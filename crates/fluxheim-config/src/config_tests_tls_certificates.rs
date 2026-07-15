@@ -93,6 +93,30 @@ fn accepts_tls_client_auth_required_with_ca_bundle() {
 }
 
 #[test]
+fn accepts_and_resolves_tls_client_auth_crl_path() {
+    let directory = TestDir::new("tls-client-auth-crl");
+    let config_path = directory.child("fluxheim.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+            [tls.client_auth]
+            mode = "required"
+            ca_path = "tls/client-ca.pem"
+            crl_path = "tls/client.crl.pem"
+        "#,
+    )
+    .unwrap();
+
+    let config = Config::load(Some(&config_path)).unwrap();
+    let expected = directory.path().join("tls/client.crl.pem");
+
+    assert_eq!(
+        config.tls.client_auth.crl_path.as_deref(),
+        Some(expected.as_path())
+    );
+}
+
+#[test]
 fn rejects_tls_client_auth_without_ca_bundle() {
     let config: Config = toml::from_str(
         r#"
@@ -107,6 +131,25 @@ fn rejects_tls_client_auth_without_ca_bundle() {
         Err(ConfigError::InvalidTlsPolicy {
             field: "tls.client_auth.ca_path",
             reason: "tls.client_auth.mode requires a client CA bundle path"
+        })
+    );
+}
+
+#[test]
+fn rejects_tls_client_auth_crl_while_client_auth_is_off() {
+    let config: Config = toml::from_str(
+        r#"
+            [tls.client_auth]
+            crl_path = "tls/client.crl.pem"
+        "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidTlsPolicy {
+            field: "tls.client_auth.crl_path",
+            reason: "tls.client_auth.crl_path requires client authentication to be enabled"
         })
     );
 }

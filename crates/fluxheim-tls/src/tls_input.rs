@@ -7,6 +7,7 @@ use sanitization::{SecretVec, sanitize_bytes};
 pub(crate) const MAX_CERT_CHAIN_BYTES: u64 = 1024 * 1024;
 pub(crate) const MAX_PRIVATE_KEY_BYTES: u64 = 64 * 1024;
 pub(crate) const MAX_CA_BUNDLE_BYTES: u64 = 8 * 1024 * 1024;
+pub(crate) const MAX_CRL_BYTES: u64 = 8 * 1024 * 1024;
 pub(crate) const MAX_CHAIN_CERTIFICATES: usize = 16;
 pub(crate) const MAX_CA_CERTIFICATES: usize = 4096;
 

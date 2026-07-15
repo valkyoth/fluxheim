@@ -2926,6 +2926,7 @@ key_path = "tls/key.pem"
 [tls.client_auth]
 mode = "off"
 # ca_path = "tls/client-ca.pem"
+# crl_path = "tls/client.crl.pem"
 ```
 
 TLS backend values: `rustls`, `openssl`. `boringssl` and `s2n` are rejected
@@ -3015,18 +3016,25 @@ listeners:
 [tls.client_auth]
 mode = "required" # "off", "optional", or "required"
 ca_path = "/etc/fluxheim/tls/client-ca.pem"
+crl_path = "/etc/fluxheim/tls/client.crl.pem" # optional, strict revocation
 ```
 
 `mode = "required"` rejects TLS handshakes that do not present a certificate
 chain trusted by `ca_path`. `mode = "optional"` asks for a client certificate
 and verifies it when present, but still accepts clients without one. The CA
-bundle path uses the same safe-path validation as other TLS files: no
+bundle and optional CRL paths use the same safe-path validation as other TLS files: no
 parent-directory traversal, no symlinked path components, and no group- or
 world-writable existing parent directory. The supported TLS matrix wires rustls
 and OpenSSL listeners only.
 Client-auth CA bundles are capped at 8 MiB and 4096 certificates. Oversized or
 over-count bundles fail listener construction instead of consuming unbounded
 memory during startup or certificate reload.
+When `crl_path` is set, Fluxheim requires exactly one bounded PEM CRL and checks
+the complete presented client chain. Rustls rejects unknown revocation status
+and expired CRLs; OpenSSL enables `CRL_CHECK` and `CRL_CHECK_ALL`. Malformed,
+empty, multi-CRL, oversized, expired, or revoked inputs fail closed. CRL policy
+changes require a process upgrade, so a failed replacement cannot mutate the
+active listener configuration.
 Verified client-certificate identity can be forwarded explicitly with
 request header templates such as `{tls.client_cert_sha256}`. Route decisions
 based on certificate identity remain future work; do not rely on client-cert

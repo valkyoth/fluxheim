@@ -12,6 +12,8 @@ pub struct TlsClientAuthConfig {
     pub mode: TlsClientAuthMode,
     #[serde(default)]
     pub ca_path: Option<PathBuf>,
+    #[serde(default)]
+    pub crl_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -19,6 +21,7 @@ pub struct TlsClientAuthConfig {
 pub(super) struct TlsClientAuthConfigFragment {
     mode: Option<TlsClientAuthMode>,
     ca_path: Option<PathBuf>,
+    crl_path: Option<PathBuf>,
 }
 
 impl TlsClientAuthConfig {
@@ -29,11 +32,20 @@ impl TlsClientAuthConfig {
         if let Some(ca_path) = fragment.ca_path {
             self.ca_path = Some(ca_path);
         }
+        if let Some(crl_path) = fragment.crl_path {
+            self.crl_path = Some(crl_path);
+        }
     }
 
     pub(super) fn validate(&self) -> Result<(), ConfigError> {
+        if self.mode == TlsClientAuthMode::Off && self.crl_path.is_some() {
+            return Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.client_auth.crl_path",
+                reason: "tls.client_auth.crl_path requires client authentication to be enabled",
+            });
+        }
         match (self.mode, &self.ca_path) {
-            (TlsClientAuthMode::Off, None) => return Ok(()),
+            (TlsClientAuthMode::Off, None) => {}
             (TlsClientAuthMode::Optional | TlsClientAuthMode::Required, None) => {
                 return Err(ConfigError::InvalidTlsPolicy {
                     field: "tls.client_auth.ca_path",
@@ -42,17 +54,26 @@ impl TlsClientAuthConfig {
             }
             (_, Some(_)) => {}
         }
-        let Some(ca_path) = &self.ca_path else {
-            return Ok(());
-        };
-        if ca_path.as_os_str().is_empty() {
-            return Err(ConfigError::InvalidTlsPolicy {
-                field: "tls.client_auth.ca_path",
-                reason: "tls.client_auth.ca_path cannot be empty",
-            });
+        if let Some(ca_path) = &self.ca_path {
+            if ca_path.as_os_str().is_empty() {
+                return Err(ConfigError::InvalidTlsPolicy {
+                    field: "tls.client_auth.ca_path",
+                    reason: "tls.client_auth.ca_path cannot be empty",
+                });
+            }
+            validate_path("tls.client_auth.ca_path", Some(ca_path))?;
+            validate_non_world_writable_parent("tls.client_auth.ca_path", Some(ca_path))?;
         }
-        validate_path("tls.client_auth.ca_path", Some(ca_path))?;
-        validate_non_world_writable_parent("tls.client_auth.ca_path", Some(ca_path))?;
+        if let Some(crl_path) = &self.crl_path {
+            if crl_path.as_os_str().is_empty() {
+                return Err(ConfigError::InvalidTlsPolicy {
+                    field: "tls.client_auth.crl_path",
+                    reason: "tls.client_auth.crl_path cannot be empty",
+                });
+            }
+            validate_path("tls.client_auth.crl_path", Some(crl_path))?;
+            validate_non_world_writable_parent("tls.client_auth.crl_path", Some(crl_path))?;
+        }
         Ok(())
     }
 }
@@ -60,6 +81,11 @@ impl TlsClientAuthConfig {
 impl TlsClientAuthConfigFragment {
     pub(super) fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(path) = &mut self.ca_path
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
+        if let Some(path) = &mut self.crl_path
             && path.is_relative()
         {
             *path = base_dir.join(&path);

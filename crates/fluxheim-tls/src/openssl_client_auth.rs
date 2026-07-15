@@ -1,11 +1,16 @@
+use std::io::Write as _;
+
 use fluxheim_config::{TlsClientAuthMode, TlsConfig};
-use openssl::ssl::{SslAcceptorBuilder, SslVerifyMode};
+use openssl::ssl::{SslAcceptorBuilder, SslFiletype, SslVerifyMode};
 use openssl::stack::Stack;
-use openssl::x509::store::X509StoreBuilder;
-use openssl::x509::{X509, X509Name};
+use openssl::x509::store::{X509Lookup, X509StoreBuilder};
+use openssl::x509::verify::X509VerifyFlags;
+use openssl::x509::{X509, X509Crl, X509Name};
 
 use super::OpenSslDownstreamAcceptorError;
-use crate::tls_input::{MAX_CA_BUNDLE_BYTES, MAX_CA_CERTIFICATES, read_bounded_file};
+use crate::tls_input::{
+    MAX_CA_BUNDLE_BYTES, MAX_CA_CERTIFICATES, MAX_CRL_BYTES, read_bounded_file,
+};
 
 pub(super) fn apply_client_auth(
     builder: &mut SslAcceptorBuilder,
@@ -81,6 +86,77 @@ pub(super) fn apply_client_auth(
                 source,
             }
         })?;
+    }
+    if let Some(crl_path) = tls.client_auth.crl_path.as_deref() {
+        let crl_bytes = read_bounded_file(crl_path, MAX_CRL_BYTES).map_err(|source| {
+            OpenSslDownstreamAcceptorError::ReadClientAuthCrl {
+                path: crl_path.to_path_buf(),
+                source,
+            }
+        })?;
+        X509Crl::from_pem(&crl_bytes).map_err(|source| {
+            OpenSslDownstreamAcceptorError::ParseClientAuthCrl {
+                path: crl_path.to_path_buf(),
+                source,
+            }
+        })?;
+        let mut staged_crl = tempfile::Builder::new()
+            .prefix("fluxheim-client-crl-")
+            .tempfile()
+            .map_err(
+                |source| OpenSslDownstreamAcceptorError::StageClientAuthCrl {
+                    path: crl_path.to_path_buf(),
+                    source,
+                },
+            )?;
+        staged_crl.write_all(&crl_bytes).map_err(|source| {
+            OpenSslDownstreamAcceptorError::StageClientAuthCrl {
+                path: crl_path.to_path_buf(),
+                source,
+            }
+        })?;
+        staged_crl.flush().map_err(|source| {
+            OpenSslDownstreamAcceptorError::StageClientAuthCrl {
+                path: crl_path.to_path_buf(),
+                source,
+            }
+        })?;
+        let path = staged_crl
+            .path()
+            .to_str()
+            .filter(|path| !path.contains('\0'))
+            .ok_or_else(
+                || OpenSslDownstreamAcceptorError::UnsupportedClientAuthCrlPath {
+                    path: crl_path.to_path_buf(),
+                },
+            )?;
+        let lookup = store.add_lookup(X509Lookup::file()).map_err(|source| {
+            OpenSslDownstreamAcceptorError::ApplyClientAuthCrl {
+                path: crl_path.to_path_buf(),
+                source,
+            }
+        })?;
+        let loaded = lookup
+            .load_crl_file(path, SslFiletype::PEM)
+            .map_err(
+                |source| OpenSslDownstreamAcceptorError::ApplyClientAuthCrl {
+                    path: crl_path.to_path_buf(),
+                    source,
+                },
+            )?;
+        if loaded != 1 {
+            return Err(OpenSslDownstreamAcceptorError::InvalidClientAuthCrlCount {
+                path: crl_path.to_path_buf(),
+            });
+        }
+        store
+            .set_flags(X509VerifyFlags::CRL_CHECK | X509VerifyFlags::CRL_CHECK_ALL)
+            .map_err(
+                |source| OpenSslDownstreamAcceptorError::ApplyClientAuthCrl {
+                    path: crl_path.to_path_buf(),
+                    source,
+                },
+            )?;
     }
     builder.set_cert_store(store.build());
     builder.set_client_ca_list(names);

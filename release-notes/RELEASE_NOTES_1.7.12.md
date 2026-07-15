@@ -79,6 +79,19 @@ trailers are not part of this release.
   reopening the pathname. This closes final-file replacement races on Windows,
   ReFS, Unix, and macOS without identity inference or unsafe code.
 
+## Downstream TLS Hardening
+
+- Add optional `tls.client_auth.crl_path` support to rustls and OpenSSL with an
+  8 MiB input bound, exactly-one-CRL validation, strict full-chain revocation,
+  and expired-CRL rejection.
+- Stage OpenSSL CRLs from the exact bounded bytes already admitted by Fluxheim,
+  preventing an OpenSSL pathname reopen from bypassing input admission.
+- Index one-label wildcard SNI certificates by normalized suffix, replacing an
+  attacker-triggerable linear scan with expected constant-time lookup.
+- Build complete, policy-equivalent OpenSSL contexts for every SNI certificate
+  and atomically switch contexts during ClientHello processing. Certificate/key
+  mismatches now reject reload before the active context store is replaced.
+
 ## Shared Cache Policy Hardening
 
 - Always bypass shared-cache lookup and storage for requests carrying

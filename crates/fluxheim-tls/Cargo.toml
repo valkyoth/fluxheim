@@ -13,7 +13,7 @@ acme = ["dep:fluxheim-acme", "fluxheim-config/acme"]
 tls-rustls-backend = ["dep:base64-ng", "dep:rustls", "dep:sanitization", "fluxheim-config/tls-rustls-backend"]
 tls-rustls = ["tls-rustls-backend", "rustls/ring"]
 tls-rustls-fips = ["tls-rustls-backend", "fluxheim-config/tls-rustls-fips", "rustls/fips"]
-tls-openssl = ["dep:openssl", "dep:sanitization", "fluxheim-config/tls-openssl"]
+tls-openssl = ["dep:openssl", "dep:sanitization", "dep:tempfile", "fluxheim-config/tls-openssl"]
 tls-openssl-fips = [
     "tls-openssl",
     "dep:fluxheim-openssl-fips-support",
@@ -30,7 +30,9 @@ log = "0.4.33"
 openssl = { version = "0.10.81", optional = true }
 rustls = { version = "0.23.41", optional = true, default-features = false, features = ["std", "tls12", "logging"] }
 sanitization = { version = "1.2.4", features = ["alloc"], optional = true }
+tempfile = { version = "3.27.0", optional = true }
 thiserror = "2.0.18"
 
 [dev-dependencies]
+rcgen = "0.14.8"
 tempfile = "3.27.0"

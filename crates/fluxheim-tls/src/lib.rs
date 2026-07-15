@@ -13,6 +13,8 @@ mod provider;
 mod rustls_resolver;
 #[cfg(feature = "tls-rustls-backend")]
 mod rustls_server_config;
+#[cfg(test)]
+mod test_certificates;
 #[cfg(any(feature = "tls-openssl", feature = "tls-rustls-backend"))]
 mod tls_input;
 

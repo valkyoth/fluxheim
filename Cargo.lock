@@ -1462,6 +1462,7 @@ dependencies = [
  "fluxheim-openssl-fips-support",
  "log",
  "openssl",
+ "rcgen",
  "rustls",
  "sanitization",
  "tempfile",

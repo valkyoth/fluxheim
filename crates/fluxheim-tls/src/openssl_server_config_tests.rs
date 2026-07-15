@@ -1,9 +1,11 @@
 use std::io::Write as _;
 use std::net::{TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::thread;
 
 use fluxheim_config::{TlsCipherSuite, TlsClientAuthConfig, TlsClientAuthMode};
 use openssl::ssl::{SslConnector, SslVerifyMode};
+use openssl::{pkey::PKey, rsa::Rsa, ssl::Ssl, x509::X509};
 
 use super::*;
 use crate::tls_input::MAX_CA_CERTIFICATES;
@@ -67,6 +69,7 @@ fn client_auth_ca_certificate_count_is_bounded() {
         client_auth: TlsClientAuthConfig {
             mode: TlsClientAuthMode::Required,
             ca_path: Some(ca_path.clone()),
+            crl_path: None,
         },
         ..TlsConfig::default()
     };
@@ -75,6 +78,97 @@ fn client_auth_ca_certificate_count_is_bounded() {
         apply_client_auth(&mut builder, &tls),
         Err(OpenSslDownstreamAcceptorError::TooManyClientAuthCa { path, .. }) if path == ca_path
     ));
+}
+
+#[test]
+fn client_auth_crl_rejects_revoked_certificate_handshake() {
+    assert!(client_auth_handshake_succeeds(ClientAuthCrl::None));
+    assert!(!client_auth_handshake_succeeds(ClientAuthCrl::Revoked));
+}
+
+#[test]
+fn client_auth_crl_rejects_expired_revocation_list_handshake() {
+    assert!(!client_auth_handshake_succeeds(ClientAuthCrl::Expired));
+}
+
+#[test]
+fn sni_store_reload_rejects_mismatched_certificate_key_without_replacing_context() {
+    let directory = tempfile::tempdir().unwrap();
+    let cert_path = directory.path().join("certificate.pem");
+    let key_path = directory.path().join("private-key.pem");
+    std::fs::copy("../../tests/fixtures/tls/localhost-cert.pem", &cert_path).unwrap();
+    std::fs::copy("../../tests/fixtures/tls/localhost-key.pem", &key_path).unwrap();
+    let certificate = StaticCertificateConfig {
+        cert_path: cert_path.clone(),
+        key_path: key_path.clone(),
+    };
+    let config = fluxheim_config::Config {
+        tls: TlsConfig {
+            enabled: true,
+            certificates: vec![certificate],
+            ..TlsConfig::default()
+        },
+        ..fluxheim_config::Config::default()
+    };
+    let selector = DownstreamCertificateSelector::from_config(&config).unwrap();
+    let store = OpenSslDownstreamCertificateStore::new(&selector, &config.tls, None).unwrap();
+    let original_public_key = store.certificates.load()[0]
+        .as_ref()
+        .unwrap()
+        .context
+        .certificate()
+        .unwrap()
+        .public_key()
+        .unwrap();
+
+    let replacement_key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
+    std::fs::write(
+        &key_path,
+        replacement_key.private_key_to_pem_pkcs8().unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        store.reload(),
+        Err(OpenSslDownstreamCertificateStoreError::Certificate(
+            OpenSslDownstreamAcceptorError::CertificateKeyMismatch { .. }
+        ))
+    ));
+
+    let active_public_key = store.certificates.load()[0]
+        .as_ref()
+        .unwrap()
+        .context
+        .certificate()
+        .unwrap()
+        .public_key()
+        .unwrap();
+    assert!(active_public_key.public_eq(&original_public_key));
+}
+
+#[test]
+fn sni_store_switches_the_complete_connection_context() {
+    let certificate = StaticCertificateConfig {
+        cert_path: PathBuf::from("../../tests/fixtures/tls/localhost-cert.pem"),
+        key_path: PathBuf::from("../../tests/fixtures/tls/localhost-key.pem"),
+    };
+    let config = fluxheim_config::Config {
+        tls: TlsConfig {
+            enabled: true,
+            certificates: vec![certificate.clone()],
+            ..TlsConfig::default()
+        },
+        ..fluxheim_config::Config::default()
+    };
+    let selector = DownstreamCertificateSelector::from_config(&config).unwrap();
+    let store = OpenSslDownstreamCertificateStore::new(&selector, &config.tls, None).unwrap();
+    let acceptor = build_openssl_downstream_acceptor(&config.tls, &certificate).unwrap();
+    let original_context = acceptor.context();
+    let mut ssl = Ssl::new(original_context).unwrap();
+
+    store.apply_certificate_for_sni(None, &mut ssl).unwrap();
+
+    assert!(!std::ptr::eq(original_context, ssl.ssl_context()));
+    assert!(ssl.ssl_context().certificate().is_some());
 }
 
 #[test]
@@ -136,4 +230,63 @@ fn handshake_succeeds(cipher_suites: Vec<TlsCipherSuite>, client_protocol: SslVe
         .is_ok();
     let server = server.join().unwrap();
     client && server.is_ok()
+}
+
+#[derive(Clone, Copy)]
+enum ClientAuthCrl {
+    None,
+    Revoked,
+    Expired,
+}
+
+fn client_auth_handshake_succeeds(crl: ClientAuthCrl) -> bool {
+    let directory = tempfile::tempdir().unwrap();
+    let fixture = crate::test_certificates::revoked_client_certificate_fixture();
+    let ca_path = directory.path().join("client-ca.pem");
+    let crl_path = directory.path().join("client.crl.pem");
+    std::fs::write(&ca_path, &fixture.ca_pem).unwrap();
+    let crl_pem = match crl {
+        ClientAuthCrl::None | ClientAuthCrl::Revoked => &fixture.crl_pem,
+        ClientAuthCrl::Expired => &fixture.expired_crl_pem,
+    };
+    std::fs::write(&crl_path, crl_pem).unwrap();
+    let certificate = StaticCertificateConfig {
+        cert_path: PathBuf::from("../../tests/fixtures/tls/localhost-cert.pem"),
+        key_path: PathBuf::from("../../tests/fixtures/tls/localhost-key.pem"),
+    };
+    let tls = TlsConfig {
+        enabled: true,
+        client_auth: TlsClientAuthConfig {
+            mode: TlsClientAuthMode::Required,
+            ca_path: Some(ca_path),
+            crl_path: (!matches!(crl, ClientAuthCrl::None)).then_some(crl_path),
+        },
+        ..TlsConfig::default()
+    };
+    let acceptor = build_openssl_downstream_acceptor(&tls, &certificate).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        acceptor
+            .accept(stream)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    });
+
+    let mut connector = SslConnector::builder(SslMethod::tls_client()).unwrap();
+    connector.set_verify(SslVerifyMode::NONE);
+    connector
+        .set_certificate(&X509::from_pem(fixture.client_pem.as_bytes()).unwrap())
+        .unwrap();
+    connector
+        .set_private_key(&PKey::private_key_from_pem(fixture.client_key_pem.as_bytes()).unwrap())
+        .unwrap();
+    let client = connector
+        .build()
+        .connect("localhost", TcpStream::connect(address).unwrap())
+        .map(|_| ())
+        .map_err(|error| error.to_string());
+    let server = server.join().unwrap();
+    client.is_ok() && server.is_ok()
 }

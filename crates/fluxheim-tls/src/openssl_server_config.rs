@@ -1,16 +1,15 @@
 use std::fs;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use fluxheim_config::{StaticCertificateConfig, TlsAlpnPolicy, TlsConfig, TlsProtocolVersion};
 use openssl::pkey::{PKey, Private};
-use openssl::ssl::{AlpnError, NameType, SniError, SslAcceptor, SslMethod, SslVersion};
+use openssl::ssl::{AlpnError, NameType, SniError, SslAcceptor, SslContext, SslMethod, SslVersion};
 use openssl::x509::X509;
-use thiserror::Error;
-
 #[path = "openssl_client_auth.rs"]
 mod client_auth;
+#[path = "openssl_server_error.rs"]
+mod error;
 
 use crate::tls_input::{
     MAX_CERT_CHAIN_BYTES, MAX_CHAIN_CERTIFICATES, MAX_PRIVATE_KEY_BYTES, read_bounded_file,
@@ -18,114 +17,15 @@ use crate::tls_input::{
 };
 use crate::{DownstreamCertificateSelector, openssl_cipher_lists, openssl_curve_list};
 use client_auth::apply_client_auth;
+pub use error::{OpenSslDownstreamAcceptorError, OpenSslDownstreamCertificateStoreError};
 
 const ALPN_HTTP1: &[u8] = b"\x08http/1.1";
 const ALPN_HTTP2: &[u8] = b"\x02h2";
 const ALPN_HTTP2_HTTP1: &[u8] = b"\x02h2\x08http/1.1";
 
-#[derive(Debug, Error)]
-pub enum OpenSslDownstreamAcceptorError {
-    #[error("failed to build OpenSSL downstream TLS acceptor: {0}")]
-    BuildAcceptor(#[source] openssl::error::ErrorStack),
-    #[error("failed to read TLS certificate chain {path}: {source}")]
-    ReadCertificate {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("failed to parse TLS certificate chain {path}: {source}")]
-    ParseCertificate {
-        path: PathBuf,
-        #[source]
-        source: openssl::error::ErrorStack,
-    },
-    #[error("TLS certificate chain {path} does not contain any certificates")]
-    EmptyCertificate { path: PathBuf },
-    #[error("TLS certificate chain {path} contains {count} certificates; maximum is {maximum}")]
-    TooManyCertificates {
-        path: PathBuf,
-        count: usize,
-        maximum: usize,
-    },
-    #[error("failed to read TLS private key {path}: {source}")]
-    ReadPrivateKey {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("failed to parse TLS private key {path}: {source}")]
-    ParsePrivateKey {
-        path: PathBuf,
-        #[source]
-        source: openssl::error::ErrorStack,
-    },
-    #[error("failed to apply TLS certificate to OpenSSL acceptor: {0}")]
-    ApplyCertificate(#[source] openssl::error::ErrorStack),
-    #[error("failed to apply TLS private key to OpenSSL acceptor: {0}")]
-    ApplyPrivateKey(#[source] openssl::error::ErrorStack),
-    #[error("OpenSSL rejected downstream TLS curve policy: {0}")]
-    ApplyCurves(#[source] openssl::error::ErrorStack),
-    #[error("OpenSSL rejected downstream TLS 1.2 cipher policy: {0}")]
-    ApplyTls12Ciphers(#[source] openssl::error::ErrorStack),
-    #[error("OpenSSL rejected downstream TLS 1.3 cipher policy: {0}")]
-    ApplyTls13Ciphers(#[source] openssl::error::ErrorStack),
-    #[error("OpenSSL rejected downstream TLS protocol policy: {0}")]
-    ApplyProtocol(#[source] openssl::error::ErrorStack),
-    #[error("tls.client_auth.ca_path is required when client auth is enabled")]
-    MissingClientAuthCa,
-    #[error("failed to read TLS client-auth CA bundle {path}: {source}")]
-    ReadClientAuthCa {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("failed to parse TLS client-auth CA bundle {path}: {source}")]
-    ParseClientAuthCa {
-        path: PathBuf,
-        #[source]
-        source: openssl::error::ErrorStack,
-    },
-    #[error("TLS client-auth CA bundle {path} contains no certificates")]
-    EmptyClientAuthCa { path: PathBuf },
-    #[error("TLS client-auth CA bundle {path} contains {count} certificates; maximum is {maximum}")]
-    TooManyClientAuthCa {
-        path: PathBuf,
-        count: usize,
-        maximum: usize,
-    },
-    #[error("OpenSSL rejected TLS client-auth CA bundle {path}: {source}")]
-    ApplyClientAuthCa {
-        path: PathBuf,
-        #[source]
-        source: openssl::error::ErrorStack,
-    },
-    #[error("OpenSSL rejected TLS client-auth CA list {path}: {source}")]
-    ApplyClientAuthCaList {
-        path: PathBuf,
-        #[source]
-        source: openssl::error::ErrorStack,
-    },
-}
-
-#[derive(Debug, Error)]
-pub enum OpenSslDownstreamCertificateStoreError {
-    #[error(transparent)]
-    Certificate(#[from] OpenSslDownstreamAcceptorError),
-    #[error(
-        "failed to inspect managed certificate paths; cert={cert_path} key={key_path}: {source}"
-    )]
-    InspectManagedCertificate {
-        cert_path: PathBuf,
-        key_path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("downstream SNI certificate index {index} was not loaded")]
-    MissingLoadedCertificate { index: usize },
-}
-
 pub struct OpenSslDownstreamCertificateStore {
     selector: DownstreamCertificateSelector,
+    tls: TlsConfig,
     certificates: ArcSwap<Vec<Option<OpenSslDownstreamCertificate>>>,
     pending_managed_certificate_recorder: Option<fn()>,
 }
@@ -133,12 +33,17 @@ pub struct OpenSslDownstreamCertificateStore {
 impl OpenSslDownstreamCertificateStore {
     pub fn new(
         selector: &DownstreamCertificateSelector,
+        tls: &TlsConfig,
         pending_managed_certificate_recorder: Option<fn()>,
     ) -> Result<Self, OpenSslDownstreamCertificateStoreError> {
-        let certificates =
-            load_openssl_downstream_certificates(selector, pending_managed_certificate_recorder)?;
+        let certificates = load_openssl_downstream_certificates(
+            selector,
+            tls,
+            pending_managed_certificate_recorder,
+        )?;
         Ok(Self {
             selector: selector.clone(),
+            tls: tls.clone(),
             certificates: ArcSwap::from_pointee(certificates),
             pending_managed_certificate_recorder,
         })
@@ -147,6 +52,7 @@ impl OpenSslDownstreamCertificateStore {
     pub fn reload(&self) -> Result<(), OpenSslDownstreamCertificateStoreError> {
         let certificates = load_openssl_downstream_certificates(
             &self.selector,
+            &self.tls,
             self.pending_managed_certificate_recorder,
         )?;
         self.certificates.store(Arc::new(certificates));
@@ -189,38 +95,29 @@ impl OpenSslDownstreamCertificateStore {
 }
 
 struct OpenSslDownstreamCertificate {
-    chain: Vec<X509>,
-    // OpenSSL owns the parsed key after this point. The PEM input bytes are
-    // zeroed by load_private_key(); EVP_PKEY_free does not expose a portable
-    // zero-on-drop guarantee for all key internals at this abstraction layer.
-    private_key: PKey<Private>,
+    context: SslContext,
 }
 
 impl OpenSslDownstreamCertificate {
-    fn load(certificate: &StaticCertificateConfig) -> Result<Self, OpenSslDownstreamAcceptorError> {
-        let chain = load_certificate_chain(certificate)?;
-        let private_key = load_private_key(certificate)?;
-        Ok(Self { chain, private_key })
+    fn load(
+        certificate: &StaticCertificateConfig,
+        tls: &TlsConfig,
+    ) -> Result<Self, OpenSslDownstreamAcceptorError> {
+        let mut builder = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls_server())
+            .map_err(OpenSslDownstreamAcceptorError::BuildAcceptor)?;
+        apply_certificate(&mut builder, certificate)?;
+        apply_tls_policy(&mut builder, tls)?;
+        Ok(Self {
+            context: builder.build().into_context(),
+        })
     }
 
     fn apply_to_ssl(
         &self,
         ssl: &mut openssl::ssl::SslRef,
     ) -> Result<(), OpenSslDownstreamAcceptorError> {
-        let Some((leaf, chain)) = self.chain.split_first() else {
-            return Err(OpenSslDownstreamAcceptorError::EmptyCertificate {
-                path: PathBuf::from("<in-memory>"),
-            });
-        };
-        ssl.set_certificate(leaf)
-            .map_err(OpenSslDownstreamAcceptorError::ApplyCertificate)?;
-        ssl.set_private_key(&self.private_key)
-            .map_err(OpenSslDownstreamAcceptorError::ApplyPrivateKey)?;
-        for certificate in chain {
-            ssl.add_chain_cert(certificate.clone())
-                .map_err(OpenSslDownstreamAcceptorError::ApplyCertificate)?;
-        }
-        Ok(())
+        ssl.set_ssl_context(&self.context)
+            .map_err(OpenSslDownstreamAcceptorError::ApplyCertificateContext)
     }
 }
 
@@ -271,6 +168,15 @@ fn apply_certificate(
             .ok_or_else(|| OpenSslDownstreamAcceptorError::EmptyCertificate {
                 path: certificate.cert_path.clone(),
             })?;
+    let public_key = leaf
+        .public_key()
+        .map_err(OpenSslDownstreamAcceptorError::InspectCertificatePublicKey)?;
+    if !private_key.public_eq(&public_key) {
+        return Err(OpenSslDownstreamAcceptorError::CertificateKeyMismatch {
+            cert_path: certificate.cert_path.clone(),
+            key_path: certificate.key_path.clone(),
+        });
+    }
 
     builder
         .set_certificate(leaf)
@@ -340,6 +246,7 @@ fn load_private_key(
 
 fn load_openssl_downstream_certificates(
     selector: &DownstreamCertificateSelector,
+    tls: &TlsConfig,
     pending_managed_certificate_recorder: Option<fn()>,
 ) -> Result<Vec<Option<OpenSslDownstreamCertificate>>, OpenSslDownstreamCertificateStoreError> {
     let mut certificates = Vec::with_capacity(selector.certificates().len());
@@ -388,7 +295,7 @@ fn load_openssl_downstream_certificates(
             certificates.push(None);
             continue;
         }
-        certificates.push(Some(OpenSslDownstreamCertificate::load(certificate)?));
+        certificates.push(Some(OpenSslDownstreamCertificate::load(certificate, tls)?));
     }
     Ok(certificates)
 }

@@ -70,7 +70,7 @@ pub struct DownstreamCertificateSelector {
     managed_acme: Vec<bool>,
     default_index: usize,
     exact_hosts: HashMap<String, usize>,
-    wildcard_hosts: Vec<WildcardCertificate>,
+    wildcard_hosts: HashMap<String, usize>,
 }
 
 impl DownstreamCertificateSelector {
@@ -85,7 +85,7 @@ impl DownstreamCertificateSelector {
             managed_acme: vec![default.managed_acme],
             default_index: 0,
             exact_hosts: HashMap::new(),
-            wildcard_hosts: Vec::new(),
+            wildcard_hosts: HashMap::new(),
         };
 
         for vhost in &config.vhosts {
@@ -111,19 +111,14 @@ impl DownstreamCertificateSelector {
 
             for host in vhost.normalized_hosts() {
                 if let Some(suffix) = host.strip_prefix("*.") {
-                    selector.wildcard_hosts.push(WildcardCertificate {
-                        suffix: suffix.to_owned(),
-                        certificate_index,
-                    });
+                    selector
+                        .wildcard_hosts
+                        .insert(suffix.to_owned(), certificate_index);
                 } else {
                     selector.exact_hosts.insert(host, certificate_index);
                 }
             }
         }
-
-        selector
-            .wildcard_hosts
-            .sort_by_key(|wildcard| std::cmp::Reverse(wildcard.suffix.len()));
 
         Some(selector)
     }
@@ -157,10 +152,9 @@ impl DownstreamCertificateSelector {
             return *index;
         }
 
-        self.wildcard_hosts
-            .iter()
-            .find(|wildcard| wildcard.matches(&host))
-            .map(|wildcard| wildcard.certificate_index)
+        host.split_once('.')
+            .and_then(|(_, suffix)| self.wildcard_hosts.get(suffix))
+            .copied()
             .unwrap_or(self.default_index)
     }
 
@@ -260,22 +254,6 @@ fn managed_acme_domains_for_vhost(vhost: &VhostConfig) -> Option<HashSet<String>
         .filter_map(|domain| normalize_host(domain))
         .collect::<HashSet<_>>();
     (!domains.is_empty()).then_some(domains)
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct WildcardCertificate {
-    suffix: String,
-    certificate_index: usize,
-}
-
-impl WildcardCertificate {
-    fn matches(&self, host: &str) -> bool {
-        let Some(prefix) = host.strip_suffix(self.suffix.as_str()) else {
-            return false;
-        };
-
-        prefix.ends_with('.') && !prefix[..prefix.len() - 1].contains('.')
-    }
 }
 
 fn acme_tls_alpn_enabled(config: &Config) -> bool {
@@ -378,6 +356,53 @@ mod tests {
             &default_cert
         );
         assert_eq!(selector.certificate_for_sni(None), &default_cert);
+    }
+
+    #[test]
+    fn downstream_certificate_selector_indexes_overlapping_wildcard_suffixes() {
+        let default_cert = StaticCertificateConfig {
+            cert_path: PathBuf::from("/tls/default.pem"),
+            key_path: PathBuf::from("/tls/default.key"),
+        };
+        let broad_cert = StaticCertificateConfig {
+            cert_path: PathBuf::from("/tls/broad.pem"),
+            key_path: PathBuf::from("/tls/broad.key"),
+        };
+        let narrow_cert = StaticCertificateConfig {
+            cert_path: PathBuf::from("/tls/narrow.pem"),
+            key_path: PathBuf::from("/tls/narrow.key"),
+        };
+        let config = Config {
+            tls: TlsConfig {
+                enabled: true,
+                certificates: vec![default_cert.clone()],
+                ..TlsConfig::default()
+            },
+            vhosts: vec![
+                vhost("broad", vec!["*.example.test"], Some(broad_cert.clone())),
+                vhost(
+                    "narrow",
+                    vec!["*.api.example.test"],
+                    Some(narrow_cert.clone()),
+                ),
+            ],
+            ..Config::default()
+        };
+
+        let selector = DownstreamCertificateSelector::from_config(&config).unwrap();
+
+        assert_eq!(
+            selector.certificate_for_sni(Some("www.example.test")),
+            &broad_cert
+        );
+        assert_eq!(
+            selector.certificate_for_sni(Some("service.api.example.test")),
+            &narrow_cert
+        );
+        assert_eq!(
+            selector.certificate_for_sni(Some("deep.service.api.example.test")),
+            &default_cert
+        );
     }
 
     #[test]

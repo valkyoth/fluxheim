@@ -66,7 +66,7 @@ pub(super) fn native_openssl_acceptor(
     let default_certificate = selector.certificate_for_sni(None);
     if plan.requires_certificate_resolver() {
         let store = Arc::new(
-            fluxheim_tls::OpenSslDownstreamCertificateStore::new(selector, None)
+            fluxheim_tls::OpenSslDownstreamCertificateStore::new(selector, &config.tls, None)
                 .map_err(NativeHttp1ProxyRuntimeError::OpenSslCertificateStore)?,
         );
         let acceptor = fluxheim_tls::build_openssl_downstream_acceptor_with_sni_store(

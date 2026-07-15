@@ -3,13 +3,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use fluxheim_config::{TlsClientAuthMode, TlsConfig, TlsProtocolVersion};
-use rustls::pki_types::{CertificateDer, pem::PemObject};
+use rustls::pki_types::{CertificateDer, CertificateRevocationListDer, pem::PemObject};
 use rustls::server::{ResolvesServerCert, VerifierBuilderError};
 use rustls::{RootCertStore, SupportedProtocolVersion};
 use thiserror::Error;
 
 use crate::rustls_kx_group;
-use crate::tls_input::{MAX_CA_BUNDLE_BYTES, MAX_CA_CERTIFICATES, read_bounded_file};
+use crate::tls_input::{
+    MAX_CA_BUNDLE_BYTES, MAX_CA_CERTIFICATES, MAX_CRL_BYTES, read_bounded_file,
+};
 use crate::{TlsRuntimeError, rustls_alpn_protocols, rustls_cipher_suite, rustls_crypto_provider};
 
 static TLS12_AND_13: [&SupportedProtocolVersion; 2] =
@@ -50,6 +52,20 @@ pub enum RustlsDownstreamServerConfigError {
         count: usize,
         maximum: usize,
     },
+    #[error("failed to open TLS client-auth CRL {path}: {source}")]
+    OpenClientAuthCrl {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error("failed to parse TLS client-auth CRL {path}: {source}")]
+    ParseClientAuthCrl {
+        path: PathBuf,
+        #[source]
+        source: rustls::pki_types::pem::Error,
+    },
+    #[error("TLS client-auth CRL {path} does not contain exactly one revocation list")]
+    InvalidClientAuthCrlCount { path: PathBuf },
     #[error("failed to build TLS client certificate verifier from {path}: {source}")]
     BuildClientAuthVerifier {
         path: PathBuf,
@@ -157,10 +173,34 @@ fn rustls_client_cert_verifier(
         });
     }
 
-    let builder = rustls::server::WebPkiClientVerifier::builder_with_provider(
+    let mut builder = rustls::server::WebPkiClientVerifier::builder_with_provider(
         Arc::new(roots),
         Arc::new(rustls_crypto_provider()),
     );
+    if let Some(crl_path) = tls.client_auth.crl_path.as_deref() {
+        let contents = read_bounded_file(crl_path, MAX_CRL_BYTES).map_err(|source| {
+            RustlsDownstreamServerConfigError::OpenClientAuthCrl {
+                path: crl_path.to_path_buf(),
+                source,
+            }
+        })?;
+        let crls = CertificateRevocationListDer::pem_slice_iter(&contents)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(
+                |source| RustlsDownstreamServerConfigError::ParseClientAuthCrl {
+                    path: crl_path.to_path_buf(),
+                    source,
+                },
+            )?;
+        if crls.len() != 1 {
+            return Err(
+                RustlsDownstreamServerConfigError::InvalidClientAuthCrlCount {
+                    path: crl_path.to_path_buf(),
+                },
+            );
+        }
+        builder = builder.with_crls(crls).enforce_revocation_expiration();
+    }
     let builder = match tls.client_auth.mode {
         TlsClientAuthMode::Off => return Ok(None),
         TlsClientAuthMode::Required => builder,
@@ -230,6 +270,7 @@ mod tests {
             client_auth: TlsClientAuthConfig {
                 mode: TlsClientAuthMode::Required,
                 ca_path: Some(ca_path.clone()),
+                crl_path: None,
             },
             ..TlsConfig::default()
         };
@@ -239,5 +280,89 @@ mod tests {
             Err(RustlsDownstreamServerConfigError::TooManyClientAuthCa { path, .. })
                 if path == ca_path
         ));
+    }
+
+    #[test]
+    fn client_auth_crl_rejects_revoked_certificate() {
+        let directory = tempfile::tempdir().unwrap();
+        let fixture = crate::test_certificates::revoked_client_certificate_fixture();
+        let ca_path = directory.path().join("client-ca.pem");
+        let crl_path = directory.path().join("client.crl.pem");
+        std::fs::write(&ca_path, fixture.ca_pem).unwrap();
+        std::fs::write(&crl_path, fixture.crl_pem).unwrap();
+        let mut tls = TlsConfig {
+            client_auth: TlsClientAuthConfig {
+                mode: TlsClientAuthMode::Required,
+                ca_path: Some(ca_path),
+                crl_path: None,
+            },
+            ..TlsConfig::default()
+        };
+        let certificate = CertificateDer::from(fixture.client_der);
+
+        let verifier_without_crl = rustls_client_cert_verifier(&tls).unwrap().unwrap();
+        assert!(
+            verifier_without_crl
+                .verify_client_cert(&certificate, &[], rustls::pki_types::UnixTime::now())
+                .is_ok()
+        );
+
+        tls.client_auth.crl_path = Some(crl_path);
+        let verifier_with_crl = rustls_client_cert_verifier(&tls).unwrap().unwrap();
+        assert!(
+            verifier_with_crl
+                .verify_client_cert(&certificate, &[], rustls::pki_types::UnixTime::now())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn client_auth_crl_rejects_malformed_input() {
+        let directory = tempfile::tempdir().unwrap();
+        let fixture = crate::test_certificates::revoked_client_certificate_fixture();
+        let ca_path = directory.path().join("client-ca.pem");
+        let crl_path = directory.path().join("client.crl.pem");
+        std::fs::write(&ca_path, fixture.ca_pem).unwrap();
+        std::fs::write(&crl_path, b"not a CRL").unwrap();
+        let tls = TlsConfig {
+            client_auth: TlsClientAuthConfig {
+                mode: TlsClientAuthMode::Required,
+                ca_path: Some(ca_path),
+                crl_path: Some(crl_path.clone()),
+            },
+            ..TlsConfig::default()
+        };
+
+        assert!(matches!(
+            rustls_client_cert_verifier(&tls),
+            Err(RustlsDownstreamServerConfigError::InvalidClientAuthCrlCount { path })
+                if path == crl_path
+        ));
+    }
+
+    #[test]
+    fn client_auth_crl_rejects_expired_revocation_list() {
+        let directory = tempfile::tempdir().unwrap();
+        let fixture = crate::test_certificates::revoked_client_certificate_fixture();
+        let ca_path = directory.path().join("client-ca.pem");
+        let crl_path = directory.path().join("expired-client.crl.pem");
+        std::fs::write(&ca_path, fixture.ca_pem).unwrap();
+        std::fs::write(&crl_path, fixture.expired_crl_pem).unwrap();
+        let tls = TlsConfig {
+            client_auth: TlsClientAuthConfig {
+                mode: TlsClientAuthMode::Required,
+                ca_path: Some(ca_path),
+                crl_path: Some(crl_path),
+            },
+            ..TlsConfig::default()
+        };
+        let certificate = CertificateDer::from(fixture.client_der);
+        let verifier = rustls_client_cert_verifier(&tls).unwrap().unwrap();
+
+        assert!(
+            verifier
+                .verify_client_cert(&certificate, &[], rustls::pki_types::UnixTime::now())
+                .is_err()
+        );
     }
 }

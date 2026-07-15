@@ -20,8 +20,23 @@ fn client_auth_change_requires_process_upgrade() {
     new.tls.client_auth = TlsClientAuthConfig {
         mode: TlsClientAuthMode::Required,
         ca_path: Some("client-ca.pem".into()),
+        crl_path: None,
     };
     assert_process_upgrade(new, ReloadReason::TlsClientAuthChanged);
+}
+
+#[test]
+fn client_auth_crl_change_requires_process_upgrade() {
+    let mut old = Config::default();
+    old.tls.client_auth = TlsClientAuthConfig {
+        mode: TlsClientAuthMode::Required,
+        ca_path: Some("client-ca.pem".into()),
+        crl_path: Some("client.crl.pem".into()),
+    };
+    let mut new = old.clone();
+    new.tls.client_auth.crl_path = Some("rotated-client.crl.pem".into());
+
+    assert_transition_requires_process_upgrade(&old, &new, ReloadReason::TlsClientAuthChanged);
 }
 
 #[test]
