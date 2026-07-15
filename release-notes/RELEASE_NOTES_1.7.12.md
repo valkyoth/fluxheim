@@ -178,8 +178,11 @@ trailers are not part of this release.
   requests are never automatically retried or failed over.
 - Transfer HTTP/1 request-body ownership directly into HTTP/2 DATA frames
   through an owner-backed `Bytes` value instead of making two additional body
-  copies. H2C negotiation retains the body until fallback is decided, secure
-  chunked growth admits old-plus-new allocation overlap, and fragmented final
+  copies. The process-budget reservation travels with the sanitizing body owner
+  and every queued H2 slice, so handler completion cannot admit replacement
+  memory before the transport releases the original allocation. H2C
+  negotiation retains the body until fallback is decided, secure HTTP/1 and
+  HTTP/2 growth admits old-plus-new allocation overlap, and fragmented final
   chunks preserve pipelined request bytes before clearing the read buffer.
 - Move static-file resolution and reads to the bounded blocking-work pool and
   cap retained static response bodies with a weighted 256 MiB process-wide
@@ -274,8 +277,9 @@ platform, configuration, key handling, and required compliance evidence.
   oversized/FIFO storage-bin manifests.
 - Body-admission tests cover process-shared defaults, pinned HTTP/1 handlers,
   exact HTTP/2 declared lengths, incremental unknown-length growth, aggregate
-  exhaustion, and permit recovery. Static error-page and cache tests preserve
-  fallback behavior while admission precedes body materialization.
+  exhaustion, owner-backed H2 DATA retention, post-handler body retention, and
+  permit recovery. Static error-page and cache tests preserve fallback behavior
+  while admission precedes body materialization.
 - Cache-encryption tests cover cross-root key separation, opaque HMAC lookup
   identities, restart continuity, missing-counter failure, local-key rotation,
   v1 rejection, and cold removal of legacy encrypted filesystem objects.

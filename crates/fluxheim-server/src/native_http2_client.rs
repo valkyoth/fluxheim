@@ -452,14 +452,20 @@ async fn drain_response_body(
 mod owned_body_tests {
     use super::*;
 
-    #[test]
-    fn h2_bytes_retains_sanitizing_request_body_allocation() {
-        let body = NativeHttp1RequestBody::from_vec(b"owned request body".to_vec());
+    #[tokio::test]
+    async fn h2_bytes_retains_body_allocation_and_admission() {
+        let budget = crate::NativeRequestBodyBudget::new(64 * 1024);
+        let admission = budget.reserve(1).await.unwrap();
+        let mut body = NativeHttp1RequestBody::from_vec(b"owned request body".to_vec());
+        body.attach_admission(admission);
         let original_pointer = body.as_ref().as_ptr();
 
         let bytes = owned_request_body_bytes(body);
 
         assert_eq!(bytes.as_ptr(), original_pointer);
         assert_eq!(bytes.as_ref(), b"owned request body");
+        assert!(budget.reserve(1).await.is_err());
+        drop(bytes);
+        assert!(budget.reserve(1).await.is_ok());
     }
 }

@@ -22,6 +22,11 @@ struct PinningBodyBudgetHandler {
     pinned: Arc<HoldingBodyBudgetHandler>,
 }
 
+struct RetainingBodyBudgetHandler {
+    budget: NativeRequestBodyBudget,
+    retained: std::sync::Mutex<Option<crate::NativeHttp1RequestBody>>,
+}
+
 impl NativeHttp1Handler for PinningBodyBudgetHandler {
     fn pin_request_handler(&self) -> Option<Arc<dyn NativeHttp1Handler>> {
         Some(self.pinned.clone())
@@ -42,12 +47,29 @@ impl NativeHttp1Handler for HoldingBodyBudgetHandler {
 
     fn handle<'a>(
         &'a self,
-        _request: NativeHttp1Request,
+        request: NativeHttp1Request,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = NativeHttp1Response> + Send + 'a>> {
         Box::pin(async move {
             self.entered.notify_one();
             self.release.notified().await;
+            drop(request);
             NativeHttp1Response::new(200, "OK", b"ok\n").close_connection()
+        })
+    }
+}
+
+impl NativeHttp1Handler for RetainingBodyBudgetHandler {
+    fn request_body_budget(&self) -> NativeRequestBodyBudget {
+        self.budget.clone()
+    }
+
+    fn handle<'a>(
+        &'a self,
+        request: NativeHttp1Request,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = NativeHttp1Response> + Send + 'a>> {
+        Box::pin(async move {
+            *self.retained.lock().unwrap() = Some(request.body);
+            NativeHttp1Response::new(200, "OK", b"retained\n").close_connection()
         })
     }
 }
@@ -571,4 +593,45 @@ async fn native_http1_rejects_aggregate_request_body_overcommit() {
             .starts_with("HTTP/1.1 200 OK\r\n")
     );
     server.await.unwrap();
+}
+
+#[tokio::test]
+async fn native_http1_body_retains_admission_after_handler_returns() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let budget = NativeRequestBodyBudget::new(64 * 1024);
+    let handler = Arc::new(RetainingBodyBudgetHandler {
+        budget: budget.clone(),
+        retained: std::sync::Mutex::new(None),
+    });
+    let server_handler = handler.clone();
+    let server = tokio::spawn(async move {
+        let (stream, peer) = listener.accept().await.unwrap();
+        serve_native_http1_connection(
+            stream,
+            Some(peer),
+            DownstreamHttp1Policy::default(),
+            server_handler,
+        )
+        .await
+        .unwrap();
+    });
+    let mut stream = TcpStream::connect(address).await.unwrap();
+
+    stream
+        .write_all(
+            b"POST /retain HTTP/1.1\r\nHost: local.test\r\nContent-Length: 1\r\nConnection: close\r\n\r\na",
+        )
+        .await
+        .unwrap();
+    assert!(
+        read_response(&mut stream)
+            .await
+            .starts_with("HTTP/1.1 200 OK\r\n")
+    );
+    server.await.unwrap();
+
+    assert!(budget.reserve(1).await.is_err());
+    handler.retained.lock().unwrap().take();
+    assert!(budget.reserve(1).await.is_ok());
 }

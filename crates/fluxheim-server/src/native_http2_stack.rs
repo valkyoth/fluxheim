@@ -7,15 +7,14 @@ use bytes::Bytes;
 use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::task::JoinSet;
-use zeroize::Zeroizing;
 
-use crate::DownstreamHttp2Policy;
 use crate::native_http2_error::NativeHttp2StackError;
 use crate::native_http2_response::send_native_http2_response;
 pub(crate) use crate::native_http2_response::{
     prohibited_http2_response_header, send_data_bounded, validate_response_headers,
 };
 use crate::response_retention::NativeResponseRetention;
+use crate::{DownstreamHttp2Policy, NativeHttp1RequestBody};
 
 const BODY_PREALLOC_HINT_BYTES: usize = 64 * 1024;
 const PROBE_IDLE_TIMEOUT: Duration = Duration::from_millis(50);
@@ -25,7 +24,7 @@ pub struct NativeHttp2Request {
     pub method: Method,
     pub uri: Uri,
     pub headers: HeaderMap,
-    pub body: Zeroizing<Vec<u8>>,
+    pub body: NativeHttp1RequestBody,
     pub trailers: Option<HeaderMap>,
 }
 
@@ -293,7 +292,7 @@ where
     };
     let body_capacity_hint =
         declared_length.map_or(0, |length| length.min(BODY_PREALLOC_HINT_BYTES));
-    let (body, trailers) = match tokio::time::timeout(
+    let (mut body, trailers) = match tokio::time::timeout(
         policy.request_body_timeout(),
         drain_request_body(
             request.body_mut(),
@@ -328,6 +327,7 @@ where
             return Ok(());
         }
     };
+    body.attach_admission(request_body_reservation);
     let response = match tokio::time::timeout(
         policy.handler_timeout(),
         handler.handle(NativeHttp2Request {
@@ -456,9 +456,9 @@ async fn drain_request_body(
     capacity_hint: usize,
     declared_length: Option<usize>,
     reservation: &mut crate::request_body_budget::NativeRequestBodyReservation,
-) -> Result<(Zeroizing<Vec<u8>>, Option<HeaderMap>), NativeHttp2StackError> {
+) -> Result<(NativeHttp1RequestBody, Option<HeaderMap>), NativeHttp2StackError> {
     let mut total = 0usize;
-    let mut buffered = Zeroizing::new(Vec::with_capacity(capacity_hint));
+    let mut buffered = NativeHttp1RequestBody::from_vec(Vec::with_capacity(capacity_hint));
     while let Some(chunk) = body.data().await {
         let chunk = chunk.map_err(NativeHttp2StackError::BodyData)?;
         let chunk_len = chunk.len();
@@ -472,7 +472,25 @@ async fn drain_request_body(
             .grow_to(total)
             .await
             .map_err(|_| NativeHttp2StackError::BodyCapacityUnavailable)?;
-        buffered.extend_from_slice(&chunk);
+        let overlap = if total > buffered.capacity() {
+            let overlap_bytes = total.checked_add(buffered.capacity()).ok_or(
+                NativeHttp2StackError::BodyTooLarge {
+                    limit: max_body_bytes,
+                },
+            )?;
+            reservation
+                .reserve_overlap(overlap_bytes)
+                .await
+                .map_err(|_| NativeHttp2StackError::BodyCapacityUnavailable)?
+        } else {
+            None
+        };
+        buffered
+            .extend_from_slice(&chunk)
+            .map_err(|_| NativeHttp2StackError::BodyTooLarge {
+                limit: max_body_bytes,
+            })?;
+        drop(overlap);
         drop(chunk);
         body.flow_control()
             .release_capacity(chunk_len)

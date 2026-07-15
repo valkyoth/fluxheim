@@ -261,7 +261,7 @@ where
                     return Ok(());
                 }
             };
-        let body = match read_body(
+        let mut body = match read_body(
             policy,
             request_body_timeout,
             &mut stream,
@@ -320,6 +320,7 @@ where
             }
             Err(error) => return Err(error),
         };
+        body.attach_admission(request_body_reservation);
         let mut request = request;
         request.body = body;
         request_handler.prepare_request_context(&mut request);

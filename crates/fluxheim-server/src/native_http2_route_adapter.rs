@@ -79,7 +79,7 @@ fn native_http2_request_to_http1(
         method,
         uri,
         headers,
-        mut body,
+        body,
         trailers,
     } = request;
     let authority = uri.authority()?.as_str().to_owned();
@@ -107,7 +107,7 @@ fn native_http2_request_to_http1(
         target,
         version: fluxheim_protocol::Http1Version::Http11,
         headers: owned_headers,
-        body: crate::NativeHttp1RequestBody::from_vec(std::mem::take(&mut *body)),
+        body,
         trailers: native_http2_headers_to_native(trailers.as_ref())?,
     })
 }
@@ -160,7 +160,7 @@ mod tests {
             method: http::Method::POST,
             uri: "https://native.test/upload?x=1".parse().unwrap(),
             headers,
-            body: zeroize::Zeroizing::new(b"body".to_vec()),
+            body: crate::NativeHttp1RequestBody::from_vec(b"body".to_vec()),
             trailers: Some({
                 let mut trailers = http::HeaderMap::new();
                 trailers.insert("grpc-status", http::HeaderValue::from_static("0"));
@@ -224,7 +224,7 @@ mod tests {
             method: http::Method::GET,
             uri: "https://public.test/resource".parse().unwrap(),
             headers,
-            body: zeroize::Zeroizing::new(Vec::new()),
+            body: crate::NativeHttp1RequestBody::empty(),
             trailers: None,
         };
 
@@ -247,7 +247,7 @@ mod tests {
             method: http::Method::GET,
             uri: "/resource".parse().unwrap(),
             headers: http::HeaderMap::new(),
-            body: zeroize::Zeroizing::new(Vec::new()),
+            body: crate::NativeHttp1RequestBody::empty(),
             trailers: None,
         };
 

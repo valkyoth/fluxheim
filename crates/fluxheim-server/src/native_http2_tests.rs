@@ -18,6 +18,11 @@ struct HoldingHttp2BodyBudgetHandler {
     release: tokio::sync::Notify,
 }
 
+struct RetainingHttp2BodyBudgetHandler {
+    budget: NativeRequestBodyBudget,
+    retained: Mutex<Option<crate::NativeHttp1RequestBody>>,
+}
+
 impl NativeHttp2Handler for HoldingHttp2BodyBudgetHandler {
     fn request_body_budget(&self) -> NativeRequestBodyBudget {
         self.budget.clone()
@@ -25,11 +30,28 @@ impl NativeHttp2Handler for HoldingHttp2BodyBudgetHandler {
 
     fn handle<'a>(
         &'a self,
-        _request: NativeHttp2Request,
+        request: NativeHttp2Request,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = NativeHttp2Response> + Send + 'a>> {
         Box::pin(async move {
             self.entered.notify_one();
             self.release.notified().await;
+            drop(request);
+            NativeHttp2Response::no_content()
+        })
+    }
+}
+
+impl NativeHttp2Handler for RetainingHttp2BodyBudgetHandler {
+    fn request_body_budget(&self) -> NativeRequestBodyBudget {
+        self.budget.clone()
+    }
+
+    fn handle<'a>(
+        &'a self,
+        request: NativeHttp2Request,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = NativeHttp2Response> + Send + 'a>> {
+        Box::pin(async move {
+            *self.retained.lock().unwrap() = Some(request.body);
             NativeHttp2Response::no_content()
         })
     }
@@ -288,6 +310,46 @@ async fn native_http2_grows_unknown_body_reservations_before_buffering() {
         first_response.await.unwrap().status(),
         http::StatusCode::NO_CONTENT
     );
+    drop(client);
+    server.await.unwrap().unwrap();
+    client_connection.await.unwrap();
+}
+
+#[tokio::test]
+async fn native_http2_body_retains_admission_after_handler_returns() {
+    let (server_io, client_io) = tokio::io::duplex(16 * 1024);
+    let budget = NativeRequestBodyBudget::new(64 * 1024);
+    let handler = Arc::new(RetainingHttp2BodyBudgetHandler {
+        budget: budget.clone(),
+        retained: Mutex::new(None),
+    });
+    let server = tokio::spawn(serve_native_http2_connection_until_idle(
+        server_io,
+        DownstreamHttp2Policy::default(),
+        handler.clone(),
+        Duration::from_secs(1),
+    ));
+    let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
+    let client_connection = tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    let request = http::Request::builder()
+        .uri("/retain")
+        .header(http::header::CONTENT_LENGTH, "1")
+        .body(())
+        .unwrap();
+    let (response, mut body) = client.send_request(request, false).unwrap();
+    body.send_data(bytes::Bytes::from_static(b"a"), true)
+        .unwrap();
+
+    assert_eq!(
+        response.await.unwrap().status(),
+        http::StatusCode::NO_CONTENT
+    );
+    assert!(budget.reserve(1).await.is_err());
+    handler.retained.lock().unwrap().take();
+    assert!(budget.reserve(1).await.is_ok());
+
     drop(client);
     server.await.unwrap().unwrap();
     client_connection.await.unwrap();

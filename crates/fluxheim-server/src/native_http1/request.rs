@@ -3,6 +3,8 @@ use std::ops::Deref;
 
 use fluxheim_protocol::{Http1RequestTarget, Http1Version, http1_request_target};
 
+use crate::request_body_budget::NativeRequestBodyReservation;
+
 #[derive(Debug, Eq, PartialEq)]
 pub struct NativeHttp1Request {
     pub method: String,
@@ -19,18 +21,38 @@ pub struct NativeHttp1Request {
     pub trailers: Vec<(String, String)>,
 }
 
-#[derive(Default, Eq, PartialEq)]
-pub struct NativeHttp1RequestBody(Vec<u8>);
+#[derive(Default)]
+pub struct NativeHttp1RequestBody {
+    bytes: Vec<u8>,
+    admission: Option<NativeRequestBodyReservation>,
+}
 
 impl NativeHttp1RequestBody {
     #[must_use]
     pub const fn empty() -> Self {
-        Self(Vec::new())
+        Self {
+            bytes: Vec::new(),
+            admission: None,
+        }
     }
 
     #[must_use]
     pub const fn from_vec(body: Vec<u8>) -> Self {
-        Self(body)
+        Self {
+            bytes: body,
+            admission: None,
+        }
+    }
+
+    pub(crate) fn attach_admission(&mut self, admission: NativeRequestBodyReservation) {
+        if self.admission.is_some() {
+            log::error!(
+                target: "fluxheim::security",
+                "request body admission was attached more than once"
+            );
+            std::process::abort();
+        }
+        self.admission = Some(admission);
     }
 
     pub(crate) fn extend_from_slice(
@@ -38,12 +60,12 @@ impl NativeHttp1RequestBody {
         bytes: &[u8],
     ) -> Result<(), fluxheim_protocol::Http1ParseError> {
         let required = self
-            .0
+            .bytes
             .len()
             .checked_add(bytes.len())
             .ok_or(fluxheim_protocol::Http1ParseError::BodyTooLarge)?;
         self.reserve_capacity(required)?;
-        self.0.extend_from_slice(bytes);
+        self.bytes.extend_from_slice(bytes);
         Ok(())
     }
 
@@ -51,16 +73,16 @@ impl NativeHttp1RequestBody {
         &mut self,
         required: usize,
     ) -> Result<(), fluxheim_protocol::Http1ParseError> {
-        if required <= self.0.capacity() {
+        if required <= self.bytes.capacity() {
             return Ok(());
         }
         let mut replacement = Vec::new();
         replacement
             .try_reserve_exact(required)
             .map_err(|_| fluxheim_protocol::Http1ParseError::BodyTooLarge)?;
-        replacement.extend_from_slice(&self.0);
-        sanitization::unsafe_wipe::volatile_sanitize_vec(&mut self.0);
-        self.0 = replacement;
+        replacement.extend_from_slice(&self.bytes);
+        sanitization::unsafe_wipe::volatile_sanitize_vec(&mut self.bytes);
+        self.bytes = replacement;
         Ok(())
     }
 
@@ -72,22 +94,30 @@ impl NativeHttp1RequestBody {
         replacement
             .try_reserve_exact(required)
             .map_err(|_| fluxheim_protocol::Http1ParseError::BodyTooLarge)?;
-        replacement.extend_from_slice(&self.0);
-        sanitization::unsafe_wipe::volatile_sanitize_vec(&mut self.0);
-        self.0 = replacement;
+        replacement.extend_from_slice(&self.bytes);
+        sanitization::unsafe_wipe::volatile_sanitize_vec(&mut self.bytes);
+        self.bytes = replacement;
         Ok(())
     }
 
     pub(crate) fn capacity(&self) -> usize {
-        self.0.capacity()
+        self.bytes.capacity()
     }
 }
+
+impl PartialEq for NativeHttp1RequestBody {
+    fn eq(&self, other: &Self) -> bool {
+        self.bytes == other.bytes
+    }
+}
+
+impl Eq for NativeHttp1RequestBody {}
 
 impl std::fmt::Debug for NativeHttp1RequestBody {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("NativeHttp1RequestBody")
-            .field("len", &self.0.len())
+            .field("len", &self.bytes.len())
             .field("contents", &"<redacted>")
             .finish()
     }
@@ -97,19 +127,19 @@ impl Deref for NativeHttp1RequestBody {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.bytes
     }
 }
 
 impl AsRef<[u8]> for NativeHttp1RequestBody {
     fn as_ref(&self) -> &[u8] {
-        &self.0
+        &self.bytes
     }
 }
 
 impl fluxheim_protocol::Http1ChunkSink for NativeHttp1RequestBody {
     fn len(&self) -> usize {
-        self.0.len()
+        self.bytes.len()
     }
 
     fn append(&mut self, bytes: &[u8]) -> Result<(), fluxheim_protocol::Http1ParseError> {
@@ -119,7 +149,7 @@ impl fluxheim_protocol::Http1ChunkSink for NativeHttp1RequestBody {
 
 impl Drop for NativeHttp1RequestBody {
     fn drop(&mut self) {
-        sanitization::unsafe_wipe::volatile_sanitize_vec(&mut self.0);
+        sanitization::unsafe_wipe::volatile_sanitize_vec(&mut self.bytes);
     }
 }
 
