@@ -23,7 +23,7 @@ async fn native_upstream_writes_proxy_protocol_v1_before_http_request() {
 
     let response = NativeHttp1Upstream::new(addr.to_string())
         .with_proxy_protocol(UpstreamProxyProtocol::V1)
-        .send(&proxy_protocol_request())
+        .send(&mut proxy_protocol_request())
         .await
         .unwrap();
 
@@ -55,7 +55,7 @@ async fn native_upstream_writes_proxy_protocol_v2_before_http_request() {
 
     let response = NativeHttp1Upstream::new(addr.to_string())
         .with_proxy_protocol(UpstreamProxyProtocol::V2)
-        .send(&proxy_protocol_request())
+        .send(&mut proxy_protocol_request())
         .await
         .unwrap();
 

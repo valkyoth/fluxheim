@@ -83,6 +83,45 @@ async fn native_http1_preserves_pipelined_request_after_chunked_body() {
 }
 
 #[tokio::test]
+async fn native_http1_preserves_pipelined_request_after_fragmented_final_chunk() {
+    let addr = spawn_server(|request| {
+        NativeHttp1Response::new(
+            200,
+            "OK",
+            format!(
+                "{}:{}",
+                request.target,
+                String::from_utf8_lossy(&request.body)
+            ),
+        )
+    })
+    .await;
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    stream.set_nodelay(true).unwrap();
+
+    stream
+        .write_all(
+            b"POST /one HTTP/1.1\r\nHost: local.test\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhe",
+        )
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    stream
+        .write_all(
+            b"llo\r\n0\r\n\r\nGET /two HTTP/1.1\r\nHost: local.test\r\nConnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    let response = String::from_utf8(response).unwrap();
+
+    assert_eq!(response.matches("HTTP/1.1 200 OK\r\n").count(), 2);
+    assert!(response.contains("/one:hello"));
+    assert!(response.ends_with("/two:"));
+}
+
+#[tokio::test]
 async fn native_http1_preserves_pipelined_request_after_content_length_body() {
     let addr = spawn_server(|request| {
         NativeHttp1Response::new(

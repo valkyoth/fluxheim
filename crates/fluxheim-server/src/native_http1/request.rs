@@ -125,6 +125,11 @@ impl Drop for NativeHttp1RequestBody {
 
 impl NativeHttp1Request {
     #[must_use]
+    pub(crate) fn take_body(&mut self) -> NativeHttp1RequestBody {
+        std::mem::take(&mut self.body)
+    }
+
+    #[must_use]
     pub(crate) fn metadata_snapshot(&self) -> Self {
         Self {
             method: self.method.clone(),

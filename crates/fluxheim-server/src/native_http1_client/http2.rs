@@ -82,7 +82,7 @@ pub(super) fn native_http2_upstream_request(
         method,
         uri,
         headers,
-        body: zeroize::Zeroizing::new(request.body.to_vec()),
+        body: crate::NativeHttp1RequestBody::empty(),
         trailers,
     })
 }

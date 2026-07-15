@@ -28,7 +28,7 @@ use crate::{
 impl NativeHttp1Upstream {
     pub(super) async fn send_http2(
         &self,
-        request: &NativeHttp1Request,
+        request: &mut NativeHttp1Request,
     ) -> Result<NativeHttp1Response, NativeHttp1Error> {
         if self.proxy_protocol != UpstreamProxyProtocol::Off {
             return Err(NativeHttp1Error::Io(std::io::Error::new(
@@ -36,7 +36,7 @@ impl NativeHttp1Upstream {
                 "native HTTP/2 upstream PROXY protocol is not supported",
             )));
         }
-        let request = native_http2_upstream_request(
+        let mut upstream_request = native_http2_upstream_request(
             request,
             &self.authority,
             upstream_h2_scheme({
@@ -50,18 +50,23 @@ impl NativeHttp1Upstream {
                 }
             }),
         )?;
+        let retry_allowed = request.body.is_empty()
+            && native_http1_retry_method_allowed(upstream_request.method.as_str());
+        let retry_request = retry_allowed
+            .then(|| upstream_request.retry_snapshot())
+            .flatten();
         let mut h2_stream_permit = Some(self.acquire_http2_stream_permit().await?);
         let (client, fresh_connection) = self.http2_client().await?;
-        let retry_allowed =
-            request.body.is_empty() && native_http1_retry_method_allowed(request.method.as_str());
+        upstream_request = upstream_request.with_owned_body(request.take_body());
         let request_policy = self.http2_request_policy(fresh_connection);
         let response = if retry_allowed {
-            let Some(retry_request) = request.retry_snapshot() else {
+            let Some(retry_request) = retry_request else {
                 return Err(NativeHttp1Error::Io(std::io::Error::other(
                     "body-bearing HTTP/2 request cannot be retained for retry",
                 )));
             };
-            match send_native_http2_upstream_request(client, request_policy, request).await {
+            match send_native_http2_upstream_request(client, request_policy, upstream_request).await
+            {
                 Ok(response) => response,
                 Err(error) if native_http2_error_retry_safe(&error) => {
                     drop(h2_stream_permit.take());
@@ -85,7 +90,8 @@ impl NativeHttp1Upstream {
                 }
             }
         } else {
-            match send_native_http2_upstream_request(client, request_policy, request).await {
+            match send_native_http2_upstream_request(client, request_policy, upstream_request).await
+            {
                 Ok(response) => response,
                 Err(error) => {
                     if native_http2_error_is_connection_fatal(&error) {
@@ -117,12 +123,16 @@ impl NativeHttp1Upstream {
 
     pub(super) async fn send_http1_and_http2(
         &self,
-        request: &NativeHttp1Request,
+        request: &mut NativeHttp1Request,
     ) -> Result<NativeHttp1Response, NativeHttp1Error> {
         if self.h2c_upgrade && self.cleartext_upstream() {
+            let body_was_empty = request.body.is_empty();
             match self.send_http2(request).await {
                 Ok(response) => return Ok(response),
-                Err(error) if h2c_upgrade_error_can_fallback(&error) => {
+                Err(error)
+                    if h2c_upgrade_error_can_fallback(&error)
+                        && (body_was_empty || !request.body.is_empty()) =>
+                {
                     self.invalidate_http2_connection().await;
                     log::debug!(
                         target: "fluxheim::native_http2",
@@ -143,7 +153,7 @@ impl NativeHttp1Upstream {
     async fn send_http2_on_stream(
         &self,
         stream: NativeHttp1Stream,
-        request: &NativeHttp1Request,
+        request: &mut NativeHttp1Request,
     ) -> Result<NativeHttp1Response, NativeHttp1Error> {
         #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
         {
@@ -156,7 +166,8 @@ impl NativeHttp1Upstream {
         }
         #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
         {
-            let request = native_http2_upstream_request(request, &self.authority, "https")?;
+            let upstream_request =
+                native_http2_upstream_request(request, &self.authority, "https")?;
             let (client, driver) = native_http2_upstream_client_on_io_with_keepalive(
                 stream,
                 self.http2_policy,
@@ -164,10 +175,12 @@ impl NativeHttp1Upstream {
             )
             .await
             .map_err(native_http2_error)?;
-            let result = send_native_http2_upstream_request(client, self.http2_policy, request)
-                .await
-                .map(native_http2_response_to_http1)
-                .map_err(native_http2_error);
+            let upstream_request = upstream_request.with_owned_body(request.take_body());
+            let result =
+                send_native_http2_upstream_request(client, self.http2_policy, upstream_request)
+                    .await
+                    .map(native_http2_response_to_http1)
+                    .map_err(native_http2_error);
             driver.abort_and_join().await;
             result?
         }

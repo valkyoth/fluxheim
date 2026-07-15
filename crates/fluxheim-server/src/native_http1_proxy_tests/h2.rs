@@ -20,7 +20,7 @@ mod support;
 
 use support::{
     h2_blocking_upstream, h2_handshake_stall_upstream, h2_idle_upstream, h2_reconnecting_upstream,
-    h2_reset_then_ok_upstream, h2_upstream, h2_upstream_with_body,
+    h2_reset_then_ok_upstream, h2_upstream, h2_upstream_receiving_body, h2_upstream_with_body,
 };
 
 #[tokio::test]
@@ -64,6 +64,21 @@ async fn native_proxy_forwards_downstream_request_to_http2_upstream() {
 }
 
 #[tokio::test]
+async fn native_http2_upstream_moves_body_out_of_source_request() {
+    let origin = h2_upstream_receiving_body(b"one owned body").await;
+    let upstream = NativeHttp1Upstream::new(origin.to_string())
+        .with_http2_policy(DownstreamHttp2Policy::default());
+    let mut request = native_proxy_test_request_for("/h2-origin");
+    request.method = "POST".to_owned();
+    request.body = crate::NativeHttp1RequestBody::from_vec(b"one owned body".to_vec());
+
+    let response = upstream.send(&mut request).await.unwrap();
+
+    assert_eq!(response.status(), 204);
+    assert!(request.body.is_empty());
+}
+
+#[tokio::test]
 async fn native_proxy_http2_upstream_rejects_too_many_headers_before_connect() {
     let (origin, accepted_connections) = h2_idle_upstream().await;
     let upstream = NativeHttp1Upstream::new(origin.to_string())
@@ -75,7 +90,7 @@ async fn native_proxy_http2_upstream_rejects_too_many_headers_before_connect() {
             .push((format!("x-extra-{index}"), "1".to_owned()));
     }
 
-    let error = upstream.send(&request).await.unwrap_err();
+    let error = upstream.send(&mut request).await.unwrap_err();
     match error {
         NativeHttp1Error::Io(error) => assert_eq!(error.kind(), std::io::ErrorKind::InvalidData),
         NativeHttp1Error::Parse(error) => panic!("unexpected parse error: {error:?}"),
@@ -96,14 +111,14 @@ async fn native_proxy_http2_upstream_stream_slot_wait_is_bounded() {
                     .with_handler_timeout(Duration::from_secs(5)),
             ),
     );
-    let first = native_proxy_test_request_for("/h2-origin");
+    let mut first = native_proxy_test_request_for("/h2-origin");
     let first_upstream = Arc::clone(&upstream);
-    let first_task = tokio::spawn(async move { first_upstream.send(&first).await });
+    let first_task = tokio::spawn(async move { first_upstream.send(&mut first).await });
     accepted.await.unwrap();
 
-    let second = native_proxy_test_request_for("/h2-origin");
+    let mut second = native_proxy_test_request_for("/h2-origin");
     let started = std::time::Instant::now();
-    let error = upstream.send(&second).await.unwrap_err();
+    let error = upstream.send(&mut second).await.unwrap_err();
     assert!(started.elapsed() < Duration::from_secs(1));
     match error {
         NativeHttp1Error::Io(error) => assert_eq!(error.kind(), std::io::ErrorKind::TimedOut),
@@ -128,7 +143,7 @@ async fn native_proxy_http2_upstream_total_connection_timeout_includes_h2_handsh
     );
     let started = std::time::Instant::now();
     let error = upstream
-        .send(&native_proxy_test_request_for("/h2-origin"))
+        .send(&mut native_proxy_test_request_for("/h2-origin"))
         .await
         .unwrap_err();
 

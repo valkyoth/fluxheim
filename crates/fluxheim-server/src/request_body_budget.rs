@@ -86,6 +86,32 @@ impl NativeRequestBodyReservation {
         self.reserved_units = required_units;
         Ok(())
     }
+
+    pub(crate) async fn reserve_overlap(
+        &self,
+        total_bytes: usize,
+    ) -> io::Result<Option<OwnedSemaphorePermit>> {
+        if total_bytes > self.budget.max_bytes {
+            return Err(io::Error::from(io::ErrorKind::WouldBlock));
+        }
+        let required_units = u32::try_from(total_bytes.div_ceil(BODY_BUDGET_UNIT_BYTES))
+            .map_err(|_| io::Error::other("request body overlap reservation overflow"))?;
+        let additional_units = required_units.saturating_sub(self.reserved_units);
+        if additional_units == 0 {
+            return Ok(None);
+        }
+        let permit = tokio::time::timeout(
+            BODY_BUDGET_WAIT,
+            self.budget
+                .semaphore
+                .clone()
+                .acquire_many_owned(additional_units),
+        )
+        .await
+        .map_err(|_| io::Error::from(io::ErrorKind::WouldBlock))?
+        .map_err(|_| io::Error::other("request body budget closed"))?;
+        Ok(Some(permit))
+    }
 }
 
 #[cfg(test)]
@@ -120,6 +146,20 @@ mod tests {
         assert!(first.grow_to(BODY_BUDGET_UNIT_BYTES + 1).await.is_err());
         drop(second);
         first.grow_to(BODY_BUDGET_UNIT_BYTES + 1).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn temporary_overlap_is_charged_until_secure_reallocation_finishes() {
+        let budget = NativeRequestBodyBudget::new(BODY_BUDGET_UNIT_BYTES * 2);
+        let reservation = budget.reserve(BODY_BUDGET_UNIT_BYTES).await.unwrap();
+        let overlap = reservation
+            .reserve_overlap(BODY_BUDGET_UNIT_BYTES * 2)
+            .await
+            .unwrap();
+
+        assert!(budget.reserve(1).await.is_err());
+        drop(overlap);
+        assert!(budget.reserve(1).await.is_ok());
     }
 
     #[test]

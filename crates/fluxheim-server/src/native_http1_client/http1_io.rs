@@ -30,7 +30,7 @@ use crate::{
 impl NativeHttp1Upstream {
     pub async fn send(
         &self,
-        request: &NativeHttp1Request,
+        request: &mut NativeHttp1Request,
     ) -> Result<NativeHttp1Response, NativeHttp1Error> {
         match self.protocol {
             NativeUpstreamHttpProtocol::Http2 => return self.send_http2(request).await,

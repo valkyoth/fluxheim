@@ -30,7 +30,7 @@ async fn native_upstream_appends_owned_via_header() {
         .push(("X-Forwarded-For".to_owned(), "192.0.2.9".to_owned()));
 
     let response = NativeHttp1Upstream::new(addr.to_string())
-        .send(&request)
+        .send(&mut request)
         .await
         .unwrap();
 
@@ -54,7 +54,7 @@ async fn privacy_mode_native_upstream_does_not_add_forwarded_for() {
     request.peer_addr = Some(SocketAddr::from(([198, 51, 100, 17], 49000)));
 
     let response = NativeHttp1Upstream::new(addr.to_string())
-        .send(&request)
+        .send(&mut request)
         .await
         .unwrap();
 
@@ -107,7 +107,7 @@ async fn native_upstream_read_timeout_is_bounded() {
 
     let error = NativeHttp1Upstream::new(addr.to_string())
         .with_read_timeout(Duration::from_millis(25))
-        .send(&request())
+        .send(&mut request())
         .await
         .unwrap_err();
 

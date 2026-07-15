@@ -6,7 +6,7 @@ use tokio::task::{AbortHandle, JoinHandle};
 use zeroize::Zeroizing;
 
 use crate::native_http2_stack::{send_data_bounded, validate_response_headers};
-use crate::{DownstreamHttp2Policy, NativeHttp2StackError};
+use crate::{DownstreamHttp2Policy, NativeHttp1RequestBody, NativeHttp2StackError};
 
 #[derive(Debug)]
 pub(crate) struct NativeHttp2ConnectionDriver {
@@ -36,7 +36,7 @@ pub struct NativeHttp2UpstreamRequest {
     pub method: Method,
     pub uri: Uri,
     pub headers: HeaderMap,
-    pub body: Zeroizing<Vec<u8>>,
+    pub body: NativeHttp1RequestBody,
     pub trailers: Option<HeaderMap>,
 }
 
@@ -46,7 +46,7 @@ impl NativeHttp2UpstreamRequest {
             method,
             uri,
             headers: HeaderMap::new(),
-            body: Zeroizing::new(Vec::new()),
+            body: NativeHttp1RequestBody::empty(),
             trailers: None,
         }
     }
@@ -57,7 +57,12 @@ impl NativeHttp2UpstreamRequest {
     }
 
     pub fn with_body(mut self, body: impl AsRef<[u8]>) -> Self {
-        self.body = Zeroizing::new(body.as_ref().to_vec());
+        self.body = NativeHttp1RequestBody::from_vec(body.as_ref().to_vec());
+        self
+    }
+
+    pub(crate) fn with_owned_body(mut self, body: NativeHttp1RequestBody) -> Self {
+        self.body = body;
         self
     }
 
@@ -73,7 +78,7 @@ impl NativeHttp2UpstreamRequest {
             method: self.method.clone(),
             uri: self.uri.clone(),
             headers: self.headers.clone(),
-            body: Zeroizing::new(Vec::new()),
+            body: NativeHttp1RequestBody::empty(),
             trailers: self.trailers.clone(),
         })
     }
@@ -354,20 +359,25 @@ async fn send_request_body_and_trailers(
     send_stream: &mut h2::SendStream<Bytes>,
     request: NativeHttp2UpstreamRequest,
 ) -> Result<(), NativeHttp2StackError> {
-    if !request.body.is_empty() {
+    let NativeHttp2UpstreamRequest { body, trailers, .. } = request;
+    if !body.is_empty() {
         send_data_bounded(
             send_stream,
-            Bytes::copy_from_slice(request.body.as_slice()),
-            request.trailers.is_none(),
+            owned_request_body_bytes(body),
+            trailers.is_none(),
         )
         .await?;
     }
-    if let Some(trailers) = request.trailers {
+    if let Some(trailers) = trailers {
         send_stream
             .send_trailers(trailers)
             .map_err(NativeHttp2StackError::SendResponse)?;
     }
     Ok(())
+}
+
+fn owned_request_body_bytes(body: NativeHttp1RequestBody) -> Bytes {
+    Bytes::from_owner(body)
 }
 
 async fn validate_inbound_response(
@@ -436,4 +446,20 @@ async fn drain_response_body(
         .await
         .map_err(NativeHttp2StackError::BodyTrailers)?;
     Ok((buffered, trailers))
+}
+
+#[cfg(test)]
+mod owned_body_tests {
+    use super::*;
+
+    #[test]
+    fn h2_bytes_retains_sanitizing_request_body_allocation() {
+        let body = NativeHttp1RequestBody::from_vec(b"owned request body".to_vec());
+        let original_pointer = body.as_ref().as_ptr();
+
+        let bytes = owned_request_body_bytes(body);
+
+        assert_eq!(bytes.as_ptr(), original_pointer);
+        assert_eq!(bytes.as_ref(), b"owned request body");
+    }
 }

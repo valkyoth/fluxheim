@@ -158,7 +158,7 @@ pub(crate) async fn native_peer_fill_fetch(
     request: &NativeHttp1Request,
     max_body_bytes: u64,
 ) -> Result<Option<NativeHttp1Response>, crate::NativeHttp1Error> {
-    let Some(peer_request) = native_peer_fill_request(peer, request, auth) else {
+    let Some(mut peer_request) = native_peer_fill_request(peer, request, auth) else {
         return Ok(None);
     };
     let max_body_bytes = usize::try_from(max_body_bytes.saturating_add(1)).unwrap_or(usize::MAX);
@@ -166,7 +166,7 @@ pub(crate) async fn native_peer_fill_fetch(
         .upstream
         .clone()
         .with_max_body_bytes(max_body_bytes)
-        .send(&peer_request)
+        .send(&mut peer_request)
         .await?;
     if response.status() == 504 {
         return Ok(None);

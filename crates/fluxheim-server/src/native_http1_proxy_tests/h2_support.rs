@@ -103,6 +103,57 @@ pub(super) async fn h2_upstream_with_body(
     (addr, accepted_connections)
 }
 
+pub(super) async fn h2_upstream_receiving_body(expected: &'static [u8]) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut connection = h2::server::handshake(stream).await.unwrap();
+        let Some(stream) = connection.accept().await else {
+            panic!("expected native H2 upstream request body");
+        };
+        let (request, mut respond) = stream.unwrap();
+        let mut handler = tokio::spawn(async move {
+            let mut received = Vec::new();
+            let mut body = request.into_body();
+            while received.len() < expected.len() {
+                let Some(chunk) = body.data().await else {
+                    panic!("native H2 upstream request body ended early");
+                };
+                let chunk = chunk.unwrap();
+                received.extend_from_slice(&chunk);
+                body.flow_control().release_capacity(chunk.len()).unwrap();
+            }
+            assert_eq!(received, expected);
+            let response = http::Response::builder()
+                .status(http::StatusCode::NO_CONTENT)
+                .body(())
+                .unwrap();
+            respond.send_response(response, true).unwrap();
+        });
+        loop {
+            tokio::select! {
+                result = &mut handler => {
+                    result.unwrap();
+                    break;
+                }
+                stream = connection.accept() => {
+                    if stream.is_some() {
+                        panic!("unexpected second native H2 upstream request");
+                    }
+                }
+            }
+        }
+        connection.graceful_shutdown();
+        let _ = tokio::time::timeout(
+            Duration::from_secs(1),
+            std::future::poll_fn(|context| connection.poll_closed(context)),
+        )
+        .await;
+    });
+    addr
+}
+
 pub(super) async fn h2_reconnecting_upstream(
     body: &'static str,
     connections: usize,

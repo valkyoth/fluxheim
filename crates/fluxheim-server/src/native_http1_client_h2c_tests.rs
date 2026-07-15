@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use http::Response;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use crate::native_http1_client_tests::request;
@@ -52,7 +52,7 @@ async fn native_upstream_uses_explicit_h2c_upgrade_for_mixed_plaintext_origin() 
     let response = NativeHttp1Upstream::new(addr.to_string())
         .with_http1_and_http2_policy(DownstreamHttp2Policy::default())
         .with_h2c_upgrade(true)
-        .send(&request())
+        .send(&mut request())
         .await;
     server.await.unwrap();
     let response = response.unwrap();
@@ -90,12 +90,66 @@ async fn native_upstream_falls_back_when_explicit_h2c_upgrade_is_not_accepted() 
     let response = NativeHttp1Upstream::new(addr.to_string())
         .with_http1_and_http2_policy(DownstreamHttp2Policy::default())
         .with_h2c_upgrade(true)
-        .send(&request())
+        .send(&mut request())
         .await
         .unwrap();
 
     assert_eq!(response.status(), 200);
     assert_eq!(response.body(), b"http1 fallback");
+}
+
+#[tokio::test]
+async fn native_upstream_preserves_body_until_h2c_fallback_is_selected() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut probe, _) = listener.accept().await.unwrap();
+        let upgrade = String::from_utf8(read_request_head(&mut probe).await).unwrap();
+        assert!(upgrade.starts_with("OPTIONS * HTTP/1.1\r\n"));
+        probe
+            .write_all(b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n")
+            .await
+            .unwrap();
+        drop(probe);
+
+        let (mut fallback, _) = listener.accept().await.unwrap();
+        let received = read_request_head(&mut fallback).await;
+        let head_end = received
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .unwrap()
+            + 4;
+        let head = String::from_utf8(received[..head_end].to_vec()).unwrap();
+        assert!(head.starts_with("POST /hello?name=fluxheim HTTP/1.1\r\n"));
+        assert!(head.contains("content-length: 13\r\n"));
+        let mut body = received[head_end..].to_vec();
+        let remaining = 13usize.saturating_sub(body.len());
+        let mut tail = vec![0u8; remaining];
+        fallback.read_exact(&mut tail).await.unwrap();
+        body.extend_from_slice(&tail);
+        assert_eq!(body, b"fallback body");
+        fallback
+            .write_all(b"HTTP/1.1 204 No Content\r\ncontent-length: 0\r\n\r\n")
+            .await
+            .unwrap();
+    });
+    let mut request = request();
+    request.method = "POST".to_owned();
+    request
+        .headers
+        .push(("content-length".to_owned(), "13".to_owned()));
+    request.body = crate::NativeHttp1RequestBody::from_vec(b"fallback body".to_vec());
+
+    let response = NativeHttp1Upstream::new(addr.to_string())
+        .with_http1_and_http2_policy(DownstreamHttp2Policy::default())
+        .with_h2c_upgrade(true)
+        .send(&mut request)
+        .await
+        .unwrap();
+    server.await.unwrap();
+
+    assert_eq!(response.status(), 204);
+    assert_eq!(request.body.as_ref(), b"fallback body");
 }
 
 #[tokio::test]
@@ -120,7 +174,7 @@ async fn native_upstream_falls_back_when_explicit_h2c_upgrade_connection_closes(
     let response = NativeHttp1Upstream::new(addr.to_string())
         .with_http1_and_http2_policy(DownstreamHttp2Policy::default())
         .with_h2c_upgrade(true)
-        .send(&request())
+        .send(&mut request())
         .await
         .unwrap();
 

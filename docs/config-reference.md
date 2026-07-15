@@ -131,10 +131,12 @@ Notes:
   extending their buffers. It returns `503` with `Retry-After: 1` while the
   aggregate budget remains occupied. HTTP/1 body bytes are moved without
   constructing a second full-body copy and retained in one owned,
-  full-capacity-cleared allocation; consumed connection buffers do not retain
-  uploaded bodies after request dispatch. Fluxheim does not automatically
-  retry or fail over a request with a non-empty body. Tune the budget to
-  available service memory.
+  full-capacity-cleared allocation; the same allocation becomes the owned H2
+  DATA source when an HTTP/2 upstream is selected. Secure chunked-body growth
+  temporarily admits both old and replacement capacities before reallocating,
+  and consumed connection buffers do not retain uploaded bodies after request
+  dispatch. Fluxheim does not automatically retry or fail over a request with
+  a non-empty body. Tune the budget to available service memory.
 - `listen` and `tls_listen` cannot both be empty unless `[stream].enabled =
   true` supplies dedicated TCP stream listeners.
 - `server.process.upstream_keepalive_pool_size` is a per-native-upstream idle

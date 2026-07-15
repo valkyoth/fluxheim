@@ -80,7 +80,7 @@ impl NativeHttp1Proxy {
         let cache = self.cache.as_ref()?;
         let max_body_bytes = cache.config.range.slice.size_bytes.as_u64();
         let capped_body_bytes = usize::try_from(max_body_bytes.saturating_add(1)).ok()?;
-        let request = native_origin_slice_request(request, bounds)?;
+        let mut request = native_origin_slice_request(request, bounds)?;
         let start = self.next_upstream.fetch_add(1, Ordering::Relaxed);
         let total = self.upstream_slots.len();
         let mut attempted = vec![false; self.upstreams.len()];
@@ -94,7 +94,7 @@ impl NativeHttp1Proxy {
             let upstream = self.upstreams[index]
                 .clone()
                 .with_max_body_bytes(capped_body_bytes);
-            match upstream.send(&request).await {
+            match upstream.send(&mut request).await {
                 Ok(response) if response.body().len() as u64 <= max_body_bytes => {
                     return Some(response);
                 }
@@ -129,7 +129,8 @@ impl NativeHttp1Proxy {
             }
             attempted[index] = true;
             unique_attempts += 1;
-            match self.upstreams[index].send(request).await {
+            let mut outbound = request.metadata_snapshot();
+            match self.upstreams[index].send(&mut outbound).await {
                 Ok(response) => return Ok(response),
                 Err(error) if retry_allowed && unique_attempts < self.upstreams.len() => {
                     last_error = Some(error);
@@ -186,7 +187,8 @@ impl NativeHttp1Proxy {
             )
             .into());
         };
-        let result = upstream.send(request).await;
+        let mut outbound = request.metadata_snapshot();
+        let result = upstream.send(&mut outbound).await;
         if let Some(reporter) = selected.reporter() {
             match &result {
                 Ok(response) => reporter.record_status(response.status(), None),
@@ -215,7 +217,8 @@ impl NativeHttp1Proxy {
             }
             attempted[index] = true;
             unique_attempts += 1;
-            match self.upstreams[index].send(request).await {
+            let mut outbound = request.metadata_snapshot();
+            match self.upstreams[index].send(&mut outbound).await {
                 Ok(response) => return Ok(response),
                 Err(error) if retry_allowed && unique_attempts < self.upstreams.len() => {
                     last_error = Some(error);

@@ -18,7 +18,7 @@ async fn native_upstream_strips_connection_nominated_and_proxy_connection_header
     .await;
 
     let response = NativeHttp1Upstream::new(addr.to_string())
-        .send(&request())
+        .send(&mut request())
         .await
         .unwrap();
 
@@ -48,7 +48,7 @@ async fn native_upstream_rejects_invalid_connection_option() {
     .await;
 
     let error = NativeHttp1Upstream::new(addr.to_string())
-        .send(&request())
+        .send(&mut request())
         .await
         .unwrap_err();
 
@@ -77,7 +77,7 @@ async fn native_upstream_consumes_informational_responses_before_final_response(
     .await;
 
     let response = NativeHttp1Upstream::new(addr.to_string())
-        .send(&request())
+        .send(&mut request())
         .await
         .unwrap();
 
@@ -110,7 +110,7 @@ async fn native_upstream_bounds_informational_response_chain() {
     .await;
 
     let error = NativeHttp1Upstream::new(addr.to_string())
-        .send(&request())
+        .send(&mut request())
         .await
         .unwrap_err();
 
@@ -137,7 +137,7 @@ async fn native_upstream_rejects_unsupported_transfer_coding_chains() {
         .await;
 
         let error = NativeHttp1Upstream::new(addr.to_string())
-            .send(&request())
+            .send(&mut request())
             .await
             .unwrap_err();
 

@@ -432,7 +432,7 @@ impl NativeHttp1Proxy {
             let managed_affinity_cookie = selected
                 .managed_affinity_cookie()
                 .map(|cookie| cookie.header_value.clone());
-            match upstream.send(&request).await {
+            match upstream.send(&mut request).await {
                 Ok(mut response) => {
                     if let Some(reporter) = selected.reporter() {
                         reporter.record_status(response.status(), None);

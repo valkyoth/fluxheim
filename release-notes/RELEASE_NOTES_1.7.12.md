@@ -176,6 +176,11 @@ trailers are not part of this release.
   Request types are no longer cloneable; compression, static, cache, and
   revalidation workers receive metadata-only snapshots, while body-bearing
   requests are never automatically retried or failed over.
+- Transfer HTTP/1 request-body ownership directly into HTTP/2 DATA frames
+  through an owner-backed `Bytes` value instead of making two additional body
+  copies. H2C negotiation retains the body until fallback is decided, secure
+  chunked growth admits old-plus-new allocation overlap, and fragmented final
+  chunks preserve pipelined request bytes before clearing the read buffer.
 - Move static-file resolution and reads to the bounded blocking-work pool and
   cap retained static response bodies with a weighted 256 MiB process-wide
   budget. Fluxheim resolves metadata first, admits the planned response bytes

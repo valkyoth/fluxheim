@@ -79,7 +79,7 @@ async fn native_upstream_forwards_request_and_reads_content_length_response() {
     .await;
 
     let response = NativeHttp1Upstream::new(addr.to_string())
-        .send(&request())
+        .send(&mut request())
         .await
         .unwrap();
 
@@ -118,11 +118,11 @@ async fn native_upstream_reuses_safe_content_length_connection() {
 
     let upstream = NativeHttp1Upstream::new(addr.to_string()).with_pool_max_idle(1);
 
-    let response = upstream.send(&request()).await.unwrap();
+    let response = upstream.send(&mut request()).await.unwrap();
     assert_eq!(response.body(), b"first");
     assert_eq!(upstream.idle_connection_count().await, 1);
 
-    let response = upstream.send(&request()).await.unwrap();
+    let response = upstream.send(&mut request()).await.unwrap();
     assert_eq!(response.body(), b"second");
     assert_eq!(upstream.idle_connection_count().await, 1);
 }
@@ -138,7 +138,7 @@ async fn native_upstream_does_not_pool_http10_without_keep_alive() {
     .await;
 
     let upstream = NativeHttp1Upstream::new(addr.to_string()).with_pool_max_idle(1);
-    let response = upstream.send(&request()).await.unwrap();
+    let response = upstream.send(&mut request()).await.unwrap();
 
     assert_eq!(response.body(), b"legacy");
     assert_eq!(upstream.idle_connection_count().await, 0);
@@ -157,7 +157,7 @@ async fn native_upstream_rejects_switching_protocols_outside_takeover_path() {
     .await;
 
     let upstream = NativeHttp1Upstream::new(addr.to_string()).with_pool_max_idle(1);
-    let error = upstream.send(&request()).await.unwrap_err();
+    let error = upstream.send(&mut request()).await.unwrap_err();
 
     assert!(matches!(
         error,
@@ -192,11 +192,11 @@ async fn native_upstream_retries_once_when_pooled_connection_is_stale() {
     });
 
     let upstream = NativeHttp1Upstream::new(addr.to_string()).with_pool_max_idle(1);
-    let response = upstream.send(&request()).await.unwrap();
+    let response = upstream.send(&mut request()).await.unwrap();
     assert_eq!(response.body(), b"stale");
     assert_eq!(upstream.idle_connection_count().await, 1);
 
-    let response = upstream.send(&request()).await.unwrap();
+    let response = upstream.send(&mut request()).await.unwrap();
     assert_eq!(response.body(), b"fresh");
     assert_eq!(accepted.load(Ordering::Acquire), 2);
 }
@@ -226,14 +226,14 @@ async fn native_upstream_does_not_retry_body_bearing_request_on_stale_pool_conne
     });
 
     let upstream = NativeHttp1Upstream::new(addr.to_string()).with_pool_max_idle(1);
-    let response = upstream.send(&request()).await.unwrap();
+    let response = upstream.send(&mut request()).await.unwrap();
     assert_eq!(response.body(), b"stale");
     assert_eq!(upstream.idle_connection_count().await, 1);
 
     let mut body_request = request();
     body_request.body = crate::NativeHttp1RequestBody::from_vec(b"do not replay".to_vec());
 
-    let error = upstream.send(&body_request).await.unwrap_err();
+    let error = upstream.send(&mut body_request).await.unwrap_err();
 
     assert!(matches!(
         error,
@@ -261,7 +261,7 @@ async fn native_upstream_does_not_pool_connection_close_response() {
     .await;
 
     let upstream = NativeHttp1Upstream::new(addr.to_string()).with_pool_max_idle(1);
-    let response = upstream.send(&request()).await.unwrap();
+    let response = upstream.send(&mut request()).await.unwrap();
 
     assert_eq!(response.body(), b"stop");
     assert_eq!(upstream.idle_connection_count().await, 0);
@@ -292,13 +292,13 @@ async fn native_upstream_expires_idle_pool_connections() {
         .with_pool_idle_timeout(Some(Duration::from_millis(1)))
         .with_pool_max_idle(1);
 
-    let response = upstream.send(&request()).await.unwrap();
+    let response = upstream.send(&mut request()).await.unwrap();
     assert_eq!(response.body(), b"first");
     assert_eq!(upstream.idle_connection_count().await, 1);
 
     tokio::time::sleep(Duration::from_millis(5)).await;
 
-    let response = upstream.send(&request()).await.unwrap();
+    let response = upstream.send(&mut request()).await.unwrap();
     assert_eq!(response.body(), b"fresh");
     assert_eq!(accepted.load(Ordering::Acquire), 2);
 }
@@ -316,7 +316,7 @@ async fn native_upstream_decodes_chunked_response_and_strips_hop_by_hop_headers(
     .await;
 
     let response = NativeHttp1Upstream::new(addr.to_string())
-        .send(&request())
+        .send(&mut request())
         .await
         .unwrap();
 
@@ -340,7 +340,7 @@ async fn native_upstream_reads_close_delimited_response() {
     .await;
 
     let response = NativeHttp1Upstream::new(addr.to_string())
-        .send(&request())
+        .send(&mut request())
         .await
         .unwrap();
 
@@ -361,7 +361,7 @@ async fn native_upstream_rejects_oversized_close_delimited_response() {
 
     let error = NativeHttp1Upstream::new(addr.to_string())
         .with_max_body_bytes(4)
-        .send(&request())
+        .send(&mut request())
         .await
         .unwrap_err();
 
@@ -383,7 +383,7 @@ async fn native_upstream_accepts_exact_limit_close_delimited_response() {
 
     let response = NativeHttp1Upstream::new(addr.to_string())
         .with_max_body_bytes(4)
-        .send(&request())
+        .send(&mut request())
         .await
         .unwrap();
 
@@ -419,7 +419,7 @@ async fn native_upstream_strips_request_hop_by_hop_headers() {
         .push(("Proxy-Connection".to_owned(), "keep-alive".to_owned()));
 
     let response = NativeHttp1Upstream::new(addr.to_string())
-        .send(&request)
+        .send(&mut request)
         .await
         .unwrap();
 

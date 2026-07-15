@@ -352,7 +352,7 @@ impl NativeHttp1Proxy {
             attempted[index] = true;
             unique_attempts += 1;
             let upstream = &self.upstreams[index];
-            match upstream.send(&request).await {
+            match upstream.send(&mut request).await {
                 Ok(response) => {
                     let mut cache_status = proxy_cache_status;
                     if let Some((cache, key, status, reason, stale_entry)) =

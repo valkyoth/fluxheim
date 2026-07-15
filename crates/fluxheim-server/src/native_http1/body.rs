@@ -73,7 +73,12 @@ where
             initial.drain(..head_len);
             *buffer = remainder;
             let mut body = NativeHttp1RequestBody::from_vec(initial);
+            let overlap_bytes = length
+                .checked_add(body.capacity())
+                .ok_or(Http1ParseError::BodyTooLarge)?;
+            let overlap = reservation.reserve_overlap(overlap_bytes).await?;
             body.replace_capacity(length)?;
+            drop(overlap);
             while body.len() < length {
                 let remaining = length - body.len();
                 let mut chunk = [0u8; READ_CHUNK_BYTES];
@@ -127,17 +132,30 @@ where
             .ok_or(Http1ParseError::EncodedBodyTooLarge)?;
         reserve_chunked_body_growth(&mut body, reservation, read, max_body_bytes).await?;
         let decoded = decoder.push_to(&chunk[..read], &mut body);
-        sanitization::unsafe_wipe::volatile_sanitize_bytes(&mut chunk[..read]);
-        if let Some(decoded) = decoded? {
-            let consumed_from_chunk = decoded
-                .consumed_len
-                .checked_sub(fed_len)
-                .ok_or(Http1ParseError::InvalidChunk)?;
-            let remainder = chunk
-                .get(consumed_from_chunk..read)
-                .ok_or(Http1ParseError::InvalidChunk)?;
-            buffer.extend_from_slice(remainder);
-            return Ok(body);
+        match decoded {
+            Ok(Some(decoded)) => {
+                let preserve_result = (|| {
+                    let consumed_from_chunk = decoded
+                        .consumed_len
+                        .checked_sub(fed_len)
+                        .ok_or(Http1ParseError::InvalidChunk)?;
+                    let remainder = chunk
+                        .get(consumed_from_chunk..read)
+                        .ok_or(Http1ParseError::InvalidChunk)?;
+                    buffer.extend_from_slice(remainder);
+                    Ok::<(), Http1ParseError>(())
+                })();
+                sanitization::unsafe_wipe::volatile_sanitize_bytes(&mut chunk[..read]);
+                preserve_result?;
+                return Ok(body);
+            }
+            Ok(None) => {
+                sanitization::unsafe_wipe::volatile_sanitize_bytes(&mut chunk[..read]);
+            }
+            Err(error) => {
+                sanitization::unsafe_wipe::volatile_sanitize_bytes(&mut chunk[..read]);
+                return Err(error.into());
+            }
         }
         fed_len = prospective_encoded;
     }
@@ -160,7 +178,12 @@ async fn reserve_chunked_body_growth(
     let geometric = body.capacity().max(READ_CHUNK_BYTES).saturating_mul(2);
     let admitted_capacity = required.max(geometric).min(max_body_bytes);
     reservation.grow_to(admitted_capacity).await?;
+    let overlap_bytes = admitted_capacity
+        .checked_add(body.capacity())
+        .ok_or(Http1ParseError::BodyTooLarge)?;
+    let overlap = reservation.reserve_overlap(overlap_bytes).await?;
     body.reserve_capacity(admitted_capacity)?;
+    drop(overlap);
     Ok(())
 }
 
@@ -178,7 +201,10 @@ mod tests {
         buffer.extend_from_slice(b"hello");
         buffer.extend_from_slice(pipeline);
         let original_capacity = buffer.capacity();
-        let mut reservation = NativeRequestBodyBudget::new(1024).reserve(5).await.unwrap();
+        let mut reservation = NativeRequestBodyBudget::new(2 * 1024 * 1024)
+            .reserve(5)
+            .await
+            .unwrap();
 
         let body = read_body_inner(
             &mut tokio::io::empty(),
@@ -195,5 +221,30 @@ mod tests {
         assert_eq!(buffer, pipeline);
         assert!(buffer.capacity() < original_capacity);
         assert!(body.capacity() >= body.len());
+    }
+
+    #[tokio::test]
+    async fn chunked_split_read_preserves_pipelined_remainder_before_wipe() {
+        let head = b"POST /one HTTP/1.1\r\nHost: local.test\r\nTransfer-Encoding: chunked\r\n\r\n";
+        let mut buffer = head.to_vec();
+        buffer.extend_from_slice(b"5\r\nhe");
+        let pipeline = b"GET /two HTTP/1.1\r\nHost: local.test\r\n\r\n";
+        let mut network = b"llo\r\n0\r\n\r\n".to_vec();
+        network.extend_from_slice(pipeline);
+        let mut reservation = NativeRequestBodyBudget::new(1024 * 1024).reservation();
+
+        let body = read_body_inner(
+            &mut network.as_slice(),
+            &mut buffer,
+            head.len(),
+            Http1BodyFraming::Chunked,
+            1024,
+            &mut reservation,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(body.as_ref(), b"hello");
+        assert_eq!(buffer, pipeline);
     }
 }
