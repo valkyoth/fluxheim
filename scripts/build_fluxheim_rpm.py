@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
         "version_tag",
         nargs="?",
         default="latest",
-        help="Fluxheim tag version, for example 1.7.11, v1.7.11, or latest",
+        help="Fluxheim tag version, for example 1.7.12, v1.7.12, or latest",
     )
     parser.add_argument(
         "build_type",

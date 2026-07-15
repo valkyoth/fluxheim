@@ -164,6 +164,8 @@ fi
   behavior with live native listener tests.
 - Add pinned OpenSSL-FIPS and rustls/AWS-LC-FIPS evidence environments with live
   downstream/upstream TLS and fail-closed policy proof.
+- Harden request-body admission, fragmented HTTP/2 growth, encrypted-cache
+  state, and snapshot filesystem operations.
 
 * Tue Jul 14 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.11-1
 - Start bounded native listener draining as the first zero-downtime upgrade

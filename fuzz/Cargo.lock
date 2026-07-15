@@ -98,7 +98,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "fluxheim-cache"
-version = "1.7.11"
+version = "1.7.12"
 dependencies = [
  "async-trait",
  "bytes",
@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-config"
-version = "1.7.11"
+version = "1.7.12"
 dependencies = [
  "fluxheim-protocol",
  "log",
@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-headers"
-version = "1.7.11"
+version = "1.7.12"
 dependencies = [
  "fluxheim-config",
  "fluxheim-protocol",
@@ -142,7 +142,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-php-fpm"
-version = "1.7.11"
+version = "1.7.12"
 dependencies = [
  "fastcgi-client",
  "fluxheim-config",
@@ -157,7 +157,10 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-protocol"
-version = "1.7.11"
+version = "1.7.12"
+dependencies = [
+ "sanitization",
+]
 
 [[package]]
 name = "futures-core"

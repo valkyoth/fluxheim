@@ -7,7 +7,9 @@ TMP_DIR=$(mktemp -d "$SMOKE_TMP_ROOT/fluxheim-1-0-load-smoke.XXXXXX")
 KEEP_LOGS=${FLUXHEIM_LOAD_KEEP_LOGS:-0}
 BUILD_RELEASE=${FLUXHEIM_LOAD_BUILD:-1}
 DURATION=${FLUXHEIM_LOAD_DURATION:-15s}
-CONCURRENCY=${FLUXHEIM_LOAD_CONCURRENCY:-64}
+# Match the native static-file blocking-work ceiling. Higher values intentionally
+# exercise load shedding and can produce bounded 503 responses.
+CONCURRENCY=${FLUXHEIM_LOAD_CONCURRENCY:-8}
 TIMEOUT=${FLUXHEIM_LOAD_TIMEOUT:-5}
 
 if ! command -v hey >/dev/null 2>&1; then

@@ -503,8 +503,9 @@ build and execute the OpenSSL-FIPS and rustls/AWS-LC-FIPS profiles.
   capture provider, toolchain, dependency, binary, and image evidence. They are
   not published FIPS images or a claim that Fluxheim itself is FIPS validated.
   The release also makes native request/static buffering admission effective
-  before allocation and completes encrypted-cache root separation, opaque HMAC
-  identities, fail-closed counter state, and the one-time legacy cold migration.
+  before allocation, keeps fragmented HTTP/2 body growth logarithmic, and
+  completes encrypted-cache root separation, opaque HMAC identities,
+  fail-closed counter state, and the one-time legacy cold migration.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

@@ -1,6 +1,7 @@
 .git
 .cargo
 target
+**/target
 docs
 examples/public
 *.log

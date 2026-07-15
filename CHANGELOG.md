@@ -7,7 +7,7 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.7.12 - Unreleased
+## 1.7.12 - 2026-07-15
 
 ### Added
 
@@ -75,6 +75,11 @@ behavior when the change improves security or project direction.
   discovery state.
 - Bound persisted self-healing state to 64 KiB and its variable diagnostics to
   4 KiB without control characters, using the same limit for reads and writes.
+- Create snapshot directories relative to a no-symlink parent directory handle
+  so concurrent path replacement cannot redirect the creation operation.
+- Grow fragmented unknown-length HTTP/2 request bodies geometrically while
+  charging both the retained and replacement allocations, preventing repeated
+  exact-size copies from creating quadratic work.
 
 ## 1.7.11 - 2026-07-14
 

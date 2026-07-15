@@ -43,3 +43,21 @@ split destinations; new functionality must not use them as precedent.
 | `crates/fluxheim-server/src/native_http1_host_router.rs` | 545 | Trusted-client GeoIP context and Wasm policy construction expanded the central host-router assembly boundary. | Move GeoIP/Wasm policy assembly into a dedicated router policy builder. |
 | `crates/fluxheim-server/src/native_http1_host_router_tests.rs` | 516 | Host-router tests now cover trusted-proxy GeoIP and Wasm policy wiring alongside base routing. | Split GeoIP and Wasm construction regressions into focused test modules. |
 | `src/cli.rs` | 531 | Snapshot command dispatch and validated runtime loading remain together in the root CLI adapter. | Move snapshot subcommand execution into a dedicated CLI snapshot module. |
+
+The following files crossed the target during the final `1.7.12` native
+buffer, cache, static-response, HTTP/2, and snapshot hardening passes. The
+security fixes and their regression coverage are retained for release; these
+modules must be split before their next feature expansion in the `1.8` line.
+
+| File | Baseline lines | Reason | Split target |
+| --- | ---: | --- | --- |
+| `crates/fluxheim-server/src/native_http1_cache.rs` | 538 | The disk-cache facade now coordinates stricter encrypted-root and storage-bin state without weakening the existing internal module boundary. | Move disk-cache construction and capability checks into `native_http1_cache_backend` or a focused facade-support module. |
+| `crates/fluxheim-server/src/native_http1_cache_encryption.rs` | 1134 | Root separation, durable nonce state, migration, bounded secret input, and encrypted-envelope tests landed together during the final cache audit. | Split root identity/state persistence, envelope encoding, and provider/key loading into focused encryption submodules; keep tests in separate files. |
+| `crates/fluxheim-server/src/native_http1_route_proxy_tests/cache_storage.rs` | 516 | Live route-cache storage coverage now includes filesystem, storage-bin, encrypted, and OpenBao paths. | Split encrypted/OpenBao storage fixtures from plain filesystem and storage-bin tests. |
+| `crates/fluxheim-server/src/native_http1_static_web.rs` | 656 | Static response admission and cache-retention accounting expanded the central static dispatcher. | Move memory-cache state and admission helpers into a focused `native_http1_static_web/cache.rs` module. |
+| `crates/fluxheim-server/src/native_http1_tests.rs` | 637 | Native HTTP/1 listener tests now include process-wide body admission and retained-owner lifetime coverage. | Split body-budget/lifetime tests from listener framing, context, and takeover tests. |
+| `crates/fluxheim-server/src/native_http2_stack.rs` | 518 | Secure geometric request-body growth and temporary-overlap admission moved the protocol stack just above the limit. | Move request validation and body draining into focused HTTP/2 request modules. |
+| `crates/fluxheim-server/src/native_http2_tests.rs` | 774 | HTTP/2 listener coverage combines framing, flow control, timeout, transport lifetime, and body-admission regressions. | Split request-body/admission tests from connection, response, and transport-lifetime tests. |
+| `crates/fluxheim-snapshot/src/operations_tests.rs` | 548 | Snapshot transaction, recovery, self-healing, and filesystem-hardening cases share one operations fixture. | Split recovery/self-healing tests from create, diff, prune, and rollback operation tests. |
+| `crates/fluxheim-snapshot/src/store.rs` | 511 | Store admission, transaction publication, and test-module declarations now sit just above the target after bounded snapshot serialization. | Move transaction-file publication helpers into `store_fs` and keep the store API focused on orchestration. |
+| `crates/fluxheim-snapshot/src/store_tests.rs` | 564 | Store tests now include private-directory creation and no-follow metadata regressions alongside capacity and runtime-state cases. | Split filesystem-mode/path tests from capacity, rollback, and runtime-state tests. |
