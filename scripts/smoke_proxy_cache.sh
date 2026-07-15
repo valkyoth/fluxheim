@@ -1022,8 +1022,8 @@ if ! grep -qi '^x-cache-status: BYPASS' "$header_bypass_headers"; then
     cat "$header_bypass_headers" >&2
     exit 1
 fi
-if ! grep -qi '^x-cache-reason: request-header' "$header_bypass_headers"; then
-    echo "proxy cache smoke failed: configured request-header bypass did not expose bounded reason" >&2
+if ! grep -qi '^x-cache-reason: request-authorization' "$header_bypass_headers"; then
+    echo "proxy cache smoke failed: Authorization bypass did not expose bounded reason" >&2
     cat "$header_bypass_headers" >&2
     exit 1
 fi
