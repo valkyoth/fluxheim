@@ -84,6 +84,9 @@ trailers are not part of this release.
 - Reject percent-decoded forward-path segments that are not canonical UTF-8 or
   contain encoded Unicode control characters, preventing disagreement with
   permissive upstream decoders.
+- Detect symlinks in every existing configured web-path prefix even when a
+  later child is absent, and deny non-UTF-8 dotfile components by their OS path
+  representation.
 - Bound storage-bin manifests to 4 KiB and use no-follow, nonblocking regular
   file reads so oversized or special persistent files fail closed at startup.
 
@@ -125,3 +128,5 @@ platform, configuration, key handling, and required compliance evidence.
   parsing.
 - Shared path-safety and live redirect tests cover invalid UTF-8, overlong
   slash encodings, encoded Unicode controls, and valid encoded Unicode.
+- Static-web tests cover missing children below valid and broken symlinked
+  parents plus hidden non-UTF-8 Unix filenames.

@@ -133,6 +133,19 @@ fn safe_relative_path_detects_prefixed_components() {
     assert!(path.contains_component_starting_with('.'));
 }
 
+#[cfg(unix)]
+#[test]
+fn safe_relative_path_detects_non_utf8_dotfile_component() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt as _;
+
+    let component = OsString::from_vec(vec![b'.', b's', b'e', b'c', b'r', b'e', b't', 0xff]);
+    let path = SafeRelativePath::from_path(Path::new(&component))
+        .expect("non-UTF-8 filename remains one normal OS path component");
+
+    assert!(path.contains_component_starting_with('.'));
+}
+
 #[test]
 fn formats_directory_listing_paths_with_trailing_slash() {
     assert_eq!(directory_listing_path(Path::new("")), "/");
@@ -166,6 +179,38 @@ fn configured_web_path_detects_symlinked_parent() {
     std::os::unix::fs::symlink(&real, &linked).unwrap();
 
     assert!(configured_web_path_contains_symlink(&public).unwrap());
+
+    let _ = std::fs::remove_file(&linked);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn configured_web_path_detects_symlinked_parent_of_missing_child() {
+    let root = unique_temp_path("fluxheim-web-symlink-missing-child");
+    let real = safe_child_path(&root, "real");
+    let linked = safe_child_path(&root, "linked");
+    let missing = safe_child_path(&linked, "missing");
+    std::fs::create_dir_all(&real).unwrap();
+    std::os::unix::fs::symlink(&real, &linked).unwrap();
+
+    assert!(configured_web_path_contains_symlink(&missing).unwrap());
+
+    let _ = std::fs::remove_file(&linked);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn configured_web_path_detects_broken_symlinked_parent() {
+    let root = unique_temp_path("fluxheim-web-broken-symlink-parent");
+    let missing_target = safe_child_path(&root, "missing-target");
+    let linked = safe_child_path(&root, "linked");
+    let missing = safe_child_path(&linked, "missing");
+    std::fs::create_dir_all(&root).unwrap();
+    std::os::unix::fs::symlink(&missing_target, &linked).unwrap();
+
+    assert!(configured_web_path_contains_symlink(&missing).unwrap());
 
     let _ = std::fs::remove_file(&linked);
     let _ = std::fs::remove_dir_all(&root);

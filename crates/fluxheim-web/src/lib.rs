@@ -116,11 +116,9 @@ impl SafeRelativePath {
     }
 
     pub fn contains_component_starting_with(&self, prefix: char) -> bool {
-        self.components.iter().any(|component| {
-            component
-                .to_str()
-                .is_some_and(|component| component.starts_with(prefix))
-        })
+        self.components
+            .iter()
+            .any(|component| component.to_string_lossy().starts_with(prefix))
     }
 }
 
@@ -397,17 +395,31 @@ pub fn configured_web_path_contains_symlink(path: &Path) -> io::Result<bool> {
         }
     }
 
-    let expected = if path.is_absolute() {
+    let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir()?.join(path)
     };
 
-    match path.canonicalize() {
-        Ok(canonical) => Ok(canonical != expected),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error),
+    let mut current = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            std::path::Component::Prefix(_)
+            | std::path::Component::RootDir
+            | std::path::Component::Normal(_) => current.push(component.as_os_str()),
+            std::path::Component::CurDir | std::path::Component::ParentDir => return Ok(true),
+        }
+        if !matches!(component, std::path::Component::Normal(_)) {
+            continue;
+        }
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => break,
+            Err(error) => return Err(error),
+        }
     }
+    Ok(false)
 }
 
 #[cfg(test)]
