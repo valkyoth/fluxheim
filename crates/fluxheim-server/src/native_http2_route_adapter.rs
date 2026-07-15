@@ -35,7 +35,7 @@ impl<H> NativeHttp2Handler for NativeHttp2RouteAdapter<H>
 where
     H: NativeHttp1Handler,
 {
-    fn request_body_budget(&self) -> Option<crate::NativeRequestBodyBudget> {
+    fn request_body_budget(&self) -> crate::NativeRequestBodyBudget {
         self.handler.request_body_budget()
     }
 

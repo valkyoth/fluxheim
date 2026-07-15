@@ -9,6 +9,8 @@ pub enum NativeHttp2StackError {
     TooManyHeaders { count: usize, limit: usize },
     UriTooLarge { len: usize, limit: usize },
     BodyReadTimeout,
+    InvalidContentLength,
+    BodyCapacityUnavailable,
     BodyTooLarge { limit: usize },
     BodyData(h2::Error),
     BodyTrailers(h2::Error),
@@ -53,6 +55,12 @@ impl std::fmt::Display for NativeHttp2StackError {
                 write!(formatter, "native HTTP/2 URI is too large: {len} > {limit}")
             }
             Self::BodyReadTimeout => write!(formatter, "native HTTP/2 body read timed out"),
+            Self::InvalidContentLength => {
+                write!(formatter, "native HTTP/2 content-length is invalid")
+            }
+            Self::BodyCapacityUnavailable => {
+                write!(formatter, "native HTTP/2 body capacity is unavailable")
+            }
             Self::BodyTooLarge { limit } => {
                 write!(formatter, "native HTTP/2 body exceeded {limit} bytes")
             }

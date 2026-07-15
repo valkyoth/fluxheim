@@ -19,8 +19,8 @@ struct HoldingHttp2BodyBudgetHandler {
 }
 
 impl NativeHttp2Handler for HoldingHttp2BodyBudgetHandler {
-    fn request_body_budget(&self) -> Option<NativeRequestBodyBudget> {
-        Some(self.budget.clone())
+    fn request_body_budget(&self) -> NativeRequestBodyBudget {
+        self.budget.clone()
     }
 
     fn handle<'a>(
@@ -187,10 +187,10 @@ async fn native_http2_connection_passes_request_trailers_to_handler() {
 }
 
 #[tokio::test]
-async fn native_http2_rejects_aggregate_request_body_overcommit() {
+async fn native_http2_charges_declared_length_instead_of_maximum_body_size() {
     let (server_io, client_io) = tokio::io::duplex(16 * 1024);
     let handler = Arc::new(HoldingHttp2BodyBudgetHandler {
-        budget: NativeRequestBodyBudget::new(16 * 1024 * 1024),
+        budget: NativeRequestBodyBudget::new(2 * 64 * 1024),
         entered: tokio::sync::Notify::new(),
         release: tokio::sync::Notify::new(),
     });
@@ -226,6 +226,53 @@ async fn native_http2_rejects_aggregate_request_body_overcommit() {
     second_body
         .send_data(bytes::Bytes::from_static(b"b"), true)
         .unwrap();
+    handler.entered.notified().await;
+    handler.release.notify_waiters();
+    assert_eq!(
+        first_response.await.unwrap().status(),
+        http::StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        second_response.await.unwrap().status(),
+        http::StatusCode::NO_CONTENT
+    );
+    drop(client);
+    server.await.unwrap().unwrap();
+    client_connection.await.unwrap();
+}
+
+#[tokio::test]
+async fn native_http2_grows_unknown_body_reservations_before_buffering() {
+    let (server_io, client_io) = tokio::io::duplex(16 * 1024);
+    let handler = Arc::new(HoldingHttp2BodyBudgetHandler {
+        budget: NativeRequestBodyBudget::new(64 * 1024),
+        entered: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    });
+    let server = tokio::spawn(serve_native_http2_connection_until_idle(
+        server_io,
+        DownstreamHttp2Policy::default(),
+        handler.clone(),
+        Duration::from_secs(1),
+    ));
+    let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
+    let client_connection = tokio::spawn(async move {
+        let _ = connection.await;
+    });
+
+    let first = http::Request::builder().uri("/first").body(()).unwrap();
+    let (first_response, mut first_body) = client.send_request(first, false).unwrap();
+    first_body
+        .send_data(bytes::Bytes::from_static(b"a"), true)
+        .unwrap();
+    handler.entered.notified().await;
+
+    client = client.ready().await.unwrap();
+    let second = http::Request::builder().uri("/second").body(()).unwrap();
+    let (second_response, mut second_body) = client.send_request(second, false).unwrap();
+    second_body
+        .send_data(bytes::Bytes::from_static(b"b"), true)
+        .unwrap();
     let second_response = second_response.await.unwrap();
     assert_eq!(
         second_response.status(),
@@ -241,6 +288,34 @@ async fn native_http2_rejects_aggregate_request_body_overcommit() {
         first_response.await.unwrap().status(),
         http::StatusCode::NO_CONTENT
     );
+    drop(client);
+    server.await.unwrap().unwrap();
+    client_connection.await.unwrap();
+}
+
+#[tokio::test]
+async fn native_http2_rejects_body_length_mismatch() {
+    let (server_io, client_io) = tokio::io::duplex(4096);
+    let server = tokio::spawn(serve_native_http2_connection_until_idle(
+        server_io,
+        DownstreamHttp2Policy::default(),
+        Arc::new(|_request: NativeHttp2Request| async { NativeHttp2Response::no_content() }),
+        Duration::from_millis(50),
+    ));
+    let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
+    let client_connection = tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    let request = http::Request::builder()
+        .uri("/mismatch")
+        .header(http::header::CONTENT_LENGTH, "2")
+        .body(())
+        .unwrap();
+    let (response, mut body) = client.send_request(request, false).unwrap();
+    body.send_data(bytes::Bytes::from_static(b"a"), true)
+        .unwrap();
+
+    assert!(response.await.is_err());
     drop(client);
     server.await.unwrap().unwrap();
     client_connection.await.unwrap();

@@ -44,6 +44,10 @@ impl NativeDiskCache {
                     Ok(bytes) => bytes,
                     Err(_) => continue,
                 };
+                if bytes.starts_with(super::NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1) {
+                    let _ = NativeSafeDiskCachePath::from_path(path).remove_file();
+                    continue;
+                }
                 let bytes = match self.decrypt_if_needed(&bytes) {
                     Ok(bytes) => bytes,
                     Err(_) => continue,
@@ -66,6 +70,7 @@ impl NativeDiskCache {
                 }
                 let weight = bytes.len() as u64;
                 state.bytes = state.bytes.saturating_add(weight);
+                let path = self.migrate_filesystem_identity_path(&path, &combined)?;
                 state.insert_object(
                     combined.clone(),
                     NativeDiskCacheRecord {
@@ -207,11 +212,52 @@ impl NativeDiskCache {
     }
 
     fn path_for_combined_key(&self, key: &str) -> PathBuf {
-        let digest = Sha256::digest(key.as_bytes());
-        let mut encoded = String::with_capacity(digest.len() * 2);
-        for byte in digest {
-            let _ = write!(&mut encoded, "{byte:02x}");
-        }
+        let encoded = self.encryption.as_ref().map_or_else(
+            || {
+                let digest = Sha256::digest(key.as_bytes());
+                let mut encoded = String::with_capacity(digest.len() * 2);
+                for byte in digest {
+                    let _ = write!(&mut encoded, "{byte:02x}");
+                }
+                encoded
+            },
+            |encryption| encryption.confidential_index_identity(key),
+        );
         self.root.join(&encoded[..2]).join(format!("{encoded}.fhc"))
+    }
+
+    fn migrate_filesystem_identity_path(
+        &self,
+        current: &Path,
+        combined_key: &str,
+    ) -> std::io::Result<PathBuf> {
+        let expected = self.path_for_combined_key(combined_key);
+        if current == expected {
+            return Ok(expected);
+        }
+        if let Some(parent) = expected.parent() {
+            create_native_cache_dir_all(parent)?;
+        }
+        NativeSafeDiskCachePath::from_path(expected.clone())
+            .rename_from(&NativeSafeDiskCachePath::from_path(current.to_path_buf()))?;
+        Ok(expected)
+    }
+
+    pub(super) fn purge_legacy_encrypted_filesystem(&self) -> std::io::Result<()> {
+        let root = NativeSafeDiskCachePath::from_path(self.root.clone());
+        for shard_path in root.child_paths()? {
+            if !shard_path.is_dir() {
+                continue;
+            }
+            let shard = NativeSafeDiskCachePath::from_path(shard_path);
+            for path in shard.child_paths()? {
+                if !path.is_dir()
+                    && path.extension().and_then(|value| value.to_str()) == Some("fhc")
+                {
+                    NativeSafeDiskCachePath::from_path(path).remove_file()?;
+                }
+            }
+        }
+        Ok(())
     }
 }

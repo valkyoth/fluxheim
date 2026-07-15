@@ -235,9 +235,34 @@ if [ -z "$bin_file" ]; then
     exit 1
 fi
 
-grep -aq 'FLUXHEIM-CACHE-ENC-v1' "$bin_file"
+grep -aq 'FLUXHEIM-CACHE-ENC-v2' "$bin_file"
+if grep -aq 'FLUXHEIM-CACHE-ENC-v1' "$bin_file"; then
+    echo "local cache encryption smoke failed: storage-bin file contains legacy v1 envelope" >&2
+    exit 1
+fi
 if grep -aq 'local-encrypted-cache-body' "$bin_file"; then
     echo "local cache encryption smoke failed: storage-bin file contains plaintext body" >&2
+    exit 1
+fi
+
+for state_file in \
+    "$TMP_DIR/cache/.fluxheim-encryption-root-v1" \
+    "$TMP_DIR/cache/.fluxheim-encryption-key-v1"
+do
+    if [ ! -s "$state_file" ]; then
+        echo "local cache encryption smoke failed: missing durable state $state_file" >&2
+        exit 1
+    fi
+done
+
+if [ -e "$TMP_DIR/cache/.fluxheim-encryption-migration-v1.pending" ]; then
+    echo "local cache encryption smoke failed: completed migration remains pending" >&2
+    exit 1
+fi
+
+counter_file=$(find "$TMP_DIR/cache" -maxdepth 1 -type f -name '.fluxheim-gcm-*.counter' | head -n 1)
+if [ -z "$counter_file" ] || [ ! -s "$counter_file" ]; then
+    echo "local cache encryption smoke failed: missing durable invocation counter" >&2
     exit 1
 fi
 

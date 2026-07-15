@@ -155,9 +155,11 @@ pub(super) fn native_http2_error(error: NativeHttp2StackError) -> NativeHttp1Err
         | NativeHttp2StackError::ResponseWriteTimeout => std::io::ErrorKind::TimedOut,
         NativeHttp2StackError::TooManyHeaders { .. }
         | NativeHttp2StackError::UriTooLarge { .. }
+        | NativeHttp2StackError::InvalidContentLength
         | NativeHttp2StackError::BodyTooLarge { .. }
         | NativeHttp2StackError::ProhibitedResponseHeader { .. }
         | NativeHttp2StackError::ResponseBuild(_) => std::io::ErrorKind::InvalidData,
+        NativeHttp2StackError::BodyCapacityUnavailable => std::io::ErrorKind::WouldBlock,
         NativeHttp2StackError::ResponseCapacityClosed => std::io::ErrorKind::Other,
         NativeHttp2StackError::Handshake(_)
         | NativeHttp2StackError::RequestReady(_)

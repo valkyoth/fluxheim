@@ -4,6 +4,7 @@ use fluxheim_protocol::{Http1BodyFraming, Http1ChunkLimits, Http1ChunkedDecoder,
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::time::timeout;
 
+use crate::request_body_budget::NativeRequestBodyReservation;
 use crate::{DownstreamHttp1Policy, NativeHttp1Error};
 
 const READ_CHUNK_BYTES: usize = 8192;
@@ -15,13 +16,21 @@ pub(super) async fn read_body<S>(
     buffer: &mut Vec<u8>,
     head_len: usize,
     framing: Http1BodyFraming,
+    reservation: &mut NativeRequestBodyReservation,
 ) -> Result<Vec<u8>, NativeHttp1Error>
 where
     S: AsyncRead + Unpin,
 {
     timeout(
         request_body_timeout,
-        read_body_inner(stream, buffer, head_len, framing, policy.max_body_bytes()),
+        read_body_inner(
+            stream,
+            buffer,
+            head_len,
+            framing,
+            policy.max_body_bytes(),
+            reservation,
+        ),
     )
     .await
     .map_err(|_| {
@@ -38,6 +47,7 @@ async fn read_body_inner<S>(
     head_len: usize,
     framing: Http1BodyFraming,
     max_body_bytes: usize,
+    reservation: &mut NativeRequestBodyReservation,
 ) -> Result<Vec<u8>, NativeHttp1Error>
 where
     S: AsyncRead + Unpin,
@@ -68,7 +78,7 @@ where
             Ok(body)
         }
         Http1BodyFraming::Chunked => {
-            read_chunked_body(stream, buffer, head_len, max_body_bytes).await
+            read_chunked_body(stream, buffer, head_len, max_body_bytes, reservation).await
         }
     }
 }
@@ -78,6 +88,7 @@ async fn read_chunked_body<S>(
     buffer: &mut Vec<u8>,
     head_len: usize,
     max_body_bytes: usize,
+    reservation: &mut NativeRequestBodyReservation,
 ) -> Result<Vec<u8>, NativeHttp1Error>
 where
     S: AsyncRead + Unpin,
@@ -87,6 +98,9 @@ where
     let mut decoder = Http1ChunkedDecoder::new(limits);
     let mut body = Vec::new();
     let initial = std::mem::take(buffer);
+    reservation
+        .grow_to(initial.len().min(max_body_bytes))
+        .await?;
     if let Some(decoded) = decoder.push(&initial, &mut body)? {
         buffer.extend_from_slice(&initial[decoded.consumed_len..]);
         return Ok(body);
@@ -98,6 +112,12 @@ where
         if read == 0 {
             return Err(Http1ParseError::InvalidChunk.into());
         }
+        let prospective_encoded = fed_len
+            .checked_add(read)
+            .ok_or(Http1ParseError::EncodedBodyTooLarge)?;
+        reservation
+            .grow_to(prospective_encoded.min(max_body_bytes))
+            .await?;
         if let Some(decoded) = decoder.push(&chunk[..read], &mut body)? {
             let consumed_from_chunk = decoded
                 .consumed_len
@@ -109,8 +129,6 @@ where
             buffer.extend_from_slice(remainder);
             return Ok(body);
         }
-        fed_len = fed_len
-            .checked_add(read)
-            .ok_or(Http1ParseError::EncodedBodyTooLarge)?;
+        fed_len = prospective_encoded;
     }
 }

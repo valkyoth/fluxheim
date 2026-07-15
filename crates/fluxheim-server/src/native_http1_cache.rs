@@ -113,6 +113,13 @@ pub(crate) struct NativeDiskCacheStats {
 }
 
 impl NativeDiskCache {
+    fn purge_legacy_encrypted_backend(&self) -> std::io::Result<()> {
+        match &self.backend {
+            NativeDiskCacheBackend::Filesystem => self.purge_legacy_encrypted_filesystem(),
+            NativeDiskCacheBackend::StorageBin(_) => self.purge_legacy_encrypted_storage_bin(),
+        }
+    }
+
     pub(crate) fn from_config(config: &CacheConfig) -> Option<Self> {
         if !config.disk.enabled || !native_disk_cache_supported(config) {
             return None;
@@ -149,6 +156,27 @@ impl NativeDiskCache {
             mutation_locks: native_disk_cache_mutation_locks(),
             index_flush: None,
         };
+        if cache
+            .encryption
+            .as_ref()
+            .is_some_and(NativeDiskCacheEncryption::root_migration_required)
+        {
+            let migration = cache.purge_legacy_encrypted_backend().and_then(|()| {
+                cache
+                    .encryption
+                    .as_ref()
+                    .ok_or_else(|| std::io::Error::other("cache encryption disappeared"))?
+                    .complete_root_migration(&cache.root)
+            });
+            if let Err(error) = migration {
+                log::error!(
+                    target: "fluxheim::security",
+                    "native disk cache encryption-root migration {}: {error}",
+                    cache.root.display()
+                );
+                return None;
+            }
+        }
         if let Err(error) = cache.rebuild_index() {
             log::warn!(
                 target: "fluxheim::native_http1",
@@ -159,7 +187,10 @@ impl NativeDiskCache {
         cache.index_flush = NativeStorageBinIndexFlush::start(
             &cache.backend,
             &cache.state,
-            cache.encryption.is_some(),
+            cache
+                .encryption
+                .as_ref()
+                .map(NativeDiskCacheEncryption::index_key),
         )
         .inspect_err(|error| {
             log::error!(target: "fluxheim::native_http1", "cache index service: {error}");

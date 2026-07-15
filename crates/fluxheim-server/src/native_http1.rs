@@ -96,8 +96,8 @@ pub trait NativeHttp1Handler: Send + Sync + 'static {
         None
     }
 
-    fn request_body_budget(&self) -> Option<crate::NativeRequestBodyBudget> {
-        None
+    fn request_body_budget(&self) -> crate::NativeRequestBodyBudget {
+        crate::NativeRequestBodyBudget::default()
     }
 
     fn handle<'a>(
@@ -218,11 +218,11 @@ where
                 owned_request_from_head(&head, peer_addr, &request_context),
             )
         };
-        let request_body_budget = handler.request_body_budget();
         let pinned_handler = handler.pin_request_handler();
         let request_handler = pinned_handler
             .as_deref()
             .unwrap_or_else(|| handler.as_ref());
+        let request_body_budget = request_handler.request_body_budget();
         let request_body_timeout = request_handler
             .request_body_timeout(&request)
             .unwrap_or(policy.request_body_timeout());
@@ -241,11 +241,11 @@ where
                 };
                 length
             }
-            Http1BodyFraming::Chunked => policy.max_body_bytes(),
+            Http1BodyFraming::Chunked => 0,
         };
-        let _request_body_permit = if let Some(budget) = request_body_budget {
-            match budget.reserve(reservation_bytes).await {
-                Ok(permit) => permit,
+        let mut request_body_reservation =
+            match request_body_budget.reserve(reservation_bytes).await {
+                Ok(reservation) => reservation,
                 Err(_) => {
                     write_response(
                         &mut stream,
@@ -261,10 +261,7 @@ where
                     .await?;
                     return Ok(());
                 }
-            }
-        } else {
-            None
-        };
+            };
         let body = match read_body(
             policy,
             request_body_timeout,
@@ -272,6 +269,7 @@ where
             &mut buffer,
             head_len,
             body_framing,
+            &mut request_body_reservation,
         )
         .await
         {
@@ -301,6 +299,21 @@ where
                     &mut stream,
                     NativeHttp1Response::new(408, "Request Timeout", b"request timeout\n")
                         .close_connection(),
+                    true,
+                )
+                .await?;
+                return Ok(());
+            }
+            Err(NativeHttp1Error::Io(error)) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                write_response(
+                    &mut stream,
+                    NativeHttp1Response::new(
+                        503,
+                        "Service Unavailable",
+                        b"request body capacity unavailable\n",
+                    )
+                    .with_retry_after_secs(1)
+                    .close_connection(),
                     true,
                 )
                 .await?;

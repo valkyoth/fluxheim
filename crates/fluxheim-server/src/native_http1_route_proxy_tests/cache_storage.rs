@@ -85,6 +85,9 @@ async fn native_route_proxy_caches_proxy_response_on_encrypted_disk() {
     )
     .unwrap();
     let cache_root = root.path().join("objects");
+    let legacy_object = cache_root.join("ab/legacy.fhc");
+    std::fs::create_dir_all(legacy_object.parent().unwrap()).unwrap();
+    std::fs::write(&legacy_object, b"FLUXHEIM-CACHE-ENC-v1\nlegacy metadata").unwrap();
     let upstream = upstream_cacheable_once("encrypted-disk-origin").await;
     let cache = native_proxy_encrypted_disk_cache_config(cache_root.clone(), key_file);
     let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
@@ -98,6 +101,7 @@ async fn native_route_proxy_caches_proxy_response_on_encrypted_disk() {
         response_header(&first, "x-cache-status").as_deref(),
         Some("MISS")
     );
+    assert!(!legacy_object.exists());
 
     let encrypted_objects = native_disk_cache_object_bytes(&cache_root);
     assert!(!encrypted_objects.is_empty());
@@ -273,7 +277,7 @@ async fn native_route_proxy_caches_proxy_response_on_openbao_storage_bin_disk() 
 
     let second = downstream_get(second_listener, "/asset.png").await;
     let requests = openbao.join();
-    assert_eq!(requests.len(), 3);
+    assert_eq!(requests.len(), 5);
     assert!(requests[0].contains("POST /v1/transit/cache/encrypt/native-key HTTP/1.1"));
     assert!(
         requests[0]
@@ -281,12 +285,15 @@ async fn native_route_proxy_caches_proxy_response_on_openbao_storage_bin_disk() 
             .contains("x-vault-token: test-token")
     );
     assert!(requests[0].contains("\"associated_data\""));
-    assert!(requests[1].contains("POST /v1/transit/cache/decrypt/native-key HTTP/1.1"));
-    assert!(requests[1].contains("\"ciphertext\""));
-    assert!(requests[1].contains("vault:v1:native-test"));
+    assert!(requests[1].contains("POST /v1/transit/cache/encrypt/native-key HTTP/1.1"));
     assert!(requests[2].contains("POST /v1/transit/cache/decrypt/native-key HTTP/1.1"));
     assert!(requests[2].contains("\"ciphertext\""));
-    assert!(requests[2].contains("vault:v1:native-test"));
+    assert!(requests[2].contains("vault:v1:index-key"));
+    assert!(
+        requests[3..]
+            .iter()
+            .all(|request| request.contains("vault:v1:native-test"))
+    );
     assert!(
         second.starts_with("HTTP/1.1 200 OK\r\n"),
         "unexpected second response: {second:?}"
@@ -397,33 +404,51 @@ fn native_openbao_transit_mock() -> NativeOpenBaoTransitMock {
     let address = format!("http://{}", listener.local_addr().unwrap());
     let handle = std::thread::spawn(move || {
         let mut requests = Vec::new();
-        let (mut encrypt_stream, _) = listener.accept().unwrap();
-        let encrypt_request = native_openbao_read_request(&mut encrypt_stream);
-        let encrypt_body = native_openbao_request_body(&encrypt_request);
-        let encrypt_json: serde_json::Value = serde_json::from_str(encrypt_body).unwrap();
-        let plaintext = encrypt_json
-            .pointer("/plaintext")
-            .and_then(serde_json::Value::as_str)
-            .unwrap()
-            .to_owned();
-        let decoded_plaintext = base64_ng::STANDARD
-            .decode_vec(plaintext.as_bytes())
-            .unwrap();
-        assert!(decoded_plaintext.starts_with(b"FLUXHEIM-CACHE-v5\n"));
-        assert!(
-            decoded_plaintext
-                .windows("openbao-storage-bin-origin".len())
-                .any(|window| window == "openbao-storage-bin-origin".as_bytes())
-        );
-        native_openbao_write_response(
-            &mut encrypt_stream,
-            r#"{"data":{"ciphertext":"vault:v1:native-test"}}"#,
-        );
-        requests.push(encrypt_request);
+        let mut plaintext_by_ciphertext = std::collections::HashMap::new();
+        for (ciphertext, cache_object) in [
+            ("vault:v1:index-key", false),
+            ("vault:v1:native-test", true),
+        ] {
+            let (mut encrypt_stream, _) = listener.accept().unwrap();
+            let encrypt_request = native_openbao_read_request(&mut encrypt_stream);
+            let encrypt_body = native_openbao_request_body(&encrypt_request);
+            let encrypt_json: serde_json::Value = serde_json::from_str(encrypt_body).unwrap();
+            let plaintext = encrypt_json
+                .pointer("/plaintext")
+                .and_then(serde_json::Value::as_str)
+                .unwrap()
+                .to_owned();
+            let decoded_plaintext = base64_ng::STANDARD
+                .decode_vec(plaintext.as_bytes())
+                .unwrap();
+            if cache_object {
+                assert!(decoded_plaintext.starts_with(b"FLUXHEIM-CACHE-v5\n"));
+                assert!(
+                    decoded_plaintext
+                        .windows("openbao-storage-bin-origin".len())
+                        .any(|window| window == "openbao-storage-bin-origin".as_bytes())
+                );
+            } else {
+                assert_eq!(decoded_plaintext.len(), 32);
+            }
+            native_openbao_write_response(
+                &mut encrypt_stream,
+                &format!(r#"{{"data":{{"ciphertext":"{ciphertext}"}}}}"#),
+            );
+            plaintext_by_ciphertext.insert(ciphertext, plaintext);
+            requests.push(encrypt_request);
+        }
 
-        for _ in 0..2 {
+        for _ in 0..3 {
             let (mut decrypt_stream, _) = listener.accept().unwrap();
             let decrypt_request = native_openbao_read_request(&mut decrypt_stream);
+            let decrypt_json: serde_json::Value =
+                serde_json::from_str(native_openbao_request_body(&decrypt_request)).unwrap();
+            let ciphertext = decrypt_json
+                .pointer("/ciphertext")
+                .and_then(serde_json::Value::as_str)
+                .unwrap();
+            let plaintext = plaintext_by_ciphertext[ciphertext].clone();
             native_openbao_write_response(
                 &mut decrypt_stream,
                 &format!(r#"{{"data":{{"plaintext":"{plaintext}"}}}}"#),

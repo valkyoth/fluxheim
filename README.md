@@ -75,7 +75,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Memory cache | ✅ | Bounded in-memory cache tier. |
 | Disk cache | ✅ | Filesystem and storage-bin disk backends with ordered eviction, one process-wide persistence worker, pre-initialization advisory lease enforcement, live inspection, fail-closed lookup admission, and coalesced durable index writes. |
 | Tiered cache | ✅ | Memory plus disk storage plans. |
-| Encrypted disk cache | ✅ | Optional local-key and OpenBao transit encryption paths; confidential v2 object/index metadata and durable fail-closed local AES-GCM invocation accounting. |
+| Encrypted disk cache | ✅ | Optional local-key and OpenBao Transit paths; root-derived data/index keys, HMAC-opaque lookup metadata, confidential v2 envelopes, and durable fail-closed local AES-GCM invocation accounting. |
 | Static-file cache | ✅ | Optional local static-file caching. |
 | Range and slice cache | ✅ | Bounded range caching and fixed-slice composition for large objects. |
 | Peer fill | ✅ | Optional peer-assisted cache fill for cache-edge deployments. |
@@ -502,6 +502,9 @@ build and execute the OpenSSL-FIPS and rustls/AWS-LC-FIPS profiles.
   CI-only proof environments build and run both FIPS-capable TLS profiles and
   capture provider, toolchain, dependency, binary, and image evidence. They are
   not published FIPS images or a claim that Fluxheim itself is FIPS validated.
+  The release also makes native request/static buffering admission effective
+  before allocation and completes encrypted-cache root separation, opaque HMAC
+  identities, fail-closed counter state, and the one-time legacy cold migration.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

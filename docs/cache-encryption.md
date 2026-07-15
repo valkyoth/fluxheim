@@ -54,7 +54,10 @@ objects at once.
 Both providers bind the configured `key_id` as authenticated data. The combined
 cache key remains inside the encrypted object and is checked after decryption,
 so a stored encrypted object cannot be silently moved to another cache key and
-cache URLs are not exposed in envelope metadata.
+cache URLs are not exposed in envelope metadata. Encrypted filesystem names and
+storage-bin index entries use HMAC-SHA-256 with a separate root-bound index key,
+not an unkeyed digest, so offline readers cannot verify guessed URLs against
+persisted lookup identities.
 
 ## Quick Start: Local Key
 
@@ -284,24 +287,41 @@ markers rather than plaintext response bodies.
 
 ## Rotation
 
-For local-key encryption, changing the raw key should also change `key_id` and
-either purge the disk cache or move to a new `cache.disk.path`. Existing cache
-objects encrypted with the old local key are intentionally unreadable once
-Fluxheim starts with only the new key.
+For local-key encryption, changing the raw key should also change `key_id`.
+Fluxheim detects the effective root-key change and cold-purges the encrypted
+cache before accepting objects under the new key. Moving to a new
+`cache.disk.path` remains useful for an explicit namespace cutover.
 
-The local provider uses random 96-bit AES-256-GCM nonces. Fluxheim durably
-reserves each object-encryption invocation in a locked, cache-root-local counter
-before generating the nonce, warns as a key approaches `2^32` invocations, and
-fails closed at that bound. The counter survives restarts and coordinates
-processes sharing a cache root. Preserve hidden `.fluxheim-gcm-*.counter` files
-while a key remains active, and rotate long-lived cache keys on a schedule that
-fits their write volume.
+The local provider creates a persistent random root identity and derives
+separate AES-256-GCM and HMAC index keys from the configured master key. This
+makes the effective encryption key unique to each independently initialized
+cache root even when operators reuse one master secret. Fluxheim durably
+reserves each random-nonce object-encryption invocation in a locked counter,
+warns as the effective root key approaches `2^32` invocations, and fails closed
+at that bound. Preserve `.fluxheim-encryption-*`, `.fluxheim-gcm-*`, and
+`.fluxheim-index-key-*` files with the cache root. Missing or damaged state on
+an established root is never allowed to reuse an AES key with a reset counter:
+missing active-key or counter state fails startup, while a missing root identity
+creates a new effective key and requires a cold purge.
+
+The first `1.7.12` startup against an older encrypted root creates root-bound
+state and cold-purges legacy objects and indexes. Envelope v1 objects are no
+longer accepted. Never clone one initialized encrypted root into multiple live
+replicas, and do not roll its hidden cryptographic state back from a snapshot.
+A complete filesystem rollback cannot be detected using only state stored on
+that filesystem. Use independent roots plus peer fill; use OpenBao or another
+external key-management boundary when externally enforced rollback resistance
+is required.
 
 For OpenBao Transit, the usual rotation path is to keep the same Fluxheim
 `key_id`, `mount`, and `key_name`, then rotate the Transit key inside OpenBao.
 OpenBao can decrypt older `vault:v...` ciphertext while retaining the necessary
 old key versions. If you change Fluxheim `key_id` or `key_name`, treat it as a
 cache namespace cutover and purge or move the disk cache.
+
+OpenBao-backed roots generate a random index-HMAC key once and persist only its
+Transit-encrypted ciphertext. Preserve that state file with the active root;
+the bearer token is not used as deterministic index-key material.
 
 ## Local Validation
 

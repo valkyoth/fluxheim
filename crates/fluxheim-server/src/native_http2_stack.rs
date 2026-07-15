@@ -82,8 +82,8 @@ impl NativeHttp2Response {
 }
 
 pub trait NativeHttp2Handler: Send + Sync + 'static {
-    fn request_body_budget(&self) -> Option<crate::NativeRequestBodyBudget> {
-        None
+    fn request_body_budget(&self) -> crate::NativeRequestBodyBudget {
+        crate::NativeRequestBodyBudget::default()
     }
 
     fn handle<'a>(
@@ -274,43 +274,47 @@ where
     let method = request.method().clone();
     let uri = request.uri().clone();
     let headers = request.headers().clone();
-    let reservation_bytes = if request.body().is_end_stream() {
-        0
-    } else {
-        policy.max_body_bytes()
-    };
-    let _request_body_permit = if let Some(budget) = handler.request_body_budget() {
-        match budget.reserve(reservation_bytes).await {
-            Ok(permit) => permit,
-            Err(_) => {
-                send_native_http2_response(
-                    respond,
-                    NativeHttp2Response::new(
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        Bytes::from_static(b"request body capacity unavailable\n"),
-                    )
-                    .with_header(header::RETRY_AFTER, HeaderValue::from_static("1")),
-                )
-                .await?;
-                return Ok(());
-            }
+    let declared_length = request_content_length(request.headers(), policy.max_body_bytes())?;
+    let reservation_bytes = declared_length.unwrap_or(0);
+    let mut request_body_reservation = match handler
+        .request_body_budget()
+        .reserve(reservation_bytes)
+        .await
+    {
+        Ok(reservation) => reservation,
+        Err(_) => {
+            send_native_http2_response(
+                respond,
+                native_http2_stream_error_response(&NativeHttp2StackError::BodyCapacityUnavailable),
+            )
+            .await?;
+            return Ok(());
         }
-    } else {
-        None
     };
-    let body_capacity_hint = request_body_capacity_hint(request.headers(), policy.max_body_bytes());
+    let body_capacity_hint =
+        declared_length.map_or(0, |length| length.min(BODY_PREALLOC_HINT_BYTES));
     let (body, trailers) = match tokio::time::timeout(
         policy.request_body_timeout(),
         drain_request_body(
             request.body_mut(),
             policy.max_body_bytes(),
             body_capacity_hint,
+            declared_length,
+            &mut request_body_reservation,
         ),
     )
     .await
     {
         Ok(Ok(result)) => result,
         Ok(Err(error @ NativeHttp2StackError::BodyTooLarge { .. })) => {
+            send_native_http2_response(respond, native_http2_stream_error_response(&error)).await?;
+            return Ok(());
+        }
+        Ok(Err(error @ NativeHttp2StackError::BodyCapacityUnavailable)) => {
+            send_native_http2_response(respond, native_http2_stream_error_response(&error)).await?;
+            return Ok(());
+        }
+        Ok(Err(error @ NativeHttp2StackError::InvalidContentLength)) => {
             send_native_http2_response(respond, native_http2_stream_error_response(&error)).await?;
             return Ok(());
         }
@@ -368,6 +372,15 @@ fn native_http2_stream_error_response(error: &NativeHttp2StackError) -> NativeHt
             StatusCode::REQUEST_TIMEOUT,
             Bytes::from_static(b"request body timeout\n"),
         ),
+        NativeHttp2StackError::InvalidContentLength => NativeHttp2Response::new(
+            StatusCode::BAD_REQUEST,
+            Bytes::from_static(b"invalid content-length\n"),
+        ),
+        NativeHttp2StackError::BodyCapacityUnavailable => NativeHttp2Response::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            Bytes::from_static(b"request body capacity unavailable\n"),
+        )
+        .with_header(header::RETRY_AFTER, HeaderValue::from_static("1")),
         NativeHttp2StackError::BodyTooLarge { .. } => NativeHttp2Response::new(
             StatusCode::PAYLOAD_TOO_LARGE,
             Bytes::from_static(b"request body too large\n"),
@@ -404,24 +417,45 @@ fn validate_request(
             limit: policy.max_uri_bytes(),
         });
     }
-    if request
-        .headers()
-        .get(header::CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .is_some_and(|length| length > policy.max_body_bytes() as u64)
-    {
+    request_content_length(request.headers(), policy.max_body_bytes())?;
+    Ok(())
+}
+
+fn request_content_length(
+    headers: &HeaderMap,
+    max_body_bytes: usize,
+) -> Result<Option<usize>, NativeHttp2StackError> {
+    let mut values = headers.get_all(header::CONTENT_LENGTH).iter();
+    let Some(value) = values.next() else {
+        return Ok(None);
+    };
+    if values.next().is_some() {
+        return Err(NativeHttp2StackError::InvalidContentLength);
+    }
+    let value = value
+        .to_str()
+        .ok()
+        .filter(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+        .ok_or(NativeHttp2StackError::InvalidContentLength)?;
+    let length = value
+        .parse::<u64>()
+        .ok()
+        .and_then(|length| usize::try_from(length).ok())
+        .ok_or(NativeHttp2StackError::InvalidContentLength)?;
+    if length > max_body_bytes {
         return Err(NativeHttp2StackError::BodyTooLarge {
-            limit: policy.max_body_bytes(),
+            limit: max_body_bytes,
         });
     }
-    Ok(())
+    Ok(Some(length))
 }
 
 async fn drain_request_body(
     body: &mut h2::RecvStream,
     max_body_bytes: usize,
     capacity_hint: usize,
+    declared_length: Option<usize>,
+    reservation: &mut crate::request_body_budget::NativeRequestBodyReservation,
 ) -> Result<(Zeroizing<Vec<u8>>, Option<HeaderMap>), NativeHttp2StackError> {
     let mut total = 0usize;
     let mut buffered = Zeroizing::new(Vec::with_capacity(capacity_hint));
@@ -434,6 +468,10 @@ async fn drain_request_body(
             .ok_or(NativeHttp2StackError::BodyTooLarge {
                 limit: max_body_bytes,
             })?;
+        reservation
+            .grow_to(total)
+            .await
+            .map_err(|_| NativeHttp2StackError::BodyCapacityUnavailable)?;
         buffered.extend_from_slice(&chunk);
         drop(chunk);
         body.flow_control()
@@ -444,16 +482,8 @@ async fn drain_request_body(
         .trailers()
         .await
         .map_err(NativeHttp2StackError::BodyTrailers)?;
+    if declared_length.is_some_and(|declared| declared != total) {
+        return Err(NativeHttp2StackError::InvalidContentLength);
+    }
     Ok((buffered, trailers))
-}
-
-fn request_body_capacity_hint(headers: &HeaderMap, max_body_bytes: usize) -> usize {
-    headers
-        .get(header::CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|length| *length <= max_body_bytes)
-        .map_or(max_body_bytes.min(BODY_PREALLOC_HINT_BYTES), |length| {
-            length.min(BODY_PREALLOC_HINT_BYTES)
-        })
 }

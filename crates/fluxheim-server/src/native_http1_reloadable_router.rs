@@ -94,8 +94,8 @@ impl NativeHttp1Handler for NativeHttp1ReloadableRouter {
         Some(self.active())
     }
 
-    fn request_body_budget(&self) -> Option<NativeRequestBodyBudget> {
-        Some(self.state.request_body_budget.clone())
+    fn request_body_budget(&self) -> NativeRequestBodyBudget {
+        self.state.request_body_budget.clone()
     }
 
     fn handle<'a>(

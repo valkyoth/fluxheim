@@ -125,8 +125,10 @@ Notes:
 - `max_request_body_bytes` limits one buffered downstream request body.
   `max_buffered_request_body_bytes` is the process-wide admission budget shared
   by HTTP/1 and HTTP/2; it defaults to `1GiB` and must be at least as large as
-  every configured server, vhost, and route body limit. Fluxheim reserves
-  capacity before reading and returns `503` with `Retry-After: 1` while the
+  every configured server, vhost, and route body limit. Fluxheim reserves an
+  exact validated `Content-Length`, rounded to 64 KiB admission units, and grows
+  unknown-length HTTP/1 chunked and HTTP/2 reservations incrementally before
+  extending their buffers. It returns `503` with `Retry-After: 1` while the
   aggregate budget remains occupied. Tune it to available service memory.
 - `listen` and `tls_listen` cannot both be empty unless `[stream].enabled =
   true` supplies dedicated TCP stream listeners.
@@ -2499,18 +2501,33 @@ must be a 64-character hex-encoded 256-bit key loaded from exactly one of
 `key_file` or `key_credential`; credential names are resolved through
 `$CREDENTIALS_DIRECTORY` when present or `/run/secrets` otherwise. `key_id` is
 stored with the encrypted object as authenticated data. The combined cache key
-remains inside the encrypted payload, and encrypted storage-bin indexes persist
-only its SHA-256 lookup identity, so cache URLs and query values are not exposed
-by object or index metadata. Decrypted objects are validated against the
+remains inside the encrypted payload. Encrypted filesystem filenames and
+storage-bin indexes use HMAC-SHA-256 identities made with a separately derived
+index key, so persisted metadata does not provide an offline oracle for
+candidate URLs or query values. Decrypted objects are validated against the
 requested cache identity before use. Local cache encryption is intended for
 cache-at-rest protection; it does not encrypt memory cache contents.
-Because the local provider uses random AES-GCM nonces, Fluxheim maintains a
-root-local, locked, durable invocation counter for each local key. Encryption
-fails closed at `2^32` object-encryption invocations per key and logs a security
-warning before that bound. The counter survives process restarts and is shared
-by processes using the same cache root. Preserve hidden
-`.fluxheim-gcm-*.counter` files while a key remains active and rotate keys on a
-schedule for long-lived high-write deployments.
+
+Fluxheim creates a persistent random identity for each encrypted cache root and
+uses HKDF-SHA-256 to derive separate root-specific AES and index keys from the
+configured local master key. Random AES-GCM nonces are accounted by a locked,
+durable counter for that effective root key. Encryption fails closed at `2^32`
+object-encryption invocations and logs a security warning before that bound.
+Preserve `.fluxheim-encryption-*`, `.fluxheim-gcm-*`, and
+`.fluxheim-index-key-*` state with the cache root. Missing, truncated, or
+inconsistent active-key or counter state fails startup instead of resetting a
+counter. A missing root identity causes a new root key and mandatory cold purge.
+Do not clone or restore one initialized encrypted root into multiple
+concurrently active replicas; use independent roots and peer fill.
+
+The first `1.7.12` startup on an existing encrypted root creates root-bound
+state and cold-purges legacy encrypted objects and indexes. Envelope v1 is no
+longer accepted. Changing a local master key also triggers a cold purge before
+the new derived key is used. Cache contents are expendable, but the hidden
+encryption state is cryptographic state: filesystem rollback of that complete
+state cannot be detected locally. High-assurance deployments requiring
+externally enforced rollback resistance should use OpenBao/KMS-managed key
+lifecycle and must not restore cache cryptographic state from an old snapshot.
 Filesystem disk-cache fills with the local provider encrypt streamed objects in
 bounded AEAD chunks, so enabling local encryption does not require Fluxheim to
 copy a complete streamed origin response back into heap before committing it to
@@ -2525,7 +2542,10 @@ come from exactly one safe `token_file` or `token_credential` source. The
 configured key id is associated data; the combined cache identity is encrypted
 inside the object and checked after decryption, so substituted objects are
 discarded without exposing cache URLs in envelope metadata. The default
-local-key provider does not require OpenBao. Transit calls do not follow HTTP redirects,
+local-key provider does not require OpenBao. Fluxheim creates a random HMAC
+index key per OpenBao cache root and stores only its Transit-encrypted form, so
+the OpenBao token itself is never used as index-key material. Transit calls do
+not follow HTTP redirects,
 and Transit JSON responses are read with an explicit size limit before parsing.
 OpenBao Transit accepts a single plaintext value per `encrypt` request, so
 Fluxheim bounds concurrent OpenBao encrypted commit heap usage and may refuse a

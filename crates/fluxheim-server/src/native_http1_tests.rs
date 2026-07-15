@@ -18,9 +18,26 @@ struct HoldingBodyBudgetHandler {
     release: tokio::sync::Notify,
 }
 
+struct PinningBodyBudgetHandler {
+    pinned: Arc<HoldingBodyBudgetHandler>,
+}
+
+impl NativeHttp1Handler for PinningBodyBudgetHandler {
+    fn pin_request_handler(&self) -> Option<Arc<dyn NativeHttp1Handler>> {
+        Some(self.pinned.clone())
+    }
+
+    fn handle<'a>(
+        &'a self,
+        _request: NativeHttp1Request,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = NativeHttp1Response> + Send + 'a>> {
+        Box::pin(async { NativeHttp1Response::new(500, "Internal Server Error", b"unpinned\n") })
+    }
+}
+
 impl NativeHttp1Handler for HoldingBodyBudgetHandler {
-    fn request_body_budget(&self) -> Option<NativeRequestBodyBudget> {
-        Some(self.budget.clone())
+    fn request_body_budget(&self) -> NativeRequestBodyBudget {
+        self.budget.clone()
     }
 
     fn handle<'a>(
@@ -507,7 +524,9 @@ async fn native_http1_rejects_aggregate_request_body_overcommit() {
         entered: tokio::sync::Notify::new(),
         release: tokio::sync::Notify::new(),
     });
-    let server_handler = handler.clone();
+    let server_handler = Arc::new(PinningBodyBudgetHandler {
+        pinned: handler.clone(),
+    });
     let server = tokio::spawn(async move {
         let mut tasks = Vec::new();
         for _ in 0..2 {

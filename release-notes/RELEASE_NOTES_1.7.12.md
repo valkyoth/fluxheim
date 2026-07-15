@@ -163,21 +163,33 @@ trailers are not part of this release.
 
 - Add `server.limits.max_buffered_request_body_bytes`, defaulting to `1GiB`, as
   one weighted process-wide admission budget shared by HTTP/1 and HTTP/2.
-  Fluxheim reserves capacity before buffering and returns a bounded `503` with
-  retry guidance when concurrent bodies exhaust the budget.
+  Fluxheim reserves validated `Content-Length` values in 64 KiB units and grows
+  unknown-length HTTP/1 chunked and HTTP/2 reservations before each buffer
+  extension. Public native-server handlers without an explicit policy share a
+  mandatory 1 GiB process budget, and pinned HTTP/1 handlers provide the
+  effective request budget. Exhaustion returns a bounded `503` with retry
+  guidance.
 - Move static-file resolution and reads to the bounded blocking-work pool and
   cap retained static response bodies with a weighted 256 MiB process-wide
-  budget. The permit follows an HTTP/1 response through HTTP/2 adaptation and
-  remains held until the downstream write completes.
+  budget. Fluxheim resolves metadata first, admits the planned response bytes
+  before reading or cloning a body, and conservatively accounts for a second
+  local-static cache copy. The permit follows an HTTP/1 response through HTTP/2
+  adaptation and remains held until the downstream write completes.
 - Give generic native HTTP/1 responses bounded defaults: a 30-second write
   timeout, a 300-second total response lifetime, and an 8 KiB/s minimum send
   rate. Explicit proxy policies continue to override these defaults.
 - Write confidential disk-cache envelope v2 objects without plaintext combined
-  cache keys. Encrypted storage-bin indexes now store SHA-256 lookup identities,
-  while legacy v1 envelopes and legacy indexes remain readable for migration.
-- Replace advisory process-local AES-GCM invocation tracking with a locked,
-  durable per-key counter in the cache root. Local encryption warns before
-  and fails closed at the `2^32` random-nonce invocation bound across restarts.
+  cache keys. Encrypted filesystem names and storage-bin indexes now use
+  HMAC-SHA-256 identities derived separately from the data-encryption key, so
+  offline candidate URLs cannot be verified against persisted lookup metadata.
+- Create a persistent random cache-root identity and derive independent local
+  data and index keys for every root. Replace advisory process-local AES-GCM
+  invocation tracking with a locked, durable counter for that effective root
+  key; missing or damaged established state fails closed.
+- Remove encrypted envelope v1 compatibility. The first startup with the new
+  root-bound format, and every local-key rotation, cold-purges that encrypted
+  cache root before serving traffic. OpenBao protects its random index key with
+  Transit rather than deriving persisted identities from the bearer token.
 
 ## Socket-Activation Hardening
 
@@ -248,6 +260,13 @@ platform, configuration, key handling, and required compliance evidence.
   freshness with an operator TTL, `s-maxage` precedence, mandatory
   revalidation, contradictory range metadata, zero-sized slice policy, and
   oversized/FIFO storage-bin manifests.
+- Body-admission tests cover process-shared defaults, pinned HTTP/1 handlers,
+  exact HTTP/2 declared lengths, incremental unknown-length growth, aggregate
+  exhaustion, and permit recovery. Static error-page and cache tests preserve
+  fallback behavior while admission precedes body materialization.
+- Cache-encryption tests cover cross-root key separation, opaque HMAC lookup
+  identities, restart continuity, missing-counter failure, local-key rotation,
+  v1 rejection, and cold removal of legacy encrypted filesystem objects.
 - Cache-header tests cover cumulative byte/directive ceilings and quoted-comma
   parsing.
 - Shared path-safety and live redirect tests cover invalid UTF-8, overlong

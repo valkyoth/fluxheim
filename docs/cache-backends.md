@@ -236,7 +236,7 @@ internal cache implementation.
   verifies live proxy traffic populates the bin/index files and returns `MISS`
   followed by `HIT`.
 - A root-local `.fluxheim-storage-bin-index-v1` records each combined cache key,
-  or its SHA-256 lookup identity when encryption is enabled, and its
+  or its root-bound HMAC-SHA-256 lookup identity when encryption is enabled, and its
   `(bin_id, offset, len)` location. On startup Fluxheim reads the index, validates
   each referenced object by parsing the v5 cache object bytes, rebuilds the purge
   index, and reconstructs free ranges from the occupied locations.
@@ -308,7 +308,11 @@ internal cache implementation.
   and stores only the returned Transit ciphertext in the cache backend.
   Encrypted objects bind the configured key id as authenticated data and keep
   the combined cache key inside the encrypted payload for post-decryption
-  identity validation. `examples/podman-compose-openbao.yml` and
+  identity validation. Encrypted filesystem names and storage-bin index entries
+  use a separate root-bound HMAC key. A first `1.7.12` encrypted-root startup
+  and local-key rotation cold-purge older encrypted cache data rather than
+  retaining v1 or unkeyed-index compatibility.
+  `examples/podman-compose-openbao.yml` and
   `scripts/smoke_openbao_cache_encryption.sh` provide an optional local
   OpenBao Transit smoke path for this provider; the script starts a dev OpenBao
   container, enables Transit, creates a cache key, and verifies a Fluxheim
