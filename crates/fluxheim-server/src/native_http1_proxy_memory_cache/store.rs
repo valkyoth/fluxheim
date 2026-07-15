@@ -3,9 +3,10 @@ use std::time::Duration;
 
 use crate::native_http1_cache::{
     NativeDiskCacheStoreKey, NativeMemoryCacheEntry, NativeMemoryCacheVariant,
-    lock_native_memory_cache, native_cache_entry_weight, native_cache_ttl,
-    native_peer_fill_cache_ttl, native_response_header_map, prune_native_memory_cache,
-    remove_native_memory_cache_entry, remove_native_memory_cache_variants,
+    lock_native_memory_cache, native_cache_body_sha256, native_cache_entry_weight,
+    native_cache_ttl, native_peer_fill_cache_ttl, native_response_header_map,
+    prune_native_memory_cache, remove_native_memory_cache_entry,
+    remove_native_memory_cache_variants,
 };
 use crate::native_http1_proxy_cache_headers::{
     cached_proxy_headers, native_not_modified_refresh_header_skipped, native_response_cache_tags,
@@ -148,6 +149,7 @@ impl NativeProxyMemoryCache {
             headers: cached_proxy_headers(&refreshed, &self.config),
             content_length: refreshed.content_length(),
             body: entry.body.clone(),
+            body_sha256: Arc::clone(&entry.body_sha256),
             expires_at,
             stale_while_revalidate_until,
             stale_if_error_until,
@@ -291,6 +293,7 @@ impl NativeProxyMemoryCache {
             headers: cached_proxy_headers(response, &self.config),
             content_length: response.content_length(),
             body: Arc::from(response.body().to_vec()),
+            body_sha256: Arc::new(native_cache_body_sha256(response.body())),
             expires_at,
             stale_while_revalidate_until,
             stale_if_error_until,

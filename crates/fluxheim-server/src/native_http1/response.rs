@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use fluxheim_protocol::{Http1ParseError, http_token_valid};
@@ -16,6 +17,7 @@ pub struct NativeHttp1Response {
     headers: Vec<(String, String)>,
     content_length: Option<u64>,
     body: Vec<u8>,
+    body_sha256: Option<Arc<[u8; 32]>>,
     close: bool,
     cache_status: Option<NativeCacheStatus>,
     proxy_status_error: Option<NativeProxyStatusError>,
@@ -39,6 +41,7 @@ impl NativeHttp1Response {
             headers: Vec::new(),
             content_length: None,
             body: body.into(),
+            body_sha256: None,
             close: false,
             cache_status: None,
             proxy_status_error: None,
@@ -138,6 +141,19 @@ impl NativeHttp1Response {
         &self.body
     }
 
+    pub(crate) fn with_body_sha256(mut self, digest: Arc<[u8; 32]>) -> Self {
+        self.body_sha256 = Some(digest);
+        self
+    }
+
+    pub(crate) fn body_sha256(&self) -> Option<&[u8; 32]> {
+        self.body_sha256.as_deref()
+    }
+
+    pub(crate) fn set_body_sha256(&mut self, digest: [u8; 32]) {
+        self.body_sha256 = Some(Arc::new(digest));
+    }
+
     #[cfg(any(
         feature = "compression-brotli",
         feature = "compression-gzip",
@@ -145,6 +161,7 @@ impl NativeHttp1Response {
     ))]
     pub(crate) fn replace_body(&mut self, body: impl Into<Vec<u8>>) {
         self.body = body.into();
+        self.body_sha256 = None;
         self.content_length = None;
     }
 }

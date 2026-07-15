@@ -491,6 +491,16 @@ async fn native_wasm_openresty_header_policy_example_uses_bounded_host_calls() {
         upstreams: vec![upstream.to_string()],
         ..Default::default()
     });
+    config.vhosts[0].routes[0]
+        .headers
+        .response
+        .metadata
+        .content_digest = Some(true);
+    config.vhosts[0].routes[0]
+        .headers
+        .response
+        .metadata
+        .repr_digest = Some(true);
     let router =
         NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
     let proxy = router_listener(router).await;
@@ -503,6 +513,22 @@ async fn native_wasm_openresty_header_policy_example_uses_bounded_host_calls() {
         Some("gold")
     );
     assert_eq!(response_header(&response, "x-powered-by"), None);
+    let digest = "sha-256=:gjQS0erLZ5ViIOUylZ8BBGAwV8iHBIY8o4580Yj9qBI=:";
+    assert_eq!(
+        response_header(&response, "content-digest").as_deref(),
+        Some(digest)
+    );
+    assert_eq!(
+        response_header(&response, "repr-digest").as_deref(),
+        Some(digest)
+    );
+    assert_eq!(
+        response
+            .lines()
+            .filter(|line| line.to_ascii_lowercase().starts_with("content-digest:"))
+            .count(),
+        1
+    );
     assert!(response.ends_with("policy"));
 }
 

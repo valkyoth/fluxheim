@@ -194,6 +194,9 @@ impl NativeProxyMemoryCache {
             headers: cached_proxy_headers(response, &self.config),
             content_length: response.content_length(),
             body: Arc::from(response.body().to_vec()),
+            body_sha256: Arc::new(crate::native_http1_cache::native_cache_body_sha256(
+                response.body(),
+            )),
             expires_at,
             stale_while_revalidate_until,
             stale_if_error_until,

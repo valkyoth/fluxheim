@@ -1,5 +1,5 @@
 use crate::native_http1_cache::{
-    NativeDiskCache, NativeDiskCacheStoreKey, NativeMemoryCacheEntry,
+    NativeDiskCache, NativeDiskCacheStoreKey, NativeMemoryCacheEntry, native_cache_body_sha256,
     purge_native_disk_cache_primary, register_native_disk_cache_purge_handle,
 };
 use crate::native_http1_proxy_cache_policy::native_cache_expiry_times;
@@ -270,6 +270,7 @@ fn native_storage_bin_disk_purge_uses_live_cache_instance() {
         ],
         content_length: Some(11),
         body: Arc::from(&b"hello-cache"[..]),
+        body_sha256: Arc::new(native_cache_body_sha256(b"hello-cache")),
         expires_at: now + Duration::from_secs(60),
         stale_while_revalidate_until: None,
         stale_if_error_until: None,

@@ -228,11 +228,8 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 {
                     return response;
                 }
-                #[cfg(feature = "wasm")]
                 let response_metadata_method = request.method.clone();
-                let response = route.handle(request).await;
-                #[cfg(feature = "wasm")]
-                let mut response = response;
+                let mut response = route.handle(request).await;
                 #[cfg(feature = "wasm")]
                 if let Some(failure) = wasm_response_header_failure(
                     &route.wasm_hooks,
@@ -243,7 +240,6 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 {
                     return failure;
                 }
-                #[cfg(feature = "wasm")]
                 route
                     .response_headers
                     .apply_digests_for_method(&response_metadata_method, &mut response);
@@ -325,6 +321,7 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 return response;
             }
             if let Some(proxy) = &self.fallback {
+                let response_metadata_method = request.method.clone();
                 self.apply_traceparent(&mut request);
                 #[cfg(feature = "wasm")]
                 let wasm_response_context = NativeWasmHeaderContext::from_path(&path);
@@ -344,7 +341,6 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     .await;
                 #[cfg(not(feature = "wasm"))]
                 let response = proxy.handle(request).await;
-                #[cfg(feature = "wasm")]
                 let mut response = response;
                 #[cfg(feature = "wasm")]
                 if let Some(failure) = wasm_response_header_failure(
@@ -356,6 +352,8 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 {
                     return failure;
                 }
+                self.fallback_response_headers
+                    .apply_digests_for_method(&response_metadata_method, &mut response);
                 return response;
             }
             NativeHttp1Response::new(404, "Not Found", b"not found\n").close_connection()

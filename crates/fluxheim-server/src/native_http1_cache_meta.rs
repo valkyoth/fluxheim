@@ -19,6 +19,7 @@ pub(super) struct NativeDiskCacheMeta {
     pub(super) stale_while_revalidate_until_unix_secs: Option<u64>,
     pub(super) stale_if_error_until_unix_secs: Option<u64>,
     pub(super) stored_at_unix_secs: u64,
+    pub(super) body_sha256: Option<[u8; 32]>,
     pub(super) vary_fields: Vec<String>,
 }
 
@@ -36,13 +37,14 @@ impl NativeDiskCacheMeta {
                 .stale_if_error_until
                 .map(native_instant_to_unix_secs),
             stored_at_unix_secs: native_instant_to_unix_secs(entry.stored_at),
+            body_sha256: Some(*entry.body_sha256),
             vary_fields,
         }
     }
 
     pub(super) fn encode(&self) -> Vec<u8> {
         let mut encoded = Vec::new();
-        let _ = writeln!(&mut encoded, "FLUXHEIM-NATIVE-PROXY-CACHE-v1");
+        let _ = writeln!(&mut encoded, "FLUXHEIM-NATIVE-PROXY-CACHE-v2");
         let _ = writeln!(&mut encoded, "{}", self.status);
         let _ = writeln!(&mut encoded, "{}", self.reason.len());
         let _ = writeln!(
@@ -68,6 +70,14 @@ impl NativeDiskCacheMeta {
                 .unwrap_or_else(|| "-".to_owned())
         );
         let _ = writeln!(&mut encoded, "{}", self.stored_at_unix_secs);
+        let _ = writeln!(
+            &mut encoded,
+            "{}",
+            self.body_sha256
+                .as_ref()
+                .map(native_sha256_hex)
+                .unwrap_or_else(|| "-".to_owned())
+        );
         let _ = writeln!(&mut encoded, "{}", self.vary_fields.len());
         for field in &self.vary_fields {
             let _ = writeln!(&mut encoded, "{}", field.len());
@@ -85,9 +95,11 @@ impl NativeDiskCacheMeta {
         }
         let mut offset = 0_usize;
         let magic = native_disk_meta_line(bytes, &mut offset)?;
-        if magic != "FLUXHEIM-NATIVE-PROXY-CACHE-v1" {
-            return None;
-        }
+        let version = match magic {
+            "FLUXHEIM-NATIVE-PROXY-CACHE-v1" => 1,
+            "FLUXHEIM-NATIVE-PROXY-CACHE-v2" => 2,
+            _ => return None,
+        };
         let status = native_disk_meta_line(bytes, &mut offset)?
             .parse::<u16>()
             .ok()?;
@@ -109,6 +121,11 @@ impl NativeDiskCacheMeta {
         let stored_at_unix_secs = native_disk_meta_line(bytes, &mut offset)?
             .parse::<u64>()
             .ok()?;
+        let body_sha256 = if version == 2 {
+            native_disk_meta_optional_sha256(native_disk_meta_line(bytes, &mut offset)?)?
+        } else {
+            None
+        };
         let vary_count = native_disk_meta_line(bytes, &mut offset)?
             .parse::<usize>()
             .ok()?;
@@ -150,6 +167,7 @@ impl NativeDiskCacheMeta {
             stale_while_revalidate_until_unix_secs,
             stale_if_error_until_unix_secs,
             stored_at_unix_secs,
+            body_sha256,
             vary_fields,
         })
     }
@@ -171,6 +189,39 @@ fn native_disk_meta_optional_u64(value: &str) -> Option<Option<u64>> {
         return Some(None);
     }
     value.parse::<u64>().ok().map(Some)
+}
+
+fn native_disk_meta_optional_sha256(value: &str) -> Option<Option<[u8; 32]>> {
+    if value == "-" {
+        return Some(None);
+    }
+    if value.len() != 64 {
+        return None;
+    }
+    let mut digest = [0_u8; 32];
+    for (output, pair) in digest.iter_mut().zip(value.as_bytes().chunks_exact(2)) {
+        *output = (native_hex_nibble(pair[0])? << 4) | native_hex_nibble(pair[1])?;
+    }
+    Some(Some(digest))
+}
+
+fn native_sha256_hex(digest: &[u8; 32]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(64);
+    for byte in digest {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
+}
+
+const fn native_hex_nibble(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
 }
 
 pub(super) fn native_disk_response_header_bytes(entry: &NativeMemoryCacheEntry) -> Vec<u8> {
@@ -234,12 +285,16 @@ pub(super) fn native_memory_entry_from_disk_object(
     let meta = NativeDiskCacheMeta::decode(&object.internal_meta)?;
     let now_system = SystemTime::now();
     let now_instant = Instant::now();
+    let body_sha256 = meta
+        .body_sha256
+        .unwrap_or_else(|| super::native_cache_body_sha256(&object.body));
     let entry = NativeMemoryCacheEntry {
         status: meta.status,
         reason: meta.reason,
         headers: native_disk_response_headers(&object.response_header)?,
         content_length: meta.content_length,
         body: object.body.clone(),
+        body_sha256: std::sync::Arc::new(body_sha256),
         expires_at: native_unix_secs_to_instant(meta.expires_at_unix_secs, now_system, now_instant),
         stale_while_revalidate_until: meta
             .stale_while_revalidate_until_unix_secs
@@ -303,6 +358,7 @@ fn native_unix_secs_to_instant(secs: u64, now_system: SystemTime, now_instant: I
 #[cfg(test)]
 mod tests {
     use super::{NativeDiskCacheMeta, native_disk_response_headers};
+    use crate::native_http1_response_metadata::native_body_sha256;
 
     #[test]
     fn disk_cache_metadata_rejects_unbounded_persistent_counts() {
@@ -313,5 +369,36 @@ mod tests {
 
         assert!(NativeDiskCacheMeta::decode(metadata.as_bytes()).is_none());
         assert!(native_disk_response_headers(format!("{}\n", usize::MAX).as_bytes()).is_none());
+    }
+
+    #[test]
+    fn disk_cache_metadata_v2_preserves_precomputed_body_digest() {
+        let metadata = NativeDiskCacheMeta {
+            status: 200,
+            reason: "OK".to_owned(),
+            content_length: Some(6),
+            expires_at_unix_secs: 10,
+            stale_while_revalidate_until_unix_secs: Some(11),
+            stale_if_error_until_unix_secs: Some(12),
+            stored_at_unix_secs: 1,
+            body_sha256: Some(native_body_sha256(b"cached")),
+            vary_fields: vec!["accept-encoding".to_owned()],
+        };
+
+        assert_eq!(
+            NativeDiskCacheMeta::decode(&metadata.encode()),
+            Some(metadata)
+        );
+    }
+
+    #[test]
+    fn disk_cache_metadata_v1_remains_readable_without_stored_digest() {
+        let metadata = b"FLUXHEIM-NATIVE-PROXY-CACHE-v1\n200\n2\n6\n10\n-\n-\n1\n0\nOK";
+        let decoded = NativeDiskCacheMeta::decode(metadata).unwrap();
+
+        assert_eq!(decoded.status, 200);
+        assert_eq!(decoded.content_length, Some(6));
+        assert_eq!(decoded.body_sha256, None);
+        assert!(decoded.vary_fields.is_empty());
     }
 }

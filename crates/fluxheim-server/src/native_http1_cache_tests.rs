@@ -8,7 +8,7 @@ use super::native_http1_cache_storage_bin::native_storage_bin_index_worker_count
 use super::{
     NativeDiskCache, NativeDiskCacheBackend, NativeDiskCacheLocation, NativeDiskCacheRecord,
     NativeDiskCacheState, NativeDiskCacheStoreKey, NativeMemoryCacheEntry,
-    native_disk_cache_mutation_locks, native_peer_fill_cache_ttl,
+    native_cache_body_sha256, native_disk_cache_mutation_locks, native_peer_fill_cache_ttl,
     register_native_disk_cache_purge_handle,
 };
 use fluxheim_config::{ByteSize, CacheConfig, CacheDiskBackend, CacheDiskStorageBinConfig};
@@ -57,6 +57,7 @@ fn disk_cache_entry(body: &'static [u8]) -> NativeMemoryCacheEntry {
         headers: vec![("cache-control".to_owned(), "max-age=60".to_owned())],
         content_length: Some(body.len() as u64),
         body: Arc::from(body),
+        body_sha256: Arc::new(native_cache_body_sha256(body)),
         expires_at: now + Duration::from_secs(60),
         stale_while_revalidate_until: None,
         stale_if_error_until: None,
@@ -281,6 +282,7 @@ fn disk_cache_rejects_record_whose_embedded_key_does_not_match_lookup() {
         headers: vec![("cache-control".to_owned(), "max-age=60".to_owned())],
         content_length: Some(4),
         body: Arc::from(&b"safe"[..]),
+        body_sha256: Arc::new(native_cache_body_sha256(b"safe")),
         expires_at: now + Duration::from_secs(60),
         stale_while_revalidate_until: None,
         stale_if_error_until: None,

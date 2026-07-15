@@ -45,9 +45,10 @@ pub use native_http1_cache_inspect::inspect_native_disk_cache_object;
 pub(crate) use native_http1_cache_memory::{
     NativeMemoryCacheCounter, NativeMemoryCacheEntry, NativeMemoryCacheFill,
     NativeMemoryCacheState, NativeMemoryCacheVariant, lock_native_memory_cache,
-    native_cache_entry_weight, native_cache_ttl, native_peer_fill_cache_ttl,
-    native_response_header_map, prune_native_memory_cache, remove_native_memory_cache_entry,
-    remove_native_memory_cache_variants, with_native_cache_status,
+    native_cache_body_sha256, native_cache_entry_weight, native_cache_ttl,
+    native_peer_fill_cache_ttl, native_response_header_map, prune_native_memory_cache,
+    remove_native_memory_cache_entry, remove_native_memory_cache_variants,
+    with_native_cache_status,
 };
 use native_http1_cache_meta::{
     NativeDiskCacheMeta, native_disk_response_header_bytes, native_instant_to_unix_secs,

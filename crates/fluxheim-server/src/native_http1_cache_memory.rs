@@ -9,7 +9,7 @@ use fluxheim_config::CacheConfig;
 use tokio::sync::Notify;
 
 use crate::NativeHttp1Response;
-use crate::native_http1_response_metadata::NativeCacheStatus;
+use crate::native_http1_response_metadata::{NativeCacheStatus, native_body_sha256};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct NativeMemoryCacheEntry {
@@ -18,6 +18,7 @@ pub(crate) struct NativeMemoryCacheEntry {
     pub(crate) headers: Vec<(String, String)>,
     pub(crate) content_length: Option<u64>,
     pub(crate) body: Arc<[u8]>,
+    pub(crate) body_sha256: Arc<[u8; 32]>,
     pub(crate) expires_at: Instant,
     pub(crate) stale_while_revalidate_until: Option<Instant>,
     pub(crate) stale_if_error_until: Option<Instant>,
@@ -58,7 +59,8 @@ pub(crate) struct NativeMemoryCacheFill {
 impl NativeMemoryCacheEntry {
     pub(crate) fn to_response(&self) -> NativeHttp1Response {
         let mut response =
-            NativeHttp1Response::new(self.status, self.reason.clone(), self.body.to_vec());
+            NativeHttp1Response::new(self.status, self.reason.clone(), self.body.to_vec())
+                .with_body_sha256(Arc::clone(&self.body_sha256));
         for (name, value) in &self.headers {
             response = response.with_header(name.clone(), value.clone());
         }
@@ -73,6 +75,10 @@ impl NativeMemoryCacheEntry {
             .saturating_duration_since(self.stored_at)
             .as_secs()
     }
+}
+
+pub(crate) fn native_cache_body_sha256(body: &[u8]) -> [u8; 32] {
+    native_body_sha256(body)
 }
 
 pub(crate) fn lock_native_memory_cache<'a>(

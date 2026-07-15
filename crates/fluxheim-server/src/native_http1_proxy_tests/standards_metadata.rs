@@ -268,6 +268,10 @@ async fn native_proxy_emits_rfc_9211_cache_status_from_real_outcomes() {
         response_header(&hit, "cache-status"),
         Some("edge-gateway; hit")
     );
+    let expected = "sha-256=:NnMBTnK2c4O+MCSFaUVVpXrTk6/euu1t7REKd1vQVW0=:";
+    assert_eq!(response_header(&miss, "content-digest"), Some(expected));
+    assert_eq!(response_header(&hit, "content-digest"), Some(expected));
+    assert_eq!(response_header(&hit, "repr-digest"), Some(expected));
     assert!(hit.ends_with("cached"));
 }
 

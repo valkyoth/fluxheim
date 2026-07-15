@@ -14,8 +14,8 @@ use fluxheim_web::{
 
 use crate::native_http1_cache::{
     NativeMemoryCacheEntry, NativeMemoryCacheState, lock_native_memory_cache,
-    native_cache_entry_weight, native_cache_ttl, native_response_header_map,
-    prune_native_memory_cache,
+    native_cache_body_sha256, native_cache_entry_weight, native_cache_ttl,
+    native_response_header_map, prune_native_memory_cache,
 };
 #[cfg(feature = "php-fpm")]
 use crate::native_http1_php::{NativePhpScriptResolution, NativePhpScriptResolve};
@@ -398,6 +398,7 @@ impl NativeStaticMemoryCache {
             headers: response.headers().to_vec(),
             content_length: response.content_length(),
             body,
+            body_sha256: Arc::new(native_cache_body_sha256(response.body())),
             expires_at,
             stale_while_revalidate_until: None,
             stale_if_error_until: None,

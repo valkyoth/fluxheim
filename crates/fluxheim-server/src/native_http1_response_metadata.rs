@@ -87,17 +87,36 @@ pub(crate) fn apply_native_digest_metadata(
     request_method: &str,
     response: &mut NativeHttp1Response,
 ) {
+    let complete_representation = metadata.repr_digest
+        && response_has_complete_selected_representation(request_method, response);
+    if !metadata.content_digest && !complete_representation {
+        if metadata.repr_digest {
+            response.remove_header("repr-digest");
+        }
+        return;
+    }
+    let digest = response
+        .body_sha256()
+        .copied()
+        .unwrap_or_else(|| native_body_sha256(response.body()));
+    if response.body_sha256().is_none() {
+        response.set_body_sha256(digest);
+    }
+    let value = digest_field_value(&digest);
     if metadata.content_digest {
-        let value = digest_field_value(response.body());
         response.remove_header("content-digest");
-        response.push_header("content-digest", value);
+        response.push_header("content-digest", value.clone());
     }
     if metadata.repr_digest {
         response.remove_header("repr-digest");
-        if response_has_complete_selected_representation(request_method, response) {
-            response.push_header("repr-digest", digest_field_value(response.body()));
+        if complete_representation {
+            response.push_header("repr-digest", value);
         }
     }
+}
+
+pub(crate) fn native_body_sha256(body: &[u8]) -> [u8; 32] {
+    Sha256::digest(body).into()
 }
 
 fn cache_status_value(identifier: &str, status: &NativeCacheStatus) -> Option<String> {
@@ -136,11 +155,10 @@ fn response_has_complete_selected_representation(
             .is_none_or(|length| length == response.body().len() as u64)
 }
 
-fn digest_field_value(body: &[u8]) -> String {
-    let digest = Sha256::digest(body);
+fn digest_field_value(digest: &[u8; 32]) -> String {
     format!(
         "sha-256=:{}:",
-        base64_ng::STANDARD.encode_string_infallible(digest.as_slice())
+        base64_ng::STANDARD.encode_string_infallible(digest)
     )
 }
 
@@ -188,7 +206,7 @@ mod tests {
     #[test]
     fn digest_uses_rfc_9530_sha256_dictionary_shape() {
         assert_eq!(
-            digest_field_value(b"hello"),
+            digest_field_value(&native_body_sha256(b"hello")),
             "sha-256=:LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=:"
         );
     }
@@ -231,6 +249,41 @@ mod tests {
         assert_eq!(
             header(&response, "repr-digest"),
             header(&response, "content-digest")
+        );
+    }
+
+    #[test]
+    fn cached_body_digest_is_reused_for_both_digest_fields() {
+        let cached_digest = native_body_sha256(b"cached representation");
+        let mut response = NativeHttp1Response::new(200, "OK", b"different body".to_vec())
+            .with_body_sha256(std::sync::Arc::new(cached_digest));
+
+        apply_native_digest_metadata(&digest_metadata(), "GET", &mut response);
+
+        let expected = digest_field_value(&cached_digest);
+        assert_eq!(header(&response, "content-digest"), Some(expected.as_str()));
+        assert_eq!(header(&response, "repr-digest"), Some(expected.as_str()));
+    }
+
+    #[cfg(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    ))]
+    #[test]
+    fn replacing_response_body_invalidates_cached_digest() {
+        let cached_digest = native_body_sha256(b"cached representation");
+        let mut response = NativeHttp1Response::new(200, "OK", b"cached representation".to_vec())
+            .with_body_sha256(std::sync::Arc::new(cached_digest));
+        response.replace_body(b"encoded representation".to_vec());
+
+        apply_native_digest_metadata(&digest_metadata(), "GET", &mut response);
+
+        let expected = digest_field_value(&native_body_sha256(b"encoded representation"));
+        assert_eq!(header(&response, "content-digest"), Some(expected.as_str()));
+        assert_ne!(
+            header(&response, "content-digest"),
+            Some(digest_field_value(&cached_digest).as_str())
         );
     }
 

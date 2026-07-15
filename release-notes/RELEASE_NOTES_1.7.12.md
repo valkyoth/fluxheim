@@ -48,6 +48,13 @@ configuration. Every field defaults to disabled.
   `206` response's returned range with `Content-Digest`.
 - Remove origin digest fields when Fluxheim compression changes the body and
   digest generation is disabled, preventing stale integrity metadata.
+- Apply digest metadata once after Wasm response-header hooks, and share one
+  SHA-256 computation when both digest fields describe the same bytes.
+- Compute immutable cache-body digests once when objects are stored and reuse
+  them for memory and disk hits. New disk metadata is versioned and existing
+  v1 cache objects remain readable.
+- Invalidate a precomputed cache digest whenever compression replaces the body,
+  then hash the final encoded bytes before emission.
 
 The native response model remains bounded and buffered. Digest generation
 hashes the final response buffer without another body copy; unbuffered digest
@@ -76,6 +83,9 @@ platform, configuration, key handling, and required compliance evidence.
 - Live native listener tests cover complete-body digests, compressed wire-byte
   digests, conditional `304`, `HEAD`, `206`, cache MISS/HIT, and refused-origin
   proxy status.
+- Live Wasm route coverage verifies post-hook digest emission and rejects
+  duplicate `Content-Digest` output; unit coverage verifies cache-digest reuse,
+  compression invalidation, and v1/v2 disk-metadata compatibility.
 - Config tests cover opt-in parsing, identifier validation, missing-identifier
   rejection, and inherited overlay behavior.
 - Status metadata application is idempotent when a response policy is applied

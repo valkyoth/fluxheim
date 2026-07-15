@@ -386,6 +386,7 @@ mod tests {
             headers: Vec::new(),
             content_length: Some(1),
             body: Arc::from(*b"x"),
+            body_sha256: Arc::new(crate::native_http1_cache::native_cache_body_sha256(b"x")),
             expires_at,
             stale_while_revalidate_until: None,
             stale_if_error_until: None,

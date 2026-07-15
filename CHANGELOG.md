@@ -28,6 +28,11 @@ behavior when the change improves security or project direction.
 - Strip origin digest fields whenever Fluxheim compression changes response
   bytes; opt-in digest generation then recomputes fields from the final encoded
   content.
+- Apply route digest metadata once at the final post-Wasm response boundary,
+  and share one SHA-256 result when both RFC 9530 digest fields are enabled.
+- Precompute immutable cache-body SHA-256 values when objects are stored and
+  reuse them across memory and disk cache hits. The versioned disk metadata
+  remains backward-compatible with existing v1 cache objects.
 - Include the reproducible FIPS-backend image proof in the deep release gate
   and expose it as a separate manual workflow and test-starter entry.
 
@@ -38,6 +43,8 @@ behavior when the change improves security or project direction.
   certificate details, cache keys, internal tiers, or arbitrary error text.
 - Suppress `Repr-Digest` instead of guessing when Fluxheim does not hold the
   complete selected representation, including `HEAD`, `206`, and `304` paths.
+- Invalidate cached body digests whenever compression replaces response bytes,
+  ensuring cache-hit optimization cannot produce stale integrity metadata.
 - Keep the FIPS proof containers separate from release images and document that
   provider evidence is not product-level FIPS validation.
 
