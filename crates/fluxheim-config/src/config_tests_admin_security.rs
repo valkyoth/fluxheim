@@ -148,6 +148,38 @@ fn rejects_admin_paths_under_world_writable_parent() {
     ));
 }
 
+#[cfg(unix)]
+#[test]
+fn rejects_existing_non_private_or_root_snapshot_store() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let snapshot_store = secure_test_dir("config-admin-snapshot-non-private");
+    std::fs::set_permissions(&snapshot_store, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let config = Config {
+        admin: AdminConfig {
+            snapshot_store: Some(snapshot_store),
+            ..AdminConfig::default()
+        },
+        ..Config::default()
+    };
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::UnsafePath { field, .. }) if field == "admin.snapshot_store"
+    ));
+
+    let root = Config {
+        admin: AdminConfig {
+            snapshot_store: Some("/".into()),
+            ..AdminConfig::default()
+        },
+        ..Config::default()
+    };
+    assert!(matches!(
+        root.validate(),
+        Err(ConfigError::UnsafePath { field, .. }) if field == "admin.snapshot_store"
+    ));
+}
+
 #[test]
 fn rejects_invalid_admin_self_healing_window() {
     let config = Config {

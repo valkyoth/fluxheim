@@ -54,6 +54,13 @@ behavior when the change improves security or project direction.
   for every byte received from a trusted proxy.
 - Refresh stream idle deadlines after every successful partial write so active
   backpressured connections are not terminated between write progress events.
+- Reject filesystem roots and pre-existing non-private snapshot directories
+  without changing their permissions; only newly created dedicated snapshot
+  directories are initialized as `0700`.
+- Reject serialized snapshots above the reader's 16 MiB limit before store
+  locking, generation allocation, or publication.
+- Bound persisted self-healing state to 64 KiB and its variable diagnostics to
+  4 KiB without control characters, using the same limit for reads and writes.
 
 ## 1.7.11 - 2026-07-14
 

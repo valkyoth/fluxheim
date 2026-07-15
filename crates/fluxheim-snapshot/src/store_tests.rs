@@ -1,6 +1,6 @@
 use super::{MAX_SNAPSHOT_STORE_ENTRIES, SnapshotError, SnapshotStore};
 use crate::metadata::{MAX_SNAPSHOT_ID_BYTES, MAX_SNAPSHOT_MESSAGE_BYTES};
-use crate::store_fs::{SNAPSHOT_DIR_MODE, SNAPSHOT_FILE_MODE};
+use crate::store_fs::{MAX_SNAPSHOT_FILE_BYTES, SNAPSHOT_DIR_MODE, SNAPSHOT_FILE_MODE};
 use crate::{
     PendingValidation, SnapshotApplyMode, SnapshotHealthSignalOutcome, SnapshotRollbackReason,
     SnapshotRuntimeState, ValidationMetrics,
@@ -8,8 +8,9 @@ use crate::{
 
 mod tests {
     use super::{
-        PendingValidation, SnapshotApplyMode, SnapshotError, SnapshotHealthSignalOutcome,
-        SnapshotRollbackReason, SnapshotRuntimeState, SnapshotStore, ValidationMetrics,
+        MAX_SNAPSHOT_FILE_BYTES, PendingValidation, SnapshotApplyMode, SnapshotError,
+        SnapshotHealthSignalOutcome, SnapshotRollbackReason, SnapshotRuntimeState, SnapshotStore,
+        ValidationMetrics,
     };
     use fluxheim_common::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
     use fluxheim_config::{Config, ProxyConfig};
@@ -160,8 +161,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = TestDir::new("snapshot-private-modes");
-        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
-        let store = SnapshotStore::new(dir.path());
+        let store = SnapshotStore::new(dir.child("store"));
         let snapshot = store
             .snapshot_config(&Config::default(), Some("initial config"))
             .unwrap();
@@ -197,6 +197,55 @@ mod tests {
         assert_eq!(metadata_mode, super::SNAPSHOT_FILE_MODE);
         assert_eq!(current_mode, super::SNAPSHOT_FILE_MODE);
         assert_eq!(lock_mode, super::SNAPSHOT_FILE_MODE);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn existing_non_private_store_is_rejected_without_chmod() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TestDir::new("snapshot-existing-non-private");
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let store = SnapshotStore::new(dir.path());
+
+        assert!(matches!(
+            store.snapshot_config(&Config::default(), None),
+            Err(SnapshotError::UnsafeSnapshotPath { .. })
+        ));
+        assert_eq!(
+            std::fs::metadata(dir.path()).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        assert!(!dir.path().join("configs").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn filesystem_root_is_rejected_without_chmod() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::path::Path::new("/");
+        let before = std::fs::metadata(root).unwrap().permissions().mode() & 0o777;
+        let store = SnapshotStore::new(root);
+
+        assert!(matches!(
+            store.snapshot_config(&Config::default(), None),
+            Err(SnapshotError::UnsafeStoreRoot { .. })
+        ));
+        assert_eq!(
+            std::fs::metadata(root).unwrap().permissions().mode() & 0o777,
+            before
+        );
+    }
+
+    #[test]
+    fn oversized_serialized_snapshot_is_rejected_before_layout_or_publication() {
+        let dir = TestDir::new("snapshot-serialized-size-limit");
+        let store = SnapshotStore::new(dir.child("store"));
+        let oversized = "x".repeat((MAX_SNAPSHOT_FILE_BYTES + 1) as usize);
+
+        assert!(store.snapshot_serialized_config(oversized, None).is_err());
+        assert!(!store.root().exists());
     }
 
     #[cfg(unix)]
@@ -265,6 +314,7 @@ mod tests {
         let store = SnapshotStore::new(dir.path());
         let configs = dir.child("configs");
         std::fs::create_dir(&configs).unwrap();
+        set_private_test_directory(&configs);
         for index in 0..=super::MAX_SNAPSHOT_STORE_ENTRIES {
             std::fs::write(safe_child_path(&configs, &format!("s{index:04}.toml")), b"").unwrap();
         }
@@ -284,6 +334,7 @@ mod tests {
         let store = SnapshotStore::new(dir.path());
         let configs = dir.child("configs");
         std::fs::create_dir(&configs).unwrap();
+        set_private_test_directory(&configs);
         for index in 0..super::MAX_SNAPSHOT_STORE_ENTRIES {
             std::fs::write(safe_child_path(&configs, &format!("s{index:04}.toml")), b"").unwrap();
         }
@@ -417,6 +468,7 @@ mod tests {
         fn new(name: &str) -> Self {
             let path = unique_temp_path(name);
             std::fs::create_dir(&path).expect("create test directory");
+            set_private_test_directory(&path);
             Self { path }
         }
 
@@ -427,6 +479,16 @@ mod tests {
         fn child(&self, name: &str) -> std::path::PathBuf {
             safe_relative_path(&self.path, name)
         }
+    }
+
+    fn set_private_test_directory(path: &std::path::Path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        #[cfg(not(unix))]
+        let _ = path;
     }
 
     impl Drop for TestDir {

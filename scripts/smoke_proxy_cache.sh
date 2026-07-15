@@ -78,6 +78,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 mkdir -p "$TMP_DIR/run" "$TMP_DIR/cache" "$TMP_DIR/snapshots"
+chmod 0700 "$TMP_DIR/snapshots"
 
 cat > "$TMP_DIR/origin.py" <<'PY'
 import sys

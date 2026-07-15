@@ -48,6 +48,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 mkdir -p "$TMP_DIR/public" "$TMP_DIR/run" "$TMP_DIR/admin-snapshots"
+chmod 0700 "$TMP_DIR/admin-snapshots"
 printf '%s\n' "fluxheim-admin-smoke-token" > "$TMP_DIR/admin-token"
 printf '%s' "0123456789abcdef0123456789abcdef" > "$TMP_DIR/snapshot-integrity.key"
 chmod 0600 "$TMP_DIR/snapshot-integrity.key"

@@ -1,5 +1,4 @@
 use std::fs;
-#[cfg(test)]
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -16,9 +15,10 @@ pub(crate) use crate::model::{
     VerifiedConfigSnapshot,
 };
 use crate::store_fs::{
-    MAX_CURRENT_SNAPSHOT_POINTER_BYTES, path_exists_without_following_symlinks,
-    read_optional_regular_file_to_string_with_limit, read_regular_file_to_string_with_limit,
-    regular_snapshot_file_exists, write_atomically, write_atomically_new,
+    MAX_CURRENT_SNAPSHOT_POINTER_BYTES, MAX_SNAPSHOT_FILE_BYTES,
+    path_exists_without_following_symlinks, read_optional_regular_file_to_string_with_limit,
+    read_regular_file_to_string_with_limit, regular_snapshot_file_exists, write_atomically,
+    write_atomically_new,
 };
 use crate::store_layout::validate_integrity_key_outside_store;
 use crate::store_support::{SnapshotTransaction, new_snapshot_id, unix_duration};
@@ -76,6 +76,16 @@ impl SnapshotStore {
             .validate()
             .map_err(|error| SnapshotError::Config(ConfigLoadError::Validate(error)))?;
         let message = snapshot_message(message)?;
+        let raw_config = toml::to_string_pretty(config).map_err(SnapshotError::Encode)?;
+        self.snapshot_serialized_config(raw_config, message)
+    }
+
+    fn snapshot_serialized_config(
+        &self,
+        raw_config: String,
+        message: Option<String>,
+    ) -> Result<ConfigSnapshot, SnapshotError> {
+        ensure_snapshot_size(&raw_config)?;
         self.with_store_lock(|| {
             self.ensure_store_capacity()?;
             let parent_id = self.current_id_unlocked()?;
@@ -92,7 +102,6 @@ impl SnapshotStore {
                 generation,
                 message,
             };
-            let raw_config = toml::to_string_pretty(config).map_err(SnapshotError::Encode)?;
             let raw_metadata = toml::to_string_pretty(&metadata).map_err(SnapshotError::Encode)?;
 
             let mut transaction = SnapshotTransaction::new();
@@ -431,6 +440,22 @@ impl SnapshotStore {
         )?;
         Ok(SnapshotIntegrityStatus::Authenticated)
     }
+}
+
+fn ensure_snapshot_size(contents: &str) -> Result<(), SnapshotError> {
+    let length = u64::try_from(contents.len()).map_err(|_| {
+        SnapshotError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "serialized snapshot length overflowed",
+        ))
+    })?;
+    if length > MAX_SNAPSHOT_FILE_BYTES {
+        return Err(SnapshotError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("serialized snapshot exceeds {MAX_SNAPSHOT_FILE_BYTES} bytes"),
+        )));
+    }
+    Ok(())
 }
 
 fn publish_transaction_file(

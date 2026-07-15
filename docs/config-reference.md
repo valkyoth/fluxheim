@@ -467,7 +467,12 @@ the selected Ring, OpenSSL-FIPS, or AWS-LC-FIPS internal crypto provider.
 parent traversal, must not sit below a
 symlinked parent directory, and on Unix must not use a group- or world-writable
 existing parent such as `/tmp`. The snapshot store runtime applies the same rule when it
-is used directly by CLI/admin paths.
+is used directly by CLI/admin paths. Configure `snapshot_store` as a dedicated
+directory, never a filesystem root or shared system/application directory. An
+existing store must already be owned by the service identity with mode `0700`;
+Fluxheim rejects it instead of changing its permissions. When the final store
+directory is absent, its immediate trusted parent must already exist and
+Fluxheim creates the dedicated store as `0700`.
 
 Remote admin exposure fails closed. Keep `admin.listen` loopback whenever
 possible. If `admin.require_loopback = false` and `admin.listen` is non-loopback,

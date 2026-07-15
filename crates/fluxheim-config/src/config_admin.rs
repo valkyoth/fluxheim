@@ -14,7 +14,9 @@ pub use crate::config_admin_transport::{
     AdminClientCertificateConfig, AdminClientCertificateConfigFragment, AdminRemoteTransportMode,
     AdminTransportConfig, AdminTransportConfigFragment,
 };
-use crate::config_path::{validate_non_world_writable_parent, validate_path};
+use crate::config_path::{
+    validate_non_world_writable_parent, validate_path, validate_private_state_directory,
+};
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -167,6 +169,7 @@ impl AdminConfig {
         )?;
         validate_path("admin.token_file", self.token_file.as_deref())?;
         validate_path("admin.snapshot_store", self.snapshot_store.as_deref())?;
+        validate_private_state_directory("admin.snapshot_store", self.snapshot_store.as_deref())?;
         validate_path(
             "admin.snapshot_integrity_key_file",
             self.snapshot_integrity_key_file.as_deref(),

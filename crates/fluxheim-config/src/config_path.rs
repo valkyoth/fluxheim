@@ -1,3 +1,4 @@
+use std::path::Component;
 use std::path::{Path, PathBuf};
 
 use crate::config::ConfigError;
@@ -61,6 +62,56 @@ pub fn validate_non_world_writable_parent(
     let _ = (field, path);
 
     Ok(())
+}
+
+pub fn validate_private_state_directory(
+    field: impl Into<String>,
+    path: Option<&Path>,
+) -> Result<(), ConfigError> {
+    let field = field.into();
+    let Some(path) = path else {
+        return Ok(());
+    };
+    if path_is_filesystem_root(path) {
+        return Err(ConfigError::UnsafePath {
+            field,
+            path: path.to_path_buf(),
+        });
+    }
+
+    let metadata = match path.symlink_metadata() {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(path_inspection_failed(field, path, error)),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(ConfigError::UnsafePath {
+            field,
+            path: path.to_path_buf(),
+        });
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(ConfigError::UnsafePath {
+                field,
+                path: path.to_path_buf(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn path_is_filesystem_root(path: &Path) -> bool {
+    let mut components = path.components();
+    match components.next() {
+        Some(Component::RootDir) => components.next().is_none(),
+        Some(Component::Prefix(_)) => {
+            matches!(components.next(), Some(Component::RootDir)) && components.next().is_none()
+        }
+        _ => false,
+    }
 }
 
 pub fn validate_optional_process_path(

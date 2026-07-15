@@ -83,8 +83,17 @@ portable Unix fallback walks every component with descriptor-relative
 `openat(..., DIRECTORY|NOFOLLOW)`. An intermediate path swap therefore cannot
 redirect the lock to a different directory.
 
-The store is deliberately conservative about filesystem indirection. Snapshot
-ids may only contain ASCII letters, digits, `_`, and `-`, and are limited to
+The store is deliberately conservative about filesystem indirection. Configure
+`admin.snapshot_store` as a dedicated snapshot directory, never as `/`, `/etc`,
+`/var`, a home directory, or another shared system/application directory. If
+the store already exists, create it with mode `0700` and the Fluxheim service
+identity as owner before startup; Fluxheim rejects a pre-existing non-private
+directory and never repairs its permissions implicitly. If the final store
+directory does not exist, its immediate parent must already exist and pass the
+ownership, write-permission, and symlink checks; Fluxheim creates only that
+dedicated final directory as `0700`.
+
+Snapshot ids may only contain ASCII letters, digits, `_`, and `-`, and are limited to
 128 bytes; the store root cannot contain `..` or sit below a symlinked parent
 directory; the store root and `configs` directory must be real directories; the
 `configs` directory must remain inside the snapshot store; and `current`,
@@ -98,8 +107,9 @@ Snapshot stores are limited to 1024 snapshots. Listing and doctor report corrupt
 entries individually instead of hiding healthy snapshots behind one malformed
 metadata file.
 
-On Unix, Fluxheim normalizes the snapshot store root and `configs` directory to
-mode `0700`, and writes the lock, current pointer, recovery state, snapshots,
+On Unix, Fluxheim creates a missing snapshot store root and `configs` directory
+as mode `0700`, requires existing directories to already be `0700` or stricter,
+and writes the lock, current pointer, recovery state, snapshots,
 metadata, integrity manifests, generation state, and pruning boundaries as mode
 `0600`. Reads reject existing state with any group or other permission bit; the
 doctor command reports such state as unhealthy instead of silently accepting
@@ -108,6 +118,12 @@ outside the snapshot store. Operators should still run the service with a
 restrictive umask such as `0077` or `0027` as defense in depth for any future
 state files. Non-Unix deployments should additionally use platform ACLs to
 grant access only to the Fluxheim service identity.
+
+Snapshot configuration writes are capped at the same 16 MiB limit enforced by
+all readers before a generation is allocated or any transaction file is
+published. Persisted self-healing state has a separate 64 KiB envelope; its
+operator-facing impact and rollback diagnostics are individually limited to
+4 KiB and cannot contain control characters.
 
 Snapshot TOML remains plaintext. Mode `0600` does not protect offline disks,
 backups, or privileged support tooling. Encrypt the snapshot volume or backup

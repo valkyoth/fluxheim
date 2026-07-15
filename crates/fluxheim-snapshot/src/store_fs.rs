@@ -187,15 +187,6 @@ pub(crate) fn require_private_regular_file(path: &Path) -> Result<(), SnapshotEr
     open_regular_file(path).map(drop)
 }
 
-pub(crate) fn read_optional_regular_file_to_string(
-    path: &Path,
-) -> Result<Option<String>, SnapshotError> {
-    if !path_exists_without_following_symlinks(path)? {
-        return Ok(None);
-    }
-    read_regular_file_to_string(path).map(Some)
-}
-
 pub(crate) fn read_optional_regular_file_to_string_with_limit(
     path: &Path,
     max_bytes: u64,
@@ -248,23 +239,31 @@ pub(crate) fn ensure_real_directory(path: &Path) -> Result<(), SnapshotError> {
                 path: path.to_path_buf(),
             });
         }
-        Some(_) => {
-            set_private_directory_mode(path)?;
+        Some(metadata) => {
+            require_private_path_metadata(path, &metadata)?;
             return Ok(());
         }
         None => {}
     }
 
-    fs::create_dir_all(path).map_err(SnapshotError::Io)?;
-    set_private_directory_mode(path)?;
-    let metadata = fs::symlink_metadata(path).map_err(SnapshotError::Io)?;
+    let created = match fs::create_dir(path) {
+        Ok(()) => true,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => false,
+        Err(error) => return Err(SnapshotError::Io(error)),
+    };
+    if created {
+        set_private_directory_mode(path)?;
+    }
+    let metadata =
+        optional_symlink_metadata(path)?.ok_or_else(|| SnapshotError::UnsafeSnapshotPath {
+            path: path.to_path_buf(),
+        })?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(SnapshotError::UnsafeSnapshotPath {
             path: path.to_path_buf(),
         });
     }
-
-    Ok(())
+    require_private_path_metadata(path, &metadata)
 }
 
 pub(crate) fn canonical_directory(path: &Path) -> Result<PathBuf, SnapshotError> {
@@ -297,10 +296,6 @@ pub(crate) fn snapshot_parent_path_contains_symlink(path: &Path) -> io::Result<b
     }
 
     Ok(false)
-}
-
-fn read_regular_file_to_string(path: &Path) -> Result<String, SnapshotError> {
-    read_regular_file_to_string_with_limit(path, MAX_SNAPSHOT_FILE_BYTES)
 }
 
 fn open_regular_file(path: &Path) -> Result<File, SnapshotError> {

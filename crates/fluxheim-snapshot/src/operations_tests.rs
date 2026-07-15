@@ -2,6 +2,7 @@ use fluxheim_common::test_support::{safe_child_path, unique_temp_path};
 use fluxheim_config::{Config, ProxyConfig};
 use std::sync::{Arc, Barrier};
 
+use crate::recovery::{MAX_RUNTIME_DIAGNOSTIC_BYTES, MAX_RUNTIME_STATE_BYTES};
 use crate::store::MAX_SNAPSHOT_STORE_ENTRIES;
 #[cfg(unix)]
 use crate::store_fs::set_open_private_file_mode_for_test;
@@ -50,6 +51,7 @@ fn concurrent_snapshot_creation_cannot_exceed_capacity() {
     let dir = TestDir::new("snapshot-concurrent-capacity");
     let configs = dir.child("configs");
     std::fs::create_dir(&configs).unwrap();
+    set_private_test_directory(&configs);
     for index in 0..MAX_SNAPSHOT_STORE_ENTRIES - 1 {
         std::fs::write(
             safe_child_path(&configs, &format!("legacy-{index:04}.toml")),
@@ -379,6 +381,61 @@ fn self_healing_state_persists_pending_and_failed_rollback() {
 }
 
 #[test]
+fn recovery_diagnostic_limits_preserve_previous_state() {
+    let dir = TestDir::new("snapshot-recovery-diagnostic-limit");
+    let store = SnapshotStore::new(dir.path());
+    let snapshot = store.snapshot_config(&Config::default(), None).unwrap();
+    let valid = SnapshotRuntimeState {
+        runtime_snapshot: Some(snapshot.id.clone()),
+        known_good_snapshot: Some(snapshot.id.clone()),
+        pending_validation: None,
+    };
+    store.save_runtime_state(&valid).unwrap();
+    let state_path = store.runtime_state_path();
+    let before = std::fs::read(&state_path).unwrap();
+
+    for (impact, failure) in [
+        ("x".repeat(MAX_RUNTIME_DIAGNOSTIC_BYTES + 1), None),
+        ("invalid\nimpact".to_owned(), None),
+        (
+            "snapshot".to_owned(),
+            Some("x".repeat(MAX_RUNTIME_DIAGNOSTIC_BYTES + 1)),
+        ),
+    ] {
+        let invalid = SnapshotRuntimeState {
+            runtime_snapshot: Some(snapshot.id.clone()),
+            known_good_snapshot: Some(snapshot.id.clone()),
+            pending_validation: Some(PendingValidation {
+                target_snapshot: snapshot.id.clone(),
+                previous_snapshot: Some(snapshot.id.clone()),
+                impact,
+                expires_unix_secs: 100,
+                successful_checks: 0,
+                failed_checks: 0,
+                rollback_attempts: 0,
+                last_rollback_failure: failure,
+            }),
+        };
+        assert!(store.save_runtime_state(&invalid).is_err());
+        assert_eq!(std::fs::read(&state_path).unwrap(), before);
+    }
+}
+
+#[test]
+fn recovery_reader_rejects_file_above_dedicated_limit() {
+    let dir = TestDir::new("snapshot-recovery-file-limit");
+    let store = SnapshotStore::new(dir.path());
+    store.snapshot_config(&Config::default(), None).unwrap();
+    write_atomically(
+        &store.runtime_state_path(),
+        &vec![b'x'; (MAX_RUNTIME_STATE_BYTES + 1) as usize],
+    )
+    .unwrap();
+
+    assert!(store.load_runtime_state().is_err());
+}
+
+#[test]
 fn failed_create_new_atomic_write_removes_temporary_file() {
     let dir = TestDir::new("snapshot-temp-cleanup");
     let destination = dir.child("existing");
@@ -451,6 +508,7 @@ impl TestDir {
     fn new(name: &str) -> Self {
         let path = unique_temp_path(name);
         std::fs::create_dir(&path).unwrap();
+        set_private_test_directory(&path);
         Self { path }
     }
 
@@ -461,6 +519,16 @@ impl TestDir {
     fn child(&self, name: &str) -> std::path::PathBuf {
         safe_child_path(&self.path, name)
     }
+}
+
+fn set_private_test_directory(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    #[cfg(not(unix))]
+    let _ = path;
 }
 
 impl Drop for TestDir {

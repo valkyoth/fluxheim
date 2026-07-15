@@ -1,5 +1,6 @@
 use std::fs;
 use std::io;
+use std::path::Component;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -72,6 +73,7 @@ impl SnapshotStore {
 
     pub(crate) fn validate_root(&self) -> Result<(), SnapshotError> {
         if self.root.as_os_str().is_empty()
+            || snapshot_path_is_filesystem_root(&self.root)
             || self
                 .root
                 .components()
@@ -140,6 +142,17 @@ impl SnapshotStore {
             return Err(SnapshotError::UnsafeSnapshotPath { path: configs_dir });
         }
         Ok(())
+    }
+}
+
+fn snapshot_path_is_filesystem_root(path: &Path) -> bool {
+    let mut components = path.components();
+    match components.next() {
+        Some(Component::RootDir) => components.next().is_none(),
+        Some(Component::Prefix(_)) => {
+            matches!(components.next(), Some(Component::RootDir)) && components.next().is_none()
+        }
+        _ => false,
     }
 }
 

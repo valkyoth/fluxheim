@@ -162,6 +162,19 @@ trailers are not part of this release.
   and immediately sanitize each forwarded plaintext range, preserving active
   connections under slow backpressure without extending truly idle sessions.
 
+## Snapshot Store Hardening
+
+- Reject filesystem roots as snapshot stores and require pre-existing store
+  directories to already be private. Fluxheim never chmods an arbitrary
+  existing directory; only a dedicated directory it creates is initialized as
+  `0700`.
+- Enforce the 16 MiB snapshot reader limit before store locking, generation
+  allocation, transaction publication, or `current` updates.
+- Give persisted self-healing state a symmetric 64 KiB read/write envelope and
+  limit impact and rollback diagnostics to 4 KiB without control characters.
+- Preserve existing `current`, generation, snapshot, and recovery files when
+  any new size or diagnostic admission check rejects input.
+
 ## Reproducible FIPS-Backend Evidence
 
 - Add separately pinned OpenSSL-FIPS and rustls/AWS-LC-FIPS proof
@@ -213,3 +226,6 @@ platform, configuration, key handling, and required compliance evidence.
   a complete authenticated preamble and proxies traffic.
 - Stream DNS-admission tests cover the blocked IANA special-purpose ranges and
   the two globally reachable IPv4 protocol-assignment anycast exceptions.
+- Snapshot tests prove filesystem roots and existing non-private directories
+  are rejected without permission changes, oversized snapshots publish no
+  layout or state, and invalid recovery diagnostics preserve prior state.

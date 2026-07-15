@@ -30,6 +30,7 @@ case "$snapshot_store" in
         ;;
 esac
 mkdir -p "$snapshot_store"
+chmod 0700 "$snapshot_store"
 
 sample_config="$out_dir/representative-runtime-cutover.toml"
 cat >"$sample_config" <<CONFIG

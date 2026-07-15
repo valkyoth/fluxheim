@@ -143,6 +143,7 @@ mod tests {
         let snapshot_id = "symlinked_config";
         let configs_dir = dir.child("configs");
         std::fs::create_dir(&configs_dir).unwrap();
+        set_private_test_directory(&configs_dir);
         let outside = dir.child("outside.toml");
         std::fs::write(
             &outside,
@@ -168,6 +169,7 @@ mod tests {
         let snapshot_id = "symlinked_metadata";
         let configs_dir = dir.child("configs");
         std::fs::create_dir(&configs_dir).unwrap();
+        set_private_test_directory(&configs_dir);
         std::fs::write(
             safe_child_path(&configs_dir, "symlinked_metadata.toml"),
             toml::to_string_pretty(&Config::default()).unwrap(),
@@ -246,6 +248,7 @@ mod tests {
         fn new(name: &str) -> Self {
             let path = unique_temp_path(name);
             std::fs::create_dir(&path).expect("create test directory");
+            set_private_test_directory(&path);
             Self { path }
         }
 
@@ -256,6 +259,16 @@ mod tests {
         fn child(&self, name: &str) -> std::path::PathBuf {
             safe_relative_path(&self.path, name)
         }
+    }
+
+    fn set_private_test_directory(path: &std::path::Path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        #[cfg(not(unix))]
+        let _ = path;
     }
 
     impl Drop for TestDir {

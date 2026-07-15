@@ -461,12 +461,23 @@ impl TestDir {
     fn new(name: &str) -> Self {
         let path = unique_temp_path(name);
         std::fs::create_dir(&path).unwrap();
+        set_private_test_directory(&path);
         Self(path)
     }
 
     fn child(&self, name: &str) -> std::path::PathBuf {
         safe_child_path(&self.0, name)
     }
+}
+
+fn set_private_test_directory(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    #[cfg(not(unix))]
+    let _ = path;
 }
 
 impl Drop for TestDir {

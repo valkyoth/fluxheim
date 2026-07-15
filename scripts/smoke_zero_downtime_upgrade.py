@@ -178,7 +178,7 @@ index_files = ["index.html"]
 '''
     if blocked_admin_address is not None:
         snapshots = generation / "snapshots"
-        snapshots.mkdir()
+        snapshots.mkdir(mode=0o700)
         token = generation / "admin-token"
         token.write_text("fluxheim-upgrade-smoke-token\n", encoding="ascii")
         integrity_key = generation / "snapshot-integrity.key"

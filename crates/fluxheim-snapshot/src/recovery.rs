@@ -1,8 +1,11 @@
 use crate::metadata::validate_snapshot_id;
 use crate::state::SnapshotRuntimeState;
 use crate::store::{SnapshotError, SnapshotStore};
-use crate::store_fs::{read_optional_regular_file_to_string, write_atomically};
+use crate::store_fs::{read_optional_regular_file_to_string_with_limit, write_atomically};
 use serde::{Deserialize, Serialize};
+
+pub(crate) const MAX_RUNTIME_STATE_BYTES: u64 = 64 * 1024;
+pub(crate) const MAX_RUNTIME_DIAGNOSTIC_BYTES: usize = 4096;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -17,11 +20,16 @@ struct PersistedRuntimeState {
 impl SnapshotStore {
     pub fn load_runtime_state(&self) -> Result<Option<SnapshotRuntimeState>, SnapshotError> {
         self.validate_for_recovery()?;
-        let Some(raw) = read_optional_regular_file_to_string(&self.runtime_state_path())? else {
+        let Some(raw) = read_optional_regular_file_to_string_with_limit(
+            &self.runtime_state_path(),
+            MAX_RUNTIME_STATE_BYTES,
+        )?
+        else {
             return Ok(None);
         };
         let persisted: PersistedRuntimeState =
             toml::from_str(&raw).map_err(SnapshotError::Decode)?;
+        require_runtime_state_size(&persisted.state_toml)?;
         match self.integrity.as_deref() {
             Some(key)
                 if persisted.key_id.as_deref() == Some(key.key_id())
@@ -41,6 +49,7 @@ impl SnapshotStore {
     pub fn save_runtime_state(&self, state: &SnapshotRuntimeState) -> Result<(), SnapshotError> {
         validate_runtime_state(state)?;
         let state_toml = toml::to_string_pretty(state).map_err(SnapshotError::Encode)?;
+        require_runtime_state_size(&state_toml)?;
         let persisted = match self.integrity.as_deref() {
             Some(key) => PersistedRuntimeState {
                 hmac_sha256: Some(key.sign_recovery(state_toml.as_bytes())?),
@@ -54,6 +63,7 @@ impl SnapshotStore {
             },
         };
         let raw = toml::to_string_pretty(&persisted).map_err(SnapshotError::Encode)?;
+        require_runtime_state_size(&raw)?;
         self.with_store_lock(|| write_atomically(&self.runtime_state_path(), raw.as_bytes()))
     }
 
@@ -83,6 +93,38 @@ fn validate_runtime_state(state: &SnapshotRuntimeState) -> Result<(), SnapshotEr
     .flatten()
     {
         validate_snapshot_id(id)?;
+    }
+    if let Some(pending) = state.pending_validation.as_ref() {
+        validate_runtime_diagnostic(&pending.impact)?;
+        if let Some(failure) = pending.last_rollback_failure.as_deref() {
+            validate_runtime_diagnostic(failure)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_runtime_diagnostic(value: &str) -> Result<(), SnapshotError> {
+    if value.len() > MAX_RUNTIME_DIAGNOSTIC_BYTES || value.chars().any(char::is_control) {
+        return Err(SnapshotError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "snapshot recovery diagnostic is invalid or exceeds its configured limit",
+        )));
+    }
+    Ok(())
+}
+
+fn require_runtime_state_size(raw: &str) -> Result<(), SnapshotError> {
+    let length = u64::try_from(raw.len()).map_err(|_| {
+        SnapshotError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "serialized snapshot recovery state length overflowed",
+        ))
+    })?;
+    if length > MAX_RUNTIME_STATE_BYTES {
+        return Err(SnapshotError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("serialized snapshot recovery state exceeds {MAX_RUNTIME_STATE_BYTES} bytes"),
+        )));
     }
     Ok(())
 }
