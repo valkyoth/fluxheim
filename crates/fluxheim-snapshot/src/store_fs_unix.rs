@@ -107,6 +107,33 @@ pub(crate) fn open_private_lock_file_in_directory(
     Ok(File::from(fd))
 }
 
+pub(crate) fn create_private_directory_in_parent(path: &Path) -> Result<(), SnapshotError> {
+    let parent = path.parent().ok_or_else(|| {
+        SnapshotError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "snapshot directory path has no parent",
+        ))
+    })?;
+    let name = path
+        .file_name()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| SnapshotError::UnsafeSnapshotPath {
+            path: path.to_path_buf(),
+        })?;
+    let open_parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
+    let directory = open_snapshot_directory(open_parent)?;
+    rustix::fs::mkdirat(
+        directory,
+        name,
+        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR | rustix::fs::Mode::XUSR,
+    )
+    .map_err(rustix_snapshot_error)
+}
+
 pub(crate) fn optional_symlink_metadata(
     path: &Path,
 ) -> Result<Option<SnapshotPathMetadata>, SnapshotError> {

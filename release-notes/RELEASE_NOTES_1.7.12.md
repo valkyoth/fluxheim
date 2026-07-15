@@ -240,6 +240,9 @@ trailers are not part of this release.
   limit impact and rollback diagnostics to 4 KiB without control characters.
 - Preserve existing `current`, generation, snapshot, and recovery files when
   any new size or diagnostic admission check rejects input.
+- Create new snapshot-store directories relative to a no-symlink parent
+  directory handle, closing the path-resolution race around directory
+  creation and keeping filesystem safety checks effective under concurrency.
 
 ## Reproducible FIPS-Backend Evidence
 

@@ -15,8 +15,8 @@ pub(crate) use crate::store_fs_metadata::{
 };
 #[cfg(unix)]
 use crate::store_fs_unix::{
-    open_private_lock_file_in_directory, sync_directory as sync_directory_unix,
-    write_atomically_in_directory,
+    create_private_directory_in_parent, open_private_lock_file_in_directory,
+    sync_directory as sync_directory_unix, write_atomically_in_directory,
 };
 
 #[cfg(unix)]
@@ -248,8 +248,8 @@ pub(crate) fn ensure_real_directory(path: &Path) -> Result<(), SnapshotError> {
 
     let created = match create_private_directory(path) {
         Ok(()) => true,
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => false,
-        Err(error) => return Err(SnapshotError::Io(error)),
+        Err(SnapshotError::Io(error)) if error.kind() == io::ErrorKind::AlreadyExists => false,
+        Err(error) => return Err(error),
     };
     if created {
         set_private_directory_mode(path)?;
@@ -267,17 +267,13 @@ pub(crate) fn ensure_real_directory(path: &Path) -> Result<(), SnapshotError> {
 }
 
 #[cfg(unix)]
-pub(crate) fn create_private_directory(path: &Path) -> io::Result<()> {
-    use std::os::unix::fs::DirBuilderExt as _;
-
-    let mut builder = fs::DirBuilder::new();
-    builder.mode(SNAPSHOT_DIR_MODE);
-    builder.create(path)
+pub(crate) fn create_private_directory(path: &Path) -> Result<(), SnapshotError> {
+    create_private_directory_in_parent(path)
 }
 
 #[cfg(not(unix))]
-pub(crate) fn create_private_directory(path: &Path) -> io::Result<()> {
-    fs::create_dir(path)
+pub(crate) fn create_private_directory(path: &Path) -> Result<(), SnapshotError> {
+    fs::create_dir(path).map_err(SnapshotError::Io)
 }
 
 pub(crate) fn canonical_directory(path: &Path) -> Result<PathBuf, SnapshotError> {

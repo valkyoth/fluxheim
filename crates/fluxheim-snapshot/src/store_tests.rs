@@ -278,12 +278,7 @@ mod tests {
         rustix::process::umask(previous);
         result.unwrap();
 
-        use std::os::unix::fs::PermissionsExt as _;
-        let mode = std::fs::symlink_metadata(root)
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777;
+        let mode = snapshot_path_mode(std::path::Path::new(&root));
         assert_eq!(mode, super::SNAPSHOT_DIR_MODE);
     }
 
@@ -307,15 +302,15 @@ mod tests {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        use std::os::unix::fs::PermissionsExt as _;
-        assert_eq!(
-            std::fs::symlink_metadata(root)
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777,
-            super::SNAPSHOT_DIR_MODE
-        );
+        assert_eq!(snapshot_path_mode(&root), super::SNAPSHOT_DIR_MODE);
+    }
+
+    #[cfg(unix)]
+    fn snapshot_path_mode(path: &std::path::Path) -> u32 {
+        rustix::fs::statat(rustix::fs::CWD, path, rustix::fs::AtFlags::SYMLINK_NOFOLLOW)
+            .unwrap()
+            .st_mode
+            & 0o777
     }
 
     #[cfg(unix)]
