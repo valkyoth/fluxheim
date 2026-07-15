@@ -82,8 +82,13 @@ trailers are not part of this release.
 ## Downstream TLS Hardening
 
 - Add optional `tls.client_auth.crl_path` support to rustls and OpenSSL with an
-  8 MiB input bound, exactly-one-CRL validation, strict full-chain revocation,
-  and expired-CRL rejection.
+  8 MiB input bound, a 1-to-64 PEM CRL bundle limit, strict full-chain
+  revocation, and expired-CRL rejection. Root/intermediate/client regression
+  handshakes prove hierarchical mTLS succeeds only when every required issuer
+  CRL is present.
+- Require a CRL bundle when required client authentication is combined with a
+  FIPS/ISO-required compliance mode; ordinary client auth retains explicit
+  opt-in revocation behavior.
 - Stage OpenSSL CRLs from the exact bounded bytes already admitted by Fluxheim,
   preventing an OpenSSL pathname reopen from bypassing input admission.
 - Index one-label wildcard SNI certificates by normalized suffix, replacing an
@@ -91,6 +96,9 @@ trailers are not part of this release.
 - Build complete, policy-equivalent OpenSSL contexts for every SNI certificate
   and atomically switch contexts during ClientHello processing. Certificate/key
   mismatches now reject reload before the active context store is replaced.
+- Parse OpenSSL client-auth policy once per SNI store generation, share admitted
+  CA objects across contexts, reject projected active-plus-reload policy input
+  above 128 MiB, and divide a 4096-entry session cache budget across contexts.
 
 ## Shared Cache Policy Hardening
 

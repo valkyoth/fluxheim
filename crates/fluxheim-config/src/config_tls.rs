@@ -197,8 +197,17 @@ impl TlsConfig {
                 reason: "X25519MLKEM768 needs a rustls crypto provider with post-quantum key exchange support; the default rustls backend currently uses ring",
             });
         }
-        self.validate_fips_policy()?;
         self.client_auth.validate()?;
+        if self.compliance_mode().required()
+            && self.client_auth.mode == TlsClientAuthMode::Required
+            && self.client_auth.crl_path.is_none()
+        {
+            return Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.client_auth.crl_path",
+                reason: "required client authentication in FIPS/ISO-required mode requires a CRL bundle",
+            });
+        }
+        self.validate_fips_policy()?;
 
         for certificate in &self.certificates {
             certificate.validate("tls.certificates")?;

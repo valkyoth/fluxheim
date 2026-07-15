@@ -16,17 +16,21 @@ use crate::tls_input::{
     read_bounded_secret,
 };
 use crate::{DownstreamCertificateSelector, openssl_cipher_lists, openssl_curve_list};
-use client_auth::apply_client_auth;
+use client_auth::OpenSslClientAuthPolicy;
 pub use error::{OpenSslDownstreamAcceptorError, OpenSslDownstreamCertificateStoreError};
 
 const ALPN_HTTP1: &[u8] = b"\x08http/1.1";
 const ALPN_HTTP2: &[u8] = b"\x02h2";
 const ALPN_HTTP2_HTTP1: &[u8] = b"\x02h2\x08http/1.1";
+const MAX_PROJECTED_OPENSSL_SNI_POLICY_BYTES: usize = 128 * 1024 * 1024;
+const OPENSSL_SESSION_CACHE_BUDGET: usize = 4096;
+const OPENSSL_RELOAD_POLICY_GENERATIONS: usize = 2;
 
 pub struct OpenSslDownstreamCertificateStore {
     selector: DownstreamCertificateSelector,
     tls: TlsConfig,
     certificates: ArcSwap<Vec<Option<OpenSslDownstreamCertificate>>>,
+    session_cache_entries_per_context: i32,
     pending_managed_certificate_recorder: Option<fn()>,
 }
 
@@ -36,23 +40,38 @@ impl OpenSslDownstreamCertificateStore {
         tls: &TlsConfig,
         pending_managed_certificate_recorder: Option<fn()>,
     ) -> Result<Self, OpenSslDownstreamCertificateStoreError> {
+        let client_auth = OpenSslClientAuthPolicy::load(tls)?;
+        let session_cache_entries_per_context = validate_openssl_sni_context_budget(
+            selector.certificates().len(),
+            client_auth.input_bytes(),
+        )?;
         let certificates = load_openssl_downstream_certificates(
             selector,
             tls,
+            &client_auth,
+            session_cache_entries_per_context,
             pending_managed_certificate_recorder,
         )?;
         Ok(Self {
             selector: selector.clone(),
             tls: tls.clone(),
             certificates: ArcSwap::from_pointee(certificates),
+            session_cache_entries_per_context,
             pending_managed_certificate_recorder,
         })
     }
 
     pub fn reload(&self) -> Result<(), OpenSslDownstreamCertificateStoreError> {
+        let client_auth = OpenSslClientAuthPolicy::load(&self.tls)?;
+        validate_openssl_sni_context_budget(
+            self.selector.certificates().len(),
+            client_auth.input_bytes(),
+        )?;
         let certificates = load_openssl_downstream_certificates(
             &self.selector,
             &self.tls,
+            &client_auth,
+            self.session_cache_entries_per_context,
             self.pending_managed_certificate_recorder,
         )?;
         self.certificates.store(Arc::new(certificates));
@@ -102,11 +121,13 @@ impl OpenSslDownstreamCertificate {
     fn load(
         certificate: &StaticCertificateConfig,
         tls: &TlsConfig,
+        client_auth: &OpenSslClientAuthPolicy,
+        session_cache_entries: i32,
     ) -> Result<Self, OpenSslDownstreamAcceptorError> {
         let mut builder = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls_server())
             .map_err(OpenSslDownstreamAcceptorError::BuildAcceptor)?;
         apply_certificate(&mut builder, certificate)?;
-        apply_tls_policy(&mut builder, tls)?;
+        apply_tls_policy(&mut builder, tls, client_auth, session_cache_entries)?;
         Ok(Self {
             context: builder.build().into_context(),
         })
@@ -128,7 +149,13 @@ pub fn build_openssl_downstream_acceptor(
     let mut builder = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls_server())
         .map_err(OpenSslDownstreamAcceptorError::BuildAcceptor)?;
     apply_certificate(&mut builder, certificate)?;
-    apply_tls_policy(&mut builder, tls)?;
+    let client_auth = OpenSslClientAuthPolicy::load(tls)?;
+    apply_tls_policy(
+        &mut builder,
+        tls,
+        &client_auth,
+        OPENSSL_SESSION_CACHE_BUDGET as i32,
+    )?;
     Ok(builder.build())
 }
 
@@ -152,7 +179,13 @@ pub fn build_openssl_downstream_acceptor_with_sni_store(
         }
         Ok(())
     });
-    apply_tls_policy(&mut builder, tls)?;
+    let client_auth = OpenSslClientAuthPolicy::load(tls)?;
+    apply_tls_policy(
+        &mut builder,
+        tls,
+        &client_auth,
+        store.session_cache_entries_per_context,
+    )?;
     Ok(builder.build())
 }
 
@@ -247,6 +280,8 @@ fn load_private_key(
 fn load_openssl_downstream_certificates(
     selector: &DownstreamCertificateSelector,
     tls: &TlsConfig,
+    client_auth: &OpenSslClientAuthPolicy,
+    session_cache_entries: i32,
     pending_managed_certificate_recorder: Option<fn()>,
 ) -> Result<Vec<Option<OpenSslDownstreamCertificate>>, OpenSslDownstreamCertificateStoreError> {
     let mut certificates = Vec::with_capacity(selector.certificates().len());
@@ -295,7 +330,12 @@ fn load_openssl_downstream_certificates(
             certificates.push(None);
             continue;
         }
-        certificates.push(Some(OpenSslDownstreamCertificate::load(certificate, tls)?));
+        certificates.push(Some(OpenSslDownstreamCertificate::load(
+            certificate,
+            tls,
+            client_auth,
+            session_cache_entries,
+        )?));
     }
     Ok(certificates)
 }
@@ -331,7 +371,10 @@ fn path_exists(path: &std::path::Path) -> Result<bool, std::io::Error> {
 fn apply_tls_policy(
     builder: &mut openssl::ssl::SslAcceptorBuilder,
     tls: &TlsConfig,
+    client_auth: &OpenSslClientAuthPolicy,
+    session_cache_entries: i32,
 ) -> Result<(), OpenSslDownstreamAcceptorError> {
+    builder.set_session_cache_size(session_cache_entries);
     let alpn = openssl_alpn_wire(tls.effective_alpn());
     builder.set_alpn_select_callback(move |_ssl, client| {
         openssl::ssl::select_next_proto(alpn, client).ok_or(AlpnError::NOACK)
@@ -367,8 +410,33 @@ fn apply_tls_policy(
     builder
         .set_max_proto_version(max_version)
         .map_err(OpenSslDownstreamAcceptorError::ApplyProtocol)?;
-    apply_client_auth(builder, tls)?;
+    client_auth.apply(builder)?;
     Ok(())
+}
+
+fn validate_openssl_sni_context_budget(
+    certificate_count: usize,
+    policy_input_bytes: usize,
+) -> Result<i32, OpenSslDownstreamCertificateStoreError> {
+    let context_count = certificate_count
+        .checked_add(1)
+        .ok_or(OpenSslDownstreamCertificateStoreError::ContextBudgetOverflow)?;
+    let projected_bytes = policy_input_bytes
+        .checked_mul(context_count)
+        .and_then(|bytes| bytes.checked_mul(OPENSSL_RELOAD_POLICY_GENERATIONS))
+        .ok_or(OpenSslDownstreamCertificateStoreError::ContextBudgetOverflow)?;
+    if projected_bytes > MAX_PROJECTED_OPENSSL_SNI_POLICY_BYTES {
+        return Err(
+            OpenSslDownstreamCertificateStoreError::ClientAuthPolicyBudgetExceeded {
+                context_count,
+                projected_bytes,
+                maximum_bytes: MAX_PROJECTED_OPENSSL_SNI_POLICY_BYTES,
+            },
+        );
+    }
+    let entries = (OPENSSL_SESSION_CACHE_BUDGET / context_count).max(1);
+    i32::try_from(entries)
+        .map_err(|_| OpenSslDownstreamCertificateStoreError::ContextBudgetOverflow)
 }
 
 fn openssl_alpn_wire(policy: TlsAlpnPolicy) -> &'static [u8] {

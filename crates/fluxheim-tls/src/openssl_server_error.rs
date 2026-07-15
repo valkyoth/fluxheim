@@ -113,14 +113,22 @@ pub enum OpenSslDownstreamAcceptorError {
     },
     #[error("TLS client-auth CRL path cannot be passed safely to OpenSSL: {path}")]
     UnsupportedClientAuthCrlPath { path: PathBuf },
-    #[error("OpenSSL did not load exactly one TLS client-auth CRL from {path}")]
-    InvalidClientAuthCrlCount { path: PathBuf },
+    #[error(
+        "TLS client-auth CRL bundle {path} contains {count} revocation lists; expected 1..={maximum}"
+    )]
+    InvalidClientAuthCrlCount {
+        path: PathBuf,
+        count: usize,
+        maximum: usize,
+    },
     #[error("OpenSSL rejected TLS client-auth CRL {path}: {source}")]
     ApplyClientAuthCrl {
         path: PathBuf,
         #[source]
         source: openssl::error::ErrorStack,
     },
+    #[error("TLS client-auth policy input size overflowed its resource budget")]
+    ClientAuthPolicySizeOverflow,
 }
 
 #[derive(Debug, Error)]
@@ -138,4 +146,14 @@ pub enum OpenSslDownstreamCertificateStoreError {
     },
     #[error("downstream SNI certificate index {index} was not loaded")]
     MissingLoadedCertificate { index: usize },
+    #[error(
+        "projected OpenSSL SNI client-auth policy storage is {projected_bytes} bytes across {context_count} contexts; maximum is {maximum_bytes} bytes"
+    )]
+    ClientAuthPolicyBudgetExceeded {
+        context_count: usize,
+        projected_bytes: usize,
+        maximum_bytes: usize,
+    },
+    #[error("OpenSSL SNI context count overflowed its resource budget")]
+    ContextBudgetOverflow,
 }

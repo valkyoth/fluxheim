@@ -7,8 +7,9 @@ use fluxheim_config::{TlsCipherSuite, TlsClientAuthConfig, TlsClientAuthMode};
 use openssl::ssl::{SslConnector, SslVerifyMode};
 use openssl::{pkey::PKey, rsa::Rsa, ssl::Ssl, x509::X509};
 
+use super::client_auth::{OpenSslClientAuthPolicy, apply_client_auth};
 use super::*;
-use crate::tls_input::MAX_CA_CERTIFICATES;
+use crate::tls_input::{MAX_CA_CERTIFICATES, MAX_CRL_COUNT};
 
 #[test]
 fn tls13_only_allowlist_disables_tls12_defaults() {
@@ -18,7 +19,7 @@ fn tls13_only_allowlist_disables_tls12_defaults() {
         cipher_suites: vec![TlsCipherSuite::Tls13Aes256GcmSha384],
         ..TlsConfig::default()
     };
-    apply_tls_policy(&mut builder, &tls).unwrap();
+    apply_test_tls_policy(&mut builder, &tls);
     assert_eq!(builder.min_proto_version(), Some(SslVersion::TLS1_3));
     assert_eq!(builder.max_proto_version(), None);
 }
@@ -31,7 +32,7 @@ fn tls12_only_allowlist_disables_tls13_defaults() {
         cipher_suites: vec![TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256],
         ..TlsConfig::default()
     };
-    apply_tls_policy(&mut builder, &tls).unwrap();
+    apply_test_tls_policy(&mut builder, &tls);
     assert_eq!(builder.min_proto_version(), Some(SslVersion::TLS1_2));
     assert_eq!(builder.max_proto_version(), Some(SslVersion::TLS1_2));
 }
@@ -89,6 +90,52 @@ fn client_auth_crl_rejects_revoked_certificate_handshake() {
 #[test]
 fn client_auth_crl_rejects_expired_revocation_list_handshake() {
     assert!(!client_auth_handshake_succeeds(ClientAuthCrl::Expired));
+}
+
+#[test]
+fn client_auth_crl_bundle_accepts_hierarchical_client_chain_handshake() {
+    assert!(!hierarchical_client_auth_handshake_succeeds(false));
+    assert!(hierarchical_client_auth_handshake_succeeds(true));
+}
+
+#[test]
+fn client_auth_crl_count_is_bounded() {
+    let directory = tempfile::tempdir().unwrap();
+    let fixture = crate::test_certificates::revoked_client_certificate_fixture();
+    let ca_path = directory.path().join("client-ca.pem");
+    let crl_path = directory.path().join("client-crls.pem");
+    std::fs::write(&ca_path, fixture.ca_pem).unwrap();
+    std::fs::write(&crl_path, fixture.crl_pem.repeat(MAX_CRL_COUNT + 1)).unwrap();
+    let tls = TlsConfig {
+        client_auth: TlsClientAuthConfig {
+            mode: TlsClientAuthMode::Required,
+            ca_path: Some(ca_path),
+            crl_path: Some(crl_path.clone()),
+        },
+        ..TlsConfig::default()
+    };
+    let mut builder = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls_server()).unwrap();
+
+    assert!(matches!(
+        apply_client_auth(&mut builder, &tls),
+        Err(OpenSslDownstreamAcceptorError::InvalidClientAuthCrlCount {
+            path,
+            count,
+            maximum: MAX_CRL_COUNT,
+        }) if path == crl_path && count == MAX_CRL_COUNT + 1
+    ));
+}
+
+#[test]
+fn sni_client_auth_policy_and_session_cache_are_globally_bounded() {
+    assert_eq!(
+        validate_openssl_sni_context_budget(3, 0).unwrap(),
+        (OPENSSL_SESSION_CACHE_BUDGET / 4) as i32
+    );
+    assert!(matches!(
+        validate_openssl_sni_context_budget(1024, MAX_PROJECTED_OPENSSL_SNI_POLICY_BYTES / 1024,),
+        Err(OpenSslDownstreamCertificateStoreError::ClientAuthPolicyBudgetExceeded { .. })
+    ));
 }
 
 #[test]
@@ -169,6 +216,10 @@ fn sni_store_switches_the_complete_connection_context() {
 
     assert!(!std::ptr::eq(original_context, ssl.ssl_context()));
     assert!(ssl.ssl_context().certificate().is_some());
+    assert_eq!(
+        ssl.ssl_context().session_cache_size(),
+        i64::from(store.session_cache_entries_per_context)
+    );
 }
 
 #[test]
@@ -232,6 +283,17 @@ fn handshake_succeeds(cipher_suites: Vec<TlsCipherSuite>, client_protocol: SslVe
     client && server.is_ok()
 }
 
+fn apply_test_tls_policy(builder: &mut openssl::ssl::SslAcceptorBuilder, tls: &TlsConfig) {
+    let client_auth = OpenSslClientAuthPolicy::load(tls).unwrap();
+    apply_tls_policy(
+        builder,
+        tls,
+        &client_auth,
+        OPENSSL_SESSION_CACHE_BUDGET as i32,
+    )
+    .unwrap();
+}
+
 #[derive(Clone, Copy)]
 enum ClientAuthCrl {
     None,
@@ -281,6 +343,65 @@ fn client_auth_handshake_succeeds(crl: ClientAuthCrl) -> bool {
         .unwrap();
     connector
         .set_private_key(&PKey::private_key_from_pem(fixture.client_key_pem.as_bytes()).unwrap())
+        .unwrap();
+    let client = connector
+        .build()
+        .connect("localhost", TcpStream::connect(address).unwrap())
+        .map(|_| ())
+        .map_err(|error| error.to_string());
+    let server = server.join().unwrap();
+    client.is_ok() && server.is_ok()
+}
+
+fn hierarchical_client_auth_handshake_succeeds(complete_crl_bundle: bool) -> bool {
+    let directory = tempfile::tempdir().unwrap();
+    let fixture = crate::test_certificates::hierarchical_client_certificate_fixture();
+    let ca_path = directory.path().join("root-ca.pem");
+    let crl_path = directory.path().join("client-crls.pem");
+    std::fs::write(&ca_path, &fixture.root_ca_pem).unwrap();
+    std::fs::write(
+        &crl_path,
+        if complete_crl_bundle {
+            &fixture.crl_bundle_pem
+        } else {
+            &fixture.intermediate_crl_pem
+        },
+    )
+    .unwrap();
+    let certificate = StaticCertificateConfig {
+        cert_path: PathBuf::from("../../tests/fixtures/tls/localhost-cert.pem"),
+        key_path: PathBuf::from("../../tests/fixtures/tls/localhost-key.pem"),
+    };
+    let tls = TlsConfig {
+        enabled: true,
+        client_auth: TlsClientAuthConfig {
+            mode: TlsClientAuthMode::Required,
+            ca_path: Some(ca_path),
+            crl_path: Some(crl_path),
+        },
+        ..TlsConfig::default()
+    };
+    let acceptor = build_openssl_downstream_acceptor(&tls, &certificate).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        acceptor
+            .accept(stream)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    });
+
+    let mut connector = SslConnector::builder(SslMethod::tls_client()).unwrap();
+    connector.set_verify(SslVerifyMode::NONE);
+    connector
+        .set_certificate(&X509::from_pem(fixture.client_pem.as_bytes()).unwrap())
+        .unwrap();
+    connector
+        .set_private_key(&PKey::private_key_from_pem(fixture.client_key_pem.as_bytes()).unwrap())
+        .unwrap();
+    connector
+        .add_extra_chain_cert(X509::from_pem(fixture.intermediate_pem.as_bytes()).unwrap())
         .unwrap();
     let client = connector
         .build()

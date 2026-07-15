@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use crate::rustls_kx_group;
 use crate::tls_input::{
-    MAX_CA_BUNDLE_BYTES, MAX_CA_CERTIFICATES, MAX_CRL_BYTES, read_bounded_file,
+    MAX_CA_BUNDLE_BYTES, MAX_CA_CERTIFICATES, MAX_CRL_BYTES, MAX_CRL_COUNT, read_bounded_file,
 };
 use crate::{TlsRuntimeError, rustls_alpn_protocols, rustls_cipher_suite, rustls_crypto_provider};
 
@@ -64,8 +64,14 @@ pub enum RustlsDownstreamServerConfigError {
         #[source]
         source: rustls::pki_types::pem::Error,
     },
-    #[error("TLS client-auth CRL {path} does not contain exactly one revocation list")]
-    InvalidClientAuthCrlCount { path: PathBuf },
+    #[error(
+        "TLS client-auth CRL bundle {path} contains {count} revocation lists; expected 1..={maximum}"
+    )]
+    InvalidClientAuthCrlCount {
+        path: PathBuf,
+        count: usize,
+        maximum: usize,
+    },
     #[error("failed to build TLS client certificate verifier from {path}: {source}")]
     BuildClientAuthVerifier {
         path: PathBuf,
@@ -192,10 +198,12 @@ fn rustls_client_cert_verifier(
                     source,
                 },
             )?;
-        if crls.len() != 1 {
+        if crls.is_empty() || crls.len() > MAX_CRL_COUNT {
             return Err(
                 RustlsDownstreamServerConfigError::InvalidClientAuthCrlCount {
                     path: crl_path.to_path_buf(),
+                    count: crls.len(),
+                    maximum: MAX_CRL_COUNT,
                 },
             );
         }
@@ -335,9 +343,80 @@ mod tests {
 
         assert!(matches!(
             rustls_client_cert_verifier(&tls),
-            Err(RustlsDownstreamServerConfigError::InvalidClientAuthCrlCount { path })
+            Err(RustlsDownstreamServerConfigError::InvalidClientAuthCrlCount { path, count: 0, .. })
                 if path == crl_path
         ));
+    }
+
+    #[test]
+    fn client_auth_crl_count_is_bounded() {
+        let directory = tempfile::tempdir().unwrap();
+        let fixture = crate::test_certificates::revoked_client_certificate_fixture();
+        let ca_path = directory.path().join("client-ca.pem");
+        let crl_path = directory.path().join("client-crls.pem");
+        std::fs::write(&ca_path, fixture.ca_pem).unwrap();
+        std::fs::write(&crl_path, fixture.crl_pem.repeat(MAX_CRL_COUNT + 1)).unwrap();
+        let tls = TlsConfig {
+            client_auth: TlsClientAuthConfig {
+                mode: TlsClientAuthMode::Required,
+                ca_path: Some(ca_path),
+                crl_path: Some(crl_path.clone()),
+            },
+            ..TlsConfig::default()
+        };
+
+        assert!(matches!(
+            rustls_client_cert_verifier(&tls),
+            Err(RustlsDownstreamServerConfigError::InvalidClientAuthCrlCount {
+                path,
+                count,
+                maximum: MAX_CRL_COUNT,
+            }) if path == crl_path && count == MAX_CRL_COUNT + 1
+        ));
+    }
+
+    #[test]
+    fn client_auth_crl_bundle_verifies_hierarchical_client_chain() {
+        let directory = tempfile::tempdir().unwrap();
+        let fixture = crate::test_certificates::hierarchical_client_certificate_fixture();
+        let ca_path = directory.path().join("root-ca.pem");
+        let crl_path = directory.path().join("client-crls.pem");
+        std::fs::write(&ca_path, &fixture.root_ca_pem).unwrap();
+        std::fs::write(&crl_path, &fixture.intermediate_crl_pem).unwrap();
+        let mut tls = TlsConfig {
+            client_auth: TlsClientAuthConfig {
+                mode: TlsClientAuthMode::Required,
+                ca_path: Some(ca_path),
+                crl_path: Some(crl_path.clone()),
+            },
+            ..TlsConfig::default()
+        };
+        let certificate = CertificateDer::from(fixture.client_der);
+        let intermediates = [CertificateDer::from(fixture.intermediate_der)];
+        let verifier_without_root_crl = rustls_client_cert_verifier(&tls).unwrap().unwrap();
+        assert!(
+            verifier_without_root_crl
+                .verify_client_cert(
+                    &certificate,
+                    &intermediates,
+                    rustls::pki_types::UnixTime::now(),
+                )
+                .is_err()
+        );
+
+        std::fs::write(&crl_path, fixture.crl_bundle_pem).unwrap();
+        tls.client_auth.crl_path = Some(crl_path);
+        let verifier = rustls_client_cert_verifier(&tls).unwrap().unwrap();
+
+        assert!(
+            verifier
+                .verify_client_cert(
+                    &certificate,
+                    &intermediates,
+                    rustls::pki_types::UnixTime::now(),
+                )
+                .is_ok()
+        );
     }
 
     #[test]

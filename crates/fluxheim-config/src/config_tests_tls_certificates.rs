@@ -155,6 +155,33 @@ fn rejects_tls_client_auth_crl_while_client_auth_is_off() {
 }
 
 #[test]
+fn compliance_mode_requires_crl_for_required_client_auth() {
+    let config: Config = toml::from_str(
+        r#"
+            [tls]
+            curve_preferences = ["CurveP256", "CurveP384"]
+            cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
+
+            [tls.fips]
+            required = true
+
+            [tls.client_auth]
+            mode = "required"
+            ca_path = "tests/fixtures/tls/localhost-cert.pem"
+        "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidTlsPolicy {
+            field: "tls.client_auth.crl_path",
+            reason: "required client authentication in FIPS/ISO-required mode requires a CRL bundle"
+        })
+    );
+}
+
+#[test]
 fn rejects_removed_s2n_tls_backend() {
     let error = toml::from_str::<Config>(
         r#"

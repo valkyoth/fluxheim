@@ -3016,7 +3016,7 @@ listeners:
 [tls.client_auth]
 mode = "required" # "off", "optional", or "required"
 ca_path = "/etc/fluxheim/tls/client-ca.pem"
-crl_path = "/etc/fluxheim/tls/client.crl.pem" # optional, strict revocation
+crl_path = "/etc/fluxheim/tls/client-crls.pem" # optional PEM CRL bundle
 ```
 
 `mode = "required"` rejects TLS handshakes that do not present a certificate
@@ -3029,12 +3029,26 @@ and OpenSSL listeners only.
 Client-auth CA bundles are capped at 8 MiB and 4096 certificates. Oversized or
 over-count bundles fail listener construction instead of consuming unbounded
 memory during startup or certificate reload.
-When `crl_path` is set, Fluxheim requires exactly one bounded PEM CRL and checks
-the complete presented client chain. Rustls rejects unknown revocation status
-and expired CRLs; OpenSSL enables `CRL_CHECK` and `CRL_CHECK_ALL`. Malformed,
-empty, multi-CRL, oversized, expired, or revoked inputs fail closed. CRL policy
-changes require a process upgrade, so a failed replacement cannot mutate the
-active listener configuration.
+When `crl_path` is set, Fluxheim accepts a bounded PEM bundle containing 1 to
+64 CRLs and checks the complete presented client chain. Hierarchical client PKI
+therefore needs the issuing intermediate CA CRL for each client certificate and
+the parent CA CRL for each non-root intermediate. Rustls rejects unknown
+revocation status and expired CRLs; OpenSSL enables `CRL_CHECK` and
+`CRL_CHECK_ALL`. Malformed, empty, over-count, oversized, expired, or revoked
+inputs fail closed. CRL policy changes require a process upgrade, so a failed
+replacement cannot mutate the active listener configuration. Without
+`crl_path`, ordinary client-auth deployments validate certificate trust but do
+not perform revocation checks. Required client authentication under
+`tls.fips.required = true` or `tls.iso19790.required = true` must configure a
+CRL bundle.
+
+The OpenSSL SNI store parses and admits client-auth policy once per atomic
+generation and shares reference-counted CA certificates across certificate
+contexts. It rejects a configuration when the CA/CRL input size projected
+across the active and replacement SNI context generations exceeds 128 MiB.
+OpenSSL's internal server session-cache capacity is divided across all SNI
+contexts from a global 4096-entry budget, preventing the backend default from
+being multiplied by every configured certificate.
 Verified client-certificate identity can be forwarded explicitly with
 request header templates such as `{tls.client_cert_sha256}`. Route decisions
 based on certificate identity remain future work; do not rely on client-cert
