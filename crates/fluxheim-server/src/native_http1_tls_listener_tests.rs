@@ -292,19 +292,23 @@ async fn native_openssl_listener_drains_retained_certificate_generation() {
         .unwrap();
     });
 
-    let tcp = TcpStream::connect(addr).await.unwrap();
-    let ssl = connector
-        .configure()
-        .unwrap()
-        .into_ssl("localhost")
-        .unwrap();
-    let mut stream = SslStream::new(ssl, tcp).unwrap();
-    std::pin::Pin::new(&mut stream).connect().await.unwrap();
-    stream
-        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
-        .await
-        .unwrap();
-    assert!(read_response(&mut stream).await.ends_with("generation one"));
+    let mut streams = Vec::new();
+    for _ in 0..2 {
+        let tcp = TcpStream::connect(addr).await.unwrap();
+        let ssl = connector
+            .configure()
+            .unwrap()
+            .into_ssl("localhost")
+            .unwrap();
+        let mut stream = SslStream::new(ssl, tcp).unwrap();
+        std::pin::Pin::new(&mut stream).connect().await.unwrap();
+        stream
+            .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        assert!(read_response(&mut stream).await.ends_with("generation one"));
+        streams.push(stream);
+    }
 
     store.reload().unwrap();
     let reload_store = store.clone();
@@ -315,11 +319,13 @@ async fn native_openssl_listener_drains_retained_certificate_generation() {
     .unwrap()
     .unwrap();
 
-    let mut byte = [0_u8; 1];
-    let closed = tokio::time::timeout(Duration::from_secs(1), stream.read(&mut byte))
-        .await
-        .expect("drained TLS connection must wake");
-    assert!(matches!(closed, Ok(0) | Err(_)));
+    for mut stream in streams {
+        let mut byte = [0_u8; 1];
+        let closed = tokio::time::timeout(Duration::from_secs(1), stream.read(&mut byte))
+            .await
+            .expect("every drained TLS connection must wake");
+        assert!(matches!(closed, Ok(0) | Err(_)));
+    }
     shutdown_tx.send(()).unwrap();
     join.await.unwrap();
 }

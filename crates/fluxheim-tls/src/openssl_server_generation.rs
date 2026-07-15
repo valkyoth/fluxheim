@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
 use std::task::{Context, Poll, Waker};
@@ -8,9 +9,9 @@ use openssl::ssl::{Ssl, SslRef};
 
 use super::OpenSslDownstreamCertificateStoreError;
 
-type OpenSslGenerationLeaseIndex = Index<Ssl, Arc<OpenSslGenerationLease>>;
+type OpenSslConnectionLeaseIndex = Index<Ssl, Arc<OpenSslConnectionLease>>;
 
-static LEASE_INDEX: OnceLock<OpenSslGenerationLeaseIndex> = OnceLock::new();
+static LEASE_INDEX: OnceLock<OpenSslConnectionLeaseIndex> = OnceLock::new();
 static LEASE_INDEX_INITIALIZATION: Mutex<()> = Mutex::new(());
 
 struct OpenSslGenerationRegistry {
@@ -20,49 +21,94 @@ struct OpenSslGenerationRegistry {
 
 pub(super) struct OpenSslGenerationLease {
     drain_requested: AtomicBool,
-    drain_waker: Mutex<Option<Waker>>,
+    drain_registrations: Mutex<OpenSslDrainRegistrations>,
     registry: Weak<OpenSslGenerationRegistry>,
+}
+
+struct OpenSslDrainRegistrations {
+    next_connection_id: u64,
+    wakers: HashMap<u64, Waker>,
+}
+
+struct OpenSslConnectionLease {
+    id: u64,
+    generation: Arc<OpenSslGenerationLease>,
 }
 
 impl OpenSslGenerationLease {
     fn new(registry: &Arc<OpenSslGenerationRegistry>) -> Self {
         Self {
             drain_requested: AtomicBool::new(false),
-            drain_waker: Mutex::new(None),
+            drain_registrations: Mutex::new(OpenSslDrainRegistrations {
+                next_connection_id: 0,
+                wakers: HashMap::new(),
+            }),
             registry: Arc::downgrade(registry),
+        }
+    }
+
+    fn new_connection(self: &Arc<Self>) -> OpenSslConnectionLease {
+        let mut registrations = self
+            .drain_registrations
+            .lock()
+            .unwrap_or_else(|_| abort_generation_waker_poison());
+        let id = registrations.next_connection_id;
+        registrations.next_connection_id = id
+            .checked_add(1)
+            .unwrap_or_else(|| abort_generation_connection_id_exhausted());
+        OpenSslConnectionLease {
+            id,
+            generation: self.clone(),
         }
     }
 
     fn request_drain(&self) {
         self.drain_requested.store(true, Ordering::Release);
-        let wake = self
-            .drain_waker
-            .lock()
-            .unwrap_or_else(|_| abort_generation_waker_poison())
-            .take();
-        if let Some(wake) = wake {
+        let wakers = {
+            let mut registrations = self
+                .drain_registrations
+                .lock()
+                .unwrap_or_else(|_| abort_generation_waker_poison());
+            std::mem::take(&mut registrations.wakers)
+        };
+        for (_, wake) in wakers {
             wake.wake();
         }
     }
+}
 
+impl OpenSslConnectionLease {
     fn poll_drain(&self, context: &mut Context<'_>) -> Poll<()> {
-        if self.drain_requested.load(Ordering::Acquire) {
+        if self.generation.drain_requested.load(Ordering::Acquire) {
             return Poll::Ready(());
         }
         let mut registered = self
-            .drain_waker
+            .generation
+            .drain_registrations
             .lock()
             .unwrap_or_else(|_| abort_generation_waker_poison());
-        if self.drain_requested.load(Ordering::Acquire) {
+        if self.generation.drain_requested.load(Ordering::Acquire) {
             return Poll::Ready(());
         }
         if !registered
-            .as_ref()
+            .wakers
+            .get(&self.id)
             .is_some_and(|registered| registered.will_wake(context.waker()))
         {
-            *registered = Some(context.waker().clone());
+            registered.wakers.insert(self.id, context.waker().clone());
         }
         Poll::Pending
+    }
+}
+
+impl Drop for OpenSslConnectionLease {
+    fn drop(&mut self) {
+        self.generation
+            .drain_registrations
+            .lock()
+            .unwrap_or_else(|_| abort_generation_waker_poison())
+            .wakers
+            .remove(&self.id);
     }
 }
 
@@ -148,7 +194,8 @@ impl OpenSslReloadGenerationState {
         ssl: &mut SslRef,
         lease: Arc<OpenSslGenerationLease>,
     ) -> Result<(), OpenSslDownstreamCertificateStoreError> {
-        ssl.set_ex_data(generation_lease_index()?, lease);
+        let connection = Arc::new(lease.new_connection());
+        ssl.set_ex_data(generation_lease_index()?, connection);
         Ok(())
     }
 }
@@ -171,7 +218,7 @@ impl OpenSslReloadGenerationGuard<'_> {
 }
 
 fn generation_lease_index()
--> Result<OpenSslGenerationLeaseIndex, OpenSslDownstreamCertificateStoreError> {
+-> Result<OpenSslConnectionLeaseIndex, OpenSslDownstreamCertificateStoreError> {
     if let Some(index) = LEASE_INDEX.get() {
         return Ok(*index);
     }
@@ -181,7 +228,7 @@ fn generation_lease_index()
     if let Some(index) = LEASE_INDEX.get() {
         return Ok(*index);
     }
-    let created = Ssl::new_ex_index::<Arc<OpenSslGenerationLease>>()
+    let created = Ssl::new_ex_index::<Arc<OpenSslConnectionLease>>()
         .map_err(OpenSslDownstreamCertificateStoreError::CreateGenerationLeaseIndex)?;
     LEASE_INDEX
         .set(created)
@@ -195,6 +242,11 @@ fn prune_released_generations(live: &mut Vec<Weak<OpenSslGenerationLease>>) {
 
 fn abort_generation_waker_poison() -> ! {
     log::error!(target: "fluxheim::tls", "OpenSSL generation drain waker lock poisoned");
+    std::process::abort()
+}
+
+fn abort_generation_connection_id_exhausted() -> ! {
+    log::error!(target: "fluxheim::tls", "OpenSSL generation connection ID space exhausted");
     std::process::abort()
 }
 

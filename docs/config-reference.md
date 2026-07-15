@@ -3050,15 +3050,16 @@ OpenSSL's internal server session-cache capacity is divided across all SNI
 contexts from a global 4096-entry budget, preventing the backend default from
 being multiplied by every configured certificate. Complete reload operations
 are serialized, and every SNI-selected SSL connection retains an explicit lease
-for its certificate generation. At most two generations may be live. When an
-older generation blocks rotation, Fluxheim marks it for draining; the native
-OpenSSL HTTP/1, HTTP/2, and connection-takeover I/O paths wake and close those
-connections, then the reload automatically retries for up to 10 seconds. If
-connections cannot release within that bound, the reload fails closed without
-replacing the active certificates. This enforced lifetime cap makes the
-active-plus-replacement memory projection match actual retained generations.
-OpenSSL SSL ex-data uses one process-global generation-lease slot, including
-when listeners or certificate stores are reconstructed in-process.
+for its certificate generation and an independent drain-waker registration.
+At most two generations may be live. When an older generation blocks rotation,
+Fluxheim marks it for draining; the native OpenSSL HTTP/1, HTTP/2, and
+connection-takeover I/O paths wake and close every retained connection before
+the reload automatically retries for up to 10 seconds. If connections cannot
+release within that bound, the reload fails closed without replacing the active
+certificates. This enforced lifetime cap makes the active-plus-replacement
+memory projection match actual retained generations. OpenSSL SSL ex-data uses
+one process-global connection-lease slot, including when listeners or
+certificate stores are reconstructed in-process.
 Verified client-certificate identity can be forwarded explicitly with
 request header templates such as `{tls.client_cert_sha256}`. Route decisions
 based on certificate identity remain future work; do not rely on client-cert
