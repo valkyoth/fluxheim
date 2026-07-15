@@ -47,6 +47,13 @@ behavior when the change improves security or project direction.
   ensuring cache-hit optimization cannot produce stale integrity metadata.
 - Keep the FIPS proof containers separate from release images and document that
   provider evidence is not product-level FIPS validation.
+- Reject additional IANA special-purpose IPv4 and IPv6 DNS answers from stream
+  hostname upstream admission, including translation and transition prefixes.
+- Bound each complete downstream stream PROXY preamble with one absolute,
+  configurable 10-second deadline instead of refreshing a long idle timeout
+  for every byte received from a trusted proxy.
+- Refresh stream idle deadlines after every successful partial write so active
+  backpressured connections are not terminated between write progress events.
 
 ## 1.7.11 - 2026-07-14
 

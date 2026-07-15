@@ -14,6 +14,10 @@ pub(crate) fn default_stream_idle_timeout_secs() -> u64 {
     300
 }
 
+pub(crate) fn default_stream_proxy_header_timeout_secs() -> u64 {
+    10
+}
+
 pub(crate) fn default_stream_max_connections() -> usize {
     DEFAULT_STREAM_MAX_CONNECTIONS
 }

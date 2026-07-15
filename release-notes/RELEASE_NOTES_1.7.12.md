@@ -149,6 +149,19 @@ trailers are not part of this release.
   `SO_PROTOCOL=TCP`, in addition to the existing socket-family, stream-type,
   listening-state, planned-address, and one-shot ownership checks.
 
+## Stream Proxy Hardening
+
+- Reject IANA special-purpose IPv4 and IPv6 DNS answers that can represent
+  translation, transition, discard-only, benchmarking, documentation,
+  site-local, or SRv6 SID destinations. Explicit IP-literal upstreams and the
+  existing trusted private-DNS opt-in remain unchanged.
+- Add `proxy_header_timeout_secs`, defaulting to 10 seconds and capped at 60,
+  as one absolute deadline for the complete downstream PROXY v1/v2 preamble.
+  Byte-drip input from a trusted proxy cannot refresh this deadline.
+- Refresh the shared stream idle deadline after every successful partial write
+  and immediately sanitize each forwarded plaintext range, preserving active
+  connections under slow backpressure without extending truly idle sessions.
+
 ## Reproducible FIPS-Backend Evidence
 
 - Add separately pinned OpenSSL-FIPS and rustls/AWS-LC-FIPS proof
@@ -192,3 +205,11 @@ platform, configuration, key handling, and required compliance evidence.
 - Systemd unit and process-level smoke coverage verifies explicit TCP protocol
   admission, bounded declarations before receipt, one-shot ownership,
   complete-set closure on validation failure, and normal listener adoption.
+- Paused-time stream tests prove v1 and v2 PROXY byte-drip input cannot extend
+  the absolute preamble deadline and that partial writes keep an active,
+  backpressured stream alive beyond one idle period.
+- The real-binary stream smoke drip-feeds an incomplete PROXY preamble beyond
+  its deadline, verifies rejection, and then proves the listener still accepts
+  a complete authenticated preamble and proxies traffic.
+- Stream DNS-admission tests cover the blocked IANA special-purpose ranges and
+  the two globally reachable IPv4 protocol-assignment anycast exceptions.

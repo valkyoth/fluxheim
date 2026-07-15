@@ -14,6 +14,7 @@ upstreams = ["10.0.0.11:5432", "10.0.0.12:5432"]
 # drain_upstreams = []
 connect_timeout_secs = 5
 idle_timeout_secs = 300
+proxy_header_timeout_secs = 10
 # max_connection_secs = 3600
 max_connection_bytes = 1073741824
 max_connections = 1024

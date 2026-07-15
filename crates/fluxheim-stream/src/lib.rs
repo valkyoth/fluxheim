@@ -127,7 +127,9 @@ pub fn stream_dns_resolved_address_allowed(address: IpAddr) -> bool {
 }
 
 fn stream_dns_resolved_ipv4_address_allowed(address: Ipv4Addr) -> bool {
-    let [first, second, ..] = address.octets();
+    let [first, second, third, fourth] = address.octets();
+    let ietf_protocol_assignment =
+        first == 192 && second == 0 && third == 0 && !matches!(fourth, 9 | 10);
     !(address.is_unspecified()
         || address.is_loopback()
         || address.is_private()
@@ -135,6 +137,7 @@ fn stream_dns_resolved_ipv4_address_allowed(address: Ipv4Addr) -> bool {
         || address.is_multicast()
         || address.is_broadcast()
         || address.is_documentation()
+        || ietf_protocol_assignment
         || first >= 240
         || first == 0
         || (first == 100 && (64..=127).contains(&second))
@@ -146,12 +149,26 @@ fn stream_dns_resolved_ipv6_address_allowed(address: Ipv6Addr) -> bool {
         return stream_dns_resolved_ipv4_address_allowed(address);
     }
     let segments = address.segments();
+    let special_or_transition = (segments[0] == 0x0064
+        && segments[1] == 0xff9b
+        && segments[2..6].iter().all(|segment| *segment == 0))
+        || (segments[0] == 0x0064 && segments[1] == 0xff9b && segments[2] == 1)
+        || (segments[0] == 0x0100
+            && segments[1] == 0
+            && segments[2] == 0
+            && matches!(segments[3], 0 | 1))
+        || (segments[0] == 0x2001 && segments[1] < 0x0200)
+        || segments[0] == 0x2002
+        || (segments[0] == 0x3fff && segments[1] & 0xf000 == 0)
+        || segments[0] == 0x5f00
+        || (segments[0] & 0xffc0) == 0xfec0;
     !(address.is_unspecified()
         || address.is_loopback()
         || address.is_multicast()
         || address.is_unique_local()
         || address.is_unicast_link_local()
         || (segments[0] == 0x2001 && segments[1] == 0x0db8))
+        && !special_or_transition
 }
 
 pub fn stream_error_outcome(error: &FluxError) -> &'static str {
@@ -197,7 +214,7 @@ pub async fn apply_downstream_proxy_protocol_to_stream(
     protocol: DownstreamProxyProtocol,
     trusted_sources: &[StreamTrustedSource],
     direct_source: Option<SocketAddr>,
-    idle_timeout: Duration,
+    proxy_header_timeout: Duration,
 ) -> FluxResult<Option<SocketAddr>> {
     if protocol == DownstreamProxyProtocol::Off {
         return Ok(direct_source);
@@ -215,25 +232,33 @@ pub async fn apply_downstream_proxy_protocol_to_stream(
             "stream downstream PROXY protocol peer is not trusted",
         ));
     }
-    match protocol {
-        DownstreamProxyProtocol::Off => Ok(Some(direct_source)),
-        DownstreamProxyProtocol::V1 => {
-            read_downstream_proxy_protocol_v1(downstream, idle_timeout).await
+    let parse = async {
+        match protocol {
+            DownstreamProxyProtocol::Off => Ok(Some(direct_source)),
+            DownstreamProxyProtocol::V1 => read_downstream_proxy_protocol_v1(downstream).await,
+            DownstreamProxyProtocol::V2 => read_downstream_proxy_protocol_v2(downstream).await,
         }
-        DownstreamProxyProtocol::V2 => {
-            read_downstream_proxy_protocol_v2(downstream, idle_timeout).await
-        }
-    }
+    };
+    tokio::time::timeout(proxy_header_timeout, parse)
+        .await
+        .map_err(|_| {
+            FluxError::timeout(
+                "stream PROXY header timeout",
+                "complete PROXY header was not received before the deadline",
+            )
+        })?
 }
 
 async fn read_downstream_proxy_protocol_v1(
     downstream: &mut (impl AsyncRead + Unpin),
-    idle_timeout: Duration,
 ) -> FluxResult<Option<SocketAddr>> {
     let mut line = Vec::with_capacity(PROXY_PROTOCOL_V1_MAX_LINE);
     loop {
         let mut byte = [0u8; 1];
-        let read = read_with_idle_timeout(downstream, &mut byte, idle_timeout).await?;
+        let read = downstream
+            .read(&mut byte)
+            .await
+            .map_err(|error| FluxError::io("read stream PROXY header", error))?;
         if read == 0 {
             return Err(FluxError::InvalidInput(
                 "stream downstream PROXY protocol v1 header ended early",
@@ -254,10 +279,9 @@ async fn read_downstream_proxy_protocol_v1(
 
 async fn read_downstream_proxy_protocol_v2(
     downstream: &mut (impl AsyncRead + Unpin),
-    idle_timeout: Duration,
 ) -> FluxResult<Option<SocketAddr>> {
     let mut header = [0u8; PROXY_PROTOCOL_V2_HEADER_LEN];
-    read_exact_with_idle_timeout(downstream, &mut header, idle_timeout).await?;
+    read_exact_proxy_header(downstream, &mut header).await?;
     if &header[..PROXY_PROTOCOL_V2_SIGNATURE.len()] != PROXY_PROTOCOL_V2_SIGNATURE {
         return Err(FluxError::InvalidInput(
             "stream downstream PROXY v2 header has invalid signature",
@@ -271,26 +295,9 @@ async fn read_downstream_proxy_protocol_v2(
     }
     let mut payload = vec![0u8; payload_len];
     if payload_len > 0 {
-        read_exact_with_idle_timeout(downstream, &mut payload, idle_timeout).await?;
+        read_exact_proxy_header(downstream, &mut payload).await?;
     }
     parse_downstream_proxy_protocol_v2(&header, &payload).map_err(proxy_protocol_parse_error)
-}
-
-async fn read_with_idle_timeout<R>(
-    reader: &mut R,
-    buffer: &mut [u8],
-    idle_timeout: Duration,
-) -> FluxResult<usize>
-where
-    R: AsyncRead + Unpin,
-{
-    match tokio::time::timeout(idle_timeout, reader.read(buffer)).await {
-        Ok(result) => result.map_err(|error| FluxError::io("read stream", error)),
-        Err(_) => Err(FluxError::timeout(
-            "stream idle timeout",
-            "stream idle timeout elapsed",
-        )),
-    }
 }
 
 async fn write_with_idle_timeout<W>(
@@ -310,23 +317,24 @@ where
     }
 }
 
-async fn read_exact_with_idle_timeout<R>(
-    reader: &mut R,
-    buffer: &mut [u8],
-    idle_timeout: Duration,
-) -> FluxResult<()>
+async fn read_exact_proxy_header<R>(reader: &mut R, buffer: &mut [u8]) -> FluxResult<()>
 where
     R: AsyncRead + Unpin,
 {
     let mut offset = 0usize;
     while offset < buffer.len() {
-        let read = read_with_idle_timeout(reader, &mut buffer[offset..], idle_timeout).await?;
+        let read = reader
+            .read(&mut buffer[offset..])
+            .await
+            .map_err(|error| FluxError::io("read stream PROXY header", error))?;
         if read == 0 {
             return Err(FluxError::InvalidInput(
                 "stream downstream PROXY protocol header ended early",
             ));
         }
-        offset = offset.saturating_add(read);
+        offset = offset.checked_add(read).ok_or(FluxError::InvalidInput(
+            "stream downstream PROXY protocol read offset overflowed",
+        ))?;
     }
     Ok(())
 }

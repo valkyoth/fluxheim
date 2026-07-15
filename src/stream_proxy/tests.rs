@@ -41,6 +41,7 @@ fn stream_app_selects_upstreams_round_robin() {
         drain_upstreams: Vec::new(),
         connect_timeout_secs: 1,
         idle_timeout_secs: 1,
+        proxy_header_timeout_secs: 10,
         max_connection_secs: None,
         max_connection_bytes: None,
         max_connections: 0,
@@ -180,6 +181,12 @@ fn stream_dns_rebind_guard_rejects_private_resolved_addresses() {
     ));
     assert!(!fluxheim_stream::stream_dns_resolved_address_allowed(
         "2001:db8::1".parse().unwrap()
+    ));
+    assert!(!fluxheim_stream::stream_dns_resolved_address_allowed(
+        "64:ff9b:1::1".parse().unwrap()
+    ));
+    assert!(!fluxheim_stream::stream_dns_resolved_address_allowed(
+        "2002::1".parse().unwrap()
     ));
     assert!(fluxheim_stream::stream_dns_resolved_address_allowed(
         "1.1.1.1".parse().unwrap()

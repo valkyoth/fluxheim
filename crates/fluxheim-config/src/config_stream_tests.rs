@@ -41,7 +41,39 @@ upstream = "127.0.0.1:5432"
         config.routes[0].max_connections,
         DEFAULT_STREAM_MAX_CONNECTIONS
     );
+    assert_eq!(config.routes[0].proxy_header_timeout_secs, 10);
     assert!(config.validate().is_ok());
+}
+
+#[test]
+fn stream_config_bounds_proxy_header_timeout() {
+    let zero: StreamConfig = toml::from_str(
+        r#"
+enabled = true
+
+[[routes]]
+name = "postgres"
+listen = ["127.0.0.1:15432"]
+upstream = "127.0.0.1:5432"
+proxy_header_timeout_secs = 0
+"#,
+    )
+    .unwrap();
+    assert!(zero.validate().is_err());
+
+    let excessive: StreamConfig = toml::from_str(
+        r#"
+enabled = true
+
+[[routes]]
+name = "postgres"
+listen = ["127.0.0.1:15432"]
+upstream = "127.0.0.1:5432"
+proxy_header_timeout_secs = 61
+"#,
+    )
+    .unwrap();
+    assert!(excessive.validate().is_err());
 }
 
 #[test]

@@ -214,6 +214,7 @@ upstreams = ["10.0.0.11:5432", "10.0.0.12:5432"]
 # drain_upstreams = []
 connect_timeout_secs = 5
 idle_timeout_secs = 300
+proxy_header_timeout_secs = 10
 # max_connection_secs = 3600
 max_connection_bytes = 1073741824
 max_connections = 1024
@@ -250,9 +251,14 @@ upstream_dns_allow_private_addresses = false
 - `idle_timeout_secs` is a true stream idle timer and defaults to `300`. The
   timer resets whenever either direction transfers bytes. Both copy directions
   retain their read/write state across dispatcher polls, so simultaneous
-  backpressured traffic cannot cancel a partial write. Forwarded plaintext is
-  cleared from the 16 KiB direction buffer immediately, and the complete buffer
-  is cleared when the direction exits.
+  backpressured traffic cannot cancel a partial write. Every successful partial
+  write refreshes the deadline and its forwarded plaintext range is cleared
+  from the 16 KiB direction buffer immediately; the complete buffer is cleared
+  when the direction exits.
+- `proxy_header_timeout_secs` is one absolute deadline for receiving the
+  complete downstream PROXY v1 or v2 preamble. It defaults to `10`, must be
+  non-zero, and cannot exceed `60`. Individual bytes do not refresh it. The
+  setting has no effect while `downstream_proxy_protocol = "off"`.
 - `max_connection_secs` is optional and bounds total accepted stream lifetime
   when set. Leave it unset for no wall-clock lifetime cap.
 - `max_connection_bytes` is optional and caps copied bytes per direction for a
@@ -281,8 +287,10 @@ upstream_dns_allow_private_addresses = false
   Hostname upstreams are resolved on connection setup. By default, Fluxheim
   rejects hostname DNS answers that resolve only to private, loopback,
   link-local, multicast, broadcast, documentation, or unspecified addresses to
-  reduce DNS-rebinding pivots. IPv4-mapped and legacy IPv4-compatible IPv6
-  answers are normalized and evaluated by the IPv4 policy before selection. Set
+  reduce DNS-rebinding pivots. IANA special-purpose translation, transition,
+  discard-only, benchmarking, site-local, and SRv6 SID prefixes are rejected as
+  well. IPv4-mapped and legacy IPv4-compatible IPv6 answers are normalized and
+  evaluated by the IPv4 policy before selection. Set
   `upstream_dns_allow_private_addresses = true` only for routes whose hostname
   upstreams are intentionally resolved by trusted internal DNS. IP-literal
   upstreams remain explicit and are not blocked by this DNS guard.

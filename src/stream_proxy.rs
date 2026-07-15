@@ -212,6 +212,7 @@ pub(crate) struct StreamProxyApp {
     upstream_selector: StreamUpstreamSelector,
     connect_timeout: Duration,
     idle_timeout: Duration,
+    proxy_header_timeout: Duration,
     max_connection_lifetime: Option<Duration>,
     max_connection_bytes: Option<u64>,
     max_connections: usize,
@@ -237,6 +238,7 @@ impl StreamProxyApp {
             upstream_selector,
             connect_timeout: Duration::from_secs(route.connect_timeout_secs),
             idle_timeout: Duration::from_secs(route.idle_timeout_secs),
+            proxy_header_timeout: Duration::from_secs(route.proxy_header_timeout_secs),
             max_connection_lifetime: route.max_connection_secs.map(Duration::from_secs),
             max_connection_bytes: route.max_connection_bytes,
             max_connections: route.max_connections,
@@ -299,7 +301,7 @@ impl StreamProxyApp {
             downstream_proxy_protocol,
             trusted_sources,
             direct_source,
-            self.idle_timeout,
+            self.proxy_header_timeout,
         )
         .await
         {

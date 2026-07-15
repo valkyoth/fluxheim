@@ -14,6 +14,7 @@ fn stream_selector_selects_upstreams_round_robin() {
         drain_upstreams: Vec::new(),
         connect_timeout_secs: 1,
         idle_timeout_secs: 1,
+        proxy_header_timeout_secs: 10,
         max_connection_secs: None,
         max_connection_bytes: None,
         max_connections: 0,
@@ -170,6 +171,24 @@ fn stream_dns_rebind_guard_rejects_private_resolved_addresses() {
     assert!(!stream_dns_resolved_address_allowed(
         "2001:db8::1".parse().unwrap()
     ));
+    for address in [
+        "192.0.0.8",
+        "192.0.0.170",
+        "64:ff9b::1",
+        "64:ff9b:1::1",
+        "100::1",
+        "100:0:0:1::1",
+        "2001:2::1",
+        "2002::1",
+        "3fff::1",
+        "5f00::1",
+        "fec0::1",
+    ] {
+        assert!(
+            !stream_dns_resolved_address_allowed(address.parse().unwrap()),
+            "special-purpose address {address} must not pass DNS admission"
+        );
+    }
     assert!(!stream_dns_resolved_address_allowed(
         "::ffff:127.0.0.1".parse().unwrap()
     ));
@@ -186,11 +205,58 @@ fn stream_dns_rebind_guard_rejects_private_resolved_addresses() {
         "1.1.1.1".parse().unwrap()
     ));
     assert!(stream_dns_resolved_address_allowed(
+        "192.0.0.9".parse().unwrap()
+    ));
+    assert!(stream_dns_resolved_address_allowed(
+        "192.0.0.10".parse().unwrap()
+    ));
+    assert!(stream_dns_resolved_address_allowed(
         "::ffff:1.1.1.1".parse().unwrap()
     ));
     assert!(stream_dns_resolved_address_allowed(
         "2606:4700:4700::1111".parse().unwrap()
     ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn stream_downstream_proxy_protocol_v1_has_one_absolute_header_deadline() {
+    assert_proxy_header_drip_times_out(DownstreamProxyProtocol::V1, b"PROX").await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn stream_downstream_proxy_protocol_v2_has_one_absolute_header_deadline() {
+    assert_proxy_header_drip_times_out(
+        DownstreamProxyProtocol::V2,
+        &PROXY_PROTOCOL_V2_SIGNATURE[..4],
+    )
+    .await;
+}
+
+async fn assert_proxy_header_drip_times_out(protocol: DownstreamProxyProtocol, bytes: &[u8]) {
+    const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
+    const DRIP_INTERVAL: Duration = Duration::from_secs(4);
+
+    let (mut downstream, mut peer) = tokio::io::duplex(64);
+    let trusted = [StreamSourceMatcher::parse("127.0.0.1", "trusted proxy").unwrap()];
+    let parse = apply_downstream_proxy_protocol_to_stream(
+        &mut downstream,
+        protocol,
+        &trusted,
+        Some("127.0.0.1:443".parse().unwrap()),
+        HEADER_TIMEOUT,
+    );
+    let drip = async {
+        for byte in bytes {
+            if peer.write_all(&[*byte]).await.is_err() {
+                break;
+            }
+            tokio::task::yield_now().await;
+            tokio::time::advance(DRIP_INTERVAL).await;
+        }
+    };
+
+    let (result, ()) = tokio::join!(parse, drip);
+    assert!(matches!(result, Err(FluxError::Timeout { .. })));
 }
 
 #[test]
@@ -320,6 +386,43 @@ async fn stream_copy_one_way_activity_keeps_shared_idle_deadline_alive() {
     let (copy_result, traffic_result) = tokio::join!(copy, traffic);
     assert_eq!(copy_result.unwrap(), (5, 0));
     assert_eq!(traffic_result.unwrap(), (b"alive".to_vec(), Vec::new()));
+}
+
+#[tokio::test(start_paused = true)]
+async fn stream_copy_partial_writes_refresh_shared_idle_deadline() {
+    const IDLE_TIMEOUT: Duration = Duration::from_secs(10);
+    const ACTIVITY_INTERVAL: Duration = Duration::from_secs(8);
+
+    let (mut downstream_proxy, mut downstream_client) = tokio::io::duplex(16);
+    let (mut upstream_proxy, upstream_server) = tokio::io::duplex(1);
+    let copy = copy_bidirectional_with_limits(
+        &mut downstream_proxy,
+        &mut upstream_proxy,
+        IDLE_TIMEOUT,
+        None,
+    );
+    let traffic = async move {
+        let (mut upstream_reader, mut upstream_writer) = tokio::io::split(upstream_server);
+        upstream_writer.shutdown().await?;
+        downstream_client.write_all(b"slow").await?;
+        downstream_client.shutdown().await?;
+
+        let mut forwarded = Vec::with_capacity(4);
+        for index in 0..4 {
+            let mut byte = [0u8; 1];
+            upstream_reader.read_exact(&mut byte).await?;
+            forwarded.push(byte[0]);
+            tokio::task::yield_now().await;
+            if index < 3 {
+                tokio::time::advance(ACTIVITY_INTERVAL).await;
+            }
+        }
+        Ok::<_, io::Error>(forwarded)
+    };
+
+    let (copy_result, traffic_result) = tokio::join!(copy, traffic);
+    assert_eq!(copy_result.unwrap(), (4, 0));
+    assert_eq!(traffic_result.unwrap(), b"slow");
 }
 
 #[tokio::test(start_paused = true)]

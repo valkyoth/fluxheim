@@ -10,10 +10,10 @@ use crate::config_net::{
 use crate::config_stream_defaults::validate_stream_optional_timeout_secs;
 
 use super::{
-    MAX_STREAM_LISTENERS, MAX_STREAM_MAX_CONNECTIONS, MAX_STREAM_ROUTE_NAME_BYTES,
-    MAX_STREAM_ROUTES, MAX_STREAM_SOURCE_MATCHERS, MAX_STREAM_UPSTREAM_TOTAL_WEIGHT,
-    MAX_STREAM_UPSTREAM_WEIGHT, MAX_STREAM_UPSTREAMS, StreamConfig, StreamConfigFragment,
-    StreamRouteConfig,
+    MAX_STREAM_LISTENERS, MAX_STREAM_MAX_CONNECTIONS, MAX_STREAM_PROXY_HEADER_TIMEOUT_SECS,
+    MAX_STREAM_ROUTE_NAME_BYTES, MAX_STREAM_ROUTES, MAX_STREAM_SOURCE_MATCHERS,
+    MAX_STREAM_UPSTREAM_TOTAL_WEIGHT, MAX_STREAM_UPSTREAM_WEIGHT, MAX_STREAM_UPSTREAMS,
+    StreamConfig, StreamConfigFragment, StreamRouteConfig,
 };
 
 impl StreamConfig {
@@ -162,6 +162,16 @@ impl StreamRouteConfig {
             self.connect_timeout_secs,
         )?;
         validate_required_timeout_secs("stream.routes.idle_timeout_secs", self.idle_timeout_secs)?;
+        validate_required_timeout_secs(
+            "stream.routes.proxy_header_timeout_secs",
+            self.proxy_header_timeout_secs,
+        )?;
+        if self.proxy_header_timeout_secs > MAX_STREAM_PROXY_HEADER_TIMEOUT_SECS {
+            return Err(ConfigError::InvalidStreamProxyPolicy {
+                field: "stream.routes.proxy_header_timeout_secs",
+                reason: "must be at most 60 seconds",
+            });
+        }
         validate_stream_optional_timeout_secs(
             "stream.routes.max_connection_secs",
             self.max_connection_secs,

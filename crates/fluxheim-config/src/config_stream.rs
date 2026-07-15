@@ -8,7 +8,7 @@ mod config_stream_impl;
 pub use crate::config_stream_defaults::DEFAULT_STREAM_MAX_CONNECTIONS;
 use crate::config_stream_defaults::{
     default_stream_connect_timeout_secs, default_stream_idle_timeout_secs,
-    default_stream_max_connections, default_true,
+    default_stream_max_connections, default_stream_proxy_header_timeout_secs, default_true,
 };
 #[cfg(feature = "stream-proxy")]
 pub use crate::config_stream_slots::{StreamConnectionSlot, acquire_stream_connection_slot};
@@ -21,6 +21,7 @@ pub const MAX_STREAM_SOURCE_MATCHERS: usize = 256;
 pub const MAX_STREAM_MAX_CONNECTIONS: usize = 1_000_000;
 pub const MAX_STREAM_UPSTREAM_WEIGHT: usize = 1000;
 pub const MAX_STREAM_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
+pub const MAX_STREAM_PROXY_HEADER_TIMEOUT_SECS: u64 = 60;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -60,6 +61,8 @@ pub struct StreamRouteConfig {
     pub connect_timeout_secs: u64,
     #[serde(default = "default_stream_idle_timeout_secs")]
     pub idle_timeout_secs: u64,
+    #[serde(default = "default_stream_proxy_header_timeout_secs")]
+    pub proxy_header_timeout_secs: u64,
     #[serde(default)]
     pub max_connection_secs: Option<u64>,
     #[serde(default)]
@@ -109,6 +112,7 @@ impl Default for StreamRouteConfig {
             drain_upstreams: Vec::new(),
             connect_timeout_secs: default_stream_connect_timeout_secs(),
             idle_timeout_secs: default_stream_idle_timeout_secs(),
+            proxy_header_timeout_secs: default_stream_proxy_header_timeout_secs(),
             max_connection_secs: None,
             max_connection_bytes: None,
             max_connections: DEFAULT_STREAM_MAX_CONNECTIONS,

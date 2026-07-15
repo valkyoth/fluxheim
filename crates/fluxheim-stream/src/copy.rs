@@ -15,8 +15,8 @@ impl StreamCopyBuffer {
         Self([0; STREAM_COPY_BUFFER_BYTES])
     }
 
-    fn clear_forwarded(&mut self, bytes: usize) {
-        sanitize_bytes(&mut self.0[..bytes]);
+    fn clear_range(&mut self, start: usize, end: usize) {
+        sanitize_bytes(&mut self.0[start..end]);
     }
 }
 
@@ -137,12 +137,30 @@ where
             return Ok(total);
         }
         total = checked_stream_byte_count(total, bytes as u64, max_connection_bytes)?;
-        writer
-            .write_all(&buffer.0[..bytes])
-            .await
-            .map_err(|error| FluxError::io("write stream", error))?;
-        buffer.clear_forwarded(bytes);
-        activity.send_replace(tokio::time::Instant::now());
+        let mut offset = 0usize;
+        while offset < bytes {
+            let written = writer
+                .write(&buffer.0[offset..bytes])
+                .await
+                .map_err(|error| FluxError::io("write stream", error))?;
+            if written == 0 {
+                return Err(FluxError::io(
+                    "write stream",
+                    io::Error::new(io::ErrorKind::WriteZero, "stream writer made no progress"),
+                ));
+            }
+            let end = offset
+                .checked_add(written)
+                .ok_or(FluxError::InvalidInput("stream write offset overflowed"))?;
+            if end > bytes {
+                return Err(FluxError::InvalidInput(
+                    "stream writer reported more bytes than requested",
+                ));
+            }
+            buffer.clear_range(offset, end);
+            offset = end;
+            activity.send_replace(tokio::time::Instant::now());
+        }
     }
 }
 
@@ -151,10 +169,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stream_copy_buffer_clears_forwarded_prefix() {
+    fn stream_copy_buffer_clears_forwarded_range() {
         let mut buffer = StreamCopyBuffer([7; STREAM_COPY_BUFFER_BYTES]);
-        buffer.clear_forwarded(3);
-        assert_eq!(&buffer.0[..3], &[0, 0, 0]);
-        assert_eq!(buffer.0[3], 7);
+        buffer.clear_range(1, 4);
+        assert_eq!(buffer.0[0], 7);
+        assert_eq!(&buffer.0[1..4], &[0, 0, 0]);
+        assert_eq!(buffer.0[4], 7);
     }
 }

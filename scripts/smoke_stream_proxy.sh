@@ -192,6 +192,37 @@ if received != expected:
     sys.exit(1)
 PY
 
+cat > "$TMP_DIR/proxy_protocol_slowloris.py" <<'PY'
+import socket
+import sys
+import time
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+started = time.monotonic()
+
+with socket.create_connection((host, port), timeout=3.0) as sock:
+    sock.settimeout(2.0)
+    for byte in b"PROX":
+        try:
+            sock.sendall(bytes([byte]))
+        except (BrokenPipeError, ConnectionResetError):
+            break
+        time.sleep(0.4)
+    try:
+        received = sock.recv(1)
+    except ConnectionResetError:
+        received = b""
+
+elapsed = time.monotonic() - started
+if received:
+    print(f"slow PROXY preamble unexpectedly received data: {received!r}", file=sys.stderr)
+    sys.exit(1)
+if elapsed > 2.5:
+    print(f"absolute PROXY preamble deadline took too long: {elapsed:.2f}s", file=sys.stderr)
+    sys.exit(1)
+PY
+
 mkdir -p "$TMP_DIR/tls"
 openssl req \
     -x509 \
@@ -248,6 +279,7 @@ connect_timeout_secs = 1
 idle_timeout_secs = 5
 downstream_proxy_protocol = "v1"
 trusted_proxies = ["127.0.0.1/32"]
+proxy_header_timeout_secs = 1
 
 [[stream.routes]]
 name = "stream-upstream-tls"
@@ -321,6 +353,7 @@ sleep 0.3
 
 python3 "$TMP_DIR/stream_client.py" 127.0.0.1 "$STREAM_PORT" probe backup:probe
 python3 "$TMP_DIR/stream_client.py" 127.0.0.1 "$PROXY_STREAM_PORT" probe proxy-v1-ok
+python3 "$TMP_DIR/proxy_protocol_slowloris.py" 127.0.0.1 "$PROXY_RECV_STREAM_PORT"
 python3 "$TMP_DIR/proxy_protocol_client.py" 127.0.0.1 "$PROXY_RECV_STREAM_PORT" probe pp-recv:probe
 python3 "$TMP_DIR/stream_client.py" 127.0.0.1 "$TLS_STREAM_PORT" probe tls:probe
 
