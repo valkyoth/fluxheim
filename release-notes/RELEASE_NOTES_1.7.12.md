@@ -74,9 +74,10 @@ trailers are not part of this release.
 - Document `compile_timeout_ms` accurately as an in-process result deadline,
   not native compiler preemption; hard cancellation requires future
   process-isolated compilation and execution.
-- On Windows, open plugin files with reparse-point semantics and compare safe
-  handle identities between validation and reading, closing the final-file
-  replacement race without introducing unsafe code.
+- Open plugin files with no-follow/reparse-point semantics during validation,
+  retain that exact regular-file handle, and read module bytes from it without
+  reopening the pathname. This closes final-file replacement races on Windows,
+  ReFS, Unix, and macOS without identity inference or unsafe code.
 
 ## Shared Cache Policy Hardening
 

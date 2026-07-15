@@ -1472,7 +1472,6 @@ dependencies = [
 name = "fluxheim-wasm"
 version = "1.7.12"
 dependencies = [
- "same-file",
  "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.18",

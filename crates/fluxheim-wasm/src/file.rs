@@ -94,24 +94,8 @@ pub enum WasmPluginError {
 
 struct ValidatedPluginPath {
     requested: PathBuf,
-    canonical: PathBuf,
     metadata: fs::Metadata,
-    #[cfg(windows)]
-    identity: same_file::Handle,
-}
-
-impl ValidatedPluginPath {
-    fn requested(&self) -> &Path {
-        &self.requested
-    }
-
-    fn canonical(&self) -> &Path {
-        &self.canonical
-    }
-
-    fn metadata(&self) -> &fs::Metadata {
-        &self.metadata
-    }
+    file: fs::File,
 }
 
 pub fn load_plugin_file(
@@ -121,45 +105,48 @@ pub fn load_plugin_file(
 ) -> Result<WasmPluginFile, WasmPluginError> {
     let limits = limits.validate()?;
     let validated = validated_plugin_path(path, approved_roots)?;
+    load_validated_plugin_file(validated, limits)
+}
 
-    let metadata = validated.metadata();
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(WasmPluginError::UnsafePath {
-            path: validated.requested().to_path_buf(),
-            message: "plugin must be a regular file",
-        });
-    }
-    if metadata.len() > limits.max_module_bytes {
+fn load_validated_plugin_file(
+    validated: ValidatedPluginPath,
+    limits: WasmSandboxLimits,
+) -> Result<WasmPluginFile, WasmPluginError> {
+    if validated.metadata.len() > limits.max_module_bytes {
         return Err(WasmPluginError::Oversized {
-            path: validated.requested().to_path_buf(),
+            path: validated.requested,
             max_bytes: limits.max_module_bytes,
         });
     }
 
-    let file = open_verified_plugin_file(&validated)?;
     let mut bytes = Vec::new();
-    file.take(limits.max_module_bytes.saturating_add(1))
+    validated
+        .file
+        .take(limits.max_module_bytes.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(|source| WasmPluginError::Io {
-            path: validated.requested().to_path_buf(),
+            path: validated.requested.clone(),
             source,
         })?;
     if bytes.len() as u64 > limits.max_module_bytes {
         return Err(WasmPluginError::Oversized {
-            path: validated.requested().to_path_buf(),
+            path: validated.requested,
             max_bytes: limits.max_module_bytes,
         });
     }
 
     let sha256_hex = sha256_hex(&bytes);
     Ok(WasmPluginFile {
-        path: validated.requested().to_path_buf(),
+        path: validated.requested,
         bytes,
         sha256_hex,
     })
 }
 
-fn open_verified_plugin_file(validated: &ValidatedPluginPath) -> Result<fs::File, WasmPluginError> {
+fn open_plugin_file(
+    canonical: &Path,
+    requested: &Path,
+) -> Result<(fs::File, fs::Metadata), WasmPluginError> {
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -174,52 +161,22 @@ fn open_verified_plugin_file(validated: &ValidatedPluginPath) -> Result<fs::File
     }
 
     let file = options
-        .open(validated.canonical())
+        .open(canonical)
         .map_err(|source| WasmPluginError::Io {
-            path: validated.requested().to_path_buf(),
+            path: requested.to_path_buf(),
             source,
         })?;
-    let opened_metadata = file.metadata().map_err(|source| WasmPluginError::Io {
-        path: validated.requested().to_path_buf(),
+    let metadata = file.metadata().map_err(|source| WasmPluginError::Io {
+        path: requested.to_path_buf(),
         source,
     })?;
-    if !opened_metadata.is_file() {
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(WasmPluginError::UnsafePath {
-            path: validated.requested().to_path_buf(),
+            path: requested.to_path_buf(),
             message: "plugin handle must be a regular file",
         });
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        if opened_metadata.dev() != validated.metadata().dev()
-            || opened_metadata.ino() != validated.metadata().ino()
-        {
-            return Err(WasmPluginError::UnsafePath {
-                path: validated.requested().to_path_buf(),
-                message: "plugin file identity changed before read",
-            });
-        }
-    }
-    #[cfg(windows)]
-    {
-        let identity_file = file.try_clone().map_err(|source| WasmPluginError::Io {
-            path: validated.requested().to_path_buf(),
-            source,
-        })?;
-        let opened_identity =
-            same_file::Handle::from_file(identity_file).map_err(|source| WasmPluginError::Io {
-                path: validated.requested().to_path_buf(),
-                source,
-            })?;
-        if opened_identity != validated.identity {
-            return Err(WasmPluginError::UnsafePath {
-                path: validated.requested().to_path_buf(),
-                message: "plugin file identity changed before read",
-            });
-        }
-    }
-    Ok(file)
+    Ok((file, metadata))
 }
 
 pub fn validate_plugin_path(
@@ -266,46 +223,17 @@ fn validated_plugin_path(
             source,
         })?;
         if plugin_canonical.starts_with(root_canonical) {
-            let metadata =
-                fs::symlink_metadata(&plugin_canonical).map_err(|source| WasmPluginError::Io {
-                    path: plugin_canonical.clone(),
-                    source,
-                })?;
-            #[cfg(windows)]
-            let identity = windows_plugin_identity(&plugin_canonical, path)?;
+            let (file, metadata) = open_plugin_file(&plugin_canonical, path)?;
             return Ok(ValidatedPluginPath {
                 requested: path.to_path_buf(),
-                canonical: plugin_canonical,
                 metadata,
-                #[cfg(windows)]
-                identity,
+                file,
             });
         }
     }
 
     Err(WasmPluginError::OutsideApprovedRoots {
         path: path.to_path_buf(),
-    })
-}
-
-#[cfg(windows)]
-fn windows_plugin_identity(
-    canonical: &Path,
-    requested: &Path,
-) -> Result<same_file::Handle, WasmPluginError> {
-    use std::os::windows::fs::OpenOptionsExt;
-
-    let file = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(WASM_PLUGIN_OPEN_REPARSE_POINT)
-        .open(canonical)
-        .map_err(|source| WasmPluginError::Io {
-            path: requested.to_path_buf(),
-            source,
-        })?;
-    same_file::Handle::from_file(file).map_err(|source| WasmPluginError::Io {
-        path: requested.to_path_buf(),
-        source,
     })
 }
 
@@ -374,6 +302,22 @@ mod tests {
             loaded.sha256_hex(),
             "93a44bbb96c751218e4c00d479e4c14358122a389acca16205b1e4d0dc5f9476"
         );
+    }
+
+    #[test]
+    fn validated_plugin_load_reads_retained_handle_after_path_replacement() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin = directory.path().join("plugin.wasm");
+        let displaced = directory.path().join("plugin-original.wasm");
+        fs::write(&plugin, b"original plugin bytes").unwrap();
+        let validated = validated_plugin_path(&plugin, &[directory.path().to_path_buf()]).unwrap();
+
+        fs::rename(&plugin, &displaced).unwrap();
+        fs::write(&plugin, b"replacement plugin bytes").unwrap();
+        let loaded = load_validated_plugin_file(validated, WasmSandboxLimits::default()).unwrap();
+
+        assert_eq!(loaded.bytes(), b"original plugin bytes");
+        assert_eq!(fs::read(plugin).unwrap(), b"replacement plugin bytes");
     }
 
     #[test]

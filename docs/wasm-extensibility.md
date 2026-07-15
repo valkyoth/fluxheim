@@ -446,6 +446,9 @@ native `fluxheim-policy-v1` admission or blocking capacity.
   directories such as `/etc`; use deployment-specific roots such as
   `/etc/fluxheim/plugins` or `/srv/fluxheim/plugins`.
 - Plugin paths must reject symlinks and symlinked parents.
+- Plugin validation retains the exact no-follow/reparse-point file handle and
+  module loading reads from that handle; the pathname is never reopened after
+  validation.
 - Plugin modules must be hashed and recorded in admin status.
 - Plugins attached to security-decision phases (`access-decision`,
   `route-decision`, or `cache-store`) must pin `sha256` in config before they
