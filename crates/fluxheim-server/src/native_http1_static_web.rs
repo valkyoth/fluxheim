@@ -229,7 +229,7 @@ impl NativeHttp1StaticWeb {
                     return Some(static_response_capacity_unavailable());
                 };
                 let web = self.clone();
-                let request = request.clone();
+                let request = request.metadata_snapshot();
                 match tokio::task::spawn_blocking(move || {
                     let _blocking_permit = blocking_permit;
                     web.cached_file_response(&request, &file)
@@ -261,7 +261,7 @@ impl NativeHttp1StaticWeb {
                 else {
                     return Some(static_response_capacity_unavailable());
                 };
-                let request = request.clone();
+                let request = request.metadata_snapshot();
                 match tokio::task::spawn_blocking(move || {
                     let _blocking_permit = blocking_permit;
                     directory_listing_response(&request, &listing)
@@ -384,7 +384,7 @@ impl NativeHttp1StaticWeb {
         let blocking_permit =
             try_acquire_request_blocking_work(NativeBlockingWorkClass::Static).ok()?;
         let web = self.clone();
-        let request = request.clone();
+        let request = request.metadata_snapshot();
         let response = tokio::task::spawn_blocking(move || {
             let _blocking_permit = blocking_permit;
             web.file_response_with_status(

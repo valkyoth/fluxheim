@@ -76,7 +76,7 @@ fn native_metrics_app_serves_prometheus_response() {
         target: "/metrics".to_owned(),
         version: fluxheim_protocol::Http1Version::Http11,
         headers: vec![("host".to_owned(), "metrics.test".to_owned())],
-        body: Zeroizing::new(Vec::new()),
+        body: fluxheim_server::NativeHttp1RequestBody::empty(),
         trailers: Vec::new(),
     };
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -364,7 +364,7 @@ fn native_metrics_request(method: &str, target: &str) -> fluxheim_server::Native
         target: target.to_owned(),
         version: fluxheim_protocol::Http1Version::Http11,
         headers: vec![("host".to_owned(), "metrics.test".to_owned())],
-        body: Zeroizing::new(Vec::new()),
+        body: fluxheim_server::NativeHttp1RequestBody::empty(),
         trailers: Vec::new(),
     }
 }

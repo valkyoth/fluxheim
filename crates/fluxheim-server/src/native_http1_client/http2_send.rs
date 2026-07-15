@@ -52,10 +52,15 @@ impl NativeHttp1Upstream {
         )?;
         let mut h2_stream_permit = Some(self.acquire_http2_stream_permit().await?);
         let (client, fresh_connection) = self.http2_client().await?;
-        let retry_allowed = native_http1_retry_method_allowed(request.method.as_str());
+        let retry_allowed =
+            request.body.is_empty() && native_http1_retry_method_allowed(request.method.as_str());
         let request_policy = self.http2_request_policy(fresh_connection);
         let response = if retry_allowed {
-            let retry_request = request.clone();
+            let Some(retry_request) = request.retry_snapshot() else {
+                return Err(NativeHttp1Error::Io(std::io::Error::other(
+                    "body-bearing HTTP/2 request cannot be retained for retry",
+                )));
+            };
             match send_native_http2_upstream_request(client, request_policy, request).await {
                 Ok(response) => response,
                 Err(error) if native_http2_error_retry_safe(&error) => {

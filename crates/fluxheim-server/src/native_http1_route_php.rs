@@ -358,7 +358,7 @@ mod tests {
             target: "/index.php".to_owned(),
             version: fluxheim_protocol::Http1Version::Http11,
             headers: vec![("host".to_owned(), "test.local".to_owned())],
-            body: zeroize::Zeroizing::new(Vec::new()),
+            body: crate::NativeHttp1RequestBody::empty(),
             trailers: Vec::new(),
         };
 

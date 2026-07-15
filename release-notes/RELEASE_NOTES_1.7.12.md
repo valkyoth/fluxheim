@@ -169,6 +169,13 @@ trailers are not part of this release.
   mandatory 1 GiB process budget, and pinned HTTP/1 handlers provide the
   effective request budget. Exhaustion returns a bounded `503` with retry
   guidance.
+- Move content-length bodies out of the reusable HTTP/1 parser buffer without
+  constructing a second full-body copy, release oversized connection-buffer
+  capacity before keep-alive, and clear full body and chunk-decoder
+  allocations through `sanitization`.
+  Request types are no longer cloneable; compression, static, cache, and
+  revalidation workers receive metadata-only snapshots, while body-bearing
+  requests are never automatically retried or failed over.
 - Move static-file resolution and reads to the bounded blocking-work pool and
   cap retained static response bodies with a weighted 256 MiB process-wide
   budget. Fluxheim resolves metadata first, admits the planned response bytes

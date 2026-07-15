@@ -51,6 +51,7 @@ impl NativeHttp1Upstream {
             Err(error)
                 if reused
                     && pooled_connection_error_can_retry(&error)
+                    && request.body.is_empty()
                     && native_http1_retry_method_allowed(&request.method) =>
             {
                 let fresh = self.connect_stream(request).await?;

@@ -133,7 +133,10 @@ impl NativeHttp1Proxy {
             feature = "compression-gzip",
             feature = "compression-zstd"
         ))]
-        let compression_request = self.compression.as_ref().map(|_| request.clone());
+        let compression_request = self
+            .compression
+            .as_ref()
+            .map(|_| request.metadata_snapshot());
         self.request_headers.apply(&mut request, None);
         #[cfg(feature = "load-balancer")]
         if self.load_balancer.is_some() {

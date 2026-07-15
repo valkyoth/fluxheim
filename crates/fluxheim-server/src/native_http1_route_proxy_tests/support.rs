@@ -96,7 +96,7 @@ pub(super) fn route_test_request(path: &str) -> NativeHttp1Request {
         target: path.to_owned(),
         version: fluxheim_protocol::Http1Version::Http11,
         headers: vec![("host".to_owned(), "route.test".to_owned())],
-        body: zeroize::Zeroizing::new(Vec::new()),
+        body: crate::NativeHttp1RequestBody::empty(),
         trailers: Vec::new(),
     }
 }

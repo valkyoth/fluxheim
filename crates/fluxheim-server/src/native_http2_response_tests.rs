@@ -78,7 +78,7 @@ async fn native_http2_route_adapter_serves_native_http1_handler() {
             "POST".to_owned(),
             "/upload?x=1".to_owned(),
             Some("native.test".to_owned()),
-            zeroize::Zeroizing::new(b"body".to_vec()),
+            crate::NativeHttp1RequestBody::from_vec(b"body".to_vec()),
             vec![("grpc-status".to_owned(), "0".to_owned())]
         ))
     );

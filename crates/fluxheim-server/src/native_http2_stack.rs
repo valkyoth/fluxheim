@@ -20,7 +20,7 @@ use crate::response_retention::NativeResponseRetention;
 const BODY_PREALLOC_HINT_BYTES: usize = 64 * 1024;
 const PROBE_IDLE_TIMEOUT: Duration = Duration::from_millis(50);
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct NativeHttp2Request {
     pub method: Method,
     pub uri: Uri,

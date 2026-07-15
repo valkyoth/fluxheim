@@ -29,7 +29,7 @@ pub use http1_chunked::{
     DEFAULT_HTTP1_MAX_BODY_BYTES, DEFAULT_HTTP1_MAX_CHUNK_COUNT,
     DEFAULT_HTTP1_MAX_CHUNK_EXTENSION_BYTES, DEFAULT_HTTP1_MAX_CHUNK_LINE_BYTES,
     DEFAULT_HTTP1_MAX_CHUNK_SIZE, DEFAULT_HTTP1_MAX_ENCODED_BYTES, Http1ChunkLimits,
-    Http1ChunkedDecode, Http1ChunkedDecoder, decode_http1_chunked_body,
+    Http1ChunkSink, Http1ChunkedDecode, Http1ChunkedDecoder, decode_http1_chunked_body,
 };
 pub use http1_connection::{
     Http1ConnectionDirective, Http1ConnectionOptions, http1_connection_directive,

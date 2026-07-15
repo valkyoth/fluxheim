@@ -38,12 +38,12 @@ fn upstream_request_filter_strips_peer_fill_internal_headers_only_for_normal_req
         target: "/".to_owned(),
         version: fluxheim_protocol::Http1Version::Http11,
         headers: Vec::new(),
-        body: zeroize::Zeroizing::new(Vec::new()),
+        body: crate::NativeHttp1RequestBody::empty(),
         trailers: Vec::new(),
     };
     let peer_fill = NativeHttp1Request {
         headers: vec![("x-fluxheim-peer-fill".to_owned(), "1".to_owned())],
-        ..normal.clone()
+        ..normal.metadata_snapshot()
     };
 
     for name in [
@@ -130,7 +130,7 @@ async fn websocket_upgrade_request_strips_hop_by_hop_headers() {
             ("x-secret-hop".to_owned(), "remove-me".to_owned()),
             ("sec-websocket-key".to_owned(), "abc".to_owned()),
         ],
-        body: zeroize::Zeroizing::new(Vec::new()),
+        body: crate::NativeHttp1RequestBody::empty(),
         trailers: Vec::new(),
     };
     request
@@ -239,7 +239,7 @@ fn h2_upstream_request_preserves_client_host_as_authority() {
         target: "/resource?x=1".to_owned(),
         version: fluxheim_protocol::Http1Version::Http11,
         headers: vec![("host".to_owned(), "client.example".to_owned())],
-        body: zeroize::Zeroizing::new(Vec::new()),
+        body: crate::NativeHttp1RequestBody::empty(),
         trailers: Vec::new(),
     };
 
@@ -271,7 +271,7 @@ fn h2_upstream_request_preserves_native_request_trailers() {
             ("host".to_owned(), "origin.test".to_owned()),
             ("content-type".to_owned(), "application/grpc".to_owned()),
         ],
-        body: zeroize::Zeroizing::new(b"request".to_vec()),
+        body: crate::NativeHttp1RequestBody::from_vec(b"request".to_vec()),
         trailers: vec![("grpc-status".to_owned(), "0".to_owned())],
     };
 

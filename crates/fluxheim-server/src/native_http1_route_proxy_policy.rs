@@ -272,7 +272,10 @@ impl NativeHttp1RouteProxyRoute {
             feature = "compression-gzip",
             feature = "compression-zstd"
         ))]
-        let compression_request = self.compression.as_ref().map(|_| request.clone());
+        let compression_request = self
+            .compression
+            .as_ref()
+            .map(|_| request.metadata_snapshot());
         #[cfg(feature = "wasm")]
         let mut response = self
             .action

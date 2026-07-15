@@ -122,7 +122,7 @@ async fn native_upstream_write_timeout_is_bounded() {
     let (client, _blocked_peer) = tokio::io::duplex(1);
     let mut request = request();
     request.method = "POST".to_owned();
-    request.body = zeroize::Zeroizing::new(vec![b'a'; 1024 * 1024]);
+    request.body = crate::NativeHttp1RequestBody::from_vec(vec![b'a'; 1024 * 1024]);
 
     let error = NativeHttp1Upstream::new("127.0.0.1:3000")
         .with_write_timeout(Duration::from_millis(25))

@@ -10,7 +10,6 @@ use fluxheim_protocol::{
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::time::timeout;
-use zeroize::Zeroizing;
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 use crate::DownstreamHttp2Policy;
@@ -38,7 +37,7 @@ pub use openssl_listener::{
 };
 use proxy_protocol::read_proxy_protocol_source;
 pub use request::{
-    NativeHttp1GeoContext, NativeHttp1Request, NativeHttp1RequestContext,
+    NativeHttp1GeoContext, NativeHttp1Request, NativeHttp1RequestBody, NativeHttp1RequestContext,
     NativeHttp1TlsClientIdentity,
 };
 use response::write_response;
@@ -322,7 +321,7 @@ where
             Err(error) => return Err(error),
         };
         let mut request = request;
-        request.body = Zeroizing::new(body);
+        request.body = body;
         request_handler.prepare_request_context(&mut request);
         if request_handler.handles_connection_takeover(&request) {
             let prebuffered = std::mem::take(&mut buffer);
@@ -445,7 +444,7 @@ fn owned_request_from_head(
         target: head.target().to_owned(),
         version: head.version(),
         headers: owned_headers(head.headers(), head.effective_authority()),
-        body: Zeroizing::new(Vec::new()),
+        body: NativeHttp1RequestBody::empty(),
         trailers: Vec::new(),
     }
 }

@@ -20,7 +20,7 @@ fn native_http1_cache_view_request(
         target: target.to_owned(),
         version: Http1Version::Http11,
         headers,
-        body: zeroize::Zeroizing::new(Vec::new()),
+        body: crate::NativeHttp1RequestBody::empty(),
         trailers: Vec::new(),
     }
 }

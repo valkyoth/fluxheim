@@ -34,7 +34,7 @@ fn request(target: &str) -> NativeHttp1Request {
             ("proxy".to_owned(), "drop-me".to_owned()),
         ],
         trailers: Vec::new(),
-        body: zeroize::Zeroizing::new(b"name=fluxheim".to_vec()),
+        body: crate::NativeHttp1RequestBody::from_vec(b"name=fluxheim".to_vec()),
     }
 }
 

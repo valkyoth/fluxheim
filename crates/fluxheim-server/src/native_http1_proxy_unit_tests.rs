@@ -19,7 +19,6 @@ use fluxheim_protocol::Http1Version;
 use sanitization::SecretVec;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use zeroize::Zeroizing;
 
 #[test]
 fn native_cache_expiry_times_rejects_unrepresentable_ttl() {
@@ -58,7 +57,7 @@ fn strips_client_supplied_peer_fill_marker() {
             (NATIVE_PEER_FILL_MARKER_HEADER.to_owned(), "1".to_owned()),
             ("host".to_owned(), "cache.test".to_owned()),
         ],
-        body: Zeroizing::new(Vec::new()),
+        body: crate::NativeHttp1RequestBody::empty(),
         trailers: Vec::new(),
     };
 
@@ -96,7 +95,7 @@ fn native_peer_fill_auth_binds_response_body_and_headers() {
             ("cache-control".to_owned(), "only-if-cached".to_owned()),
             (NATIVE_PEER_FILL_NONCE_HEADER.to_owned(), nonce.clone()),
         ],
-        body: Zeroizing::new(Vec::new()),
+        body: crate::NativeHttp1RequestBody::empty(),
         trailers: Vec::new(),
     };
     let signature =
@@ -199,7 +198,7 @@ async fn native_peer_fill_fetch_discards_unsigned_authenticated_peer_response() 
         target: "/poison.txt".to_owned(),
         version: Http1Version::Http11,
         headers: vec![("host".to_owned(), "cache.test".to_owned())],
-        body: Zeroizing::new(Vec::new()),
+        body: crate::NativeHttp1RequestBody::empty(),
         trailers: Vec::new(),
     };
     let cache = fluxheim_config::CacheConfig::default();

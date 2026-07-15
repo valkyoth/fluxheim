@@ -1360,6 +1360,9 @@ dependencies = [
 [[package]]
 name = "fluxheim-protocol"
 version = "1.7.12"
+dependencies = [
+ "sanitization",
+]
 
 [[package]]
 name = "fluxheim-runtime"

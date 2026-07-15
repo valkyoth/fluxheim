@@ -92,7 +92,7 @@ impl NativeProxyMemoryCache {
             return Ok(None);
         };
         let key = key.to_owned();
-        let request = request.clone();
+        let request = request.metadata_snapshot();
         let blocking_permit = crate::blocking_work::try_acquire_request_blocking_work(
             crate::blocking_work::NativeBlockingWorkClass::DiskCache,
         )

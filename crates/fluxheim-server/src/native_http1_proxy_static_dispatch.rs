@@ -38,7 +38,8 @@ impl NativeHttp1Proxy {
         ))]
         compression_request: Option<&NativeHttp1Request>,
     ) -> NativeHttp1Response {
-        let retry_allowed = native_http1_static_failover_method_allowed(&request.method);
+        let retry_allowed =
+            request.body.is_empty() && native_http1_static_failover_method_allowed(&request.method);
         let mut proxy_cache_fill = None::<(
             NativeProxyMemoryCache,
             String,
@@ -149,7 +150,7 @@ impl NativeHttp1Proxy {
                         self.spawn_cache_revalidation(
                             cache.clone(),
                             key,
-                            request.clone(),
+                            request.metadata_snapshot(),
                             entry.clone(),
                         );
                         return self.finish_response(

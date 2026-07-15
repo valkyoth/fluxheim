@@ -240,7 +240,7 @@ fn native_peer_fill_request(
         target,
         version: request.version,
         headers,
-        body: zeroize::Zeroizing::new(Vec::new()),
+        body: crate::NativeHttp1RequestBody::empty(),
         trailers: Vec::new(),
     })
 }

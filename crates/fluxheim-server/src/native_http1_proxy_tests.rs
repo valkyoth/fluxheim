@@ -96,7 +96,7 @@ fn native_proxy_test_request() -> NativeHttp1Request {
         target: "/socket-policy".to_owned(),
         version: fluxheim_protocol::Http1Version::Http11,
         headers: vec![("host".to_owned(), "proxy.test".to_owned())],
-        body: zeroize::Zeroizing::new(Vec::new()),
+        body: crate::NativeHttp1RequestBody::empty(),
         trailers: Vec::new(),
     }
 }
@@ -311,6 +311,43 @@ async fn native_proxy_forwards_downstream_request_to_upstream() {
     );
     assert!(response.contains("x-origin: native\r\n"));
     assert!(response.ends_with("hello native"));
+}
+
+#[tokio::test]
+async fn native_proxy_does_not_fail_over_body_bearing_get() {
+    let first = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let first_addr = first.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = first.accept().await.unwrap();
+        let mut request = [0_u8; 4096];
+        let _ = stream.read(&mut request).await;
+    });
+    let second = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let second_addr = second.local_addr().unwrap();
+    let second_accepted = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let second_accepted_task = Arc::clone(&second_accepted);
+    tokio::spawn(async move {
+        if let Ok(Ok((_stream, _))) =
+            tokio::time::timeout(Duration::from_millis(500), second.accept()).await
+        {
+            second_accepted_task.store(true, std::sync::atomic::Ordering::Release);
+        }
+    });
+    let proxy = failover_proxy_listener(first_addr, second_addr).await;
+    let mut client = TcpStream::connect(proxy).await.unwrap();
+
+    client
+        .write_all(
+            b"GET /with-body HTTP/1.1\r\nHost: proxy.test\r\nContent-Length: 4\r\nConnection: close\r\n\r\nbody",
+        )
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    client.read_to_end(&mut response).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(550)).await;
+
+    assert!(response.starts_with(b"HTTP/1.1 502 Bad Gateway\r\n"));
+    assert!(!second_accepted.load(std::sync::atomic::Ordering::Acquire));
 }
 
 #[cfg(feature = "load-balancer")]

@@ -42,7 +42,8 @@ impl NativeHttp1Proxy {
             return NativeHttp1Response::new(502, "Bad Gateway", b"bad gateway\n")
                 .close_connection();
         };
-        let retry_allowed = native_http1_static_failover_method_allowed(&request.method);
+        let retry_allowed =
+            request.body.is_empty() && native_http1_static_failover_method_allowed(&request.method);
         let client_ip = request
             .effective_client_addr
             .or(request.peer_addr)
@@ -157,7 +158,7 @@ impl NativeHttp1Proxy {
                         self.spawn_cache_revalidation(
                             cache.clone(),
                             key,
-                            request.clone(),
+                            request.metadata_snapshot(),
                             entry.clone(),
                         );
                         return self.finish_response(

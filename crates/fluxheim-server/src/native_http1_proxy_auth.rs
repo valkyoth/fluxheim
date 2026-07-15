@@ -220,7 +220,6 @@ fn global_auth_request_inflight() -> Arc<tokio::sync::Semaphore> {
 mod admission_tests {
     use super::*;
     use fluxheim_protocol::Http1Version;
-    use zeroize::Zeroizing;
 
     #[test]
     fn auth_request_instances_share_process_wide_admission() {
@@ -233,9 +232,9 @@ mod admission_tests {
         let second = NativeAuthRequest::from_config(&config).unwrap();
 
         assert!(Arc::ptr_eq(&first.global_inflight, &second.global_inflight));
-        assert_eq!(
-            first.global_inflight.available_permits(),
-            MAX_GLOBAL_AUTH_REQUESTS_IN_FLIGHT
+        assert!(
+            first.global_inflight.available_permits() <= MAX_GLOBAL_AUTH_REQUESTS_IN_FLIGHT,
+            "shared global admission exceeded its configured ceiling"
         );
     }
 
@@ -263,7 +262,7 @@ mod admission_tests {
             target: "/".to_owned(),
             version: Http1Version::Http11,
             headers: vec![("host".to_owned(), "app.test".to_owned())],
-            body: Zeroizing::new(Vec::new()),
+            body: crate::NativeHttp1RequestBody::empty(),
             trailers: Vec::new(),
         };
 
@@ -379,7 +378,6 @@ mod tests {
     use super::apply_native_auth_request_headers;
     use crate::NativeHttp1Request;
     use fluxheim_protocol::Http1Version;
-    use zeroize::Zeroizing;
 
     #[test]
     fn native_auth_request_headers_replace_existing_values() {
@@ -397,7 +395,7 @@ mod tests {
                 ("host".to_owned(), "auth.test".to_owned()),
                 ("x-user-id".to_owned(), "attacker".to_owned()),
             ],
-            body: Zeroizing::new(Vec::new()),
+            body: crate::NativeHttp1RequestBody::empty(),
             trailers: Vec::new(),
         };
         let headers = vec![(

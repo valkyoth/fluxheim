@@ -54,7 +54,7 @@ enum Http1ChunkedDecodeState {
     End,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct Http1ChunkedDecoder {
     limits: Http1ChunkLimits,
     input: Vec<u8>,
@@ -90,6 +90,17 @@ impl Http1ChunkedDecoder {
         &mut self,
         chunk: &[u8],
         output: &mut Vec<u8>,
+    ) -> Result<Option<Http1ChunkedDecode>, Http1ParseError> {
+        if output.len() != self.decoded_len {
+            return Err(Http1ParseError::InvalidChunk);
+        }
+        self.push_with_sink(chunk, output)
+    }
+
+    pub fn push_to<S: Http1ChunkSink>(
+        &mut self,
+        chunk: &[u8],
+        output: &mut S,
     ) -> Result<Option<Http1ChunkedDecode>, Http1ParseError> {
         if output.len() != self.decoded_len {
             return Err(Http1ParseError::InvalidChunk);
@@ -272,11 +283,27 @@ impl Http1ChunkedDecoder {
     }
 }
 
-trait Http1ChunkSink {
+impl Drop for Http1ChunkedDecoder {
+    fn drop(&mut self) {
+        sanitization::unsafe_wipe::volatile_sanitize_vec(&mut self.input);
+    }
+}
+
+pub trait Http1ChunkSink {
+    fn len(&self) -> usize;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     fn append(&mut self, bytes: &[u8]) -> Result<(), Http1ParseError>;
 }
 
 impl Http1ChunkSink for Vec<u8> {
+    fn len(&self) -> usize {
+        Vec::len(self)
+    }
+
     fn append(&mut self, bytes: &[u8]) -> Result<(), Http1ParseError> {
         self.try_reserve(bytes.len())
             .map_err(|_| Http1ParseError::BodyTooLarge)?;
@@ -291,6 +318,10 @@ struct Http1SliceChunkSink<'a> {
 }
 
 impl Http1ChunkSink for Http1SliceChunkSink<'_> {
+    fn len(&self) -> usize {
+        self.len
+    }
+
     fn append(&mut self, bytes: &[u8]) -> Result<(), Http1ParseError> {
         let end = self
             .len

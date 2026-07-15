@@ -73,7 +73,7 @@ pub(super) fn native_request(
         target: target.to_owned(),
         version: fluxheim_protocol::Http1Version::Http11,
         headers,
-        body: zeroize::Zeroizing::new(Vec::new()),
+        body: fluxheim_server::NativeHttp1RequestBody::empty(),
         trailers: Vec::new(),
     }
 }

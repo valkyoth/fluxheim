@@ -50,7 +50,7 @@ pub(crate) fn request() -> NativeHttp1Request {
             ("Host".to_owned(), "example.test".to_owned()),
             ("Accept".to_owned(), "text/plain".to_owned()),
         ],
-        body: zeroize::Zeroizing::new(Vec::new()),
+        body: crate::NativeHttp1RequestBody::empty(),
         trailers: Vec::new(),
     }
 }
@@ -202,7 +202,7 @@ async fn native_upstream_retries_once_when_pooled_connection_is_stale() {
 }
 
 #[tokio::test]
-async fn native_upstream_does_not_retry_unsafe_method_on_stale_pool_connection() {
+async fn native_upstream_does_not_retry_body_bearing_request_on_stale_pool_connection() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let accepted = Arc::new(AtomicUsize::new(0));
@@ -230,11 +230,10 @@ async fn native_upstream_does_not_retry_unsafe_method_on_stale_pool_connection()
     assert_eq!(response.body(), b"stale");
     assert_eq!(upstream.idle_connection_count().await, 1);
 
-    let mut post = request();
-    post.method = "POST".to_owned();
-    post.body = zeroize::Zeroizing::new(b"do not replay".to_vec());
+    let mut body_request = request();
+    body_request.body = crate::NativeHttp1RequestBody::from_vec(b"do not replay".to_vec());
 
-    let error = upstream.send(&post).await.unwrap_err();
+    let error = upstream.send(&body_request).await.unwrap_err();
 
     assert!(matches!(
         error,

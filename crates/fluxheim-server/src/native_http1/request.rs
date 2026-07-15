@@ -1,9 +1,9 @@
 use std::net::SocketAddr;
+use std::ops::Deref;
 
 use fluxheim_protocol::{Http1RequestTarget, Http1Version, http1_request_target};
-use zeroize::Zeroizing;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct NativeHttp1Request {
     pub method: String,
     pub peer_addr: Option<SocketAddr>,
@@ -15,8 +15,132 @@ pub struct NativeHttp1Request {
     pub target: String,
     pub version: Http1Version,
     pub headers: Vec<(String, String)>,
-    pub body: Zeroizing<Vec<u8>>,
+    pub body: NativeHttp1RequestBody,
     pub trailers: Vec<(String, String)>,
+}
+
+#[derive(Default, Eq, PartialEq)]
+pub struct NativeHttp1RequestBody(Vec<u8>);
+
+impl NativeHttp1RequestBody {
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self(Vec::new())
+    }
+
+    #[must_use]
+    pub const fn from_vec(body: Vec<u8>) -> Self {
+        Self(body)
+    }
+
+    pub(crate) fn extend_from_slice(
+        &mut self,
+        bytes: &[u8],
+    ) -> Result<(), fluxheim_protocol::Http1ParseError> {
+        let required = self
+            .0
+            .len()
+            .checked_add(bytes.len())
+            .ok_or(fluxheim_protocol::Http1ParseError::BodyTooLarge)?;
+        self.reserve_capacity(required)?;
+        self.0.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    pub(crate) fn reserve_capacity(
+        &mut self,
+        required: usize,
+    ) -> Result<(), fluxheim_protocol::Http1ParseError> {
+        if required <= self.0.capacity() {
+            return Ok(());
+        }
+        let mut replacement = Vec::new();
+        replacement
+            .try_reserve_exact(required)
+            .map_err(|_| fluxheim_protocol::Http1ParseError::BodyTooLarge)?;
+        replacement.extend_from_slice(&self.0);
+        sanitization::unsafe_wipe::volatile_sanitize_vec(&mut self.0);
+        self.0 = replacement;
+        Ok(())
+    }
+
+    pub(crate) fn replace_capacity(
+        &mut self,
+        required: usize,
+    ) -> Result<(), fluxheim_protocol::Http1ParseError> {
+        let mut replacement = Vec::new();
+        replacement
+            .try_reserve_exact(required)
+            .map_err(|_| fluxheim_protocol::Http1ParseError::BodyTooLarge)?;
+        replacement.extend_from_slice(&self.0);
+        sanitization::unsafe_wipe::volatile_sanitize_vec(&mut self.0);
+        self.0 = replacement;
+        Ok(())
+    }
+
+    pub(crate) fn capacity(&self) -> usize {
+        self.0.capacity()
+    }
+}
+
+impl std::fmt::Debug for NativeHttp1RequestBody {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("NativeHttp1RequestBody")
+            .field("len", &self.0.len())
+            .field("contents", &"<redacted>")
+            .finish()
+    }
+}
+
+impl Deref for NativeHttp1RequestBody {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<[u8]> for NativeHttp1RequestBody {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl fluxheim_protocol::Http1ChunkSink for NativeHttp1RequestBody {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn append(&mut self, bytes: &[u8]) -> Result<(), fluxheim_protocol::Http1ParseError> {
+        self.extend_from_slice(bytes)
+    }
+}
+
+impl Drop for NativeHttp1RequestBody {
+    fn drop(&mut self) {
+        sanitization::unsafe_wipe::volatile_sanitize_vec(&mut self.0);
+    }
+}
+
+impl NativeHttp1Request {
+    #[must_use]
+    pub(crate) fn metadata_snapshot(&self) -> Self {
+        Self {
+            method: self.method.clone(),
+            peer_addr: self.peer_addr,
+            local_addr: self.local_addr,
+            effective_client_addr: self.effective_client_addr,
+            downstream_tls: self.downstream_tls,
+            tls_identity: self.tls_identity.clone(),
+            geo_context: self.geo_context.clone(),
+            target: self.target.clone(),
+            version: self.version,
+            headers: self.headers.clone(),
+            body: NativeHttp1RequestBody::empty(),
+            trailers: self.trailers.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -112,5 +236,40 @@ fn native_http1_cache_request_query<'a>(method: &str, target: &'a str) -> Option
         Ok(Http1RequestTarget::Origin { query, .. })
         | Ok(Http1RequestTarget::AbsoluteUri { query, .. }) => query,
         Ok(Http1RequestTarget::Authority { .. } | Http1RequestTarget::Asterisk) | Err(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metadata_snapshot_never_copies_request_body() {
+        let request = NativeHttp1Request {
+            method: "POST".to_owned(),
+            peer_addr: "127.0.0.1:1234".parse().ok(),
+            local_addr: None,
+            effective_client_addr: None,
+            downstream_tls: true,
+            tls_identity: None,
+            geo_context: None,
+            target: "/upload".to_owned(),
+            version: Http1Version::Http11,
+            headers: vec![(
+                "content-type".to_owned(),
+                "application/octet-stream".to_owned(),
+            )],
+            body: NativeHttp1RequestBody::from_vec(b"sensitive-body".to_vec()),
+            trailers: vec![("x-checksum".to_owned(), "value".to_owned())],
+        };
+
+        let snapshot = request.metadata_snapshot();
+
+        assert!(snapshot.body.is_empty());
+        assert_eq!(snapshot.method, request.method);
+        assert_eq!(snapshot.target, request.target);
+        assert_eq!(snapshot.headers, request.headers);
+        assert_eq!(snapshot.trailers, request.trailers);
+        assert!(!format!("{request:?}").contains("sensitive-body"));
     }
 }

@@ -97,9 +97,8 @@ pub(crate) fn native_origin_slice_request(
     if !fluxheim_common::path_safety::safe_forward_path_and_query(&request.target) {
         return None;
     }
-    let mut request = request.clone();
+    let mut request = request.metadata_snapshot();
     request.method = "GET".to_owned();
-    request.body = zeroize::Zeroizing::new(Vec::new());
     request.trailers.clear();
     request.headers.retain(|(name, _)| {
         !name.eq_ignore_ascii_case("range")

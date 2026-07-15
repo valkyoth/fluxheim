@@ -31,7 +31,7 @@ impl NativeHttp2ConnectionDriver {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct NativeHttp2UpstreamRequest {
     pub method: Method,
     pub uri: Uri,
@@ -66,6 +66,16 @@ impl NativeHttp2UpstreamRequest {
             .get_or_insert_with(HeaderMap::new)
             .insert(name, value);
         self
+    }
+
+    pub(crate) fn retry_snapshot(&self) -> Option<Self> {
+        self.body.is_empty().then(|| Self {
+            method: self.method.clone(),
+            uri: self.uri.clone(),
+            headers: self.headers.clone(),
+            body: Zeroizing::new(Vec::new()),
+            trailers: self.trailers.clone(),
+        })
     }
 }
 
