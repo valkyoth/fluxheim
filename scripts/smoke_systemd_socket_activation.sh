@@ -105,6 +105,17 @@ done
 
 python3 - "$ownership_probe" <<'PY'
 import os
+import sys
+
+binary = sys.argv[1]
+environment = os.environ.copy()
+environment["LISTEN_FDS"] = "129"
+environment["LISTEN_PID"] = str(os.getpid())
+os.execve(binary, [binary, "oversized-declaration"], environment)
+PY
+
+python3 - "$ownership_probe" <<'PY'
+import os
 import socket
 import sys
 

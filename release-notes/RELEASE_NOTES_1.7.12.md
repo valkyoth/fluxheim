@@ -140,6 +140,15 @@ trailers are not part of this release.
 - Bound storage-bin manifests to 4 KiB and use no-follow, nonblocking regular
   file reads so oversized or special persistent files fail closed at startup.
 
+## Socket-Activation Hardening
+
+- Bound `LISTEN_FDS` to 1 through 128 inside the focused systemd adoption crate
+  before libsystemd can allocate descriptor storage, independently preserving
+  the root runtime's existing launch-environment validation.
+- Require every inherited internet stream listener to report
+  `SO_PROTOCOL=TCP`, in addition to the existing socket-family, stream-type,
+  listening-state, planned-address, and one-shot ownership checks.
+
 ## Reproducible FIPS-Backend Evidence
 
 - Add separately pinned OpenSSL-FIPS and rustls/AWS-LC-FIPS proof
@@ -180,3 +189,6 @@ platform, configuration, key handling, and required compliance evidence.
   slash encodings, encoded Unicode controls, and valid encoded Unicode.
 - Static-web tests cover missing children below valid and broken symlinked
   parents plus hidden non-UTF-8 Unix filenames.
+- Systemd unit and process-level smoke coverage verifies explicit TCP protocol
+  admission, bounded declarations before receipt, one-shot ownership,
+  complete-set closure on validation failure, and normal listener adoption.

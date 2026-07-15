@@ -6,9 +6,10 @@ fn main() -> io::Result<()> {
         Some("concurrent") => concurrent_claim_probe(),
         Some("repeat") => repeat_claim_probe(),
         Some("failed-validation-retry") => failed_validation_retry_probe(),
+        Some("oversized-declaration") => oversized_declaration_probe(),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "expected concurrent, repeat, or failed-validation-retry probe",
+            "expected concurrent, repeat, failed-validation-retry, or oversized-declaration probe",
         )),
     }
 }
@@ -107,6 +108,20 @@ fn failed_validation_retry_probe() -> io::Result<()> {
     }
     first.local_addr()?;
     second.local_addr()?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn oversized_declaration_probe() -> io::Result<()> {
+    let error = match fluxheim_systemd::receive_tcp_listeners(1) {
+        Ok(_) => return Err(io::Error::other("oversized LISTEN_FDS was accepted")),
+        Err(error) => error,
+    };
+    if error.kind() != io::ErrorKind::InvalidInput
+        || !error.to_string().contains("LISTEN_FDS declares 129")
+    {
+        return Err(error);
+    }
     Ok(())
 }
 

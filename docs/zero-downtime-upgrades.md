@@ -65,8 +65,10 @@ for activated production listeners.
 Descriptor receipt never clears or changes `LISTEN_PID`, `LISTEN_FDS`, or
 `LISTEN_FDNAMES`. Mutating process environment storage after Tokio worker
 threads exist is not memory-safe on Unix. The focused `fluxheim-systemd` crate
-uses non-mutating libsystemd receipt and contains the single audited raw-FD
-ownership transfer required to construct owned Rust listeners.
+independently bounds the declared listener count before non-mutating libsystemd
+receipt, explicitly verifies `SOCK_STREAM`, `SO_PROTOCOL=TCP`, internet-family,
+and listening state, and contains the single audited raw-FD ownership transfer
+required to construct owned Rust listeners.
 
 Descriptor adoption is process-wide and one-shot. Concurrent or repeated
 calls fail before reading FD 3. Fluxheim converts the complete declared set to

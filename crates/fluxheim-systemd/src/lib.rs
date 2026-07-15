@@ -11,6 +11,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 static ACTIVATION_CONSUMED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "linux")]
+const MAX_ACTIVATION_LISTENERS: usize = 128;
+
+#[cfg(target_os = "linux")]
 pub fn receive_tcp_listeners(expected: usize) -> io::Result<Vec<TcpListener>> {
     use std::os::fd::{FromRawFd as _, IntoRawFd as _, OwnedFd};
 
@@ -24,6 +27,8 @@ pub fn receive_tcp_listeners(expected: usize) -> io::Result<Vec<TcpListener>> {
                 "systemd activation descriptors were already consumed",
             )
         })?;
+
+    validate_declared_count(expected, activation_listener_declaration()?.as_deref())?;
 
     // `false` is security-critical: environment mutation is unsound once other
     // process threads can concurrently read libc's environment storage.
@@ -71,19 +76,83 @@ pub fn receive_tcp_listeners(expected: usize) -> io::Result<Vec<TcpListener>> {
 
 #[cfg(target_os = "linux")]
 fn validated_tcp_listener(index: usize, owned: std::os::fd::OwnedFd) -> io::Result<TcpListener> {
-    if rustix::net::sockopt::socket_type(&owned)? != rustix::net::SocketType::STREAM {
+    validate_tcp_listener_properties(
+        index,
+        rustix::net::sockopt::socket_type(&owned)?,
+        rustix::net::sockopt::socket_protocol(&owned)?,
+        rustix::net::sockopt::socket_acceptconn(&owned)?,
+    )?;
+    Ok(TcpListener::from(owned))
+}
+
+#[cfg(target_os = "linux")]
+fn validate_tcp_listener_properties(
+    index: usize,
+    socket_type: rustix::net::SocketType,
+    protocol: Option<rustix::net::Protocol>,
+    listening: bool,
+) -> io::Result<()> {
+    if socket_type != rustix::net::SocketType::STREAM {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("descriptor index {index} is not a TCP stream socket"),
+            format!("descriptor index {index} is not a stream socket"),
         ));
     }
-    if !rustix::net::sockopt::socket_acceptconn(&owned)? {
+    if protocol != Some(rustix::net::ipproto::TCP) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("descriptor index {index} does not use TCP"),
+        ));
+    }
+    if !listening {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("descriptor index {index} is not in listening state"),
         ));
     }
-    Ok(TcpListener::from(owned))
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn activation_listener_declaration() -> io::Result<Option<String>> {
+    std::env::var_os("LISTEN_FDS")
+        .map(|value| {
+            value.into_string().map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "LISTEN_FDS is not valid Unicode",
+                )
+            })
+        })
+        .transpose()
+}
+
+#[cfg(target_os = "linux")]
+fn validate_declared_count(expected: usize, declared: Option<&str>) -> io::Result<()> {
+    if !(1..=MAX_ACTIVATION_LISTENERS).contains(&expected) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "expected listener count must be between 1 and 128",
+        ));
+    }
+    let declared = declared
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "LISTEN_FDS is missing"))?
+        .parse::<usize>()
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "LISTEN_FDS is not a valid integer",
+            )
+        })?;
+    if declared != expected || declared > MAX_ACTIVATION_LISTENERS {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "expected {expected} inherited listener(s), but LISTEN_FDS declares {declared}"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -107,6 +176,32 @@ mod tests {
         let listener = validated_tcp_listener(0, OwnedFd::from(listener)).unwrap();
 
         assert_eq!(listener.local_addr().unwrap(), expected);
+    }
+
+    #[test]
+    fn rejects_non_tcp_stream_protocol() {
+        let error = validate_tcp_listener_properties(
+            2,
+            rustix::net::SocketType::STREAM,
+            Some(rustix::net::ipproto::UDP),
+            true,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("index 2 does not use TCP"));
+    }
+
+    #[test]
+    fn bounds_declared_listener_count_before_descriptor_receipt() {
+        assert!(validate_declared_count(1, Some("1")).is_ok());
+        assert!(validate_declared_count(0, Some("0")).is_err());
+        assert!(validate_declared_count(129, Some("129")).is_err());
+        assert!(validate_declared_count(1, None).is_err());
+        assert!(validate_declared_count(1, Some("invalid")).is_err());
+        assert!(validate_declared_count(1, Some("2")).is_err());
+        assert!(
+            validate_declared_count(1, Some("184467440737095516160000000000000000000")).is_err()
+        );
     }
 
     #[test]
