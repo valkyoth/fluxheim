@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.7.11
+Version:        1.7.12
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2

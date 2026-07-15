@@ -12,9 +12,40 @@ published Security Policy.
 
 ## Status
 
-Current release line: `1.6.x`. The FIPS/ISO internal-crypto closure was
-completed in `1.3.6`; the `1.6.x` Pingora-exit line does not broaden the
-compliance claim.
+Current release line: `1.7.x`. The FIPS/ISO internal-crypto closure was
+completed in `1.3.6`; later native-runtime and extensibility work does not
+broaden the compliance claim.
+
+Fluxheim `1.7.12` adds reproducible CI evidence environments for both supported
+FIPS-capable backends. These are proof images, not published runtime variants:
+
+- `containers/fips/Containerfile.openssl` builds against the pinned UBI 9
+  environment and its packaged OpenSSL FIPS provider.
+- `containers/fips/Containerfile.rustls` builds the rustls/AWS-LC FIPS path
+  with pinned Rust and an AWS-LC-supported GCC 11 toolchain.
+- Both record compiler, package, Cargo dependency, and binary-hash evidence,
+  then run the exact built binary as an unprivileged user.
+- The live smoke rejects a non-FIPS policy, terminates verified downstream TLS,
+  and proxies to a certificate-verified TLS origin.
+
+Run both proof environments with:
+
+```bash
+scripts/smoke_fips_backend_images.sh all
+```
+
+Use `openssl` or `rustls` instead of `all` for one backend. Podman and Docker
+are supported. The normal CI validates the evidence plan without paying the
+full native-build cost on every commit; the manual `FIPS Backend Evidence`
+workflow and the deep release gate run the real builds. Set
+`FLUXHEIM_GATE_FIPS_IMAGES=1` to add them to a normal stable gate.
+
+Passing these tests proves that the recorded Fluxheim artifact can activate
+the selected provider and complete the tested TLS operations in that exact
+image. It does not make the image, Fluxheim, or an arbitrary deployment FIPS
+validated. Formal deployment evidence still depends on the selected module's
+CMVP certificate, Security Policy, approved operating environment, and
+operator procedures.
 
 The `1.3.4` release line adds OpenSSL FIPS-capable TLS validation and
 ISO/IEC 19790 terminology aliases for compliance evidence plumbing. The

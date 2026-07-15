@@ -1,0 +1,80 @@
+ARG UBI_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal:9.6@sha256:d1bad2a2790eac1651e57e78159a81b72ddfa7b836936b26cf51e09744bf1c2d
+
+FROM ${UBI_IMAGE} AS builder
+
+ARG RUST_TOOLCHAIN=1.97.0
+ARG RUSTUP_INIT_SHA256=20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c
+
+ENV CARGO_HOME=/opt/rust/cargo
+ENV RUSTUP_HOME=/opt/rust/rustup
+ENV PATH=/opt/rust/cargo/bin:${PATH}
+
+RUN microdnf install -y \
+        cmake \
+        curl-minimal \
+        findutils \
+        gcc \
+        gcc-c++ \
+        git \
+        golang \
+        gzip \
+        make \
+        openssl \
+        perl-core \
+        pkgconf-pkg-config \
+        tar \
+    && microdnf clean all \
+    && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/rustup-init \
+        https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init \
+    && printf '%s  %s\n' "${RUSTUP_INIT_SHA256}" /tmp/rustup-init | sha256sum -c - \
+    && chmod 0755 /tmp/rustup-init \
+    && /tmp/rustup-init -y --profile minimal --default-toolchain "${RUST_TOOLCHAIN}" \
+    && rm -f /tmp/rustup-init
+
+WORKDIR /usr/src/fluxheim
+COPY . .
+
+RUN scripts/validate-features.sh profile-fips-rustls \
+    && cargo build --locked --release --no-default-features \
+        --features profile-fips-rustls \
+        --bin fluxheim \
+        --bin fluxheim-config-tester \
+    && install -d -m 0755 /usr/src/fluxheim/evidence \
+    && rustc -vV > /usr/src/fluxheim/evidence/rustc.txt \
+    && gcc --version > /usr/src/fluxheim/evidence/cc.txt \
+    && go version > /usr/src/fluxheim/evidence/go.txt \
+    && cmake --version > /usr/src/fluxheim/evidence/cmake.txt \
+    && rpm -qa | LC_ALL=C sort > /usr/src/fluxheim/evidence/packages.txt \
+    && cargo tree --locked --no-default-features --features profile-fips-rustls \
+        > /usr/src/fluxheim/evidence/cargo-tree.txt \
+    && grep -F 'aws-lc-fips-sys v' /usr/src/fluxheim/evidence/cargo-tree.txt \
+    && sha256sum \
+        target/release/fluxheim \
+        target/release/fluxheim-config-tester \
+        > /usr/src/fluxheim/evidence/binaries.sha256
+
+FROM ${UBI_IMAGE}
+
+RUN microdnf install -y ca-certificates openssl \
+    && microdnf clean all \
+    && install -d -m 0700 -o 65532 -g 65532 \
+        /opt/fluxheim-evidence/run \
+        /opt/fluxheim-evidence/tls
+
+COPY --from=builder /usr/src/fluxheim/target/release/fluxheim /usr/local/bin/fluxheim
+COPY --from=builder /usr/src/fluxheim/target/release/fluxheim-config-tester /usr/local/bin/fluxheim-config-tester
+COPY --from=builder /usr/src/fluxheim/evidence /opt/fluxheim-evidence/build
+COPY scripts/generate_fips_evidence_tls.sh /usr/local/bin/generate-fips-evidence-tls
+COPY scripts/smoke_fips_backend_container.sh /usr/local/bin/smoke-fips-backend-container
+
+RUN chown -R 65532:65532 /opt/fluxheim-evidence \
+    && chmod 0755 /usr/local/bin/generate-fips-evidence-tls \
+    && /usr/local/bin/generate-fips-evidence-tls \
+    && rm -f /usr/local/bin/generate-fips-evidence-tls \
+    && chmod 0755 /usr/local/bin/fluxheim /usr/local/bin/fluxheim-config-tester \
+        /usr/local/bin/smoke-fips-backend-container \
+    && chown -R 65532:65532 /opt/fluxheim-evidence
+
+USER 65532:65532
+ENV FLUXHEIM_FIPS_BACKEND=rustls
+ENTRYPOINT ["/usr/local/bin/smoke-fips-backend-container"]

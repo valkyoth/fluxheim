@@ -195,6 +195,13 @@ else
     echo "stable release gate: skipping rustls/AWS-LC FIPS-capable validation; set FLUXHEIM_GATE_FIPS_RUSTLS=1 to enable"
 fi
 
+if [ "${FLUXHEIM_GATE_FIPS_IMAGES:-0}" = "1" ]; then
+    echo "stable release gate: FIPS backend image evidence"
+    scripts/smoke_fips_backend_images.sh all
+else
+    echo "stable release gate: skipping FIPS backend image evidence; set FLUXHEIM_GATE_FIPS_IMAGES=1 to enable"
+fi
+
 if [ "${FLUXHEIM_GATE_TLS_SCAN:-0}" = "1" ]; then
     echo "stable release gate: local TLS scan"
     scripts/tls_scan_local.sh

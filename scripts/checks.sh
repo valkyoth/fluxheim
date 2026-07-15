@@ -117,6 +117,7 @@ cargo fmt --all --check
 scripts/validate-release-metadata.sh
 scripts/validate-modularity-policy.sh check
 scripts/validate-instant-acme-patch.sh
+scripts/validate-fips-image-evidence-plan.sh
 scripts/capture-runtime-baseline.sh check
 scripts/validate-pingora-dependency-policy.sh check
 scripts/validate-native-web-tls.sh check

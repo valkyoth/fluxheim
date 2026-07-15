@@ -60,6 +60,13 @@ TESTS: tuple[TestEntry, ...] = (
         "Pulls and prints the configured WordPress, OpenBao, database, Prometheus, and Jaeger images.",
     ),
     TestEntry(
+        "fips-images",
+        "FIPS backend image evidence",
+        "containers",
+        ("scripts/smoke_fips_backend_images.sh", "all"),
+        "Builds pinned OpenSSL and rustls/AWS-LC proof images and exercises downstream and upstream TLS.",
+    ),
+    TestEntry(
         "core",
         "1.0 core smoke",
         "smoke",

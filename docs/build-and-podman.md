@@ -71,6 +71,20 @@ cargo build --release --no-default-features --features profile-iso19790-rustls
 scripts/validate-fips-rustls.sh check
 ```
 
+For the stronger `1.7.12` container evidence, build the exact proof binaries
+inside pinned UBI environments and exercise real downstream and upstream TLS:
+
+```bash
+scripts/smoke_fips_backend_images.sh all
+# or: scripts/smoke_fips_backend_images.sh openssl
+# or: scripts/smoke_fips_backend_images.sh rustls
+```
+
+These are CI/deep-gate proof images, not release images and not a FIPS
+certification claim. They retain compiler, package, dependency, provider, and
+binary-hash evidence inside each image. See [FIPS-Capable Deployments](fips.md)
+for the exact boundary and operator responsibilities.
+
 Use an AWS-LC-supported FIPS builder for
 `scripts/validate-fips-rustls.sh release`. Rolling distribution compilers can be
 ahead of AWS-LC FIPS support; newer GCC/Clang families may fail inside

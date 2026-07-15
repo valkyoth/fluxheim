@@ -88,6 +88,9 @@ jobs:
       - name: Validate ACME mount-boundary test plan
         run: scripts/validate-acme-mount-boundary-plan.sh
 
+      - name: Validate FIPS backend image evidence plan
+        run: scripts/validate-fips-image-evidence-plan.sh
+
       - name: Validate panic policy on feature profiles
         run: |
           cargo clippy --no-default-features --features proxy,tls-rustls,acme --all-targets -- -D warnings
