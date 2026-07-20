@@ -22,8 +22,8 @@ name = "build_policy_examples"
 
 [dependencies]
 sha2 = "0.11.0"
-thiserror = "2.0.18"
-tokio = { version = "1.52.3", default-features = false, features = ["rt", "sync", "time"], optional = true }
+thiserror = "2.0.19"
+tokio = { version = "1.53.0", default-features = false, features = ["rt", "sync", "time"], optional = true }
 wasmtime = { version = "46.0.1", default-features = false, features = ["cranelift", "runtime", "std"], optional = true }
 wasmtime-wasi = { version = "46.0.1", default-features = false, features = ["p1"], optional = true }
 

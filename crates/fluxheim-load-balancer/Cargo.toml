@@ -16,26 +16,26 @@ tls-openssl-backend = ["dep:openssl", "dep:tokio-openssl"]
 
 [dependencies]
 arc-swap = "1.9.2"
-async-trait = "0.1.89"
-base64-ng = "1.3.7"
+async-trait = "0.1.91"
+base64-ng = "1.3.8"
 bytes = "1.12.1"
 crc32fast = "1.5.0"
 fluxheim-common = { path = "../fluxheim-common" }
 fluxheim-config = { path = "../fluxheim-config", features = ["load-balancer", "proxy"] }
 fluxheim-runtime = { path = "../fluxheim-runtime" }
-futures = "0.3.32"
+futures = "0.3.33"
 getrandom = "0.4.3"
 h2 = "0.4.15"
 http = "1.4.2"
 log = "0.4.33"
 openssl = { version = "0.10.81", optional = true }
 ring = "0.17.14"
-rustls = { version = "0.23.41", optional = true, default-features = false, features = ["std", "tls12", "logging"] }
+rustls = { version = "0.23.42", optional = true, default-features = false, features = ["std", "tls12", "logging"] }
 rustls-native-certs = { version = "0.8.4", optional = true }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.150"
-sanitization = { version = "1.2.4", features = ["alloc"] }
-tokio = { version = "1.52.3", default-features = false, features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sanitization = { version = "1.2.5", features = ["alloc"] }
+tokio = { version = "1.53.0", default-features = false, features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
 tokio-openssl = { version = "0.6.5", optional = true }
 tokio-rustls = { version = "0.26.4", optional = true, default-features = false, features = ["logging", "tls12"] }
 ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"] }
@@ -43,5 +43,5 @@ zeroize = "1.9.0"
 
 [dev-dependencies]
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }
-proptest = "1.6.0"
-rustls = { version = "0.23.41", default-features = false, features = ["std", "tls12", "logging", "ring"] }
+proptest = "1.11.0"
+rustls = { version = "0.23.42", default-features = false, features = ["std", "tls12", "logging", "ring"] }

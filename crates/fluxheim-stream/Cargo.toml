@@ -11,8 +11,8 @@ description = "Internal Fluxheim TCP stream proxy runtime boundary."
 fluxheim-common = { path = "../fluxheim-common" }
 fluxheim-config = { path = "../fluxheim-config", features = ["stream-proxy"] }
 fluxheim-protocol = { path = "../fluxheim-protocol" }
-sanitization = { version = "1.2.4" }
-tokio = { version = "1.52.3", features = ["io-util", "macros", "rt", "sync", "time"] }
+sanitization = { version = "1.2.5" }
+tokio = { version = "1.53.0", features = ["io-util", "macros", "rt", "sync", "time"] }
 
 [dev-dependencies]
-tokio = { version = "1.52.3", features = ["test-util"] }
+tokio = { version = "1.53.0", features = ["test-util"] }
