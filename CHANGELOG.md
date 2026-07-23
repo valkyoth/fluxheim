@@ -44,6 +44,11 @@ behavior when the change improves security or project direction.
 
 ### Security
 
+- Register cache-fill waiters while holding the fill-state lock, enforce
+  `wait_timeout_secs` as one total deadline capped by the writer's remaining
+  valid age across wake-and-recheck races, and fail ordinary and fixed-slice
+  waiters closed with a retryable `503` instead of allowing timed-out readers
+  to stampede the origin.
 - Partition fixed-slice range-cache keys by configured
   `vary_request_headers`, and refuse slice storage when an origin introduces an
   unconfigured response-only `Vary` dimension.

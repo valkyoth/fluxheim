@@ -99,6 +99,37 @@ async fn native_route_proxy_cache_lock_collapses_concurrent_memory_fills() {
 }
 
 #[tokio::test]
+async fn native_route_proxy_cache_lock_wait_timeout_fails_closed() {
+    let (upstream, accepted) =
+        upstream_delayed_cacheable_once("slow-fill", Duration::from_millis(1_500)).await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.lock.enabled = true;
+    cache.lock.wait_timeout_secs = 1;
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let first = tokio::spawn(async move { downstream_get(listener, "/asset.png").await });
+    accepted.await.unwrap();
+    let second = downstream_get(listener, "/asset.png").await;
+    let first = first.await.unwrap();
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(second.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("BYPASS")
+    );
+    assert_eq!(
+        response_header(&second, "x-cache-reason").as_deref(),
+        Some("lock-wait-timeout")
+    );
+    assert_eq!(
+        response_header(&second, "retry-after").as_deref(),
+        Some("1")
+    );
+}
+
+#[tokio::test]
 async fn native_route_proxy_does_not_cache_authorized_proxy_response() {
     let upstream = upstream_cacheable_sequence(&[
         ("/tenant.png", "authorized-origin"),

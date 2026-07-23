@@ -6,7 +6,9 @@ use crate::native_http1_cache::{
     native_response_header_map, prune_native_memory_cache, remove_native_memory_cache_entry,
 };
 use crate::native_http1_proxy::NativeHttp1Proxy;
-use crate::native_http1_proxy_cache_fill::NativeCacheFillGate;
+use crate::native_http1_proxy_cache_fill::{
+    NativeCacheFillGate, NativeCacheFillWaitBudget, NativeCacheFillWaitTimeout,
+};
 use crate::native_http1_proxy_cache_headers::{
     cached_proxy_headers, native_response_cache_tags, native_vary_cache_key,
 };
@@ -33,52 +35,69 @@ impl NativeProxyMemoryCache {
         request: &NativeHttp1Request,
         proxy: &NativeHttp1Proxy,
         #[cfg(feature = "wasm")] key_components: &[super::NativeProxyCacheKeyComponent],
-    ) -> Option<NativeCacheSliceResponse> {
+    ) -> Result<Option<NativeCacheSliceResponse>, NativeCacheFillWaitTimeout> {
         if !self.config.range.enabled || !self.config.range.slice.enabled {
-            return None;
+            return Ok(None);
         }
-        let primary_key = self.key_with_components(
+        let Some(primary_key) = self.key_with_components(
             request,
             #[cfg(feature = "wasm")]
             key_components,
             #[cfg(not(feature = "wasm"))]
             &[],
-        )?;
+        ) else {
+            return Ok(None);
+        };
         let base_key = if self.config.vary_request_headers.is_empty() {
             primary_key.clone()
         } else {
-            native_vary_cache_key(&primary_key, &self.config.vary_request_headers, request)?
+            let Some(base_key) =
+                native_vary_cache_key(&primary_key, &self.config.vary_request_headers, request)
+            else {
+                return Ok(None);
+            };
+            base_key
         };
         if request_cache_bypass_reason(request, &self.config).is_some()
             || self.cache_pass_should_bypass(&primary_key)
         {
-            return None;
+            return Ok(None);
         }
-        let slice_request = selected_cache_slice_range_request(request, &self.config)?;
+        let Some(slice_request) = selected_cache_slice_range_request(request, &self.config) else {
+            return Ok(None);
+        };
         let slice_size = self.config.range.slice.size_bytes.as_u64();
-        let (total, first_slice, first_filled) = self
+        let Some((total, first_slice, first_filled)) = self
             .discover_slice_total(&base_key, &primary_key, request, proxy, slice_size)
-            .await?;
-        let ranges = resolve_client_slice_ranges(&slice_request.ranges, total)?;
+            .await?
+        else {
+            return Ok(None);
+        };
+        let Some(ranges) = resolve_client_slice_ranges(&slice_request.ranges, total) else {
+            return Ok(None);
+        };
+        let Some(max_slices) = usize::try_from(self.config.range.slice.max_slices).ok() else {
+            return Ok(None);
+        };
         if ranges.is_empty()
             || !native_slice_request_within_policy(
                 &ranges,
                 self.config.range.max_bytes.as_u64(),
-                usize::try_from(self.config.range.slice.max_slices).ok()?,
+                max_slices,
                 slice_size,
             )
         {
-            return Some(NativeCacheSliceResponse {
+            return Ok(Some(NativeCacheSliceResponse {
                 response: native_slice_not_satisfiable_response(total),
                 filled: false,
-            });
+            }));
         }
 
         let identity = native_slice_identity(&first_slice);
         if let Some(if_range) = slice_request.if_range.as_deref()
             && !native_if_range_matches_slice_identity(if_range, &identity)
         {
-            return None;
+            return Ok(None);
         }
 
         let mut filled = first_filled;
@@ -91,17 +110,22 @@ impl NativeProxyMemoryCache {
             if slices.contains_key(&(bounds.start, bounds.end)) {
                 continue;
             }
-            let result = self
+            let Some(result) = self
                 .lookup_or_fill_slice(&base_key, &primary_key, request, proxy, bounds)
-                .await?;
+                .await?
+            else {
+                return Ok(None);
+            };
             filled |= result.1;
             if native_slice_identity(&result.0) != identity {
-                return None;
+                return Ok(None);
             }
             slices.insert((result.0.bounds.start, result.0.bounds.end), result.0);
         }
 
-        native_compose_slice_response(&ranges, &slices, &identity, filled)
+        Ok(native_compose_slice_response(
+            &ranges, &slices, &identity, filled,
+        ))
     }
 
     async fn discover_slice_total(
@@ -111,15 +135,18 @@ impl NativeProxyMemoryCache {
         request: &NativeHttp1Request,
         proxy: &NativeHttp1Proxy,
         slice_size: u64,
-    ) -> Option<(u64, NativeCacheSliceObject, bool)> {
+    ) -> Result<Option<(u64, NativeCacheSliceObject, bool)>, NativeCacheFillWaitTimeout> {
         let first_bounds = CacheSliceBounds {
             start: 0,
             end: slice_size.saturating_sub(1),
         };
-        let (slice, filled) = self
+        let Some((slice, filled)) = self
             .lookup_or_fill_slice(base_key, primary_key, request, proxy, first_bounds)
-            .await?;
-        Some((slice.total, slice, filled))
+            .await?
+        else {
+            return Ok(None);
+        };
+        Ok(Some((slice.total, slice, filled)))
     }
 
     async fn lookup_or_fill_slice(
@@ -129,33 +156,43 @@ impl NativeProxyMemoryCache {
         request: &NativeHttp1Request,
         proxy: &NativeHttp1Proxy,
         bounds: CacheSliceBounds,
-    ) -> Option<(NativeCacheSliceObject, bool)> {
+    ) -> Result<Option<(NativeCacheSliceObject, bool)>, NativeCacheFillWaitTimeout> {
         let key = native_slice_cache_key(base_key, bounds.range_request());
         if let Some(slice) = self.lookup_cached_slice(&key) {
-            return Some((slice, false));
+            return Ok(Some((slice, false)));
         }
         if !self.config.range.slice.fill_missing {
-            return None;
+            return Ok(None);
         }
+        let mut wait_budget = NativeCacheFillWaitBudget::new();
         let _fill_permit = loop {
             match self.cache_fill_gate(&key) {
                 NativeCacheFillGate::Disabled => break None,
                 NativeCacheFillGate::Writer(permit) => break Some(permit),
-                NativeCacheFillGate::Waiter { notify, timeout } => {
-                    let _ = tokio::time::timeout(timeout, notify.notified()).await;
+                NativeCacheFillGate::Waiter(waiter) => {
+                    if !wait_budget.wait(waiter).await {
+                        return Err(NativeCacheFillWaitTimeout);
+                    }
                     if let Some(slice) = self.lookup_cached_slice(&key) {
-                        return Some((slice, false));
+                        return Ok(Some((slice, false)));
                     }
                 }
             }
         };
-        let _origin_permit = self.acquire_origin_fill_permit()?;
+        let Some(_origin_permit) = self.acquire_origin_fill_permit() else {
+            return Ok(None);
+        };
         if let Some(slice) = self.lookup_cached_slice(&key) {
-            return Some((slice, false));
+            return Ok(Some((slice, false)));
         }
-        let response = proxy.fetch_origin_slice(request, bounds).await?;
-        let slice = self.store_origin_slice(primary_key, &key, request, bounds, &response)?;
-        Some((slice, true))
+        let Some(response) = proxy.fetch_origin_slice(request, bounds).await else {
+            return Ok(None);
+        };
+        let Some(slice) = self.store_origin_slice(primary_key, &key, request, bounds, &response)
+        else {
+            return Ok(None);
+        };
+        Ok(Some((slice, true)))
     }
 
     fn lookup_cached_slice(&self, key: &str) -> Option<NativeCacheSliceObject> {

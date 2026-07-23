@@ -55,6 +55,9 @@ This release is under development.
   and reject response-only slice variance that cannot be known at lookup time.
 - Prove a concurrent 32-request burst for one missing range slice produces one
   origin fetch when cache locking is enabled.
+- Prove ordinary and fixed-slice cache-fill waiters cannot miss a fast writer
+  notification and receive a bounded retryable `503` after one total wait
+  deadline without creating another origin request.
 - Bound runtime and inspection Vary keys to one SHA-256 component regardless of
   permitted request-header value length.
 - Prove non-cache Wasm admission is partitioned per vhost beneath the native and
@@ -67,6 +70,8 @@ This release is under development.
   does not claim provider-owned key-state zeroization.
 - Apply the existing per-key cache-fill gate to fixed range slices, preventing
   same-slice origin stampedes.
+- Register cache-fill notifications before releasing shared state, and enforce
+  one total waiter deadline across ordinary and fixed-slice fills.
 - Replace variable-width encoded Vary material in cache keys with a fixed-width
   SHA-256 digest. Persisted variants using the prior key format become cold and
   age out or can be purged.

@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use tokio::sync::Notify;
+use tokio::sync::futures::OwnedNotified;
 
 use crate::native_http1_cache::{NativeMemoryCacheState, lock_native_memory_cache};
 
@@ -29,11 +31,22 @@ pub(crate) struct NativePeerFillPermit {
 pub(crate) enum NativeCacheFillGate {
     Disabled,
     Writer(NativeCacheFillPermit),
-    Waiter {
-        notify: Arc<Notify>,
-        timeout: Duration,
-    },
+    Waiter(NativeCacheFillWaiter),
 }
+
+#[derive(Debug)]
+pub(crate) struct NativeCacheFillWaiter {
+    notified: Pin<Box<OwnedNotified>>,
+    timeout: Duration,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct NativeCacheFillWaitBudget {
+    deadline: Option<tokio::time::Instant>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct NativeCacheFillWaitTimeout;
 
 #[derive(Debug)]
 pub(crate) struct NativeCacheFillPermit {
@@ -49,6 +62,35 @@ impl NativeCacheFillPermit {
         notify: Arc<Notify>,
     ) -> Self {
         Self { state, key, notify }
+    }
+}
+
+impl NativeCacheFillWaiter {
+    pub(crate) fn new(notify: Arc<Notify>, timeout: Duration) -> Self {
+        let mut notified = Box::pin(notify.notified_owned());
+        notified.as_mut().enable();
+        Self { notified, timeout }
+    }
+}
+
+impl NativeCacheFillWaitBudget {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) async fn wait(&mut self, waiter: NativeCacheFillWaiter) -> bool {
+        let deadline = match self.deadline {
+            Some(deadline) => deadline,
+            None => {
+                let now = tokio::time::Instant::now();
+                let deadline = now.checked_add(waiter.timeout).unwrap_or(now);
+                self.deadline = Some(deadline);
+                deadline
+            }
+        };
+        tokio::time::timeout_at(deadline, waiter.notified)
+            .await
+            .is_ok()
     }
 }
 
@@ -161,4 +203,37 @@ fn prune_inactive_cache_fill_counters(
         return;
     }
     counters.retain(|_, counter| counter.load(Ordering::Acquire) > 0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NativeCacheFillWaitBudget, NativeCacheFillWaiter};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::Notify;
+
+    #[tokio::test]
+    async fn owned_waiter_observes_notify_waiters_before_await() {
+        let notify = Arc::new(Notify::new());
+        let waiter = NativeCacheFillWaiter::new(notify.clone(), Duration::from_secs(1));
+        notify.notify_waiters();
+
+        let mut budget = NativeCacheFillWaitBudget::new();
+        assert!(budget.wait(waiter).await);
+    }
+
+    #[tokio::test]
+    async fn wait_budget_keeps_one_total_deadline() {
+        let first_notify = Arc::new(Notify::new());
+        let first = NativeCacheFillWaiter::new(first_notify.clone(), Duration::from_millis(25));
+        first_notify.notify_waiters();
+
+        let mut budget = NativeCacheFillWaitBudget::new();
+        assert!(budget.wait(first).await);
+        let deadline = budget.deadline;
+
+        let second = NativeCacheFillWaiter::new(Arc::new(Notify::new()), Duration::from_secs(30));
+        assert!(!budget.wait(second).await);
+        assert_eq!(budget.deadline, deadline);
+    }
 }

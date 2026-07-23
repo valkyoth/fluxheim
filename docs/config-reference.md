@@ -2911,7 +2911,12 @@ one request fetches the origin object while matching readers wait for the cache
 fill instead of all hitting the backend together. The same per-key gate applies
 to each fixed range-slice fill. `age_timeout_secs` controls how long an active
 writer lock is considered valid, while `wait_timeout_secs` controls how long
-readers wait for the writer before falling back to their own origin fetch.
+readers wait in total for the writer, capped by that writer's remaining valid
+age. Fluxheim registers each waiter before releasing the cache-state lock,
+preserves the first deadline across
+wake-and-recheck races, and returns `503 Service Unavailable` with
+`Retry-After: 1` when that deadline expires rather than allowing every waiter
+to start another origin fill.
 
 Per-vhost cache settings use `[vhosts.cache]`, `[vhosts.cache.memory]`, and
 `[vhosts.cache.disk]`. Route cache settings use `[vhosts.routes.cache]` and

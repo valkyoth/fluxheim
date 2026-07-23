@@ -218,6 +218,62 @@ async fn native_route_proxy_slice_cache_collapses_concurrent_same_slice_fills() 
 }
 
 #[tokio::test]
+async fn native_route_proxy_slice_cache_lock_wait_timeout_fails_closed() {
+    let (upstream, upstream_requests) =
+        upstream_counted_delayed_slice(Duration::from_millis(1_500)).await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.lock.enabled = true;
+    cache.lock.wait_timeout_secs = 1;
+    cache.range.enabled = true;
+    cache.range.slice.enabled = true;
+    cache.range.slice.fill_missing = true;
+    cache.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(4);
+    cache.range.slice.max_slices = 4;
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let first = tokio::spawn(async move {
+        downstream_request(
+            listener,
+            "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nRange: bytes=0-3\r\nConnection: close\r\n\r\n",
+        )
+        .await
+    });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while upstream_requests.load(Ordering::Acquire) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let second = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nRange: bytes=0-3\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let first = first.await.unwrap();
+
+    assert!(first.starts_with("HTTP/1.1 206 Partial Content\r\n"));
+    assert!(
+        second.starts_with("HTTP/1.1 503 Service Unavailable\r\n"),
+        "unexpected second response: {second:?}"
+    );
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("BYPASS")
+    );
+    assert_eq!(
+        response_header(&second, "x-cache-reason").as_deref(),
+        Some("lock-wait-timeout")
+    );
+    assert_eq!(
+        response_header(&second, "retry-after").as_deref(),
+        Some("1")
+    );
+    assert_eq!(upstream_requests.load(Ordering::Acquire), 1);
+}
+
+#[tokio::test]
 async fn native_route_proxy_slice_cache_isolates_configured_vary_headers() {
     let upstream = upstream_slice_response_sequence(&[
         (

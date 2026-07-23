@@ -8,8 +8,8 @@ use crate::native_http1_cache::{
 };
 use crate::native_http1_proxy::NativeHttp1Proxy;
 use crate::native_http1_proxy_cache_fill::{
-    NativeCacheFillGate, NativeCacheFillPermit, NativeOriginFillPermit,
-    acquire_native_origin_fill_permit,
+    NativeCacheFillGate, NativeCacheFillPermit, NativeCacheFillWaitBudget, NativeCacheFillWaiter,
+    NativeOriginFillPermit, acquire_native_origin_fill_permit,
 };
 use crate::native_http1_proxy_cache_policy::{
     native_predictor_counter_uses, prune_native_predictor_counters,
@@ -37,6 +37,14 @@ mod slice;
 mod store;
 
 static NATIVE_PROXY_CACHE_ID: AtomicUsize = AtomicUsize::new(0);
+
+fn native_cache_fill_wait_timeout(
+    configured_wait: Duration,
+    writer_age: Duration,
+    writer_age_timeout: Duration,
+) -> Duration {
+    configured_wait.min(writer_age_timeout.saturating_sub(writer_age))
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct NativeProxyMemoryCache {
@@ -101,6 +109,13 @@ pub(crate) enum NativePeerFillDecision {
     Skip,
     Hit(NativeHttp1Response),
     FailClosed(&'static str),
+}
+
+#[derive(Debug)]
+pub(crate) enum NativeCacheFillWaitResult {
+    Hit(NativeMemoryCacheEntry),
+    Miss,
+    TimedOut,
 }
 
 impl NativeProxyMemoryCache {
@@ -235,11 +250,17 @@ impl NativeProxyMemoryCache {
         let now = std::time::Instant::now();
         let age_timeout = Duration::from_secs(self.config.lock.age_timeout_secs);
         if let Some(fill) = state.filling.get(key) {
-            if now.saturating_duration_since(fill.started_at) < age_timeout {
-                return NativeCacheFillGate::Waiter {
-                    notify: fill.notify.clone(),
-                    timeout: Duration::from_secs(self.config.lock.wait_timeout_secs),
-                };
+            let fill_age = now.saturating_duration_since(fill.started_at);
+            if fill_age < age_timeout {
+                let wait_timeout = native_cache_fill_wait_timeout(
+                    Duration::from_secs(self.config.lock.wait_timeout_secs),
+                    fill_age,
+                    age_timeout,
+                );
+                return NativeCacheFillGate::Waiter(NativeCacheFillWaiter::new(
+                    fill.notify.clone(),
+                    wait_timeout,
+                ));
             }
             let expired = state.filling.remove(key);
             if let Some(expired) = expired {
@@ -264,13 +285,18 @@ impl NativeProxyMemoryCache {
 
     pub(crate) async fn wait_for_cache_fill(
         &self,
-        notify: Arc<Notify>,
-        timeout: Duration,
+        waiter: NativeCacheFillWaiter,
+        budget: &mut NativeCacheFillWaitBudget,
         key: &str,
         request: &NativeHttp1Request,
-    ) -> Result<Option<NativeMemoryCacheEntry>, self::disk::NativeDiskCacheLookupError> {
-        let _ = tokio::time::timeout(timeout, notify.notified()).await;
-        self.get(key, request).await
+    ) -> Result<NativeCacheFillWaitResult, self::disk::NativeDiskCacheLookupError> {
+        if !budget.wait(waiter).await {
+            return Ok(NativeCacheFillWaitResult::TimedOut);
+        }
+        Ok(match self.get(key, request).await? {
+            Some(entry) => NativeCacheFillWaitResult::Hit(entry),
+            None => NativeCacheFillWaitResult::Miss,
+        })
     }
 
     fn cache_pass_should_bypass(&self, key: &str) -> bool {
@@ -332,5 +358,31 @@ impl NativeProxyMemoryCache {
             );
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::native_cache_fill_wait_timeout;
+    use std::time::Duration;
+
+    #[test]
+    fn cache_fill_wait_timeout_cannot_outlive_writer_age() {
+        assert_eq!(
+            native_cache_fill_wait_timeout(
+                Duration::from_secs(30),
+                Duration::from_secs(29),
+                Duration::from_secs(30),
+            ),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            native_cache_fill_wait_timeout(
+                Duration::from_secs(5),
+                Duration::from_secs(1),
+                Duration::from_secs(30),
+            ),
+            Duration::from_secs(5)
+        );
     }
 }

@@ -61,6 +61,32 @@ impl NativeHttp1Proxy {
         response
     }
 
+    pub(crate) fn finish_cache_fill_wait_timeout(
+        &self,
+        request: &NativeHttp1Request,
+        cache: &CacheConfig,
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        compression_request: Option<&NativeHttp1Request>,
+    ) -> NativeHttp1Response {
+        self.finish_response(
+            request,
+            NativeHttp1Response::new(503, "Service Unavailable", b"cache fill wait timed out\n")
+                .with_retry_after_secs(1)
+                .close_connection(),
+            Some((cache, "BYPASS", Some("lock-wait-timeout"), None)),
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression_request,
+        )
+    }
+
     pub(crate) fn rejects_invalid_authenticated_peer_fill(
         &self,
         request: &NativeHttp1Request,

@@ -27,7 +27,12 @@ internal cache implementation.
   prevent cache stampedes when many clients request the same uncached or
   expired object at once. One request receives the writer permit and fetches
   from the origin; matching readers wait for that writer up to the configured
-  timeout instead of all hitting the origin together. `cache.lock`,
+  total timeout, capped by the writer's remaining valid age, instead of all
+  hitting the origin together. The waiter is
+  registered before the cache-state lock is released so a fast writer
+  completion cannot be missed. If the total wait deadline expires, Fluxheim
+  returns `503 Service Unavailable` with `Retry-After: 1` and does not turn
+  every waiter into another origin request. `cache.lock`,
   `vhosts.cache.lock`, and `vhosts.routes.cache.lock` configure whether request
   collapsing is enabled and how long writer age and reader wait timeouts last.
   Defaults use a 30 second writer age timeout and 30 second waiter timeout.

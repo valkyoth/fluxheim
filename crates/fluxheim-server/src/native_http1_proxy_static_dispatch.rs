@@ -2,7 +2,7 @@ use std::sync::atomic::Ordering;
 
 use crate::native_http1_cache::NativeMemoryCacheEntry;
 use crate::native_http1_proxy::NativeHttp1Proxy;
-use crate::native_http1_proxy_cache_fill::NativeCacheFillGate;
+use crate::native_http1_proxy_cache_fill::{NativeCacheFillGate, NativeCacheFillWaitBudget};
 use crate::native_http1_proxy_cache_headers::{
     native_cache_revalidation_request, native_request_cache_only_if_cached,
 };
@@ -13,7 +13,8 @@ use crate::native_http1_proxy_error_page::native_error_page_response;
 #[cfg(feature = "wasm")]
 use crate::native_http1_proxy_memory_cache::NativeProxyCacheKeyComponent;
 use crate::native_http1_proxy_memory_cache::{
-    NativePeerFillDecision, NativeProxyCacheLookup, NativeProxyMemoryCache,
+    NativeCacheFillWaitResult, NativePeerFillDecision, NativeProxyCacheLookup,
+    NativeProxyMemoryCache,
 };
 use crate::native_http1_proxy_request::native_proxy_error_is_timeout;
 use crate::native_http1_response_metadata::native_proxy_status_error;
@@ -93,8 +94,8 @@ impl NativeHttp1Proxy {
                     }
                 }
             }
-            if proxy_cache_status.is_none()
-                && let Some(slice) = cache
+            if proxy_cache_status.is_none() {
+                match cache
                     .slice_response(
                         &request,
                         self,
@@ -102,23 +103,40 @@ impl NativeHttp1Proxy {
                         &wasm_cache_key_components,
                     )
                     .await
-            {
-                return self.finish_response(
-                    &request,
-                    slice.response,
-                    Some((
-                        &cache.config,
-                        if slice.filled { "MISS" } else { "HIT" },
-                        Some(if slice.filled { "slice-fill" } else { "slice" }),
-                        None,
-                    )),
-                    #[cfg(any(
-                        feature = "compression-brotli",
-                        feature = "compression-gzip",
-                        feature = "compression-zstd"
-                    ))]
-                    compression_request,
-                );
+                {
+                    Ok(Some(slice)) => {
+                        return self.finish_response(
+                            &request,
+                            slice.response,
+                            Some((
+                                &cache.config,
+                                if slice.filled { "MISS" } else { "HIT" },
+                                Some(if slice.filled { "slice-fill" } else { "slice" }),
+                                None,
+                            )),
+                            #[cfg(any(
+                                feature = "compression-brotli",
+                                feature = "compression-gzip",
+                                feature = "compression-zstd"
+                            ))]
+                            compression_request,
+                        );
+                    }
+                    Ok(None) => {}
+                    Err(_) => {
+                        cache.record_policy_activity("error");
+                        return self.finish_cache_fill_wait_timeout(
+                            &request,
+                            &cache.config,
+                            #[cfg(any(
+                                feature = "compression-brotli",
+                                feature = "compression-gzip",
+                                feature = "compression-zstd"
+                            ))]
+                            compression_request,
+                        );
+                    }
+                }
             }
             if proxy_cache_status.is_none() {
                 match cache
@@ -262,16 +280,17 @@ impl NativeHttp1Proxy {
             }
         }
         let _cache_fill_permit = if let Some((cache, key, _, _, _)) = proxy_cache_fill.as_ref() {
+            let mut wait_budget = NativeCacheFillWaitBudget::new();
             loop {
                 match cache.cache_fill_gate(key) {
                     NativeCacheFillGate::Disabled => break None,
                     NativeCacheFillGate::Writer(permit) => break Some(permit),
-                    NativeCacheFillGate::Waiter { notify, timeout } => {
+                    NativeCacheFillGate::Waiter(waiter) => {
                         match cache
-                            .wait_for_cache_fill(notify, timeout, key, &request)
+                            .wait_for_cache_fill(waiter, &mut wait_budget, key, &request)
                             .await
                         {
-                            Ok(Some(entry)) => {
+                            Ok(NativeCacheFillWaitResult::Hit(entry)) => {
                                 return self.finish_response(
                                     &request,
                                     entry.to_response(),
@@ -284,7 +303,20 @@ impl NativeHttp1Proxy {
                                     compression_request,
                                 );
                             }
-                            Ok(None) => {}
+                            Ok(NativeCacheFillWaitResult::Miss) => {}
+                            Ok(NativeCacheFillWaitResult::TimedOut) => {
+                                cache.record_policy_activity("error");
+                                return self.finish_cache_fill_wait_timeout(
+                                    &request,
+                                    &cache.config,
+                                    #[cfg(any(
+                                        feature = "compression-brotli",
+                                        feature = "compression-gzip",
+                                        feature = "compression-zstd"
+                                    ))]
+                                    compression_request,
+                                );
+                            }
                             Err(error) => {
                                 cache.record_policy_activity("error");
                                 let response = NativeHttp1Response::new(
