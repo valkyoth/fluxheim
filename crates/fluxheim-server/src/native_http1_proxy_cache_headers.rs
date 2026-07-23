@@ -5,6 +5,7 @@ use fluxheim_cache::{
     CacheRequestView, VaryRequestHashField, collect_cache_tags, vary_request_hash_material,
 };
 use fluxheim_config::CacheConfig;
+use sha2::{Digest, Sha256};
 
 pub(crate) fn native_cache_entry_revalidatable(
     entry: &NativeMemoryCacheEntry,
@@ -94,11 +95,18 @@ pub(crate) fn native_vary_cache_key(
     fields: &[String],
     request: &NativeHttp1Request,
 ) -> Option<String> {
+    native_vary_cache_key_for_headers(base_key, fields, &request.headers)
+}
+
+pub(crate) fn native_vary_cache_key_for_headers(
+    base_key: &str,
+    fields: &[String],
+    headers: &[(String, String)],
+) -> Option<String> {
     let material = vary_request_hash_material(fields.iter().map(|field| {
         VaryRequestHashField {
             name: field.as_str(),
-            values: request
-                .headers
+            values: headers
                 .iter()
                 .filter_map(|(name, value)| {
                     name.eq_ignore_ascii_case(field).then_some(value.as_bytes())
@@ -106,6 +114,35 @@ pub(crate) fn native_vary_cache_key(
                 .collect(),
         }
     }));
-    let variance = base64_ng::URL_SAFE_NO_PAD.encode_string(&material).ok()?;
-    Some(format!("{base_key};vary:{variance}"))
+    let digest = Sha256::digest(material);
+    let variance = base64_ng::URL_SAFE_NO_PAD
+        .encode_string(digest.as_ref())
+        .ok()?;
+    Some(format!("{base_key};vary-sha256:{variance}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::native_vary_cache_key_for_headers;
+
+    #[test]
+    fn vary_cache_key_has_fixed_width_for_large_header_values() {
+        let fields = vec!["accept-language".to_owned()];
+        let short = native_vary_cache_key_for_headers(
+            "base",
+            &fields,
+            &[("accept-language".to_owned(), "en".to_owned())],
+        )
+        .unwrap();
+        let long = native_vary_cache_key_for_headers(
+            "base",
+            &fields,
+            &[("accept-language".to_owned(), "x".repeat(32 * 1024))],
+        )
+        .unwrap();
+
+        assert_eq!(short.len(), long.len());
+        assert_eq!(short.len(), "base;vary-sha256:".len() + 43);
+        assert_ne!(short, long);
+    }
 }

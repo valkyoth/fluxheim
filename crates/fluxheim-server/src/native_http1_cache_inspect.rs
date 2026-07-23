@@ -1,9 +1,9 @@
 use std::time::Instant;
 
-use fluxheim_cache::{
-    CacheObjectFreshnessState, VaryRequestHashField, collect_cache_tags, vary_request_hash_material,
-};
+use fluxheim_cache::{CacheObjectFreshnessState, collect_cache_tags};
 use fluxheim_config::{CacheConfig, CacheDiskBackend};
+
+use crate::native_http1_proxy_cache_headers::native_vary_cache_key_for_headers;
 
 use super::native_http1_cache_purge::registered_native_disk_cache;
 use super::{NativeDiskCache, NativeDiskCacheObjectMetadata, native_instant_to_unix_secs};
@@ -89,19 +89,7 @@ fn native_inspection_vary_cache_key(
     fields: &[String],
     request_headers: &[(String, String)],
 ) -> Option<String> {
-    let material = vary_request_hash_material(fields.iter().map(|field| {
-        VaryRequestHashField {
-            name: field.as_str(),
-            values: request_headers
-                .iter()
-                .filter_map(|(name, value)| {
-                    name.eq_ignore_ascii_case(field).then_some(value.as_bytes())
-                })
-                .collect(),
-        }
-    }));
-    let variance = base64_ng::URL_SAFE_NO_PAD.encode_string(&material).ok()?;
-    Some(format!("{base_key};vary:{variance}"))
+    native_vary_cache_key_for_headers(base_key, fields, request_headers)
 }
 
 fn native_stale_window_secs(expires_at: Instant, until: Option<Instant>) -> u32 {

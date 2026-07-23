@@ -2908,10 +2908,10 @@ identity.
 `[cache.lock]` controls request collapsing for concurrent misses on the same
 cache key. Keep it enabled for expensive static misses and stampede protection:
 one request fetches the origin object while matching readers wait for the cache
-fill instead of all hitting the backend together. `age_timeout_secs` controls
-how long an active writer lock is considered valid, while `wait_timeout_secs`
-controls how long readers wait for the writer before falling back to their own
-origin fetch.
+fill instead of all hitting the backend together. The same per-key gate applies
+to each fixed range-slice fill. `age_timeout_secs` controls how long an active
+writer lock is considered valid, while `wait_timeout_secs` controls how long
+readers wait for the writer before falling back to their own origin fetch.
 
 Per-vhost cache settings use `[vhosts.cache]`, `[vhosts.cache.memory]`, and
 `[vhosts.cache.disk]`. Route cache settings use `[vhosts.routes.cache]` and

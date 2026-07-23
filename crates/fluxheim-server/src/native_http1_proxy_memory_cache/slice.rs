@@ -6,6 +6,7 @@ use crate::native_http1_cache::{
     native_response_header_map, prune_native_memory_cache, remove_native_memory_cache_entry,
 };
 use crate::native_http1_proxy::NativeHttp1Proxy;
+use crate::native_http1_proxy_cache_fill::NativeCacheFillGate;
 use crate::native_http1_proxy_cache_headers::{
     cached_proxy_headers, native_response_cache_tags, native_vary_cache_key,
 };
@@ -136,7 +137,19 @@ impl NativeProxyMemoryCache {
         if !self.config.range.slice.fill_missing {
             return None;
         }
-        let _permit = self.acquire_origin_fill_permit()?;
+        let _fill_permit = loop {
+            match self.cache_fill_gate(&key) {
+                NativeCacheFillGate::Disabled => break None,
+                NativeCacheFillGate::Writer(permit) => break Some(permit),
+                NativeCacheFillGate::Waiter { notify, timeout } => {
+                    let _ = tokio::time::timeout(timeout, notify.notified()).await;
+                    if let Some(slice) = self.lookup_cached_slice(&key) {
+                        return Some((slice, false));
+                    }
+                }
+            }
+        };
+        let _origin_permit = self.acquire_origin_fill_permit()?;
         if let Some(slice) = self.lookup_cached_slice(&key) {
             return Some((slice, false));
         }

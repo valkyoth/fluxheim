@@ -47,6 +47,11 @@ behavior when the change improves security or project direction.
 - Partition fixed-slice range-cache keys by configured
   `vary_request_headers`, and refuse slice storage when an origin introduces an
   unconfigured response-only `Vary` dimension.
+- Collapse concurrent fixed-slice misses through the existing per-key
+  cache-fill gate before acquiring origin-fill capacity.
+- Hash bounded Vary request material into fixed-width SHA-256 cache keys shared
+  by live lookup and authenticated inspection, preventing large permitted
+  header values from being copied into every object, slice, and index key.
 - Document the opaque ACME provider signing-key representation as an accepted
   upstream residual while retaining drop-cleared transient PKCS#8 handling.
 

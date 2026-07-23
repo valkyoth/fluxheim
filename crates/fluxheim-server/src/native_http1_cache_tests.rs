@@ -340,6 +340,50 @@ fn live_cache_inspection_uses_registered_allocator_during_inserts() {
 }
 
 #[test]
+fn live_cache_inspection_uses_runtime_vary_digest_key() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = storage_bin_config(&directory.path().join("cache"));
+    let cache = Arc::new(NativeDiskCache::from_config(&config).unwrap());
+    let vhost: Arc<str> = Arc::from(format!("inspect-vary-{}", std::process::id()));
+    register_native_disk_cache_purge_handle(vhost.clone(), None, &cache);
+    let fields = vec!["accept-language".to_owned()];
+    let request_headers = vec![("accept-language".to_owned(), "sv".to_owned())];
+    let combined = crate::native_http1_proxy_cache_headers::native_vary_cache_key_for_headers(
+        "asset",
+        &fields,
+        &request_headers,
+    )
+    .unwrap();
+    cache
+        .store(
+            NativeDiskCacheStoreKey {
+                combined,
+                primary: "asset".to_owned(),
+                user_tag: "cache.test".to_owned(),
+                index_path: Some("/asset".to_owned()),
+                cache_tags: Vec::new(),
+                vary_fields: fields,
+            },
+            &disk_cache_entry(b"variant"),
+        )
+        .unwrap();
+
+    let metadata =
+        super::inspect_native_disk_cache_object(&vhost, None, &config, "asset", &request_headers)
+            .unwrap();
+    let wrong_variant = super::inspect_native_disk_cache_object(
+        &vhost,
+        None,
+        &config,
+        "asset",
+        &[("accept-language".to_owned(), "en".to_owned())],
+    );
+
+    assert_eq!(metadata.body_bytes, 7);
+    assert!(wrong_variant.is_none());
+}
+
+#[test]
 fn filesystem_cache_inspection_rebuilds_index_without_live_allocator() {
     let directory = tempfile::tempdir().unwrap();
     let config = CacheConfig {

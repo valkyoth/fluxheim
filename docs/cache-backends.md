@@ -92,7 +92,12 @@ internal cache implementation.
   matching the runtime Vary field cap. The same partition applies to fixed
   range slices. A slice response carrying an additional origin `Vary` field is
   not stored unless that field is configured here, because it is unavailable
-  when Fluxheim constructs the pre-origin slice lookup key.
+  when Fluxheim constructs the pre-origin slice lookup key. Fluxheim hashes the
+  bounded variance material into a fixed-width SHA-256 key component, so large
+  permitted request-header values are not copied into every object, slice, or
+  purge-index key. This `1.8.0` key format deliberately treats persisted
+  variants from the older variable-width format as cold; normal cache eviction
+  or an operator purge removes those legacy objects.
 - `cache.key_namespace`, `vhosts.cache.key_namespace`, and
   `vhosts.routes.cache.key_namespace` add an operator-controlled namespace
   component to the primary cache key. Bump this value to isolate new objects

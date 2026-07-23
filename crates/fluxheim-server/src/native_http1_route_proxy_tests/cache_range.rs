@@ -1,9 +1,13 @@
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+
 use crate::NativeHttp1RouteProxy;
 
 use super::{
     downstream_get, downstream_request, native_proxy_memory_cache_config, proxy_for,
-    response_header, route_proxy_listener, upstream_cacheable_once, upstream_raw_response_sequence,
-    upstream_slice_response_sequence,
+    response_header, route_proxy_listener, upstream_cacheable_once, upstream_counted_delayed_slice,
+    upstream_raw_response_sequence, upstream_slice_response_sequence,
 };
 
 #[tokio::test]
@@ -172,6 +176,45 @@ async fn native_route_proxy_slice_cache_fills_and_composes_memory_range() {
         response_header(&second, "x-cache-reason").as_deref(),
         Some("slice")
     );
+}
+
+#[tokio::test]
+async fn native_route_proxy_slice_cache_collapses_concurrent_same_slice_fills() {
+    const REQUESTS: usize = 32;
+
+    let (upstream, upstream_requests) =
+        upstream_counted_delayed_slice(Duration::from_millis(100)).await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.lock.enabled = true;
+    cache.lock.wait_timeout_secs = 5;
+    cache.range.enabled = true;
+    cache.range.slice.enabled = true;
+    cache.range.slice.fill_missing = true;
+    cache.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(4);
+    cache.range.slice.max_slices = 4;
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+    let barrier = Arc::new(tokio::sync::Barrier::new(REQUESTS + 1));
+    let mut requests = Vec::with_capacity(REQUESTS);
+    for _ in 0..REQUESTS {
+        let barrier = barrier.clone();
+        requests.push(tokio::spawn(async move {
+            barrier.wait().await;
+            downstream_request(
+                listener,
+                "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nRange: bytes=0-3\r\nConnection: close\r\n\r\n",
+            )
+            .await
+        }));
+    }
+
+    barrier.wait().await;
+    for request in requests {
+        let response = request.await.unwrap();
+        assert!(response.starts_with("HTTP/1.1 206 Partial Content\r\n"));
+        assert!(response.ends_with("0123"));
+    }
+    assert_eq!(upstream_requests.load(Ordering::Acquire), 1);
 }
 
 #[tokio::test]

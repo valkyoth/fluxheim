@@ -52,6 +52,10 @@ This release is under development.
   and exercise live allow/deny decisions.
 - Prove configured request-header variance partitions fixed-slice cache objects
   and reject response-only slice variance that cannot be known at lookup time.
+- Prove a concurrent 32-request burst for one missing range slice produces one
+  origin fetch when cache locking is enabled.
+- Bound runtime and inspection Vary keys to one SHA-256 component regardless of
+  permitted request-header value length.
 - Prove non-cache Wasm admission is partitioned per vhost beneath the native and
   preview process-wide ceilings, matching the existing cache-hook isolation.
 
@@ -60,3 +64,8 @@ This release is under development.
 - Record the ACME provider's opaque active signing-key representation as an
   accepted upstream residual. Fluxheim clears its transient PKCS#8 copies but
   does not claim provider-owned key-state zeroization.
+- Apply the existing per-key cache-fill gate to fixed range slices, preventing
+  same-slice origin stampedes.
+- Replace variable-width encoded Vary material in cache keys with a fixed-width
+  SHA-256 digest. Persisted variants using the prior key format become cold and
+  age out or can be purged.

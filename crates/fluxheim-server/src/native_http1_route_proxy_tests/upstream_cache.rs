@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -372,4 +374,49 @@ pub(super) async fn upstream_slice_response_sequence(
         }
     });
     addr
+}
+
+pub(super) async fn upstream_counted_delayed_slice(
+    delay: Duration,
+) -> (std::net::SocketAddr, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let task_requests = requests.clone();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let request_count = task_requests.clone();
+            tokio::spawn(async move {
+                let mut request = Vec::new();
+                let mut chunk = [0u8; 1024];
+                loop {
+                    let read = stream.read(&mut chunk).await.unwrap();
+                    if read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&chunk[..read]);
+                    if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let request = String::from_utf8(request).unwrap();
+                assert!(request.starts_with("GET /asset.png HTTP/1.1\r\n"));
+                assert!(
+                    request
+                        .lines()
+                        .any(|line| line.eq_ignore_ascii_case("range: bytes=0-3")),
+                    "missing expected slice range: {request:?}"
+                );
+                request_count.fetch_add(1, Ordering::AcqRel);
+                tokio::time::sleep(delay).await;
+                stream
+                    .write_all(
+                        b"HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\netag: \"collapsed-slice\"\r\ncontent-range: bytes 0-3/4\r\ncontent-length: 4\r\n\r\n0123",
+                    )
+                    .await
+                    .unwrap();
+            });
+        }
+    });
+    (addr, requests)
 }
