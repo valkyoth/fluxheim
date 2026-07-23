@@ -8,6 +8,7 @@ source of truth remains packaging/rpm/fluxheim.spec.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shlex
 import shutil
@@ -52,7 +53,7 @@ def parse_args() -> argparse.Namespace:
         "version_tag",
         nargs="?",
         default="latest",
-        help="Fluxheim tag version, for example 1.7.12, v1.7.12, or latest",
+        help="Fluxheim tag version, for example 1.8.0, v1.8.0, or latest",
     )
     parser.add_argument(
         "build_type",
@@ -89,6 +90,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="List supported build targets and exit.",
     )
+    parser.add_argument(
+        "--local-source",
+        action="store_true",
+        help=(
+            "Build the current working tree instead of cloning GitHub. "
+            "Ignored files and repository metadata are excluded."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -105,6 +114,7 @@ def run_container_build(
     build_type: str,
     rpm_release: str,
     features: str,
+    source_mode: str,
 ) -> None:
     common_args = [
         "run",
@@ -118,6 +128,7 @@ def run_container_build(
         build_type,
         rpm_release,
         features,
+        source_mode,
     ]
     if container_tool == "podman":
         command = ["podman", *common_args]
@@ -136,6 +147,7 @@ def run_container_build(
                 build_type,
                 rpm_release,
                 features,
+                source_mode,
             ],
             check=True,
         )
@@ -156,6 +168,7 @@ def run_container_build(
                 build_type,
                 rpm_release,
                 features,
+                source_mode,
             ],
             check=True,
         )
@@ -202,6 +215,45 @@ def validate_features(features: str) -> None:
         )
 
 
+def stage_local_source_snapshot(source_dir: Path, destination: Path) -> None:
+    source_root = source_dir.resolve()
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(source_root),
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ],
+        check=True,
+        stdout=subprocess.PIPE,
+    )
+    destination.mkdir(parents=True)
+
+    for raw_path in result.stdout.split(b"\0"):
+        if not raw_path:
+            continue
+        relative = Path(os.fsdecode(raw_path))
+        if relative.is_absolute() or ".." in relative.parts:
+            raise SystemExit(f"error: unsafe repository path in local source: {relative}")
+        source = source_root / relative
+        if not source.exists() and not source.is_symlink():
+            continue
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_symlink():
+            target.symlink_to(os.readlink(source))
+        elif source.is_file():
+            shutil.copy2(source, target)
+        else:
+            raise SystemExit(
+                f"error: unsupported local source entry (expected file or symlink): {relative}"
+            )
+
+
 def generate_build_script(script_path: Path) -> None:
     script_content = r"""#!/usr/bin/env bash
 set -euo pipefail
@@ -210,6 +262,7 @@ TAG="$1"
 BUILD_TYPE="$2"
 RPM_RELEASE="$3"
 FEATURES="$4"
+SOURCE_MODE="$5"
 WORKSPACE="/workspace"
 REPO_URL="https://github.com/valkyoth/fluxheim.git"
 
@@ -234,10 +287,15 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 
 echo "--- Cloning Fluxheim ---"
 cd "$WORKSPACE"
-git clone --depth 1 "$REPO_URL" repo
+if [ "$SOURCE_MODE" = "local" ]; then
+    mkdir -p repo
+    cp -a "$WORKSPACE/source/." repo/
+else
+    git clone --depth 1 "$REPO_URL" repo
+fi
 cd repo
 
-if [ "$TAG" != "latest" ]; then
+if [ "$SOURCE_MODE" != "local" ] && [ "$TAG" != "latest" ]; then
     git fetch --depth 1 origin "refs/tags/${TAG}:refs/tags/${TAG}" || true
     if [[ "$TAG" != v* ]]; then
         git fetch --depth 1 origin "refs/tags/v${TAG}:refs/tags/v${TAG}" || true
@@ -430,6 +488,9 @@ def main() -> int:
         build_script_path = work_dir / "build_in_container.sh"
         generate_build_script(build_script_path)
         build_script_path.chmod(0o755)
+        source_mode = "local" if args.local_source else "remote"
+        if args.local_source:
+            stage_local_source_snapshot(output_dir, work_dir / "source")
 
         run_container_build(
             container_tool,
@@ -439,6 +500,7 @@ def main() -> int:
             args.build_type,
             args.rpm_release,
             args.features,
+            source_mode,
         )
 
         rpms = sorted(work_dir.glob("*.rpm"))

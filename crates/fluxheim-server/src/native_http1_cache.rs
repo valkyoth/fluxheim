@@ -534,5 +534,8 @@ fn native_disk_cache_encryption_supported(cache: &CacheConfig) -> bool {
 }
 
 #[cfg(test)]
+#[path = "native_http1_cache_lease_tests.rs"]
+mod lease_tests;
+#[cfg(test)]
 #[path = "native_http1_cache_tests.rs"]
 mod tests;

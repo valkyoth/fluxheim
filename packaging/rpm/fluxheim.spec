@@ -49,11 +49,11 @@ Requires:       ca-certificates
 
 %description
 Fluxheim is a modular Rust edge gateway for websites, applications, caching,
-and load balancing. The 1.7 line adds optional WebAssembly policy
-extensibility while keeping the packaged native build on the full production
-feature set: proxy, static web serving, cache, load balancing, managed ACME,
-Prometheus metrics, OpenTelemetry export support, GeoIP policy, stream
-proxying, and PHP-FPM support.
+and load balancing. The 1.8 line packages optional WebAssembly policy
+extensibility as a separate profile while keeping this RPM on the Wasm-free
+full production feature set: proxy, static web serving, cache, load balancing,
+managed ACME, Prometheus metrics, OpenTelemetry export support, GeoIP policy,
+stream proxying, and PHP-FPM support.
 
 This spec builds from vendored Cargo dependencies and uses Cargo offline mode.
 It intentionally does not download crates during the RPM build.
@@ -162,7 +162,8 @@ fi
   feature set Wasm-free.
 - Add matching tar.gz and zip portable archive generation and packaged-binary
   Wasm policy smoke coverage.
-- Start the unsigned macOS and Windows portable parity roadmap.
+- Start unsigned macOS archive builds and define the Windows archive contract;
+  native Windows runtime and archive work remains scheduled for 1.8.2.
 
 * Wed Jul 15 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.12-1
 - Add opt-in RFC 9211 Cache-Status, RFC 9209 Proxy-Status, and RFC 9530 response

@@ -198,7 +198,7 @@ default-features = false
 version = "1.1.0"
 
 [dependencies.sanitization]
-version = "1.2.4"
+version = "2.0.3"
 features = ["alloc"]
 
 [dependencies.serde]

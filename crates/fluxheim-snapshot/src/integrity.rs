@@ -88,7 +88,7 @@ impl SnapshotIntegrityKey {
             .map_err(SnapshotError::Io)?;
         let mut growth_probe = [0u8; 1];
         let grew = file.read(&mut growth_probe).map_err(SnapshotError::Io)? != 0;
-        sanitization::sanitize_bytes(&mut growth_probe);
+        sanitization::wipe::bytes(&mut growth_probe);
         if grew || secret.with_secret(|bytes| bytes.len()) < MIN_INTEGRITY_KEY_BYTES {
             return Err(SnapshotError::InvalidIntegrityKey);
         }

@@ -98,7 +98,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "fluxheim-cache"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-config"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "fluxheim-protocol",
  "log",
@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-headers"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "fluxheim-config",
  "fluxheim-protocol",
@@ -142,7 +142,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-php-fpm"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "fastcgi-client",
  "fluxheim-config",
@@ -157,7 +157,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-protocol"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "sanitization",
 ]
@@ -384,9 +384,9 @@ dependencies = [
 
 [[package]]
 name = "sanitization"
-version = "1.2.5"
+version = "2.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c92c75202f3f884d540d83c61b14a9e3787542ced35cd5d7842d075c7475c0b1"
+checksum = "75e43f2762b31232062e8ba7bfbdfcbd33c80c43bf7a306a7e195c3c4f734e0f"
 
 [[package]]
 name = "serde"
@@ -493,9 +493,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.53.0"
+version = "1.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d988bcd52dbe076d3d46903332f58c912b87a2c49b1428419a5845154762ffee"
+checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
 dependencies = [
  "bytes",
  "libc",

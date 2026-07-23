@@ -385,7 +385,10 @@ pub(super) fn admin_fingerprint_list_contains(values: &[String], fingerprint: &s
     let fingerprint = fingerprint.as_bytes();
     let mut matched = 0u8;
     for value in values {
-        matched |= value.as_bytes().ct_eq(fingerprint).unwrap_u8();
+        matched |= value
+            .as_bytes()
+            .ct_eq(fingerprint)
+            .declassify_u8("admin client-certificate fingerprint comparison result is public");
     }
     matched == 1
 }

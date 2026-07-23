@@ -4,8 +4,6 @@ Fluxheim 1.8.0 packages the completed Wasm extensibility line as an explicit
 distribution profile and begins a shared portable archive contract for Linux,
 macOS, and Windows.
 
-This release is under development.
-
 ## Wasm Distribution Profile
 
 - Add `profile-wasm` as `profile-full` plus the reviewed proxy-ABI and WASI
@@ -72,6 +70,12 @@ This release is under development.
   path.
 - Keep Unix descriptor-relative cache storage out of Windows profile builds
   until the native Windows filesystem implementation is reviewed in `1.8.2`.
+- Compile and test the full workspace against `sanitization 2.0`, including
+  request-body clearing, TLS and ACME secret input handling, snapshot
+  integrity, administrative authentication, and persistence-cookie checks.
+- Build RPM evidence from the exact release-candidate tree instead of remote
+  `main`, and tag both FIPS backend evidence images with the candidate package
+  version.
 
 ## Security Notes
 

@@ -66,11 +66,11 @@ regex = "1.13.1"
 ring = "0.17.14"
 rustls = { version = "0.23.42", optional = true, default-features = false, features = ["std", "tls12", "logging"] }
 rustls-native-certs = { version = "0.8.4", optional = true }
-sanitization = { version = "1.2.5", features = ["alloc"] }
+sanitization = { version = "2.0.3", features = ["alloc"] }
 serde_json = { version = "1.0.151", optional = true }
 sha2 = "0.11.0"
 socket2 = { version = "0.6.5", features = ["all"] }
-tokio = { version = "1.53.0", default-features = false, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+tokio = { version = "1.53.1", default-features = false, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 tokio-openssl = { version = "0.6.5", optional = true }
 tokio-rustls = { version = "0.26.4", optional = true, default-features = false, features = ["logging", "tls12"] }
 ureq = { version = "3.3.0", default-features = false, features = ["rustls"], optional = true }
@@ -84,4 +84,4 @@ flate2 = "1.1.9"
 proptest = "1.11.0"
 rcgen = { version = "0.14.8", default-features = false, features = ["pem", "ring"] }
 tempfile = "3.27.0"
-wat = "1.253.0"
+wat = "1.254.0"

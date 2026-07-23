@@ -81,7 +81,10 @@ pub(super) fn managed_cookie_key(
     let mut matched = 0_u8;
     for hmac_key in managed_cookie_hmac_keys_for_verify() {
         let expected = managed_cookie_tag_with_key(&hmac_key, name.as_bytes(), key);
-        matched |= expected.as_slice().ct_eq(tag).unwrap_u8();
+        matched |= expected
+            .as_slice()
+            .ct_eq(tag)
+            .declassify_u8("load-balancer persistence-cookie tag result is public");
     }
     if matched != 1 {
         return None;

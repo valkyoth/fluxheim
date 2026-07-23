@@ -7,7 +7,7 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.8.0 - Unreleased
+## 1.8.0 - 2026-07-23
 
 ### Added
 
@@ -47,6 +47,11 @@ behavior when the change improves security or project direction.
 - Partition native and preview non-cache Wasm admission per vhost beneath their
   process-wide ceilings so one tenant cannot starve another tenant's access,
   routing, or header hooks.
+- Refresh compatible dependencies and migrate secret containers, direct memory
+  clearing, and constant-time decision boundaries to the `sanitization 2.0`
+  API.
+- Build RPM release-gate evidence from the exact candidate working tree and
+  derive FIPS evidence-image tags from the candidate package version.
 
 ### Security
 

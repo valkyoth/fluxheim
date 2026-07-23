@@ -7,7 +7,7 @@ crate checksum is
 
 Fluxheim adds caller-key account bootstrap and recovery methods around the
 existing private `create_inner` implementation. Account credential PKCS#8 bytes
-are owned by `sanitization::SecretVec`, and key JSON encoding/decoding uses
+are owned by `sanitization 2.0` `SecretVec`, and key JSON encoding/decoding uses
 drop-cleared Base64 buffers. New P-256 account material is generated through a
 zeroizing RustCrypto `SecretKey` and serialized through a zeroizing
 `SecretDocument` before the selected Ring/AWS-LC-compatible provider imports it

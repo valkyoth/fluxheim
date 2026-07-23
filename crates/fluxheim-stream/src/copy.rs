@@ -2,7 +2,7 @@ use std::io;
 use std::time::Duration;
 
 use fluxheim_common::{FluxError, FluxResult};
-use sanitization::sanitize_bytes;
+use sanitization::wipe;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio::sync::watch;
 
@@ -16,13 +16,13 @@ impl StreamCopyBuffer {
     }
 
     fn clear_range(&mut self, start: usize, end: usize) {
-        sanitize_bytes(&mut self.0[start..end]);
+        wipe::bytes(&mut self.0[start..end]);
     }
 }
 
 impl Drop for StreamCopyBuffer {
     fn drop(&mut self) {
-        sanitize_bytes(&mut self.0);
+        wipe::bytes(&mut self.0);
     }
 }
 

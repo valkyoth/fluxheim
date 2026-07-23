@@ -15,8 +15,8 @@ getrandom = "0.4.3"
 log = "0.4.33"
 percent-encoding = "2.3.2"
 rustix = { version = "1.1.4", features = ["fs", "net", "process"] }
-sanitization = { version = "1.2.5", features = ["alloc"] }
-tokio = { version = "1.53.0", default-features = false, features = ["fs", "io-util", "net", "rt", "time"] }
+sanitization = { version = "2.0.3", features = ["alloc"] }
+tokio = { version = "1.53.1", default-features = false, features = ["fs", "io-util", "net", "rt", "time"] }
 
 [dev-dependencies]
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }

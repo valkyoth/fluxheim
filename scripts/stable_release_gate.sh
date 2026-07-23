@@ -159,7 +159,14 @@ fi
 
 if [ "${FLUXHEIM_GATE_RPM_BUILD:-0}" = "1" ]; then
     echo "stable release gate: RPM build smoke"
-    scripts/build_fluxheim_rpm.py latest native --target "${FLUXHEIM_GATE_RPM_TARGET:-fedora-44}"
+    rpm_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | sed -n '1p')"
+    if [ -z "$rpm_version" ]; then
+        echo "stable release gate: failed to determine RPM version from Cargo.toml" >&2
+        exit 1
+    fi
+    scripts/build_fluxheim_rpm.py "$rpm_version" native \
+        --target "${FLUXHEIM_GATE_RPM_TARGET:-fedora-44}" \
+        --local-source
 else
     echo "stable release gate: skipping RPM build smoke; set FLUXHEIM_GATE_RPM_BUILD=1 to enable"
 fi

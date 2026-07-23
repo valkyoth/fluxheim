@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
 
-use sanitization::{SecretVec, sanitize_bytes};
+use sanitization::{SecretVec, wipe};
 
 pub(crate) const MAX_CERT_CHAIN_BYTES: u64 = 1024 * 1024;
 pub(crate) const MAX_PRIVATE_KEY_BYTES: u64 = 64 * 1024;
@@ -63,7 +63,7 @@ fn read_admitted_secret(reader: &mut impl Read, admitted: usize) -> io::Result<S
 fn reject_reader_growth(reader: &mut impl Read) -> io::Result<()> {
     let mut growth_probe = [0_u8; 1];
     let read_result = reader.read(&mut growth_probe);
-    sanitize_bytes(&mut growth_probe);
+    wipe::bytes(&mut growth_probe);
     if read_result? != 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,

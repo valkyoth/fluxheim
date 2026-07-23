@@ -30,8 +30,10 @@ platform labels such as:
 ```text
 fluxheim-1.8.0-wasm-x86_64-linux.zip
 fluxheim-1.8.0-wasm-aarch64-macos.tar.gz
-fluxheim-1.8.0-wasm-x86_64-windows.zip
 ```
+
+Windows will use the same naming contract from `1.8.2`; `1.8.0` does not
+publish a Windows archive.
 
 The shared matrix can be inspected without compiling:
 

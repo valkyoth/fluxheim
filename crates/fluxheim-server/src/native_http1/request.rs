@@ -87,7 +87,7 @@ impl NativeHttp1RequestBody {
             .try_reserve_exact(required)
             .map_err(|_| fluxheim_protocol::Http1ParseError::BodyTooLarge)?;
         replacement.extend_from_slice(&self.bytes);
-        sanitization::unsafe_wipe::volatile_sanitize_vec(&mut self.bytes);
+        sanitization::wipe::vec(&mut self.bytes);
         self.bytes = replacement;
         #[cfg(test)]
         {
@@ -105,7 +105,7 @@ impl NativeHttp1RequestBody {
             .try_reserve_exact(required)
             .map_err(|_| fluxheim_protocol::Http1ParseError::BodyTooLarge)?;
         replacement.extend_from_slice(&self.bytes);
-        sanitization::unsafe_wipe::volatile_sanitize_vec(&mut self.bytes);
+        sanitization::wipe::vec(&mut self.bytes);
         self.bytes = replacement;
         #[cfg(test)]
         {
@@ -168,7 +168,7 @@ impl fluxheim_protocol::Http1ChunkSink for NativeHttp1RequestBody {
 
 impl Drop for NativeHttp1RequestBody {
     fn drop(&mut self) {
-        sanitization::unsafe_wipe::volatile_sanitize_vec(&mut self.bytes);
+        sanitization::wipe::vec(&mut self.bytes);
     }
 }
 

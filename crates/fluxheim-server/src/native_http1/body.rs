@@ -54,7 +54,7 @@ where
 {
     match framing {
         Http1BodyFraming::NoBody => {
-            sanitization::unsafe_wipe::volatile_sanitize_bytes(&mut buffer[..head_len]);
+            sanitization::wipe::bytes(&mut buffer[..head_len]);
             buffer.drain(..head_len);
             Ok(NativeHttp1RequestBody::empty())
         }
@@ -69,7 +69,7 @@ where
                 .ok_or(Http1ParseError::BodyTooLarge)?;
             let mut initial = std::mem::take(buffer);
             let remainder = initial.split_off(body_end);
-            sanitization::unsafe_wipe::volatile_sanitize_bytes(&mut initial[..head_len]);
+            sanitization::wipe::bytes(&mut initial[..head_len]);
             initial.drain(..head_len);
             *buffer = remainder;
             let mut body = NativeHttp1RequestBody::from_vec(initial);
@@ -89,7 +89,7 @@ where
                     return Err(Http1ParseError::InvalidContentLength.into());
                 }
                 let append_result = body.extend_from_slice(&chunk[..read]);
-                sanitization::unsafe_wipe::volatile_sanitize_bytes(&mut chunk[..read]);
+                sanitization::wipe::bytes(&mut chunk[..read]);
                 append_result?;
             }
             Ok(body)
@@ -145,15 +145,15 @@ where
                     buffer.extend_from_slice(remainder);
                     Ok::<(), Http1ParseError>(())
                 })();
-                sanitization::unsafe_wipe::volatile_sanitize_bytes(&mut chunk[..read]);
+                sanitization::wipe::bytes(&mut chunk[..read]);
                 preserve_result?;
                 return Ok(body);
             }
             Ok(None) => {
-                sanitization::unsafe_wipe::volatile_sanitize_bytes(&mut chunk[..read]);
+                sanitization::wipe::bytes(&mut chunk[..read]);
             }
             Err(error) => {
-                sanitization::unsafe_wipe::volatile_sanitize_bytes(&mut chunk[..read]);
+                sanitization::wipe::bytes(&mut chunk[..read]);
                 return Err(error.into());
             }
         }

@@ -19,28 +19,41 @@ else
     exit 2
 fi
 
+version="$(
+    sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml |
+        sed -n '1p'
+)"
+case "$version" in
+    ''|*[!0-9A-Za-z._+-]*)
+        echo "fips image evidence: invalid Cargo package version: ${version:-<empty>}" >&2
+        exit 2
+        ;;
+esac
+openssl_image="fluxheim-fips-openssl-evidence:${version}"
+rustls_image="fluxheim-fips-rustls-evidence:${version}"
+
 build_openssl() {
     echo "fips image evidence: building OpenSSL backend"
     case "$container_tool" in
         podman)
             podman build \
                 --file containers/fips/Containerfile.openssl \
-                --tag localhost/fluxheim-fips-openssl-evidence:1.7.12 \
+                --tag "localhost/${openssl_image}" \
                 .
-            podman run --rm localhost/fluxheim-fips-openssl-evidence:1.7.12
+            podman run --rm "localhost/${openssl_image}"
             podman image inspect \
                 --format 'fips image evidence: OpenSSL image={{.Id}} digest={{.Digest}}' \
-                localhost/fluxheim-fips-openssl-evidence:1.7.12
+                "localhost/${openssl_image}"
             ;;
         docker)
             docker build \
                 --file containers/fips/Containerfile.openssl \
-                --tag fluxheim-fips-openssl-evidence:1.7.12 \
+                --tag "$openssl_image" \
                 .
-            docker run --rm fluxheim-fips-openssl-evidence:1.7.12
+            docker run --rm "$openssl_image"
             docker image inspect \
                 --format 'fips image evidence: OpenSSL image={{.Id}} digests={{json .RepoDigests}}' \
-                fluxheim-fips-openssl-evidence:1.7.12
+                "$openssl_image"
             ;;
     esac
 }
@@ -51,22 +64,22 @@ build_rustls() {
         podman)
             podman build \
                 --file containers/fips/Containerfile.rustls \
-                --tag localhost/fluxheim-fips-rustls-evidence:1.7.12 \
+                --tag "localhost/${rustls_image}" \
                 .
-            podman run --rm localhost/fluxheim-fips-rustls-evidence:1.7.12
+            podman run --rm "localhost/${rustls_image}"
             podman image inspect \
                 --format 'fips image evidence: rustls image={{.Id}} digest={{.Digest}}' \
-                localhost/fluxheim-fips-rustls-evidence:1.7.12
+                "localhost/${rustls_image}"
             ;;
         docker)
             docker build \
                 --file containers/fips/Containerfile.rustls \
-                --tag fluxheim-fips-rustls-evidence:1.7.12 \
+                --tag "$rustls_image" \
                 .
-            docker run --rm fluxheim-fips-rustls-evidence:1.7.12
+            docker run --rm "$rustls_image"
             docker image inspect \
                 --format 'fips image evidence: rustls image={{.Id}} digests={{json .RepoDigests}}' \
-                fluxheim-fips-rustls-evidence:1.7.12
+                "$rustls_image"
             ;;
     esac
 }

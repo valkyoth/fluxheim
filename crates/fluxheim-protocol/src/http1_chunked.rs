@@ -285,7 +285,7 @@ impl Http1ChunkedDecoder {
 
 impl Drop for Http1ChunkedDecoder {
     fn drop(&mut self) {
-        sanitization::unsafe_wipe::volatile_sanitize_vec(&mut self.input);
+        sanitization::wipe::vec(&mut self.input);
     }
 }
 
