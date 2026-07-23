@@ -41,3 +41,6 @@ This release is under development.
 - Extract the Wasm release tarball and run the real F5 iRules-style,
   nginx/OpenResty-style, HAProxy Lua/SPOE-style, and VCL-like cache-policy
   examples through the packaged binary.
+- Build the dedicated Wasm Wolfi image, mount a hash-pinned policy module
+  read-only at `/etc/fluxheim/plugins`, prove writes fail inside the container,
+  and exercise live allow/deny decisions.

@@ -243,6 +243,14 @@ TESTS: tuple[TestEntry, ...] = (
         "Builds both Wasm archive formats, extracts the tarball, and runs every policy family through that release binary.",
     ),
     TestEntry(
+        "wasm-container",
+        "Wasm container plugin mount smoke",
+        "wasm",
+        ("scripts/smoke_wasm_container.sh",),
+        "Builds the Wasm image and proves a hash-pinned module loads from a "
+        "read-only mounted plugin directory.",
+    ),
+    TestEntry(
         "wasm-irules",
         "F5 iRules-style Wasm policy smoke",
         "wasm",

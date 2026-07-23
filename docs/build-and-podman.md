@@ -286,6 +286,23 @@ Keep logs on their normal writable mount, for example
 plugins available. See [Wasm Extensibility](wasm-extensibility.md) for
 hash-pinning and filesystem trust requirements.
 
+Run the dedicated image proof with:
+
+```bash
+scripts/test_starter.py --run wasm-container
+```
+
+The smoke builds the Wolfi Wasm profile, mounts a hash-pinned policy module at
+the documented path, verifies the mount rejects writes inside the container,
+and exercises live allow and deny requests. Include it in local release checks
+with:
+
+```bash
+FLUXHEIM_RELEASE_PODMAN=1 \
+FLUXHEIM_RELEASE_WASM_CONTAINER=1 \
+scripts/release_checks.sh
+```
+
 These focused profiles use TLS/ACME as shared ingress capabilities. The
 `cache` image is TLS-capable and omits local static web serving. The `proxy`
 image is TLS-capable and omits cache and static web serving. The `php` image is

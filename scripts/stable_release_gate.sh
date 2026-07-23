@@ -143,6 +143,13 @@ else
     echo "stable release gate: skipping Wasm sandbox smoke; set FLUXHEIM_GATE_WASM=1 to enable"
 fi
 
+if [ "${FLUXHEIM_GATE_WASM_CONTAINER:-0}" = "1" ]; then
+    echo "stable release gate: Wasm container plugin-mount smoke"
+    scripts/smoke_wasm_container.sh
+else
+    echo "stable release gate: skipping Wasm container smoke; set FLUXHEIM_GATE_WASM_CONTAINER=1 to enable"
+fi
+
 if [ "${FLUXHEIM_GATE_PHP_WOLFI:-0}" = "1" ]; then
     echo "stable release gate: PHP Wolfi image smoke"
     scripts/smoke_fluxheim_php_wolfi.sh

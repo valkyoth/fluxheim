@@ -51,5 +51,6 @@ examples/tls-intermediate.toml	config	1.6.6	Intermediate TLS policy config parit
 examples/php-fpm.toml	config	1.6.9	PHP-FPM adapter parity.
 docs/wasm-policy-example-parity.md	doc	1.7.0	End-of-line Wasm example and live-test requirements for F5 iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, and VCL-like cache policy parity.
 scripts/validate_portable_release_plan.py	script	1.8.0	Shared Linux, macOS, and Windows archive-profile naming, feature, binary, and per-profile-selection contract.
+scripts/smoke_wasm_container.sh	script	1.8.0	Dedicated Wasm Wolfi image build, read-only hash-pinned plugin mount, and live allow/deny request proof.
 tests/fixtures/tls/localhost-cert.pem	fixture	1.6.6	TLS listener/upstream test certificate fixture.
 tests/fixtures/tls/localhost-key.pem	fixture	1.6.6	TLS listener/upstream test key fixture.

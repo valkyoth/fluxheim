@@ -62,6 +62,17 @@ def main() -> int:
         ),
         "container documentation must include the read-only plugin mount",
     )
+    require(
+        contains(
+            "scripts/smoke_wasm_container.sh",
+            "$TMP_DIR/plugins:/etc/fluxheim/plugins:ro,Z",
+        )
+        and contains(
+            "scripts/smoke_wasm_container.sh",
+            "Wasm container read-only plugin mount smoke: ok",
+        ),
+        "Wasm image must have a live read-only plugin-mount smoke",
+    )
     print("Wasm release profile: ok")
     return 0
 

@@ -18,6 +18,9 @@ behavior when the change improves security or project direction.
   directory.
 - Add a live release-archive smoke that executes all four documented Wasm
   policy migration examples through the packaged binary.
+- Add a dedicated Wasm container smoke proving a hash-pinned policy module
+  loads from the documented read-only `/etc/fluxheim/plugins` mount and affects
+  live requests.
 - Add a shared seven-profile portable release plan validator and native macOS
   and Windows CI archive builds for the representative `full` and `wasm`
   profiles.
