@@ -65,6 +65,14 @@ full, Wasm, and development profiles on native macOS and Windows runners. It
 also builds representative `full` and `wasm` archives on each runner. The
 complete seven-profile naming and feature contract is checked on every CI run.
 
+The Windows `1.8.0` artifacts are build and packaging previews, not
+configuration-backed serving releases. Fluxheim deliberately rejects
+configuration-file loading on Windows until native owner and ACL trust checks
+replace the Unix ownership and mode checks. It does not silently skip this
+security boundary. The Windows CI gate executes a platform-specific regression
+that proves these checks fail closed. Runtime config loading, path trust,
+service integration, and live profile parity are `1.8.2` work.
+
 Live platform parity remains staged:
 
 - `1.8.1` expands native macOS runtime and archive smoke coverage.

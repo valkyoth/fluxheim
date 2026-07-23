@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::config::ConfigError;
+#[cfg(unix)]
 use crate::config_path::validate_required_process_path;
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -115,7 +116,6 @@ fn default_admin_ops_socket_mode() -> String {
     "0600".to_owned()
 }
 
-#[cfg(unix)]
 fn parse_admin_ops_socket_mode(value: &str) -> Result<u32, ConfigError> {
     let value = value.trim();
     let raw = value.strip_prefix("0o").unwrap_or(value);

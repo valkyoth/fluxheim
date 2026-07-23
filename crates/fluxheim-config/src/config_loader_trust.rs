@@ -3,7 +3,6 @@ use std::path::Path;
 
 use super::ConfigLoadError;
 
-#[cfg(unix)]
 pub(super) fn ensure_trusted_config_path(path: &Path) -> Result<(), ConfigLoadError> {
     match crate::fs_trust::existing_path_or_parent_has_insecure_write_permissions(path) {
         Ok(false) => Ok(()),
@@ -18,12 +17,6 @@ pub(super) fn ensure_trusted_config_path(path: &Path) -> Result<(), ConfigLoadEr
     }
 }
 
-#[cfg(not(unix))]
-pub(super) fn ensure_trusted_config_path(_path: &Path) -> Result<(), ConfigLoadError> {
-    Ok(())
-}
-
-#[cfg(unix)]
 pub(super) fn ensure_trusted_opened_config_file(
     metadata: &Metadata,
     path: &Path,
@@ -36,14 +29,6 @@ pub(super) fn ensure_trusted_opened_config_file(
             format!("opened config file is not trusted: {}", path.display()),
         )));
     }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-pub(super) fn ensure_trusted_opened_config_file(
-    _metadata: &Metadata,
-    _path: &Path,
-) -> Result<(), ConfigLoadError> {
     Ok(())
 }
 

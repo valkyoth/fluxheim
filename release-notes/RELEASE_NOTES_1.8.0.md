@@ -36,6 +36,9 @@ This release is under development.
   native archive jobs.
 - Build representative `full` and `wasm` archives on native macOS and Windows
   CI runners before expanding live platform parity in `1.8.1` and `1.8.2`.
+- Compile Windows configuration and admin-socket planning without relying on
+  Unix-only symbols, while keeping configuration-file loading fail-closed
+  until Windows owner and ACL trust checks are implemented in `1.8.2`.
 - Fix the release helper's `--profile all` state handling so one completed
   profile cannot suppress the remaining six archives.
 - Keep signed/notarized macOS packages and Authenticode/MSI/MSIX delivery
@@ -63,6 +66,9 @@ This release is under development.
   permitted request-header value length.
 - Prove non-cache Wasm admission is partitioned per vhost beneath the native and
   preview process-wide ceilings, matching the existing cache-hook isolation.
+- Run a native Windows regression proving unsupported filesystem ownership and
+  ACL trust checks return an error rather than silently accepting a config
+  path.
 
 ## Security Notes
 

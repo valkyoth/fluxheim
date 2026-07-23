@@ -39,6 +39,9 @@ behavior when the change improves security or project direction.
   both the POSIX asset builder and validator, avoiding WSL-versus-Git-Bash
   command resolution on Windows runners.
 - Fix portable workflow package-version extraction on macOS and Windows.
+- Make shared filesystem-trust and admin-socket configuration code compile on
+  Windows while rejecting config-file loading until native Windows owner and
+  ACL checks are implemented; add a native Windows fail-closed regression.
 - Partition native and preview non-cache Wasm admission per vhost beneath their
   process-wide ceilings so one tenant cannot starve another tenant's access,
   routing, or header hooks.

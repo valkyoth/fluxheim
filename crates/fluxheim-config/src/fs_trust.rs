@@ -3,11 +3,6 @@ use std::path::Path;
 #[cfg(unix)]
 const MAX_PERMISSION_INSPECTION_DEPTH: usize = 256;
 
-#[cfg(not(unix))]
-compile_error!(
-    "Fluxheim filesystem trust checks require a Unix target; implement platform ACL and ownership checks before enabling non-Unix builds"
-);
-
 #[cfg(unix)]
 pub fn existing_parent_has_insecure_write_permissions(path: &Path) -> std::io::Result<bool> {
     let current = path
@@ -19,11 +14,23 @@ pub fn existing_parent_has_insecure_write_permissions(path: &Path) -> std::io::R
     existing_path_has_insecure_write_permissions(&current)
 }
 
+#[cfg(not(unix))]
+pub fn existing_parent_has_insecure_write_permissions(_path: &Path) -> std::io::Result<bool> {
+    Err(unsupported_filesystem_trust_error())
+}
+
 #[cfg(unix)]
 pub fn existing_path_or_parent_has_insecure_write_permissions(
     path: &Path,
 ) -> std::io::Result<bool> {
     existing_path_has_insecure_write_permissions(path)
+}
+
+#[cfg(not(unix))]
+pub fn existing_path_or_parent_has_insecure_write_permissions(
+    _path: &Path,
+) -> std::io::Result<bool> {
+    Err(unsupported_filesystem_trust_error())
 }
 
 #[cfg(unix)]
@@ -97,6 +104,21 @@ pub(crate) fn metadata_has_insecure_owner_or_write_permissions(
     )
 }
 
+#[cfg(not(unix))]
+pub(crate) fn metadata_has_insecure_owner_or_write_permissions(
+    _metadata: &std::fs::Metadata,
+) -> std::io::Result<bool> {
+    Err(unsupported_filesystem_trust_error())
+}
+
+#[cfg(not(unix))]
+fn unsupported_filesystem_trust_error() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "filesystem ownership and ACL trust checks are not implemented for this platform",
+    )
+}
+
 #[cfg(unix)]
 fn check_inspection_depth(inspected_depth: &mut usize) -> std::io::Result<()> {
     *inspected_depth = inspected_depth.saturating_add(1);
@@ -147,5 +169,31 @@ mod tests {
 
         let error = existing_path_has_insecure_write_permissions(&current).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+}
+
+#[cfg(all(test, not(unix)))]
+mod non_unix_tests {
+    use super::{
+        existing_parent_has_insecure_write_permissions,
+        existing_path_or_parent_has_insecure_write_permissions,
+    };
+    use std::path::Path;
+
+    #[test]
+    fn filesystem_trust_checks_fail_closed_when_platform_support_is_absent() {
+        let path = Path::new("fluxheim.toml");
+
+        for error in [
+            existing_parent_has_insecure_write_permissions(path).unwrap_err(),
+            existing_path_or_parent_has_insecure_write_permissions(path).unwrap_err(),
+        ] {
+            assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
+            assert!(
+                error
+                    .to_string()
+                    .contains("filesystem ownership and ACL trust checks")
+            );
+        }
     }
 }

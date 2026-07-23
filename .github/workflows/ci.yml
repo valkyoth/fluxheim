@@ -300,6 +300,7 @@ jobs:
       - name: Check Windows portable profiles
         run: |
           scripts/validate_portable_release_plan.py
+          cargo test --locked -p fluxheim-config --no-default-features filesystem_trust_checks_fail_closed_when_platform_support_is_absent
           cargo check --locked --no-default-features --features profile-static-site --bin fluxheim
           cargo check --locked --no-default-features --features profile-reverse-proxy --bin fluxheim
           cargo check --locked --no-default-features --features profile-full --bin fluxheim
