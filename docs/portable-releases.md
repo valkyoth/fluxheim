@@ -42,6 +42,10 @@ scripts/build_release_assets.sh 1.8.0 --kind windows --plan
 scripts/validate_portable_release_plan.py
 ```
 
+The shell asset builder and cross-platform validator consume the same native
+Python release-plan module. Plan validation therefore does not require Bash,
+Git Bash, or WSL on Windows.
+
 Build on the operating system and architecture represented by the target:
 
 ```bash

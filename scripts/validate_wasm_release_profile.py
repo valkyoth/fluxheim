@@ -44,10 +44,17 @@ def main() -> int:
     )
     require(
         contains(
-            "scripts/build_release_assets.sh",
-            "bundle_runtime_profile wasm profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp",
+            "scripts/portable_release_plan.py",
+            '"wasm": "profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp"',
         ),
-        "release builder must package the Wasm profile",
+        "portable release plan must package the Wasm profile",
+    )
+    require(
+        contains(
+            "scripts/build_release_assets.sh",
+            "scripts/portable_release_plan.py",
+        ),
+        "release builder must consume the portable release plan",
     )
     require(
         contains(

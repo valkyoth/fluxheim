@@ -127,15 +127,8 @@ copy_binary() {
 }
 
 bundle_runtime_profile() {
-    bundle_profile="$1"
+    dist_name="$1"
     bundle_features="$2"
-    dist_name="fluxheim-${version}-${bundle_profile}-${label}"
-
-    if [ "$plan_only" -eq 1 ]; then
-        printf '%s|%s|fluxheim%s,fluxheim-acme%s\n' \
-            "$dist_name" "$bundle_features" "$binary_suffix" "$binary_suffix"
-        return
-    fi
 
     cargo build --release --locked --target "$target" --no-default-features \
         --features "$bundle_features" --bin fluxheim --bin fluxheim-acme
@@ -150,13 +143,7 @@ bundle_runtime_profile() {
 }
 
 bundle_config_tester() {
-    dist_name="fluxheim-${version}-config-tester-${label}"
-
-    if [ "$plan_only" -eq 1 ]; then
-        printf '%s|profile-development|fluxheim-config-tester%s\n' \
-            "$dist_name" "$binary_suffix"
-        return
-    fi
+    dist_name="$1"
 
     cargo build --release --locked --target "$target" --no-default-features \
         --features profile-development --bin fluxheim-config-tester
@@ -170,12 +157,6 @@ bundle_config_tester() {
 
 bundle_macos_dev() {
     dist_name="fluxheim-${version}-dev-${label}"
-
-    if [ "$plan_only" -eq 1 ]; then
-        printf '%s|profile-development|fluxheim%s,fluxheim-acme%s,fluxheim-config-tester%s\n' \
-            "$dist_name" "$binary_suffix" "$binary_suffix" "$binary_suffix"
-        return
-    fi
 
     cargo build --release --locked --target "$target" --no-default-features \
         --features profile-development \
@@ -207,29 +188,27 @@ case "$kind:$target" in
         ;;
 esac
 
+release_plan="$("$(python_command)" scripts/portable_release_plan.py "$version" \
+    --kind "$kind" --target "$target" --profile "$selected_profile")"
+if [ "$plan_only" -eq 1 ]; then
+    printf '%s\n' "$release_plan"
+    exit 0
+fi
+
 case "$kind" in
     linux | macos | windows)
-        if [ "$selected_profile" = "all" ] || [ "$selected_profile" = "full" ]; then
-            bundle_runtime_profile full profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
-        fi
-        if [ "$selected_profile" = "all" ] || [ "$selected_profile" = "wasm" ]; then
-            bundle_runtime_profile wasm profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
-        fi
-        if [ "$selected_profile" = "all" ] || [ "$selected_profile" = "cache" ]; then
-            bundle_runtime_profile cache profile-cache-edge,acme-client
-        fi
-        if [ "$selected_profile" = "all" ] || [ "$selected_profile" = "proxy" ]; then
-            bundle_runtime_profile proxy profile-proxy-edge,acme-client
-        fi
-        if [ "$selected_profile" = "all" ] || [ "$selected_profile" = "load-balancer" ]; then
-            bundle_runtime_profile load-balancer profile-load-balancer-edge,acme-client
-        fi
-        if [ "$selected_profile" = "all" ] || [ "$selected_profile" = "php" ]; then
-            bundle_runtime_profile php profile-web-server,php-fpm,acme-client
-        fi
-        if [ "$selected_profile" = "all" ] || [ "$selected_profile" = "config-tester" ]; then
-            bundle_config_tester
-        fi
+        while IFS='|' read -r dist_name bundle_features bundle_binaries; do
+            case "$bundle_binaries" in
+                fluxheim-config-tester*)
+                    bundle_config_tester "$dist_name"
+                    ;;
+                *)
+                    bundle_runtime_profile "$dist_name" "$bundle_features"
+                    ;;
+            esac
+        done <<EOF
+$release_plan
+EOF
         ;;
     macos-dev)
         if [ "$selected_profile" != "all" ]; then

@@ -30,9 +30,10 @@ This release is under development.
   unsigned macOS and Windows portable releases.
 - Validate the same seven public profile names, Cargo feature sets, and binary
   layout across Linux, macOS, and Windows, including `.exe` naming on Windows.
-- Run the shared POSIX archive planner explicitly through Bash with a
-  repository-relative forward-slash path on Windows, and use portable
-  package-version extraction in both native archive jobs.
+- Generate and validate the archive matrix through one native Python planner
+  consumed by the POSIX asset builder, avoiding WSL-versus-Git-Bash command
+  resolution on Windows, and use portable package-version extraction in both
+  native archive jobs.
 - Build representative `full` and `wasm` archives on native macOS and Windows
   CI runners before expanding live platform parity in `1.8.1` and `1.8.2`.
 - Fix the release helper's `--profile all` state handling so one completed

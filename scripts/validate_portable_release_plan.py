@@ -4,28 +4,15 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 import tomllib
 from pathlib import Path
 
+from portable_release_plan import PLATFORMS, PROFILES, release_plan
+
 
 ROOT = Path(__file__).resolve().parents[1]
-BUILDER = "scripts/build_release_assets.sh"
-PROFILES = {
-    "full": "profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp",
-    "wasm": "profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp",
-    "cache": "profile-cache-edge,acme-client",
-    "proxy": "profile-proxy-edge,acme-client",
-    "load-balancer": "profile-load-balancer-edge,acme-client",
-    "php": "profile-web-server,php-fpm,acme-client",
-    "config-tester": "profile-development",
-}
-PLATFORMS = (
-    ("linux", "x86_64-unknown-linux-gnu", "x86_64-linux", ""),
-    ("macos", "aarch64-apple-darwin", "aarch64-macos", ""),
-    ("windows", "x86_64-pc-windows-msvc", "x86_64-windows", ".exe"),
-)
+BUILDER = ROOT / "scripts" / "build_release_assets.sh"
 
 
 def package_version() -> str:
@@ -33,54 +20,12 @@ def package_version() -> str:
     return cargo["package"]["version"]
 
 
-def release_plan(
-    version: str, kind: str, target: str, profile: str = "all"
-) -> list[tuple[str, str, str]]:
-    result = subprocess.run(
-        (
-            "bash",
-            BUILDER,
-            version,
-            "--kind",
-            kind,
-            "--target",
-            target,
-            "--profile",
-            profile,
-            "--plan",
-        ),
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    rows = []
-    for line in result.stdout.splitlines():
-        parts = line.split("|")
-        if len(parts) != 3:
-            raise ValueError(f"malformed release plan row: {line!r}")
-        rows.append((parts[0], parts[1], parts[2]))
-    return rows
-
-
 def expect_plan_rejection(version: str, kind: str, target: str) -> None:
-    result = subprocess.run(
-        (
-            "bash",
-            BUILDER,
-            version,
-            "--kind",
-            kind,
-            "--target",
-            target,
-            "--plan",
-        ),
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0:
-        raise ValueError(f"unsafe or mismatched target was accepted: {kind}/{target}")
+    try:
+        release_plan(version, kind, target)
+    except ValueError:
+        return
+    raise ValueError(f"unsafe or mismatched target was accepted: {kind}/{target}")
 
 
 def validate_platform(
@@ -122,10 +67,9 @@ def validate_platform(
 
 
 def main() -> int:
-    if Path(BUILDER).is_absolute() or "\\" in BUILDER:
-        raise ValueError("release builder must use a relative POSIX path")
-    if not (ROOT / BUILDER).is_file():
-        raise ValueError(f"release builder does not exist: {BUILDER}")
+    builder = BUILDER.read_text(encoding="utf-8")
+    if "scripts/portable_release_plan.py" not in builder:
+        raise ValueError("release builder does not consume the shared Python plan")
 
     version = package_version()
     for platform in PLATFORMS:
@@ -139,10 +83,6 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except subprocess.CalledProcessError as error:
-        detail = (error.stderr or error.stdout or str(error)).strip()
-        print(f"portable release plan: {detail}", file=sys.stderr)
-        raise SystemExit(1) from error
     except (OSError, ValueError) as error:
         print(f"portable release plan: {error}", file=sys.stderr)
         raise SystemExit(1) from error
