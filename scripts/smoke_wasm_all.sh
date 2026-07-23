@@ -7,6 +7,6 @@ scripts/smoke_wasm_sandbox.sh
 cargo test --locked -p fluxheim-server --features wasm \
     wasm_guest_id_decoders_are_total
 scripts/smoke_wasm_policy_examples.sh
-scripts/smoke_wasm_policy_examples_binary.sh
+scripts/smoke_wasm_release_asset.sh
 
 echo "wasm complete smoke: ok"

@@ -216,7 +216,15 @@ fn status_endpoint_requires_bearer_token() {
 #[cfg(feature = "wasm")]
 #[test]
 fn status_endpoint_reports_wasm_registry_summary() {
-    let config: Config = toml::from_str(
+    let plugin_root = tempfile::Builder::new()
+        .prefix("wasm-admin-")
+        .tempdir_in(fluxheim_common::test_support::test_root())
+        .unwrap();
+    let plugin_path = plugin_root.path().join("headers.wasm");
+    std::fs::write(&plugin_path, b"\0asm\x01\0\0\0").unwrap();
+    let plugin_root_toml = plugin_root.path().to_string_lossy().replace('\\', "\\\\");
+    let plugin_path_toml = plugin_path.to_string_lossy().replace('\\', "\\\\");
+    let config: Config = toml::from_str(&format!(
         r#"
         [server]
         listen = ["127.0.0.1:8080"]
@@ -224,15 +232,15 @@ fn status_endpoint_reports_wasm_registry_summary() {
 
         [wasm]
         enabled = true
-        plugin_roots = ["/srv/fluxheim/plugins"]
+        plugin_roots = ["{plugin_root_toml}"]
         max_total_concurrent_executions = 32
         max_total_preview_concurrent_executions = 16
         max_total_cache_concurrent_executions = 48
 
         [[wasm.plugins]]
         name = "headers"
-        path = "/srv/fluxheim/plugins/headers.wasm"
-        sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        path = "{plugin_path_toml}"
+        sha256 = "93a44bbb96c751218e4c00d479e4c14358122a389acca16205b1e4d0dc5f9476"
         phases = ["request-headers", "response-headers"]
 
         [[wasm.attachments]]
@@ -244,8 +252,8 @@ fn status_endpoint_reports_wasm_registry_summary() {
         [[vhosts]]
         name = "app"
         hosts = ["app.test"]
-        "#,
-    )
+        "#
+    ))
     .unwrap();
     config.validate().unwrap();
 
@@ -263,7 +271,7 @@ fn status_endpoint_reports_wasm_registry_summary() {
     assert_eq!(body["wasm"]["plugins"][0]["name"], "headers");
     assert_eq!(
         body["wasm"]["plugins"][0]["expected_sha256"],
-        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        "93a44bbb96c751218e4c00d479e4c14358122a389acca16205b1e4d0dc5f9476"
     );
     assert_eq!(body["wasm"]["plugins"][0]["phases"][0], "request-headers");
     assert_eq!(

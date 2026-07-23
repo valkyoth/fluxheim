@@ -143,7 +143,7 @@ else
         quay_namespace="${QUAY_NAMESPACE:-valkyoth}"
         quay_repository="${QUAY_REPOSITORY:-fluxheim}"
         for registry in "ghcr.io/valkyoth/fluxheim" "quay.io/${quay_namespace}/${quay_repository}"; do
-            for variant in wolfi alpine suse-micro debian cache-wolfi cache-alpine cache-suse-micro cache-debian proxy-wolfi proxy-alpine proxy-suse-micro proxy-debian php-wolfi php-alpine php-suse-micro php-debian; do
+            for variant in wolfi alpine suse-micro debian wasm-wolfi wasm-alpine wasm-suse-micro wasm-debian cache-wolfi cache-alpine cache-suse-micro cache-debian proxy-wolfi proxy-alpine proxy-suse-micro proxy-debian load-balancer-wolfi load-balancer-alpine load-balancer-suse-micro load-balancer-debian php-wolfi php-alpine php-suse-micro php-debian; do
                 image="${registry}:${tag}-${variant}"
                 if "$tool" pull "$image" >/dev/null 2>&1; then
                     digest="$("$tool" inspect "$image" --format '{{index .RepoDigests 0}}')"

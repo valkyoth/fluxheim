@@ -119,6 +119,7 @@ feature aliases for common deployment shapes.
 | `profile-observability` | `profile-core`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Core server with Prometheus metrics, optional local OTLP metrics export, trace context propagation, and optional local OTLP trace export. |
 | `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Zero-retention static/proxy profile. |
 | `profile-full` | `profile-load-balancer`, `geoip`, `stream-proxy`, `traffic-mirror` | All stable production modules, including GeoIP, traffic mirroring, and the current stream/load-balancer runtime lines. |
+| `profile-wasm` | `profile-full`, `wasm-proxy-abi`, `wasm-wasi` | Explicit Wasm distribution profile; `profile-full` remains Wasm-free. |
 | `profile-development` | `profile-full`, `php-fpm`, `acme-client`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Broad development build with all compatible production modules. |
 | `profile-web-server` | `proxy`, `web`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Static webserver profile while serving still uses the shared proxy runtime. |
 | `profile-cache-edge` | `proxy`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Cache edge without local static web serving. |
@@ -139,6 +140,7 @@ Examples that match the official release artifacts:
 
 ```bash
 cargo build --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+cargo build --no-default-features --features profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
 cargo build --no-default-features --features profile-development
 cargo build --no-default-features --features profile-cache-edge,acme-client
 cargo build --no-default-features --features profile-proxy-edge,acme-client
@@ -154,7 +156,8 @@ cargo build --no-default-features --features profile-iso19790-rustls
 The raw profile aliases do not force `acme-client`; that is intentional for
 offline or static-certificate custom builds. Official RPMs, images, and release
 tarballs add `acme-client` to the full, cache, proxy, load-balancer, and PHP
-profiles by default.
+profiles by default. The dedicated Wasm artifact adds the same production
+modules to `profile-wasm`; Wasm remains absent from `profile-full`.
 
 ## FIPS-Capable TLS Features
 
@@ -239,8 +242,9 @@ Focused image profile status:
 - The `cache` and `proxy` focused profiles compile without local static web
   serving.
 - Compatibility aliases may keep the older broad behavior, but published
-  focused images are `full`, `cache`, `proxy`, `php`, and, starting with the
-  `1.5` line, `load-balancer`.
+  focused images are `full`, `wasm`, `cache`, `proxy`, `php`, and
+  `load-balancer`. The `wasm` profile starts with `1.8.0`; the unsuffixed
+  `full` image remains Wasm-free.
 
 ## Incompatible Combinations
 

@@ -153,6 +153,7 @@ cargo check --no-default-features --features profile-reverse-proxy
 cargo check --no-default-features --features profile-cache-server
 cargo check --no-default-features --features profile-load-balancer
 cargo check --no-default-features --features profile-full
+cargo check --no-default-features --features profile-wasm
 cargo check --no-default-features --features profile-development
 cargo check --no-default-features --features profile-web-server
 cargo check --no-default-features --features profile-web-server,php-fpm
@@ -166,6 +167,7 @@ cargo check --no-default-features --features profile-iso19790-openssl
 cargo check --no-default-features --features profile-fips-rustls
 cargo check --no-default-features --features profile-iso19790-rustls
 cargo check --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+cargo check --no-default-features --features profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
 cargo check --no-default-features --features profile-cache-edge,acme-client
 cargo check --no-default-features --features profile-proxy-edge,acme-client
 cargo check --no-default-features --features profile-load-balancer-edge,acme-client

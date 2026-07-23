@@ -52,6 +52,7 @@ jobs:
           scripts/validate-features.sh profile-core,acme-client
           scripts/validate-features.sh profile-load-balancer
           scripts/validate-features.sh profile-full
+          scripts/validate-features.sh profile-wasm
           scripts/validate-features.sh profile-development
           scripts/validate-features.sh profile-web-server
           scripts/validate-features.sh profile-cache-edge
@@ -79,6 +80,9 @@ jobs:
             exit 1
           fi
 
+      - name: Validate Wasm release profile
+        run: scripts/validate_wasm_release_profile.py
+
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
 
@@ -97,6 +101,7 @@ jobs:
           cargo clippy --no-default-features --features proxy,tls-rustls,acme-client --all-targets -- -D warnings
           cargo clippy --no-default-features --features tls-rustls --all-targets -- -D warnings
           cargo clippy --no-default-features --features profile-full --all-targets -- -D warnings
+          cargo clippy --no-default-features --features profile-wasm --all-targets -- -D warnings
           cargo clippy --no-default-features --features profile-web-server --all-targets -- -D warnings
           cargo clippy --no-default-features --features profile-cache-edge --all-targets -- -D warnings
           cargo clippy --no-default-features --features profile-proxy-edge --all-targets -- -D warnings
@@ -148,6 +153,7 @@ jobs:
           cargo check --no-default-features --features profile-cache-server
           cargo check --no-default-features --features profile-load-balancer
           cargo check --no-default-features --features profile-full
+          cargo check --no-default-features --features profile-wasm
           cargo check --no-default-features --features profile-development
           cargo check --no-default-features --features profile-web-server
           cargo check --no-default-features --features profile-cache-edge
@@ -257,6 +263,7 @@ jobs:
           cargo check --locked --no-default-features --features profile-static-site --bin fluxheim
           cargo check --locked --no-default-features --features profile-reverse-proxy --bin fluxheim
           cargo check --locked --no-default-features --features profile-full --bin fluxheim
+          cargo check --locked --no-default-features --features profile-wasm --bin fluxheim
           cargo check --locked --no-default-features --features profile-development --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
 
       - name: Run macOS developer smoke

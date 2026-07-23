@@ -7,6 +7,25 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.8.0 - Unreleased
+
+### Added
+
+- Add an explicit `profile-wasm` distribution profile, dedicated Wasm
+  container image, and Wasm release archive while keeping `profile-full`
+  Wasm-free.
+- Emit matching `.tar.gz` and `.zip` release archives from one staged
+  directory.
+- Add a live release-archive smoke that executes all four documented Wasm
+  policy migration examples through the packaged binary.
+
+### Changed
+
+- Start the unsigned macOS and Windows portable archive line before
+  company-backed signing and native installer work.
+- Document the required read-only container plugin mount and keep operator
+  modules outside official images.
+
 ## 1.7.12 - 2026-07-15
 
 ### Added

@@ -470,6 +470,22 @@ native `fluxheim-policy-v1` admission or blocking capacity.
 
 ## Configuration Sketch
 
+The official Wasm container contains the runtime but no operator plugins.
+Mount a dedicated plugin directory read-only and configure that exact
+directory as a plugin root:
+
+```yaml
+services:
+  fluxheim:
+    image: ghcr.io/valkyoth/fluxheim:v1.8.0-wasm-wolfi
+    volumes:
+      - /srv/infra/fluxheim/plugins:/etc/fluxheim/plugins:ro,Z
+```
+
+Do not mount the plugin directory over `/var/log/fluxheim` or another mutable
+runtime path. Keep plugins read-only, owned by the deployment administrator,
+free of symlinks, and pin every security-decision module by SHA-256 in config.
+
 ```toml
 [wasm]
 enabled = true

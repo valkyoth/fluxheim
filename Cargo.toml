@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim"
-version = "1.7.12"
+version = "1.8.0"
 edition = "2024"
 rust-version = "1.97.0"
 license = "EUPL-1.2"
@@ -193,6 +193,11 @@ profile-full = [
     "geoip",
     "stream-proxy",
     "traffic-mirror",
+]
+profile-wasm = [
+    "profile-full",
+    "wasm-proxy-abi",
+    "wasm-wasi",
 ]
 profile-development = [
     "profile-full",

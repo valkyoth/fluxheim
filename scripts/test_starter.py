@@ -225,7 +225,14 @@ TESTS: tuple[TestEntry, ...] = (
         "Wasm complete smoke",
         "wasm",
         ("scripts/smoke_wasm_all.sh",),
-        "Builds policy examples and validates the registry, sandbox, and real-listener migration examples.",
+        "Builds policy examples and validates the registry, sandbox, packaged release binary, and real-listener migration examples.",
+    ),
+    TestEntry(
+        "wasm-release",
+        "Packaged Wasm archive smoke",
+        "wasm",
+        ("scripts/smoke_wasm_release_asset.sh",),
+        "Builds both Wasm archive formats, extracts the tarball, and runs every policy family through that release binary.",
     ),
     TestEntry(
         "wasm-irules",

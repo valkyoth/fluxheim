@@ -305,10 +305,26 @@ STABLE_PID=$!
 python3 "$TMP_DIR/origin.py" "$CANARY_PORT" canary >"$TMP_DIR/canary.log" 2>&1 &
 CANARY_PID=$!
 
-(cd "$ROOT_DIR" && cargo build --quiet --locked --no-default-features \
-    --features profile-development,wasm --bin fluxheim)
+if [ -n "${FLUXHEIM_BIN:-}" ]; then
+    case "$FLUXHEIM_BIN" in
+        /*) ;;
+        *)
+            echo "Wasm binary smoke requires an absolute FLUXHEIM_BIN path" >&2
+            exit 2
+            ;;
+    esac
+    if [ ! -x "$FLUXHEIM_BIN" ]; then
+        echo "Wasm binary smoke cannot execute FLUXHEIM_BIN: $FLUXHEIM_BIN" >&2
+        exit 2
+    fi
+    fluxheim_bin="$FLUXHEIM_BIN"
+else
+    (cd "$ROOT_DIR" && cargo build --quiet --locked --no-default-features \
+        --features profile-wasm --bin fluxheim)
+    fluxheim_bin="$ROOT_DIR/target/debug/fluxheim"
+fi
 
-"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" \
+"$fluxheim_bin" --config "$TMP_DIR/fluxheim.toml" \
     >"$TMP_DIR/fluxheim.log" 2>&1 &
 FLUXHEIM_PID=$!
 

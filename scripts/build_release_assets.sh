@@ -2,7 +2,7 @@
 set -eu
 
 usage() {
-    echo "usage: scripts/build_release_assets.sh VERSION [--target TARGET] [--kind linux|macos-dev]" >&2
+    echo "usage: scripts/build_release_assets.sh VERSION [--target TARGET] [--kind linux|macos-dev] [--profile all|full|wasm|cache|proxy|load-balancer|php|config-tester]" >&2
 }
 
 version="${1:-}"
@@ -21,6 +21,7 @@ esac
 
 target="$(rustc -vV | sed -n 's/^host: //p')"
 kind="linux"
+profile="all"
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -37,6 +38,17 @@ while [ "$#" -gt 0 ]; do
             kind="${1:-}"
             case "$kind" in
                 linux | macos-dev) ;;
+                *)
+                    usage
+                    exit 2
+                    ;;
+            esac
+            ;;
+        --profile)
+            shift
+            profile="${1:-}"
+            case "$profile" in
+                all | full | wasm | cache | proxy | load-balancer | php | config-tester) ;;
                 *)
                     usage
                     exit 2
@@ -87,8 +99,7 @@ bundle_runtime_profile() {
     cp "target/$target/release/fluxheim-acme" "dist/$dist_name/"
     cp README.md LICENSE CHANGELOG.md "dist/$dist_name/"
     cp -r docs examples packaging release-notes "dist/$dist_name/"
-    tar -C dist -czf "dist/${dist_name}.tar.gz" "$dist_name"
-    sha256sum "dist/${dist_name}.tar.gz"
+    python3 scripts/create_release_archives.py "$dist_name"
 }
 
 bundle_config_tester() {
@@ -101,8 +112,7 @@ bundle_config_tester() {
     mkdir -p "dist/$dist_name"
     cp "target/$target/release/fluxheim-config-tester" "dist/$dist_name/"
     cp README.md LICENSE CHANGELOG.md "dist/$dist_name/"
-    tar -C dist -czf "dist/${dist_name}.tar.gz" "$dist_name"
-    sha256sum "dist/${dist_name}.tar.gz"
+    python3 scripts/create_release_archives.py "$dist_name"
 }
 
 bundle_macos_dev() {
@@ -119,8 +129,7 @@ bundle_macos_dev() {
     cp "target/$target/release/fluxheim-config-tester" "dist/$dist_name/"
     cp README.md LICENSE CHANGELOG.md "dist/$dist_name/"
     cp -r docs examples release-notes "dist/$dist_name/"
-    tar -C dist -czf "dist/${dist_name}.tar.gz" "$dist_name"
-    sha256sum "dist/${dist_name}.tar.gz"
+    python3 scripts/create_release_archives.py "$dist_name"
 }
 
 case "$kind" in
@@ -132,14 +141,33 @@ case "$kind" in
                 exit 2
                 ;;
         esac
-        bundle_runtime_profile full profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
-        bundle_runtime_profile cache profile-cache-edge,acme-client
-        bundle_runtime_profile proxy profile-proxy-edge,acme-client
-        bundle_runtime_profile load-balancer profile-load-balancer-edge,acme-client
-        bundle_runtime_profile php profile-web-server,php-fpm,acme-client
-        bundle_config_tester
+        if [ "$profile" = "all" ] || [ "$profile" = "full" ]; then
+            bundle_runtime_profile full profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+        fi
+        if [ "$profile" = "all" ] || [ "$profile" = "wasm" ]; then
+            bundle_runtime_profile wasm profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+        fi
+        if [ "$profile" = "all" ] || [ "$profile" = "cache" ]; then
+            bundle_runtime_profile cache profile-cache-edge,acme-client
+        fi
+        if [ "$profile" = "all" ] || [ "$profile" = "proxy" ]; then
+            bundle_runtime_profile proxy profile-proxy-edge,acme-client
+        fi
+        if [ "$profile" = "all" ] || [ "$profile" = "load-balancer" ]; then
+            bundle_runtime_profile load-balancer profile-load-balancer-edge,acme-client
+        fi
+        if [ "$profile" = "all" ] || [ "$profile" = "php" ]; then
+            bundle_runtime_profile php profile-web-server,php-fpm,acme-client
+        fi
+        if [ "$profile" = "all" ] || [ "$profile" = "config-tester" ]; then
+            bundle_config_tester
+        fi
         ;;
     macos-dev)
+        if [ "$profile" != "all" ]; then
+            echo "release assets: --profile is not supported with --kind macos-dev" >&2
+            exit 2
+        fi
         case "$target" in
             *apple-darwin*) ;;
             *)

@@ -22,6 +22,7 @@ Feature-reduced builds keep the binary small and reduce dependency surface:
 cargo build --release --no-default-features --features proxy
 cargo build --release --no-default-features --features proxy,load-balancer
 cargo build --release --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+cargo build --release --no-default-features --features profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
 cargo build --release --no-default-features --features profile-cache-edge,acme-client
 cargo build --release --no-default-features --features profile-proxy-edge,acme-client
 cargo build --release --no-default-features --features profile-web-server,php-fpm,acme-client
@@ -34,7 +35,7 @@ grouped build profiles as normal feature aliases such as `profile-core`,
 `profile-load-balancer`, `profile-observability`, and `profile-privacy`.
 Fluxheim 1.3 also adds focused profile aliases: `profile-full`,
 `profile-web-server`, `profile-cache-edge`, `profile-proxy-edge`,
-`profile-load-balancer-edge`, `profile-fips-openssl`, and
+`profile-load-balancer-edge`, `profile-wasm`, `profile-fips-openssl`, and
 `profile-iso19790-openssl`. The `1.3.5` release line introduced
 `profile-fips-rustls` and `profile-iso19790-rustls` for the rustls/AWS-LC FIPS
 candidate path, and `1.3.6` adds fail-closed internal-crypto gates and
@@ -262,10 +263,26 @@ gzip/Zstandard/Brotli compression codecs, rustls TLS, managed ACME, Prometheus
 metrics, and OpenTelemetry export support.
 Published releases also build smaller focused profiles:
 
+- `wasm`: `profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp`
 - `cache`: `profile-cache-edge,acme-client`
 - `proxy`: `profile-proxy-edge,acme-client`
 - `php`: `profile-web-server,php-fpm,acme-client`
 - `load-balancer`: `profile-load-balancer-edge,acme-client`
+
+The `wasm` image is the full production server plus the reviewed Wasm
+proxy-ABI and WASI capability surfaces. The unsuffixed `full` image
+intentionally excludes Wasm. The image contains no operator plugin modules;
+mount them read-only and point `wasm.plugin_roots` at the mounted path:
+
+```yaml
+volumes:
+  - /srv/infra/fluxheim/plugins:/etc/fluxheim/plugins:ro,Z
+```
+
+Keep logs on their normal writable mount, for example
+`/srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U`; a log mount does not make
+plugins available. See [Wasm Extensibility](wasm-extensibility.md) for
+hash-pinning and filesystem trust requirements.
 
 These focused profiles use TLS/ACME as shared ingress capabilities. The
 `cache` image is TLS-capable and omits local static web serving. The `proxy`
@@ -487,15 +504,15 @@ Optional Quay repository secrets and variables:
 
 The workflow publishes OS-variant tags for the full/default image profile:
 
-- `v1.7.12-wolfi`, `v1.7.12-alpine`, `v1.7.12-suse-micro`, `v1.7.12-debian`
+- `v1.8.0-wolfi`, `v1.8.0-alpine`, `v1.8.0-suse-micro`, `v1.8.0-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
 For the recommended Wolfi runtime, the full/default profile also gets short
 aliases:
 
-- `v1.7.12`
-- `v1.7.12-base`
+- `v1.8.0`
+- `v1.8.0-base`
 - `latest`
 - `latest-base`
 
@@ -504,22 +521,24 @@ automation. They point at the full/default image profile.
 
 The focused image profiles publish tags with a profile segment:
 
-- `v1.7.12-cache-wolfi`, `v1.7.12-cache-alpine`,
-  `v1.7.12-cache-suse-micro`, `v1.7.12-cache-debian`
-- `v1.7.12-proxy-wolfi`, `v1.7.12-proxy-alpine`,
-  `v1.7.12-proxy-suse-micro`, `v1.7.12-proxy-debian`
-- `v1.7.12-load-balancer-wolfi`, `v1.7.12-load-balancer-alpine`,
-  `v1.7.12-load-balancer-suse-micro`, `v1.7.12-load-balancer-debian`
-- `v1.7.12-php-wolfi`, `v1.7.12-php-alpine`,
-  `v1.7.12-php-suse-micro`, `v1.7.12-php-debian`
+- `v1.8.0-wasm-wolfi`, `v1.8.0-wasm-alpine`,
+  `v1.8.0-wasm-suse-micro`, `v1.8.0-wasm-debian`
+- `v1.8.0-cache-wolfi`, `v1.8.0-cache-alpine`,
+  `v1.8.0-cache-suse-micro`, `v1.8.0-cache-debian`
+- `v1.8.0-proxy-wolfi`, `v1.8.0-proxy-alpine`,
+  `v1.8.0-proxy-suse-micro`, `v1.8.0-proxy-debian`
+- `v1.8.0-load-balancer-wolfi`, `v1.8.0-load-balancer-alpine`,
+  `v1.8.0-load-balancer-suse-micro`, `v1.8.0-load-balancer-debian`
+- `v1.8.0-php-wolfi`, `v1.8.0-php-alpine`,
+  `v1.8.0-php-suse-micro`, `v1.8.0-php-debian`
 - `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`,
   `sha-<short-sha>-load-balancer-wolfi`, `sha-<short-sha>-php-wolfi`, etc.
 - `latest-cache-wolfi`, `latest-proxy-wolfi`,
   `latest-load-balancer-wolfi`, `latest-php-wolfi`, etc. when run from the
   default branch
-- Wolfi short aliases: `v1.7.12-cache`, `v1.7.12-proxy`,
-  `v1.7.12-load-balancer`, `v1.7.12-php`, `latest-cache`, `latest-proxy`,
-  `latest-load-balancer`, and `latest-php`
+- Wolfi short aliases: `v1.8.0-wasm`, `v1.8.0-cache`, `v1.8.0-proxy`,
+  `v1.8.0-load-balancer`, `v1.8.0-php`, `latest-wasm`, `latest-cache`,
+  `latest-proxy`, `latest-load-balancer`, and `latest-php`
 
 Starting with `v1.5.0`, the load-balancer image profile is part of normal tag
 publishing. For older tags or development branches, it can still be included in

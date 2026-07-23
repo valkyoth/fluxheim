@@ -3213,51 +3213,41 @@ Stable scope:
   parsing freshness metadata fail-closed, persisting mandatory-revalidation
   restrictions across cache tiers, validating range metadata strictly, and
   bounding storage-bin manifest reads.
-- `v1.8.0`: cross-platform production baseline planning. Replace the old
-  "macOS developer-only" posture with a concrete macOS and Windows production
-  parity line now that Fluxheim no longer depends on Pingora for the normal
-  runtime. Define the supported feature matrix for macOS and Windows against
-  Linux: static web, reverse proxy, cache, load-balancer, ACME, admin,
-  observability, Wasm-enabled profiles, and focused images. Explicitly mark
-  features that need platform-specific alternatives, such as Unix sockets,
-  daemon/process management, filesystem trust checks, PHP-FPM supervision,
-  service integration, and certificate/key storage.
-- `v1.8.1`: macOS production release foundation. Add regular macOS CI for
-  Apple Silicon and Intel where runners are available, run profile builds for
-  the same public profiles as Linux, and add live smoke coverage for static
-  serving, proxying, TLS, ACME dry-run/config validation, cache, admin,
-  load-balancer, observability, and selected Wasm hooks. Add launchd service
-  templates or an explicitly documented non-service deployment mode, Mac-safe
-  production paths, APFS/symlink/ACL/security review notes, and release-asset
-  generation for `aarch64-macos` and `x86_64-macos`.
-- `v1.8.2`: macOS signed package release. Produce a macOS distribution path
-  that can be trusted by normal operators: signed and notarized artifacts with
-  an Apple Developer ID, plus either a signed/notarized `.pkg`, a Homebrew
-  formula/cask path, or both. The release gate must verify codesign/notary
-  status where credentials are available and keep unsigned developer artifacts
-  clearly separate from production artifacts. Do not make FIPS/ISO-19790
-  claims on macOS unless a separate provider-specific evidence package exists.
-- `v1.8.3`: Windows production release foundation. Add Windows CI for
-  `x86_64-pc-windows-msvc`, profile builds for the same public profiles as
-  Linux where platform semantics allow them, and live smoke coverage for
-  static serving, reverse proxying, TLS, cache, admin, load-balancer,
-  observability, and selected Wasm hooks. Define Windows-specific behavior for
-  paths, ACLs, file locking, symlink handling, signal/shutdown semantics,
-  service control, named-pipe or TCP replacements for Unix-socket control
-  paths, certificate/key storage, and unsupported or degraded Unix-only
-  features.
-- `v1.8.4`: Windows signed package release. Add a signed Windows installer and
-  distribution path. Prefer an MSIX/App Installer or Microsoft Store-compatible
-  package when it fits Fluxheim's service/server model; otherwise ship a
-  signed MSI or signed zip with a documented Windows service installation path
-  and keep Store publication as a separate compatibility decision. The release
-  gate must verify Authenticode signing where credentials are available and
-  prove install, service start, smoke request, upgrade, and uninstall behavior.
-- `v1.8.5`: cross-platform parity hardening. Compare Linux, macOS, and Windows
-  behavior profile by profile, close remaining platform gaps where practical,
-  document intentional differences, add `scripts/test_starter.py` entries for
-  macOS and Windows smoke flows, and require the stable/deep release gates to
-  prove all supported platform assets before the line is complete.
+- `v1.8.0`: Wasm distribution and portable-archive baseline. Add a dedicated
+  `profile-wasm`, Wasm container image, and Wasm binary archive based on
+  `profile-full` plus the reviewed proxy-ABI and WASI capability surfaces.
+  Keep `profile-full` Wasm-free because in-process policy execution remains an
+  explicit operator risk decision. Emit both `.tar.gz` and `.zip` from one
+  staged directory, test the packaged Wasm binary against the real policy
+  examples, document the read-only plugin mount and hash-pinned plugin config,
+  and define one archive/profile contract for Linux, macOS, and Windows.
+- `v1.8.1`: unsigned macOS portable parity. Build the same supported public
+  archive profiles for Apple Silicon and Intel where runners are available,
+  using the same archive names, layout, documentation, checksums, and smoke
+  expectations as Linux. Add live static, proxy, TLS, cache, admin,
+  load-balancer, observability, and Wasm tests, plus launchd or an explicitly
+  documented foreground deployment mode and APFS/ACL/symlink review.
+- `v1.8.2`: unsigned Windows portable parity. Build MSVC archives for the same
+  supported profiles and both archive formats, run live static, proxy, TLS,
+  cache, admin, load-balancer, observability, and Wasm tests, and define
+  Windows path, ACL, file-locking, shutdown, service, certificate-storage, and
+  Unix-control-path replacements. Any unsupported profile must be named and
+  justified rather than silently omitted.
+- `v1.8.3`: cross-platform parity hardening. Compare Linux, macOS, and Windows
+  behavior profile by profile, close practical gaps, document intentional
+  differences, add `scripts/test_starter.py` platform entries, and require
+  stable/deep gates to prove every published portable artifact. Unsigned
+  archives must be clearly labeled and accompanied by checksums and
+  provenance; users remain responsible for local trust-policy exceptions.
+- `v1.8.4`: company-backed signing foundation, conditional on Fluxheim having
+  the required legal publisher identity and credentials. Add Apple Developer
+  ID signing/notarization and Windows Authenticode without making unavailable
+  credentials a blocker for the unsigned portable line.
+- `v1.8.5`: signed native installers. Produce a notarized macOS `.pkg` and a
+  signed Windows MSI/MSIX or Microsoft Store-compatible package when the
+  service model is proven. Verify install, service start, upgrade, rollback,
+  and uninstall. Keep Store publication a separate policy decision and do not
+  make FIPS claims without platform-specific provider evidence.
 - `v1.9.0`: Fluxheim-owned HTTP/3 and QUIC line. Stop at an opt-in
   `http3`/`http3-experimental` feature using Rust `quinn` for QUIC transport
   and the Rust `h3` stack for HTTP/3 framing behind Fluxheim-owned listener,
@@ -4870,32 +4860,24 @@ circular dependencies.
   close the shared-cache policy audit with unconditional credential bypass,
   fail-closed freshness parsing, persisted mandatory-revalidation state,
   strict range admission, and bounded storage-bin manifest reads.
-- `v1.8.0`: cross-platform production baseline planning. Make macOS and
-  Windows first-class release targets where practical, with Linux as the
-  reference baseline. Define the supported profile matrix, platform-specific
-  gaps, service/install models, release asset shape, and smoke evidence needed
-  before either platform is called production-supported.
-- `v1.8.1`: macOS production foundation with regular CI, Apple Silicon and
-  Intel build profiles, live static/proxy/TLS/cache/admin/load-balancer/Wasm
-  smoke coverage, launchd or documented non-service deployment, Mac-safe
-  production paths, and APFS/ACL/symlink/certificate-storage review notes.
-- `v1.8.2`: macOS signed package release with Apple Developer ID signing and
-  notarization. Ship a signed/notarized `.pkg`, Homebrew formula/cask path, or
-  both, with release-gate checks for signed/notarized artifacts when
-  credentials are available.
-- `v1.8.3`: Windows production foundation with Windows CI, MSVC build profiles,
-  live static/proxy/TLS/cache/admin/load-balancer/Wasm smoke coverage, Windows
-  service behavior, ACL/path/file-locking/symlink review, and replacements or
-  documented limitations for Unix-only control paths.
-- `v1.8.4`: Windows signed package release with Authenticode signing and an
-  installer path. Prefer Microsoft Store/MSIX/App Installer when the Store
-  model fits Fluxheim's server/service behavior; otherwise ship signed MSI or
-  signed zip/service assets and keep Store publication as a separate packaging
-  compatibility decision.
-- `v1.8.5`: cross-platform parity hardening. Compare Linux, macOS, and Windows
-  behavior profile by profile, close remaining gaps where practical, document
-  intentional differences, and add platform smoke entries to the release gates
-  and `scripts/test_starter.py`.
+- `v1.8.0`: dedicated Wasm distribution and portable archive baseline. Keep
+  `full` Wasm-free, add `profile-wasm`, a Wasm image and release archive, both
+  `.tar.gz` and `.zip` formats, a read-only plugin mount contract, and a live
+  packaged-binary Wasm smoke.
+- `v1.8.1`: unsigned macOS portable parity for Apple Silicon and Intel, using
+  the same supported profile names, archive layout, checksums, docs, and live
+  evidence as Linux.
+- `v1.8.2`: unsigned Windows MSVC portable parity with the same supported
+  profile/archive contract and explicit replacements or limitations for
+  Unix-only behavior.
+- `v1.8.3`: cross-platform parity hardening, platform test-starter entries,
+  documented intentional differences, and stable/deep release-gate evidence
+  for every published archive.
+- `v1.8.4`: company-backed Apple Developer ID and Windows Authenticode signing
+  foundation once the legal publisher identity and credentials exist.
+- `v1.8.5`: notarized macOS and signed Windows installer delivery, including
+  install/start/upgrade/rollback/uninstall proof; Microsoft Store publication
+  remains a separate compatibility and policy decision.
 - `v1.9.0`: Fluxheim-owned HTTP/3 and QUIC line. Stop at an opt-in
   `http3`/`http3-experimental` feature using Rust `quinn` for QUIC transport
   and the Rust `h3` stack for HTTP/3 framing behind Fluxheim-owned listener,

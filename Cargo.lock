@@ -1160,7 +1160,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1227,7 +1227,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-acme"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "base64-ng",
  "bytes",
@@ -1257,7 +1257,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-cache"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1271,14 +1271,14 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-common"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "thiserror 2.0.19",
 ]
 
 [[package]]
 name = "fluxheim-compression"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "brotli",
  "bytes",
@@ -1290,7 +1290,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-config"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "fluxheim-common",
  "fluxheim-protocol",
@@ -1305,7 +1305,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-geoip"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "fluxheim-common",
  "fluxheim-config",
@@ -1316,7 +1316,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-headers"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "fluxheim-config",
  "fluxheim-protocol",
@@ -1324,7 +1324,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-load-balancer"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1356,7 +1356,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-observability"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "fluxheim-common",
  "fluxheim-config",
@@ -1379,7 +1379,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-php-fpm"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "fastcgi-client",
  "fluxheim-common",
@@ -1396,14 +1396,14 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-protocol"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "sanitization",
 ]
 
 [[package]]
 name = "fluxheim-runtime"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "async-trait",
  "tokio",
@@ -1411,7 +1411,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-server"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "arc-swap",
  "base64-ng",
@@ -1462,7 +1462,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-snapshot"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "fluxheim-common",
  "fluxheim-config",
@@ -1475,7 +1475,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-stream"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "fluxheim-common",
  "fluxheim-config",
@@ -1486,7 +1486,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-systemd"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "libsystemd",
  "rustix",
@@ -1494,7 +1494,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-tls"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "arc-swap",
  "base64-ng",
@@ -1512,7 +1512,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-wasm"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "sha2 0.11.0",
  "tempfile",
@@ -1525,7 +1525,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-web"
-version = "1.7.12"
+version = "1.8.0"
 dependencies = [
  "chrono",
  "fluxheim-common",

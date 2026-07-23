@@ -65,6 +65,12 @@ jobs:
             config: packaging/container/fluxheim.toml
             wolfi_config: ""
             wolfi_runtime_packages: ""
+          - name: wasm
+            tag: wasm
+            features: profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+            config: packaging/container/fluxheim.toml
+            wolfi_config: ""
+            wolfi_runtime_packages: ""
           - name: cache
             tag: cache
             features: profile-cache-edge,acme-client

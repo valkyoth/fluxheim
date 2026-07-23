@@ -27,11 +27,11 @@ FIPS/ISO-capable TLS build paths, GeoIP policy, TCP stream proxying, and
 enterprise HTTP/TCP load balancing. Normal Fluxheim builds now use
 Fluxheim-owned Rust runtime boundaries for server/listener/TLS, HTTP/1,
 HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and
-background-service paths. The active `1.7.x` line adds a shared WebAssembly
-policy runtime for typed, sandboxed operator extensions before the later
-HTTP/3/QUIC line. The operator-facing product is Fluxheim: focused release
-profiles are available for full, cache, proxy, load-balancer, and PHP
-deployments, with matching container images and Linux runtime archives.
+background-service paths. The `1.7.x` line added a shared WebAssembly policy
+runtime for typed, sandboxed operator extensions, and `1.8.x` packages it as an
+explicit Wasm profile while starting portable macOS and Windows archives. The
+operator-facing product is Fluxheim: focused release profiles are available
+for full, Wasm, cache, proxy, load-balancer, and PHP deployments.
 
 The load-balancer line targets F5 LTM, HAProxy, nginx, and Envoy-style HTTP/TCP
 pool operations: weighted and adaptive selection, health and circuit state,
@@ -122,7 +122,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | OpenTelemetry | ✅ | OTLP metrics and tracing export profiles. |
 | Structured access logs | ✅ | Trusted client IP, cache phase, route, selected upstream/alias/retries, TLS identity, compression, and optional Geo-Context fields. |
 | Config tester | ✅ | Release-page config diagnostics through `fluxheim-config-tester`. |
-| Rootless containers | ✅ | Wolfi, Alpine, SUSE Micro, Debian, focused full/cache/proxy/load-balancer/PHP images. |
+| Rootless containers | ✅ | Wolfi, Alpine, SUSE Micro, Debian, focused full/Wasm/cache/proxy/load-balancer/PHP images. |
 | Native services | ✅ | systemd units and RPM packaging files. |
 | Default page | ✅ | Packaged `/srv/fluxheim/index.html` with no external assets. |
 
@@ -294,6 +294,7 @@ Recommended profile features:
 | `profile-observability` | `profile-core`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Core server with Prometheus metrics, optional local OTLP metrics export, trace context propagation, and optional local OTLP trace export. |
 | `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Zero-retention static/proxy profile. |
 | `profile-full` | `profile-load-balancer`, `geoip`, `stream-proxy`, `traffic-mirror` | All stable production modules, including GeoIP, traffic mirroring, stream, and load-balancer runtime lines. |
+| `profile-wasm` | `profile-full`, `wasm-proxy-abi`, `wasm-wasi` | Explicit Wasm distribution profile. It includes the full native server plus reviewed Wasm compatibility surfaces; `profile-full` intentionally remains Wasm-free. |
 | `profile-development` | `profile-full`, `php-fpm`, `acme-client`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Broad development build with all compatible production modules. |
 | `profile-web-server` | `proxy`, `web`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Static webserver profile using Fluxheim's native server path. |
 | `profile-cache-edge` | `proxy`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Cache edge without local static web serving. |
@@ -310,9 +311,10 @@ it is not part of any supported release profile.
 Fluxheim 1.3 started the focused image split. The `profile-cache-edge` and
 `profile-proxy-edge` aliases are TLS-capable without compiling local static web
 serving. Official RPMs, container images, and release tarballs add
-`acme-client` to the full, cache, and proxy profiles by default because
-managed certificates are the normal production path. Custom source builds can
-still omit `acme-client` for fully offline or static-certificate deployments.
+`acme-client` to the full, Wasm, cache, proxy, and load-balancer profiles by
+default because managed certificates are the normal production path. Custom
+source builds can still omit `acme-client` for fully offline or
+static-certificate deployments.
 `profile-cache-server` and `profile-load-balancer` remain compatibility aliases
 for operators who want the older convenience bundles.
 
@@ -336,6 +338,7 @@ Example grouped builds that match the official release artifacts:
 
 ```bash
 cargo build --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+cargo build --no-default-features --features profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
 cargo build --no-default-features --features profile-development
 cargo build --no-default-features --features profile-cache-edge,acme-client
 cargo build --no-default-features --features profile-proxy-edge,acme-client
@@ -349,11 +352,10 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries. The first
-`1.7.x` image tags include `v1.7.0-wolfi`, `v1.7.0-cache-wolfi`,
-`v1.7.0-proxy-wolfi`, `v1.7.0-load-balancer-wolfi`, and `v1.7.0-php-wolfi`;
-follow-up `1.7.x` releases use the same suffix pattern, for example
-`v1.7.12-wolfi`, `v1.7.12-cache-wolfi`, `v1.7.12-proxy-wolfi`,
-`v1.7.12-load-balancer-wolfi`, and `v1.7.12-php-wolfi`.
+The `1.8.x` image line adds a dedicated Wasm profile. Tags include
+`v1.8.0-wolfi`, `v1.8.0-wasm-wolfi`, `v1.8.0-cache-wolfi`,
+`v1.8.0-proxy-wolfi`, `v1.8.0-load-balancer-wolfi`, and
+`v1.8.0-php-wolfi`. Wasm is not included in the unsuffixed full image.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
 tag. The GitHub Release page is published under `v1.5.15-release` because the
@@ -424,14 +426,13 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Current Release: 1.7.12 Standards Metadata And FIPS Evidence
+## Current Development: 1.8.0 Wasm Distribution And Portable Archives
 
-Fluxheim does not treat every planned idea as stable. The current release line
-is `1.7.12`, the standards-based response-metadata and reproducible
-FIPS-backend evidence release after the stable Wasm and zero-downtime
-milestones. It adds opt-in RFC 9211 `Cache-Status`, low-cardinality RFC 9209
-`Proxy-Status`, RFC 9530 response digests, and pinned proof environments that
-build and execute the OpenSSL-FIPS and rustls/AWS-LC-FIPS profiles.
+Fluxheim does not treat every planned idea as stable. Development is now on
+`1.8.0`, which packages the completed Wasm line as an explicit image/archive
+profile and starts the shared portable-archive contract for Linux, macOS, and
+Windows. The normal `full` profile remains Wasm-free. Unsigned macOS and
+Windows archives come before company-backed signing and installer work.
 
 - `1.0` is the gateway foundation: vhosts, routes, redirects, static serving,
   proxying, SNI/TLS, safe ACME challenge exceptions, systemd/RPM packaging, and

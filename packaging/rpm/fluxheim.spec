@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.7.12
+Version:        1.8.0
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -157,6 +157,13 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Thu Jul 23 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.8.0-1
+- Add an explicit Wasm release profile while keeping the normal full RPM
+  feature set Wasm-free.
+- Add matching tar.gz and zip portable archive generation and packaged-binary
+  Wasm policy smoke coverage.
+- Start the unsigned macOS and Windows portable parity roadmap.
+
 * Wed Jul 15 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.12-1
 - Add opt-in RFC 9211 Cache-Status, RFC 9209 Proxy-Status, and RFC 9530 response
   digests generated from native runtime outcomes and final response bytes.

@@ -28,6 +28,9 @@ expand_fluxheim_feature() {
         profile-full)
             echo "proxy,web,cache,compression-gzip,compression-zstd,compression-brotli,load-balancer,stream-proxy,tls-rustls,security"
             ;;
+        profile-wasm)
+            echo "proxy,web,cache,compression-gzip,compression-zstd,compression-brotli,load-balancer,stream-proxy,tls-rustls,security,wasm,wasm-proxy-abi,wasm-wasi"
+            ;;
         profile-development)
             echo "proxy,web,cache,compression-gzip,compression-zstd,compression-brotli,load-balancer,stream-proxy,tls-rustls,security,php-fpm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp"
             ;;
