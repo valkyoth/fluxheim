@@ -2916,7 +2916,10 @@ age. Fluxheim registers each waiter before releasing the cache-state lock,
 preserves the first deadline across
 wake-and-recheck races, and returns `503 Service Unavailable` with
 `Retry-After: 1` when that deadline expires rather than allowing every waiter
-to start another origin fill.
+to start another origin fill. Set `wait_timeout_secs` above normal upper-tail
+origin latency but below the shortest applicable client, ingress, or service
+request deadline. Keep `age_timeout_secs` at least as large as the intended
+wait budget because remaining writer age is an additional cap.
 
 Per-vhost cache settings use `[vhosts.cache]`, `[vhosts.cache.memory]`, and
 `[vhosts.cache.disk]`. Route cache settings use `[vhosts.routes.cache]` and

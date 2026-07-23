@@ -36,6 +36,10 @@ internal cache implementation.
   `vhosts.cache.lock`, and `vhosts.routes.cache.lock` configure whether request
   collapsing is enabled and how long writer age and reader wait timeouts last.
   Defaults use a 30 second writer age timeout and 30 second waiter timeout.
+  Set `wait_timeout_secs` above normal upper-tail origin latency but below the
+  shortest applicable client, ingress, or service request deadline. Keep
+  `age_timeout_secs` at least as large as the intended wait budget; otherwise
+  the writer's remaining age becomes the effective shorter deadline.
 - `cache.predictor`, `vhosts.cache.predictor`, and
   `vhosts.routes.cache.predictor` can opt into Fluxheim's cacheability
   predictor. The predictor keeps a bounded LRU of primary keys that recently

@@ -72,6 +72,9 @@ This release is under development.
   same-slice origin stampedes.
 - Register cache-fill notifications before releasing shared state, and enforce
   one total waiter deadline across ordinary and fixed-slice fills.
+- Tune cache-lock waits above normal upper-tail origin latency but below
+  surrounding request deadlines, with `age_timeout_secs` no shorter than the
+  intended waiter budget.
 - Replace variable-width encoded Vary material in cache keys with a fixed-width
   SHA-256 digest. Persisted variants using the prior key format become cold and
   age out or can be purged.
