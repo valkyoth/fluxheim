@@ -16,6 +16,10 @@ This release is under development.
 - Require an explicit read-only plugin mount such as
   `/srv/infra/fluxheim/plugins:/etc/fluxheim/plugins:ro,Z`; no operator plugin
   is embedded in the image.
+- Document that container read-only mounts do not protect their host source,
+  require hash pinning for every production module, and recommend
+  digest-pinned derivative images containing reviewed modules for
+  high-assurance deployments.
 
 ## Portable Archives
 

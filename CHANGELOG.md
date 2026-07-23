@@ -31,6 +31,8 @@ behavior when the change improves security or project direction.
   company-backed signing and native installer work.
 - Document the required read-only container plugin mount and keep operator
   modules outside official images.
+- Document the host-side replacement boundary of read-only Wasm plugin mounts
+  and recommend digest-pinned derivative images for high-assurance deployments.
 - Fix `--profile all` release packaging so shell function state cannot stop the
   matrix after the first profile.
 

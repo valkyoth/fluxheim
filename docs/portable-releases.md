@@ -106,3 +106,10 @@ volumes:
 Set `wasm.plugin_roots = ["/etc/fluxheim/plugins"]` and use hash-pinned plugin
 configuration. A writable log mount such as `/var/log/fluxheim` is unrelated
 to plugin loading and must not be reused as a plugin directory.
+
+The read-only flag applies inside the container only. For high-assurance
+deployments, build a derivative image containing reviewed modules and
+non-secret configuration, pin both the Fluxheim base and deployed derivative
+by manifest digest, and treat plugin changes as image releases. See
+[Wasm Extensibility](wasm-extensibility.md#container-plugin-trust-models) for
+the threat model and example.

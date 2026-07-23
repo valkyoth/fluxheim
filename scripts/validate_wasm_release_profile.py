@@ -73,6 +73,25 @@ def main() -> int:
         ),
         "Wasm image must have a live read-only plugin-mount smoke",
     )
+    require(
+        contains(
+            "docs/wasm-extensibility.md",
+            "### Container Plugin Trust Models",
+        )
+        and contains(
+            "docs/wasm-extensibility.md",
+            "A `:ro` bind mount is read-only from inside the container",
+        )
+        and contains(
+            "docs/wasm-extensibility.md",
+            "High-assurance deployments should build a derivative image",
+        )
+        and contains(
+            "docs/wasm-extensibility.md",
+            "Do not bake private keys, admin tokens, ACME EAB keys",
+        ),
+        "Wasm container docs must preserve the host-mount threat model",
+    )
     print("Wasm release profile: ok")
     return 0
 

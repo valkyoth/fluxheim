@@ -284,7 +284,9 @@ volumes:
 Keep logs on their normal writable mount, for example
 `/srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U`; a log mount does not make
 plugins available. See [Wasm Extensibility](wasm-extensibility.md) for
-hash-pinning and filesystem trust requirements.
+hash-pinning, bind-mount threat boundaries, and the recommended derivative
+image model for high-assurance deployments. A `:ro` mount prevents container
+writes but does not prevent a host administrator from replacing its source.
 
 Run the dedicated image proof with:
 
