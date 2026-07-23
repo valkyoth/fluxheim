@@ -89,7 +89,10 @@ internal cache implementation.
   `Vary` header. Sensitive headers such as `Cookie`, `Authorization`, and
   `Proxy-Authorization` are rejected here; use `bypass_request_headers` for
   request-specific responses. The configured list is capped at 16 headers,
-  matching the runtime Vary field cap.
+  matching the runtime Vary field cap. The same partition applies to fixed
+  range slices. A slice response carrying an additional origin `Vary` field is
+  not stored unless that field is configured here, because it is unavailable
+  when Fluxheim constructs the pre-origin slice lookup key.
 - `cache.key_namespace`, `vhosts.cache.key_namespace`, and
   `vhosts.routes.cache.key_namespace` add an operator-controlled namespace
   component to the primary cache key. Bump this value to isolate new objects

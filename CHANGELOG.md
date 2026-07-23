@@ -35,6 +35,17 @@ behavior when the change improves security or project direction.
   and recommend digest-pinned derivative images for high-assurance deployments.
 - Fix `--profile all` release packaging so shell function state cannot stop the
   matrix after the first profile.
+- Partition native and preview non-cache Wasm admission per vhost beneath their
+  process-wide ceilings so one tenant cannot starve another tenant's access,
+  routing, or header hooks.
+
+### Security
+
+- Partition fixed-slice range-cache keys by configured
+  `vary_request_headers`, and refuse slice storage when an origin introduces an
+  unconfigured response-only `Vary` dimension.
+- Document the opaque ACME provider signing-key representation as an accepted
+  upstream residual while retaining drop-cleared transient PKCS#8 handling.
 
 ## 1.7.12 - 2026-07-15
 

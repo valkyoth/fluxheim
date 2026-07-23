@@ -2463,10 +2463,15 @@ open-ended, suffix, or `multipart/byteranges` responses. Missing slices can be
 filled from origin with bounded single-slice `Range` requests when
 `fill_missing = true`; concurrent fills for the same slice key are collapsed.
 Slice fill rejects responses unless `206`, `Content-Range`, `Content-Length`,
-content type, object length, and validators are compatible. `If-Range` requests
-are served from slices only when the cached `ETag` or `Last-Modified` matches;
-otherwise Fluxheim falls back to the normal proxy path. Exact admin purges also
-remove indexed slices for the same request path.
+content type, object length, validators, and cache variance are compatible.
+Configured `vary_request_headers` values partition fixed-slice keys exactly as
+they partition complete objects. Because an origin-only `Vary` field is not
+known before a slice lookup, Fluxheim admits that slice only when every response
+`Vary` field is also listed in `vary_request_headers`; otherwise it falls back
+without storing the slice. `If-Range` requests are served from slices only when
+the cached `ETag` or `Last-Modified` matches; otherwise Fluxheim falls back to
+the normal proxy path. Exact admin purges also remove indexed slices for the
+same request path.
 
 ```toml
 [cache.range]

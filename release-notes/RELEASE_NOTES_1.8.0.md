@@ -48,3 +48,13 @@ This release is under development.
 - Build the dedicated Wasm Wolfi image, mount a hash-pinned policy module
   read-only at `/etc/fluxheim/plugins`, prove writes fail inside the container,
   and exercise live allow/deny decisions.
+- Prove configured request-header variance partitions fixed-slice cache objects
+  and reject response-only slice variance that cannot be known at lookup time.
+- Prove non-cache Wasm admission is partitioned per vhost beneath the native and
+  preview process-wide ceilings, matching the existing cache-hook isolation.
+
+## Security Notes
+
+- Record the ACME provider's opaque active signing-key representation as an
+  accepted upstream residual. Fluxheim clears its transient PKCS#8 copies but
+  does not claim provider-owned key-state zeroization.

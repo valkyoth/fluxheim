@@ -238,7 +238,14 @@ key material behind drop-cleared containers. New P-256 keys are generated in a
 zeroizing RustCrypto secret-key type and serialized into a zeroizing PKCS#8
 document before Ring imports the active signing key. The active cryptographic
 signing key remains inside Ring for the lifetime of the account, as required to
-sign ACME requests.
+sign the nonce, account, order, authorization, and finalize requests in one ACME
+operation. Ring's opaque `EcdsaKeyPair` does not expose a verifiable memory
+clearing operation. Fluxheim records this as an accepted upstream residual and
+does not claim that provider-owned active key state is zeroized. Constructing a
+fresh key for each signature is not compatible with the account-bound ACME
+identity. High-assurance deployments should retain the existing process,
+core-dump, swap, and host-memory protections and revisit this boundary when the
+selected provider exposes a zeroizing key representation.
 
 New account creation is refused until the selected issuer records both
 `terms_of_service_agreed = true` and the exact HTTPS

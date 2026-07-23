@@ -17,6 +17,12 @@ HTTP, or response behavior is changed. These APIs let Fluxheim durably journal
 the account key before the issuer can activate it while preserving configured
 contacts and EAB.
 
+The selected provider's active signing-key representation is opaque and does
+not expose a verifiable memory-clearing operation. The patch protects transient
+PKCS#8 copies but does not claim to zeroize Ring/AWS-LC-owned active key state,
+which remains live for the ACME account operation. This is an accepted upstream
+residual until the provider API offers an auditable zeroizing representation.
+
 Remove this patch when an upstream release exposes an equivalent API. Before
 updating it, compare every vendored file with the corresponding crates.io source
 and retain a focused test proving key identity, contacts, and EAB behavior.

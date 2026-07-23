@@ -175,6 +175,80 @@ async fn native_route_proxy_slice_cache_fills_and_composes_memory_range() {
 }
 
 #[tokio::test]
+async fn native_route_proxy_slice_cache_isolates_configured_vary_headers() {
+    let upstream = upstream_slice_response_sequence(&[
+        (
+            "/asset.png",
+            "bytes=0-3",
+            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\netag: \"english-v1\"\r\ncontent-range: bytes 0-3/10\r\ncontent-length: 4\r\n\r\nE012",
+        ),
+        (
+            "/asset.png",
+            "bytes=4-7",
+            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\netag: \"english-v1\"\r\ncontent-range: bytes 4-7/10\r\ncontent-length: 4\r\n\r\n3456",
+        ),
+        (
+            "/asset.png",
+            "bytes=0-3",
+            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\netag: \"swedish-v1\"\r\ncontent-range: bytes 0-3/10\r\ncontent-length: 4\r\n\r\nSABC",
+        ),
+        (
+            "/asset.png",
+            "bytes=4-7",
+            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\netag: \"swedish-v1\"\r\ncontent-range: bytes 4-7/10\r\ncontent-length: 4\r\n\r\nDEFG",
+        ),
+    ])
+    .await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.range.enabled = true;
+    cache.range.slice.enabled = true;
+    cache.range.slice.fill_missing = true;
+    cache.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(4);
+    cache.range.slice.max_slices = 4;
+    cache.vary_request_headers = vec!["accept-language".to_owned()];
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let english = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nAccept-Language: en\r\nRange: bytes=2-5\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let swedish = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nAccept-Language: sv\r\nRange: bytes=2-5\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let english_hit = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nAccept-Language: en\r\nRange: bytes=2-5\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(
+        english.ends_with("1234"),
+        "unexpected English slice: {english:?}"
+    );
+    assert!(
+        swedish.ends_with("BCDE"),
+        "unexpected Swedish slice: {swedish:?}"
+    );
+    assert!(english_hit.ends_with("1234"));
+    assert_eq!(
+        response_header(&english, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert_eq!(
+        response_header(&swedish, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert_eq!(
+        response_header(&english_hit, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+}
+
+#[tokio::test]
 async fn native_route_proxy_slice_cache_composes_multipart_memory_response() {
     let upstream = upstream_slice_response_sequence(&[
         (

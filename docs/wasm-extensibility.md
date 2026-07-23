@@ -596,15 +596,18 @@ does not match.
 
 `wasm.max_total_concurrent_executions` caps total concurrent plugin executions
 across the whole process. Per-plugin and per-attachment admission budgets are
-still enforced inside that global ceiling. Fluxheim acquires attachment,
-plugin, optional cache-vhost, and finally process-wide permits, so requests
-waiting on a narrow policy cannot reserve broader process capacity. Admission
-is implemented with Tokio semaphores and is complete before work is submitted
-to Tokio's blocking pool. `queue_limit = 0` rejects immediately at the
-configured concurrency limit; a positive value permits only that many async
-waiters and never enlarges the blocking-work queue. Active and queued budgets
-are each hard-capped at `256`. Immediately before blocking submission, Wasm
-also acquires Fluxheim's shared request-driven blocking-work budget. Wasm has a
+still enforced inside that global ceiling. Fluxheim derives a fair-share
+per-vhost ceiling for native policy hooks and a separate fair-share ceiling for
+preview-ABI hooks. A slow or attacked vhost therefore cannot consume all
+process capacity needed by another configured vhost. Fluxheim acquires
+attachment, plugin, vhost, and finally process-wide permits, so requests waiting
+on a narrow policy cannot reserve broader process capacity. Admission is
+implemented with Tokio semaphores and is complete before work is submitted to
+Tokio's blocking pool. `queue_limit = 0` rejects immediately at the configured
+concurrency limit; a positive value permits only that many async waiters and
+never enlarges the blocking-work queue. Active and queued budgets are each
+hard-capped at `256`. Immediately before blocking submission, Wasm also
+acquires Fluxheim's shared request-driven blocking-work budget. Wasm has a
 `96`-execution class ceiling beneath the `224` non-critical and `256` total
 ceilings, so it cannot starve external auth, disk-cache work, traffic mirrors,
 or the `32` slots reserved for critical ACME work. Runtime wall-time enforcement
@@ -691,8 +694,8 @@ Required metrics include:
 - plugin invocations and completed decisions;
 - execution duration;
 - traps, panics, timeouts, compile timeouts, and fuel exhaustion;
-- global, cache-global, cache-vhost, per-plugin, and per-attachment admission
-  rejections;
+- global, vhost, preview-global, preview-vhost, cache-global, cache-vhost,
+  per-plugin, and per-attachment admission rejections;
 - fail-open and fail-closed outcomes;
 - loaded module count and module-cache generation/hash changes;
 - reload validation, load, swap, and rejection outcomes.
@@ -718,6 +721,8 @@ Required metrics include:
   traffic before upstream forwarding.
 - Verify process-wide admission rejects excess concurrent plugin executions
   even when each plugin's individual budget has not been exhausted.
+- Verify native and preview hook admission applies per-vhost fair-share ceilings
+  so one vhost cannot starve another vhost's access, routing, or header hooks.
 - Verify cache-hook admission applies a process-wide ceiling and a per-vhost
   fair-share ceiling so one vhost cannot starve another vhost's cache hooks.
 - Verify WASM registry changes are classified by reload impact and do not fall

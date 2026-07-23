@@ -6,7 +6,9 @@ use crate::native_http1_cache::{
     native_response_header_map, prune_native_memory_cache, remove_native_memory_cache_entry,
 };
 use crate::native_http1_proxy::NativeHttp1Proxy;
-use crate::native_http1_proxy_cache_headers::{cached_proxy_headers, native_response_cache_tags};
+use crate::native_http1_proxy_cache_headers::{
+    cached_proxy_headers, native_response_cache_tags, native_vary_cache_key,
+};
 use crate::native_http1_proxy_cache_policy::native_cache_expiry_times;
 use crate::native_http1_proxy_cache_slice::{
     NativeCacheSliceObject, NativeCacheSliceResponse, native_compose_slice_response,
@@ -16,7 +18,8 @@ use crate::native_http1_proxy_cache_slice::{
 };
 use crate::{NativeHttp1Request, NativeHttp1Response};
 use fluxheim_cache::{
-    CacheRequestView, CacheSliceBounds, request_cache_bypass_reason, resolve_client_slice_ranges,
+    CacheRequestView, CacheSliceBounds, VaryCachePolicy, cache_vary_policy,
+    request_cache_bypass_reason, resolve_client_slice_ranges,
     response_cache_control_stale_reuse_forbidden, response_range_cache_admission_rejection,
     selected_cache_slice_range_request,
 };
@@ -33,22 +36,27 @@ impl NativeProxyMemoryCache {
         if !self.config.range.enabled || !self.config.range.slice.enabled {
             return None;
         }
-        let base_key = self.key_with_components(
+        let primary_key = self.key_with_components(
             request,
             #[cfg(feature = "wasm")]
             key_components,
             #[cfg(not(feature = "wasm"))]
             &[],
         )?;
+        let base_key = if self.config.vary_request_headers.is_empty() {
+            primary_key.clone()
+        } else {
+            native_vary_cache_key(&primary_key, &self.config.vary_request_headers, request)?
+        };
         if request_cache_bypass_reason(request, &self.config).is_some()
-            || self.cache_pass_should_bypass(&base_key)
+            || self.cache_pass_should_bypass(&primary_key)
         {
             return None;
         }
         let slice_request = selected_cache_slice_range_request(request, &self.config)?;
         let slice_size = self.config.range.slice.size_bytes.as_u64();
         let (total, first_slice, first_filled) = self
-            .discover_slice_total(&base_key, request, proxy, slice_size)
+            .discover_slice_total(&base_key, &primary_key, request, proxy, slice_size)
             .await?;
         let ranges = resolve_client_slice_ranges(&slice_request.ranges, total)?;
         if ranges.is_empty()
@@ -83,7 +91,7 @@ impl NativeProxyMemoryCache {
                 continue;
             }
             let result = self
-                .lookup_or_fill_slice(&base_key, request, proxy, bounds)
+                .lookup_or_fill_slice(&base_key, &primary_key, request, proxy, bounds)
                 .await?;
             filled |= result.1;
             if native_slice_identity(&result.0) != identity {
@@ -98,6 +106,7 @@ impl NativeProxyMemoryCache {
     async fn discover_slice_total(
         &self,
         base_key: &str,
+        primary_key: &str,
         request: &NativeHttp1Request,
         proxy: &NativeHttp1Proxy,
         slice_size: u64,
@@ -107,7 +116,7 @@ impl NativeProxyMemoryCache {
             end: slice_size.saturating_sub(1),
         };
         let (slice, filled) = self
-            .lookup_or_fill_slice(base_key, request, proxy, first_bounds)
+            .lookup_or_fill_slice(base_key, primary_key, request, proxy, first_bounds)
             .await?;
         Some((slice.total, slice, filled))
     }
@@ -115,6 +124,7 @@ impl NativeProxyMemoryCache {
     async fn lookup_or_fill_slice(
         &self,
         base_key: &str,
+        primary_key: &str,
         request: &NativeHttp1Request,
         proxy: &NativeHttp1Proxy,
         bounds: CacheSliceBounds,
@@ -131,7 +141,7 @@ impl NativeProxyMemoryCache {
             return Some((slice, false));
         }
         let response = proxy.fetch_origin_slice(request, bounds).await?;
-        let slice = self.store_origin_slice(base_key, &key, request, bounds, &response)?;
+        let slice = self.store_origin_slice(primary_key, &key, request, bounds, &response)?;
         Some((slice, true))
     }
 
@@ -152,7 +162,7 @@ impl NativeProxyMemoryCache {
 
     fn store_origin_slice(
         &self,
-        base_key: &str,
+        primary_key: &str,
         key: &str,
         request: &NativeHttp1Request,
         bounds: CacheSliceBounds,
@@ -162,6 +172,9 @@ impl NativeProxyMemoryCache {
             return None;
         }
         let headers = native_response_header_map(response);
+        if !slice_vary_policy_covered_by_config(&headers, &self.config) {
+            return None;
+        }
         if fluxheim_cache::range_response_cache_admission_rejection(
             response.status(),
             &headers,
@@ -218,7 +231,7 @@ impl NativeProxyMemoryCache {
             state.bytes = state.bytes.saturating_add(entry.weight);
             state.purge_index.insert_with_path_and_tags(
                 key.to_owned(),
-                base_key.to_owned(),
+                primary_key.to_owned(),
                 self.user_tag(),
                 Some(request.path().to_owned()),
                 cache_tags,
@@ -231,5 +244,49 @@ impl NativeProxyMemoryCache {
             prune_native_memory_cache(&mut state, self.max_bytes);
         }
         Some(slice)
+    }
+}
+
+fn slice_vary_policy_covered_by_config(
+    headers: &http::HeaderMap,
+    config: &fluxheim_config::CacheConfig,
+) -> bool {
+    match cache_vary_policy(headers, config) {
+        VaryCachePolicy::None => true,
+        VaryCachePolicy::Fields(fields) => fields.iter().all(|field| {
+            config
+                .vary_request_headers
+                .iter()
+                .any(|configured| configured.eq_ignore_ascii_case(field))
+        }),
+        VaryCachePolicy::Uncacheable(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::slice_vary_policy_covered_by_config;
+
+    #[test]
+    fn slice_vary_policy_requires_response_fields_to_be_configured() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert("vary", http::HeaderValue::from_static("accept-language"));
+
+        assert!(!slice_vary_policy_covered_by_config(
+            &headers,
+            &fluxheim_config::CacheConfig::default(),
+        ));
+    }
+
+    #[test]
+    fn slice_vary_policy_accepts_configured_response_fields() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert("vary", http::HeaderValue::from_static("Accept-Language"));
+        let config = fluxheim_config::CacheConfig {
+            vary_request_headers: vec!["accept-language".to_owned()],
+            ..Default::default()
+        };
+
+        assert!(slice_vary_policy_covered_by_config(&headers, &config));
     }
 }
