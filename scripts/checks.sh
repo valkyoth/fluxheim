@@ -138,6 +138,7 @@ cargo clippy --no-default-features --features profile-fips-rustls --all-targets 
 cargo clippy --no-default-features --features profile-iso19790-rustls --all-targets -- -D warnings
 cargo test
 scripts/validate-owasp-top10-2025.sh check
+scripts/validate_portable_release_plan.py
 # Incubator profile permutations are build coverage. Check test cfgs without
 # linking every feature-specific test binary; the default feature set still runs
 # with `cargo test` above.

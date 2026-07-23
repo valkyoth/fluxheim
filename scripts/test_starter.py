@@ -46,6 +46,14 @@ TESTS: tuple[TestEntry, ...] = (
         "Runs the normal release-quality gate without publishing.",
     ),
     TestEntry(
+        "portable-release-plan",
+        "Portable release profile plan",
+        "release",
+        ("scripts/validate_portable_release_plan.py",),
+        "Checks matching Linux, macOS, and Windows archive names, profiles, "
+        "features, and binary suffixes.",
+    ),
+    TestEntry(
         "deep-gate",
         "Deep release gate",
         "release",

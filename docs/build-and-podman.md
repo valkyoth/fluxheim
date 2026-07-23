@@ -15,6 +15,8 @@ RUSTFLAGS="-C target-cpu=native" cargo build --release
 
 Use `target-cpu=native` only for binaries that will run on the same CPU family
 they were built on. For portable release artifacts, omit the flag.
+The cross-platform profile and archive contract is documented in
+[Portable Releases](portable-releases.md).
 
 Feature-reduced builds keep the binary small and reduce dependency surface:
 

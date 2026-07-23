@@ -1,13 +1,15 @@
 # macOS Development Support
 
-Fluxheim `1.4.4` targets Level 1 macOS support: contributors should be able to
-build and run local development profiles on Apple Silicon Macs. This is not a
-production macOS support claim.
+Fluxheim `1.4.4` established Level 1 macOS development support. Fluxheim
+`1.8.0` adds the shared unsigned portable archive contract and native macOS CI
+for representative `full` and `wasm` profiles. This remains a portable preview,
+not a signed or notarized production package.
 
 Linux remains the production baseline for native packages, systemd units,
-containers, FIPS/ISO evidence, and release-gate parity. macOS support is for
-local development, site testing, and contributor workflows while Pingora macOS
-support remains experimental.
+containers, FIPS/ISO evidence, and complete release-gate parity. The native
+Fluxheim runtime now removes the former Pingora portability qualification;
+remaining work is macOS-specific live parity, filesystem-policy review,
+service integration, signing, and notarization.
 
 ## Supported Scope
 
@@ -51,6 +53,7 @@ cargo check --locked --no-default-features --features web --lib
 cargo check --locked --no-default-features --features profile-static-site --bin fluxheim
 cargo check --locked --no-default-features --features profile-reverse-proxy --bin fluxheim
 cargo check --locked --no-default-features --features profile-full --bin fluxheim
+cargo check --locked --no-default-features --features profile-wasm --bin fluxheim
 cargo check --locked --no-default-features --features profile-development --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
 ```
 
@@ -88,21 +91,23 @@ world-writable parents.
 
 ## Release Assets
 
-If macOS developer binaries are attached to a GitHub release, build them on
-macOS with the release helper:
+Build the common portable profile matrix on macOS with:
 
 ```bash
-RELEASE_VERSION=1.4.5
-scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos-dev
+RELEASE_VERSION=1.8.0
+scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos
 ```
 
-Preferred release naming examples:
+This produces separate `full`, `wasm`, `cache`, `proxy`, `load-balancer`,
+`php`, and `config-tester` archives in both `.tar.gz` and `.zip`. The older
+combined developer archive remains available through `--kind macos-dev`.
+Preferred portable naming examples:
 
-- `fluxheim-1.4.5-dev-aarch64-macos.tar.gz`
-- `fluxheim-1.4.5-dev-x86_64-macos.tar.gz`
-- `fluxheim-1.4.5-full-x86_64-linux.tar.gz`
-- `fluxheim-1.4.5-full-aarch64-linux.tar.gz`
+- `fluxheim-1.8.0-full-aarch64-macos.tar.gz`
+- `fluxheim-1.8.0-wasm-aarch64-macos.zip`
+- `fluxheim-1.8.0-full-x86_64-macos.tar.gz`
 
 Universal macOS binaries are optional and can be produced with `lipo` from
 separate Intel and Apple Silicon builds, but per-target tarballs are simpler
-and clearer for Fluxheim's current support level.
+and clearer for Fluxheim's current support level. See
+[Portable Releases](portable-releases.md) for unsigned-preview limitations.

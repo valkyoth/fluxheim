@@ -18,6 +18,9 @@ behavior when the change improves security or project direction.
   directory.
 - Add a live release-archive smoke that executes all four documented Wasm
   policy migration examples through the packaged binary.
+- Add a shared seven-profile portable release plan validator and native macOS
+  and Windows CI archive builds for the representative `full` and `wasm`
+  profiles.
 
 ### Changed
 
@@ -25,6 +28,8 @@ behavior when the change improves security or project direction.
   company-backed signing and native installer work.
 - Document the required read-only container plugin mount and keep operator
   modules outside official images.
+- Fix `--profile all` release packaging so shell function state cannot stop the
+  matrix after the first profile.
 
 ## 1.7.12 - 2026-07-15
 

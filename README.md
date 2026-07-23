@@ -133,7 +133,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Proxy module split | ✅ | `1.4.2`; access logs, compression, auth subrequests, traffic mirroring, edge policy, route policy, cache API DTOs, request-side cache policy, path safety, upstream TLS loading, PROXY protocol framing, and PHP-FPM process/spool/FastCGI handling are split into focused modules, with a new rule that future feature domains start outside the proxy orchestration file. |
 | Config module split | ✅ | `1.4.3`; config loading, shared helpers, domain validation, and large config tests are split into focused `config_*` modules while keeping `crate::config::*` stable. |
 | Load-balancer module split | ✅ | `1.5.0`; health checks, backend state, persistence, selection algorithms, backend policy/status, and file/DNS discovery are split into focused `load_balancer/*` modules while keeping `crate::load_balancer::*` stable. |
-| Apple Silicon macOS dev builds | ✅ | `1.4.4`; Level 1 developer support with Mac-safe runtime paths while some upstream macOS support remains experimental. |
+| macOS portable builds | 🧪 | `1.4.4` established Apple Silicon development support; `1.8.0` adds the shared unsigned archive contract and native full/Wasm CI while broader live parity remains in progress. |
 | GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional bounded local MMDB support with trusted-file enforcement for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. The [GeoIP guide](docs/geoip.md) includes a pinned real CIRCL database proof for static, proxy, and load-balancer paths. |
 | Pingora-free runtime | ✅ | `1.6.34`; normal Fluxheim builds no longer compile Pingora crates. Server/listener/TLS, HTTP/1, HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and background-service paths run through Fluxheim-owned Rust crates. |
 | HTTP/3/QUIC | ❌ | Planned as a Fluxheim-owned `1.9` protocol milestone using the Rust `quinn`/`h3` stack after the `1.8` macOS/Windows production parity line. |
@@ -432,7 +432,9 @@ Fluxheim does not treat every planned idea as stable. Development is now on
 `1.8.0`, which packages the completed Wasm line as an explicit image/archive
 profile and starts the shared portable-archive contract for Linux, macOS, and
 Windows. The normal `full` profile remains Wasm-free. Unsigned macOS and
-Windows archives come before company-backed signing and installer work.
+Windows archives come before company-backed signing and installer work. See
+[Portable Releases](docs/portable-releases.md) for the shared archive contract,
+current platform support level, and unsigned-preview policy.
 
 - `1.0` is the gateway foundation: vhosts, routes, redirects, static serving,
   proxying, SNI/TLS, safe ACME challenge exceptions, systemd/RPM packaging, and
@@ -551,6 +553,7 @@ moves to the following Fluxheim-owned `1.9` protocol line based on the Rust
 - [OpenTelemetry Tracing](docs/opentelemetry-tracing.md)
 - [WASM Extensibility](docs/wasm-extensibility.md)
 - [Wasm Policy Example Parity](docs/wasm-policy-example-parity.md)
+- [Portable Releases](docs/portable-releases.md)
 - [Zero-Downtime Upgrades](docs/zero-downtime-upgrades.md)
 - [Crypto RPC Edge](docs/crypto-rpc-edge.md)
 - [External Authorization Request](docs/auth-request.md)

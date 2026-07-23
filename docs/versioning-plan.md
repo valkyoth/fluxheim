@@ -1131,7 +1131,7 @@ Reference parity map:
 | Response and URI rewrites | NGINX `proxy_redirect`, Apache `ProxyPassReverse`, NGINX `proxy_cookie_domain`/`proxy_cookie_path`, NGINX `rewrite`/HAProxy path replace | Bounded `Location`, `Refresh`, `Set-Cookie` domain/path rewrites, route `strip_prefix`/`rewrite_prefix`, then regex/template rewrite policy |
 | Geo policy | NGINX GeoIP2 module, HAProxy maps/ACLs | Optional `geoip` feature using provider-agnostic MMDB readers for MaxMind GeoIP2/GeoLite2 and European CIRCL Geo Open datasets, with country/ASN variables, ACLs, and route selection |
 | TCP stream proxy | NGINX stream, HAProxy TCP mode | Separate stream feature with byte-copy proxying, TLS passthrough/SNI sniffing later, TCP metrics, and no HTTP semantics |
-| Apple Silicon macOS development | NGINX/Homebrew developer workflows | Developer-build and smoke-test support for `aarch64-apple-darwin`; not a production/FIPS support claim while Pingora macOS remains experimental |
+| Apple Silicon macOS development | NGINX/Homebrew developer workflows | `1.4.4` developer-build/smoke baseline, superseded by the native runtime and unsigned portable-profile parity work in `1.8` |
 | Extension hooks | NGINX/HAProxy Lua, Envoy Wasm | Typed policy inputs and hook points in 1.4; actual shared Wasm runtime moves to 1.7 after the Pingora exit |
 
 Release shape:
@@ -4326,11 +4326,11 @@ the exception while the cache server is being completed as a focused sequence:
   ClientHello parser, preread buffer limit, and byte replay model are proven. Dynamic
   xDS/Kubernetes/Consul discovery belongs here or a later control-plane line
   after local DNS/file discovery and runtime backend mutation are stable.
-- Later macOS production line: only after Level 1 developer support is stable.
-  Requires regular macOS CI, runtime smoke coverage, launchd/Homebrew or other
-  packaging decisions, signed/notarized binary policy, and a macOS-specific
-  filesystem/security review. Keep Linux as the production baseline until that
-  line is explicitly scheduled.
+- macOS production line: scheduled as `1.8` after Level 1 developer support
+  stabilized and the native runtime replaced Pingora. It requires regular
+  macOS CI, runtime smoke coverage, launchd or a documented foreground model,
+  signed/notarized binary policy, and a macOS-specific filesystem/security
+  review. Keep Linux as the production baseline until that line completes.
 - `v1.5.1`: enterprise load-balancer stabilization. Stop at correctness fixes,
   release-profile polish, docs/migration cleanup, bounded operational
   hardening, and test coverage for behavior already shipped in `1.5.0`. Do not

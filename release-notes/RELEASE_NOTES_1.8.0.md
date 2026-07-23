@@ -24,6 +24,12 @@ This release is under development.
   tested independently.
 - Preserve a common archive naming and content contract as the basis for
   unsigned macOS and Windows portable releases.
+- Validate the same seven public profile names, Cargo feature sets, and binary
+  layout across Linux, macOS, and Windows, including `.exe` naming on Windows.
+- Build representative `full` and `wasm` archives on native macOS and Windows
+  CI runners before expanding live platform parity in `1.8.1` and `1.8.2`.
+- Fix the release helper's `--profile all` state handling so one completed
+  profile cannot suppress the remaining six archives.
 - Keep signed/notarized macOS packages and Authenticode/MSI/MSIX delivery
   deferred until company-backed publisher credentials exist.
 

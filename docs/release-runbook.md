@@ -159,6 +159,8 @@ triple:
 | `aarch64-unknown-linux-gnu` | `aarch64-linux` |
 | `x86_64-apple-darwin` | `x86_64-macos` |
 | `aarch64-apple-darwin` | `aarch64-macos` |
+| `x86_64-pc-windows-msvc` | `x86_64-windows` |
+| `aarch64-pc-windows-msvc` | `aarch64-windows` |
 
 Build the current Linux host target:
 
@@ -208,8 +210,29 @@ The smoke extracts the release archive and runs the F5 iRules-style,
 OpenResty-style, HAProxy Lua/SPOE-style, and VCL-like policy examples through
 that exact packaged binary.
 
-For Level 1 macOS developer artifacts, build on the matching Mac host. These
-artifacts are developer conveniences, not production packages:
+Validate the common operating-system archive plan without compiling:
+
+```bash
+scripts/validate_portable_release_plan.py
+```
+
+Build the seven portable profiles on a matching macOS or Windows host with
+`--kind macos` or `--kind windows`. During `1.8.0`, native CI builds the
+representative `full` and `wasm` archives while `1.8.1` and `1.8.2` expand
+live parity across every published profile:
+
+```bash
+scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos
+scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind windows
+```
+
+Windows binaries retain `.exe`; both operating systems receive matching
+`.tar.gz` and `.zip` payloads. These archives are unsigned previews, not
+notarized or Authenticode-signed installers. See
+[Portable Releases](portable-releases.md).
+
+The older combined macOS development artifact remains available for local
+developer workflows:
 
 ```bash
 scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos-dev
@@ -218,8 +241,8 @@ scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos-dev
 Apple Silicon Macs produce
 `fluxheim-${RELEASE_VERSION}-dev-aarch64-macos.{tar.gz,zip}`. Intel Macs
 produce `fluxheim-${RELEASE_VERSION}-dev-x86_64-macos.{tar.gz,zip}`. These
-remain unsigned development conveniences until the v1.8 portable profile
-matrix and platform smoke gates promote them.
+remain unsigned development conveniences and are separate from the portable
+profile matrix.
 
 Record all runtime and config-tester binary checksums.
 
@@ -315,12 +338,16 @@ On GitHub:
    `dist/fluxheim-${RELEASE_VERSION}-{full,wasm,cache,proxy,load-balancer,php}-{x86_64,aarch64}-linux.{tar.gz,zip}`.
 7. Upload both formats of the unified config-tester archive built in step 4:
    `dist/fluxheim-${RELEASE_VERSION}-config-tester-{x86_64,aarch64}-linux.{tar.gz,zip}`.
-8. If the release includes Level 1 macOS developer artifacts, upload
-   `dist/fluxheim-${RELEASE_VERSION}-dev-{aarch64,x86_64}-macos.{tar.gz,zip}`
-   for the Mac targets that were actually built.
-9. Upload `target/release-evidence/fluxheim.spdx.json`.
-10. Upload `target/release-evidence/fluxheim.cyclonedx.json`.
-11. Publish the release.
+8. If the release includes unsigned portable previews, upload every
+   successfully gated profile from
+   `dist/fluxheim-${RELEASE_VERSION}-{full,wasm,cache,proxy,load-balancer,php,config-tester}-{aarch64,x86_64}-{macos,windows}.{tar.gz,zip}`.
+   Do not upload an untested target or describe these files as signed
+   installers.
+9. If a legacy combined macOS developer artifact is needed, upload
+   `dist/fluxheim-${RELEASE_VERSION}-dev-{aarch64,x86_64}-macos.{tar.gz,zip}`.
+10. Upload `target/release-evidence/fluxheim.spdx.json`.
+11. Upload `target/release-evidence/fluxheim.cyclonedx.json`.
+12. Publish the release.
 
 It is normal to publish before every evidence field is filled. Source archives
 and container digests are available only after the tag/release and image

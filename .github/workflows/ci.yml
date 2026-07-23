@@ -83,6 +83,9 @@ jobs:
       - name: Validate Wasm release profile
         run: scripts/validate_wasm_release_profile.py
 
+      - name: Validate portable release plan
+        run: scripts/validate_portable_release_plan.py
+
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
 
@@ -245,10 +248,10 @@ jobs:
       - name: Verify reproducible release build
         run: scripts/reproducible_build_check.sh
 
-  macos-arm64-dev:
-    name: Apple Silicon macOS developer gate
+  macos-portable:
+    name: macOS portable gate
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 90
 
     steps:
       - name: Checkout repository
@@ -257,8 +260,9 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Check macOS developer profiles
+      - name: Check macOS portable profiles
         run: |
+          scripts/validate_portable_release_plan.py
           cargo check --locked --no-default-features --features web --lib
           cargo check --locked --no-default-features --features profile-static-site --bin fluxheim
           cargo check --locked --no-default-features --features profile-reverse-proxy --bin fluxheim
@@ -268,3 +272,43 @@ jobs:
 
       - name: Run macOS developer smoke
         run: sh scripts/smoke_macos_dev.sh
+
+      - name: Build macOS full and Wasm portable archives
+        run: |
+          version="$(sed -n 's/^version = \"\\([^\"]*\\)\"/\\1/p' Cargo.toml | sed -n '1p')"
+          target="$(rustc -vV | sed -n 's/^host: //p')"
+          scripts/build_release_assets.sh "${version}" --kind macos --profile full
+          scripts/build_release_assets.sh "${version}" --kind macos --profile wasm
+          FLUXHEIM_BIN="$(pwd)/target/${target}/release/fluxheim" \
+            scripts/smoke_wasm_policy_examples_binary.sh
+
+  windows-x86_64-portable:
+    name: Windows x86_64 portable gate
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Check Windows portable profiles
+        run: |
+          scripts/validate_portable_release_plan.py
+          cargo check --locked --no-default-features --features profile-static-site --bin fluxheim
+          cargo check --locked --no-default-features --features profile-reverse-proxy --bin fluxheim
+          cargo check --locked --no-default-features --features profile-full --bin fluxheim
+          cargo check --locked --no-default-features --features profile-wasm --bin fluxheim
+          cargo check --locked --no-default-features --features profile-development --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
+
+      - name: Build Windows full and Wasm portable archives
+        run: |
+          version="$(sed -n 's/^version = \"\\([^\"]*\\)\"/\\1/p' Cargo.toml | sed -n '1p')"
+          scripts/build_release_assets.sh "${version}" --kind windows --profile full
+          scripts/build_release_assets.sh "${version}" --kind windows --profile wasm
+          target/x86_64-pc-windows-msvc/release/fluxheim.exe --version

@@ -2,7 +2,7 @@
 set -eu
 
 usage() {
-    echo "usage: scripts/build_release_assets.sh VERSION [--target TARGET] [--kind linux|macos-dev] [--profile all|full|wasm|cache|proxy|load-balancer|php|config-tester]" >&2
+    echo "usage: scripts/build_release_assets.sh VERSION [--target TARGET] [--kind linux|macos|windows|macos-dev] [--profile all|full|wasm|cache|proxy|load-balancer|php|config-tester] [--plan]" >&2
 }
 
 version="${1:-}"
@@ -21,7 +21,8 @@ esac
 
 target="$(rustc -vV | sed -n 's/^host: //p')"
 kind="linux"
-profile="all"
+selected_profile="all"
+plan_only=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -37,17 +38,20 @@ while [ "$#" -gt 0 ]; do
             shift
             kind="${1:-}"
             case "$kind" in
-                linux | macos-dev) ;;
+                linux | macos | windows | macos-dev) ;;
                 *)
                     usage
                     exit 2
                     ;;
             esac
             ;;
+        --plan)
+            plan_only=1
+            ;;
         --profile)
             shift
-            profile="${1:-}"
-            case "$profile" in
+            selected_profile="${1:-}"
+            case "$selected_profile" in
                 all | full | wasm | cache | proxy | load-balancer | php | config-tester) ;;
                 *)
                     usage
@@ -64,6 +68,13 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$target" in
+    *[!0-9A-Za-z_-]* | "" | .* | *..*)
+        echo "release assets: unsafe Rust target: $target" >&2
+        exit 2
+        ;;
+esac
+
+case "$target" in
     x86_64-unknown-linux-gnu | x86_64-unknown-linux-musl)
         label="x86_64-linux"
         ;;
@@ -76,6 +87,12 @@ case "$target" in
     aarch64-apple-darwin)
         label="aarch64-macos"
         ;;
+    x86_64-pc-windows-msvc)
+        label="x86_64-windows"
+        ;;
+    aarch64-pc-windows-msvc)
+        label="aarch64-windows"
+        ;;
     *)
         label="$target"
         ;;
@@ -83,40 +100,82 @@ esac
 
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
-mkdir -p dist
+if [ "$plan_only" -eq 0 ]; then
+    mkdir -p dist
+fi
+
+case "$target" in
+    *-windows-msvc) binary_suffix=".exe" ;;
+    *) binary_suffix="" ;;
+esac
+
+python_command() {
+    if command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' python3
+    elif command -v python >/dev/null 2>&1; then
+        printf '%s\n' python
+    else
+        echo "release assets: Python 3 is required" >&2
+        exit 2
+    fi
+}
+
+copy_binary() {
+    name="$1"
+    destination="$2"
+    cp "target/$target/release/${name}${binary_suffix}" "$destination/"
+}
 
 bundle_runtime_profile() {
-    profile="$1"
-    features="$2"
-    dist_name="fluxheim-${version}-${profile}-${label}"
+    bundle_profile="$1"
+    bundle_features="$2"
+    dist_name="fluxheim-${version}-${bundle_profile}-${label}"
+
+    if [ "$plan_only" -eq 1 ]; then
+        printf '%s|%s|fluxheim%s,fluxheim-acme%s\n' \
+            "$dist_name" "$bundle_features" "$binary_suffix" "$binary_suffix"
+        return
+    fi
 
     cargo build --release --locked --target "$target" --no-default-features \
-        --features "$features" --bin fluxheim --bin fluxheim-acme
+        --features "$bundle_features" --bin fluxheim --bin fluxheim-acme
 
     rm -rf "dist/$dist_name"
     mkdir -p "dist/$dist_name"
-    cp "target/$target/release/fluxheim" "dist/$dist_name/"
-    cp "target/$target/release/fluxheim-acme" "dist/$dist_name/"
+    copy_binary fluxheim "dist/$dist_name"
+    copy_binary fluxheim-acme "dist/$dist_name"
     cp README.md LICENSE CHANGELOG.md "dist/$dist_name/"
     cp -r docs examples packaging release-notes "dist/$dist_name/"
-    python3 scripts/create_release_archives.py "$dist_name"
+    "$(python_command)" scripts/create_release_archives.py "$dist_name"
 }
 
 bundle_config_tester() {
     dist_name="fluxheim-${version}-config-tester-${label}"
+
+    if [ "$plan_only" -eq 1 ]; then
+        printf '%s|profile-development|fluxheim-config-tester%s\n' \
+            "$dist_name" "$binary_suffix"
+        return
+    fi
 
     cargo build --release --locked --target "$target" --no-default-features \
         --features profile-development --bin fluxheim-config-tester
 
     rm -rf "dist/$dist_name"
     mkdir -p "dist/$dist_name"
-    cp "target/$target/release/fluxheim-config-tester" "dist/$dist_name/"
+    copy_binary fluxheim-config-tester "dist/$dist_name"
     cp README.md LICENSE CHANGELOG.md "dist/$dist_name/"
-    python3 scripts/create_release_archives.py "$dist_name"
+    "$(python_command)" scripts/create_release_archives.py "$dist_name"
 }
 
 bundle_macos_dev() {
     dist_name="fluxheim-${version}-dev-${label}"
+
+    if [ "$plan_only" -eq 1 ]; then
+        printf '%s|profile-development|fluxheim%s,fluxheim-acme%s,fluxheim-config-tester%s\n' \
+            "$dist_name" "$binary_suffix" "$binary_suffix" "$binary_suffix"
+        return
+    fi
 
     cargo build --release --locked --target "$target" --no-default-features \
         --features profile-development \
@@ -124,47 +183,56 @@ bundle_macos_dev() {
 
     rm -rf "dist/$dist_name"
     mkdir -p "dist/$dist_name"
-    cp "target/$target/release/fluxheim" "dist/$dist_name/"
-    cp "target/$target/release/fluxheim-acme" "dist/$dist_name/"
-    cp "target/$target/release/fluxheim-config-tester" "dist/$dist_name/"
+    copy_binary fluxheim "dist/$dist_name"
+    copy_binary fluxheim-acme "dist/$dist_name"
+    copy_binary fluxheim-config-tester "dist/$dist_name"
     cp README.md LICENSE CHANGELOG.md "dist/$dist_name/"
     cp -r docs examples release-notes "dist/$dist_name/"
-    python3 scripts/create_release_archives.py "$dist_name"
+    "$(python_command)" scripts/create_release_archives.py "$dist_name"
 }
 
+case "$kind:$target" in
+    linux:*-linux-* | macos:*-apple-darwin | windows:*-windows-msvc) ;;
+    linux:*)
+        echo "release assets: --kind linux requires a Linux target, got $target" >&2
+        exit 2
+        ;;
+    macos:*)
+        echo "release assets: --kind macos requires an Apple Darwin target, got $target" >&2
+        exit 2
+        ;;
+    windows:*)
+        echo "release assets: --kind windows requires a Windows MSVC target, got $target" >&2
+        exit 2
+        ;;
+esac
+
 case "$kind" in
-    linux)
-        case "$target" in
-            *linux*) ;;
-            *)
-                echo "release assets: --kind linux requires a linux target, got $target" >&2
-                exit 2
-                ;;
-        esac
-        if [ "$profile" = "all" ] || [ "$profile" = "full" ]; then
+    linux | macos | windows)
+        if [ "$selected_profile" = "all" ] || [ "$selected_profile" = "full" ]; then
             bundle_runtime_profile full profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
         fi
-        if [ "$profile" = "all" ] || [ "$profile" = "wasm" ]; then
+        if [ "$selected_profile" = "all" ] || [ "$selected_profile" = "wasm" ]; then
             bundle_runtime_profile wasm profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
         fi
-        if [ "$profile" = "all" ] || [ "$profile" = "cache" ]; then
+        if [ "$selected_profile" = "all" ] || [ "$selected_profile" = "cache" ]; then
             bundle_runtime_profile cache profile-cache-edge,acme-client
         fi
-        if [ "$profile" = "all" ] || [ "$profile" = "proxy" ]; then
+        if [ "$selected_profile" = "all" ] || [ "$selected_profile" = "proxy" ]; then
             bundle_runtime_profile proxy profile-proxy-edge,acme-client
         fi
-        if [ "$profile" = "all" ] || [ "$profile" = "load-balancer" ]; then
+        if [ "$selected_profile" = "all" ] || [ "$selected_profile" = "load-balancer" ]; then
             bundle_runtime_profile load-balancer profile-load-balancer-edge,acme-client
         fi
-        if [ "$profile" = "all" ] || [ "$profile" = "php" ]; then
+        if [ "$selected_profile" = "all" ] || [ "$selected_profile" = "php" ]; then
             bundle_runtime_profile php profile-web-server,php-fpm,acme-client
         fi
-        if [ "$profile" = "all" ] || [ "$profile" = "config-tester" ]; then
+        if [ "$selected_profile" = "all" ] || [ "$selected_profile" = "config-tester" ]; then
             bundle_config_tester
         fi
         ;;
     macos-dev)
-        if [ "$profile" != "all" ]; then
+        if [ "$selected_profile" != "all" ]; then
             echo "release assets: --profile is not supported with --kind macos-dev" >&2
             exit 2
         fi

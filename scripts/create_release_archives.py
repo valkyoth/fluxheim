@@ -43,7 +43,7 @@ def archive_members(bundle: Path) -> list[Path]:
 def normalized_mode(path: Path) -> int:
     if path.is_dir():
         return 0o755
-    if os.access(path, os.X_OK):
+    if path.suffix.lower() == ".exe" or os.access(path, os.X_OK):
         return 0o755
     return 0o644
 
