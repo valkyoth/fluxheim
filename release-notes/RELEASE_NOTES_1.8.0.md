@@ -34,8 +34,9 @@ This release is under development.
   consumed by the POSIX asset builder, avoiding WSL-versus-Git-Bash command
   resolution on Windows, and use portable package-version extraction in both
   native archive jobs.
-- Build representative `full` and `wasm` archives on native macOS and Windows
-  CI runners before expanding live platform parity in `1.8.1` and `1.8.2`.
+- Build representative `full` and `wasm` archives on native macOS CI while
+  keeping Windows at archive-plan and fail-closed config-boundary validation
+  until native runtime and archive work begins in `1.8.2`.
 - Compile Windows configuration and admin-socket planning without relying on
   Unix-only symbols, while keeping configuration-file loading fail-closed
   until Windows owner and ACL trust checks are implemented in `1.8.2`.
@@ -69,6 +70,8 @@ This release is under development.
 - Run a native Windows regression proving unsupported filesystem ownership and
   ACL trust checks return an error rather than silently accepting a config
   path.
+- Keep Unix descriptor-relative cache storage out of Windows profile builds
+  until the native Windows filesystem implementation is reviewed in `1.8.2`.
 
 ## Security Notes
 

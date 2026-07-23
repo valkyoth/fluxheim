@@ -21,14 +21,14 @@ behavior when the change improves security or project direction.
 - Add a dedicated Wasm container smoke proving a hash-pinned policy module
   loads from the documented read-only `/etc/fluxheim/plugins` mount and affects
   live requests.
-- Add a shared seven-profile portable release plan validator and native macOS
-  and Windows CI archive builds for the representative `full` and `wasm`
-  profiles.
+- Add a shared seven-profile portable release plan validator, native macOS
+  archive builds for representative `full` and `wasm` profiles, and a native
+  Windows planning and fail-closed trust-boundary gate.
 
 ### Changed
 
-- Start the unsigned macOS and Windows portable archive line before
-  company-backed signing and native installer work.
+- Start the unsigned macOS portable archive line and define the Windows archive
+  contract before company-backed signing and native installer work.
 - Document the required read-only container plugin mount and keep operator
   modules outside official images.
 - Document the host-side replacement boundary of read-only Wasm plugin mounts
@@ -42,6 +42,8 @@ behavior when the change improves security or project direction.
 - Make shared filesystem-trust and admin-socket configuration code compile on
   Windows while rejecting config-file loading until native Windows owner and
   ACL checks are implemented; add a native Windows fail-closed regression.
+- Defer Windows runtime/profile/archive builds to `1.8.2` instead of weakening
+  Unix descriptor-relative cache-storage guarantees for a compile-only preview.
 - Partition native and preview non-cache Wasm admission per vhost beneath their
   process-wide ceilings so one tenant cannot starve another tenant's access,
   routing, or header hooks.

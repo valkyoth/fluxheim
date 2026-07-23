@@ -50,28 +50,31 @@ Build on the operating system and architecture represented by the target:
 
 ```bash
 scripts/build_release_assets.sh 1.8.0 --kind macos --profile wasm
-scripts/build_release_assets.sh 1.8.0 --kind windows --profile wasm
 ```
 
 Cross-compiling a Windows MSVC binary from Linux is not an authoritative
 release proof because the MSVC linker and Windows SDK are absent. The Windows
-CI runner builds the Windows archives natively. The same rule applies to Apple
-SDK and linker validation: published macOS archives must be built on macOS.
+CI runner validates the shared archive plan and fail-closed configuration
+boundary in `1.8.0`; native Windows runtime and archive builds begin with the
+`1.8.2` parity work. The same host-native rule applies to Apple SDK and linker
+validation: published macOS archives must be built on macOS.
 
 ## Current Support Level
 
 The `1.8.0` CI baseline compiles the portable static-site, reverse-proxy,
-full, Wasm, and development profiles on native macOS and Windows runners. It
-also builds representative `full` and `wasm` archives on each runner. The
-complete seven-profile naming and feature contract is checked on every CI run.
+full, Wasm, and development profiles on native macOS, and builds representative
+macOS `full` and `wasm` archives. The complete seven-profile naming and feature
+contract is checked without compiling on every supported CI host.
 
-The Windows `1.8.0` artifacts are build and packaging previews, not
-configuration-backed serving releases. Fluxheim deliberately rejects
+`1.8.0` does not publish Windows binaries. Fluxheim deliberately rejects
 configuration-file loading on Windows until native owner and ACL trust checks
-replace the Unix ownership and mode checks. It does not silently skip this
-security boundary. The Windows CI gate executes a platform-specific regression
-that proves these checks fail closed. Runtime config loading, path trust,
-service integration, and live profile parity are `1.8.2` work.
+replace the Unix ownership and mode checks, and the cache storage path still
+depends on descriptor-relative Unix filesystem operations. It does not
+silently weaken either security boundary to make a preview compile. The
+Windows CI planning gate validates archive names and feature sets and executes
+a platform-specific regression proving unsupported config trust checks fail
+closed. Runtime config loading, path trust, cache storage, service integration,
+profile builds, and archives are `1.8.2` work.
 
 Live platform parity remains staged:
 
@@ -94,10 +97,10 @@ out explicitly before release rather than silently omitted.
 
 ## Unsigned Preview Policy
 
-macOS and Windows archives are unsigned portable previews until Fluxheim has
-company-backed publisher credentials. SHA-256 checksums prove downloaded-byte
-integrity against the published release metadata; they do not establish a
-signed publisher identity.
+macOS archives are unsigned portable previews until Fluxheim has company-backed
+publisher credentials. Windows archives will follow the same policy when they
+begin in `1.8.2`. SHA-256 checksums prove downloaded-byte integrity against the
+published release metadata; they do not establish a signed publisher identity.
 
 Operators are responsible for local Gatekeeper, SmartScreen, ACL, and
 execution-policy decisions for these unsigned archives. Fluxheim will not

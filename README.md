@@ -29,7 +29,8 @@ Fluxheim-owned Rust runtime boundaries for server/listener/TLS, HTTP/1,
 HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and
 background-service paths. The `1.7.x` line added a shared WebAssembly policy
 runtime for typed, sandboxed operator extensions, and `1.8.x` packages it as an
-explicit Wasm profile while starting portable macOS and Windows archives. The
+explicit Wasm profile while starting portable macOS archives and defining the
+Windows archive contract. The
 operator-facing product is Fluxheim: focused release profiles are available
 for full, Wasm, cache, proxy, load-balancer, and PHP deployments.
 
@@ -431,8 +432,9 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 Fluxheim does not treat every planned idea as stable. Development is now on
 `1.8.0`, which packages the completed Wasm line as an explicit image/archive
 profile and starts the shared portable-archive contract for Linux, macOS, and
-Windows. The normal `full` profile remains Wasm-free. Unsigned macOS and
-Windows archives come before company-backed signing and installer work. See
+Windows. The normal `full` profile remains Wasm-free. `1.8.0` builds unsigned
+macOS previews; Windows remains plan-only until native runtime work in `1.8.2`.
+Both come before company-backed signing and installer work. See
 [Portable Releases](docs/portable-releases.md) for the shared archive contract,
 current platform support level, and unsigned-preview policy.
 

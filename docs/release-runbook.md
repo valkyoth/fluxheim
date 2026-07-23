@@ -216,19 +216,18 @@ Validate the common operating-system archive plan without compiling:
 scripts/validate_portable_release_plan.py
 ```
 
-Build the seven portable profiles on a matching macOS or Windows host with
-`--kind macos` or `--kind windows`. During `1.8.0`, native CI builds the
-representative `full` and `wasm` archives while `1.8.1` and `1.8.2` expand
-live parity across every published profile:
+Build the seven portable profiles on a matching supported host. During
+`1.8.0`, native CI builds representative macOS `full` and `wasm` archives.
+Windows is plan-only until native runtime and archive work begins in `1.8.2`;
+do not publish Windows artifacts before that gate is restored:
 
 ```bash
 scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos
-scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind windows
 ```
 
-Windows binaries retain `.exe`; both operating systems receive matching
-`.tar.gz` and `.zip` payloads. These archives are unsigned previews, not
-notarized or Authenticode-signed installers. See
+Future Windows binaries retain `.exe`; both operating systems use matching
+`.tar.gz` and `.zip` payload contracts. These archives are unsigned previews,
+not notarized or Authenticode-signed installers. See
 [Portable Releases](portable-releases.md).
 
 The older combined macOS development artifact remains available for local
