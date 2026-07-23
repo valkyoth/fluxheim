@@ -35,8 +35,8 @@ behavior when the change improves security or project direction.
   and recommend digest-pinned derivative images for high-assurance deployments.
 - Fix `--profile all` release packaging so shell function state cannot stop the
   matrix after the first profile.
-- Invoke the POSIX release-asset planner through Bash so the shared Python
-  validator works on Windows runners.
+- Invoke the POSIX release-asset planner through Bash with a repository-relative
+  forward-slash path so the shared Python validator works on Windows runners.
 - Fix portable workflow package-version extraction on macOS and Windows.
 - Partition native and preview non-cache Wasm admission per vhost beneath their
   process-wide ceilings so one tenant cannot starve another tenant's access,

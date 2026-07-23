@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BUILDER = ROOT / "scripts" / "build_release_assets.sh"
+BUILDER = "scripts/build_release_assets.sh"
 PROFILES = {
     "full": "profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp",
     "wasm": "profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp",
@@ -39,7 +39,7 @@ def release_plan(
     result = subprocess.run(
         (
             "bash",
-            str(BUILDER),
+            BUILDER,
             version,
             "--kind",
             kind,
@@ -67,7 +67,7 @@ def expect_plan_rejection(version: str, kind: str, target: str) -> None:
     result = subprocess.run(
         (
             "bash",
-            str(BUILDER),
+            BUILDER,
             version,
             "--kind",
             kind,
@@ -122,6 +122,11 @@ def validate_platform(
 
 
 def main() -> int:
+    if Path(BUILDER).is_absolute() or "\\" in BUILDER:
+        raise ValueError("release builder must use a relative POSIX path")
+    if not (ROOT / BUILDER).is_file():
+        raise ValueError(f"release builder does not exist: {BUILDER}")
+
     version = package_version()
     for platform in PLATFORMS:
         validate_platform(version, *platform)
@@ -134,6 +139,10 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (OSError, subprocess.CalledProcessError, ValueError) as error:
+    except subprocess.CalledProcessError as error:
+        detail = (error.stderr or error.stdout or str(error)).strip()
+        print(f"portable release plan: {detail}", file=sys.stderr)
+        raise SystemExit(1) from error
+    except (OSError, ValueError) as error:
         print(f"portable release plan: {error}", file=sys.stderr)
         raise SystemExit(1) from error
