@@ -38,6 +38,7 @@ def release_plan(
 ) -> list[tuple[str, str, str]]:
     result = subprocess.run(
         (
+            "bash",
             str(BUILDER),
             version,
             "--kind",
@@ -65,6 +66,7 @@ def release_plan(
 def expect_plan_rejection(version: str, kind: str, target: str) -> None:
     result = subprocess.run(
         (
+            "bash",
             str(BUILDER),
             version,
             "--kind",

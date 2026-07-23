@@ -275,7 +275,7 @@ jobs:
 
       - name: Build macOS full and Wasm portable archives
         run: |
-          version="$(sed -n 's/^version = \"\\([^\"]*\\)\"/\\1/p' Cargo.toml | sed -n '1p')"
+          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | sed -n '1p')"
           target="$(rustc -vV | sed -n 's/^host: //p')"
           scripts/build_release_assets.sh "${version}" --kind macos --profile full
           scripts/build_release_assets.sh "${version}" --kind macos --profile wasm
@@ -308,7 +308,7 @@ jobs:
 
       - name: Build Windows full and Wasm portable archives
         run: |
-          version="$(sed -n 's/^version = \"\\([^\"]*\\)\"/\\1/p' Cargo.toml | sed -n '1p')"
+          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | sed -n '1p')"
           scripts/build_release_assets.sh "${version}" --kind windows --profile full
           scripts/build_release_assets.sh "${version}" --kind windows --profile wasm
           target/x86_64-pc-windows-msvc/release/fluxheim.exe --version
