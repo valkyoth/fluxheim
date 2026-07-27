@@ -2,7 +2,7 @@
 name = "fluxheim-cache"
 version = "1.8.0"
 edition = "2024"
-rust-version = "1.97.0"
+rust-version = "1.97.1"
 license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim cache policy and storage boundary."

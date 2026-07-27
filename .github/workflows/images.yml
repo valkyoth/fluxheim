@@ -126,7 +126,7 @@ jobs:
 
       - name: Checkout repository
         if: ${{ steps.profile.outputs.build == 'true' }}
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up QEMU
         if: ${{ steps.profile.outputs.build == 'true' }}
@@ -138,7 +138,7 @@ jobs:
 
       - name: Log in to GitHub Container Registry
         if: ${{ steps.profile.outputs.build == 'true' }}
-        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -146,7 +146,7 @@ jobs:
 
       - name: Log in to Docker Hub
         if: ${{ steps.profile.outputs.build == 'true' && env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
-        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
         with:
           registry: docker.io
           username: ${{ env.DOCKERHUB_USERNAME }}
@@ -154,7 +154,7 @@ jobs:
 
       - name: Log in to Quay
         if: ${{ steps.profile.outputs.build == 'true' && env.QUAY_USERNAME != '' && env.QUAY_TOKEN != '' }}
-        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
         with:
           registry: quay.io
           username: ${{ env.QUAY_USERNAME }}
@@ -343,14 +343,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Log in to Quay
         if: ${{ env.QUAY_USERNAME != '' && env.QUAY_TOKEN != '' }}
-        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
         with:
           registry: quay.io
           username: ${{ env.QUAY_USERNAME }}

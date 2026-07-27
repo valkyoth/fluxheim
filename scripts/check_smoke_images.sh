@@ -43,7 +43,7 @@ suite exercises the current registry digest for the selected tag.
 
 EOF
 
-inspect_image "OpenBao" "${FLUXHEIM_OPENBAO_IMAGE:-quay.io/openbao/openbao:2.5}"
+inspect_image "OpenBao" "${FLUXHEIM_OPENBAO_IMAGE:-quay.io/openbao/openbao:2.6}"
 inspect_image "WordPress PHP-FPM" "${FLUXHEIM_WORDPRESS_FPM_IMAGE:-docker.io/library/wordpress:php8.3-fpm-alpine}"
 inspect_image "WordPress Apache" "${FLUXHEIM_WORDPRESS_APACHE_IMAGE:-docker.io/library/wordpress:php8.3-apache}"
 inspect_image "WordPress MariaDB" "${FLUXHEIM_WORDPRESS_DB_IMAGE:-docker.io/library/mariadb:12.3}"

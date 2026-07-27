@@ -1,6 +1,6 @@
 services:
   openbao:
-    image: quay.io/openbao/openbao:2.5
+    image: quay.io/openbao/openbao:2.6
     container_name: fluxheim_openbao_dev
     command: ["server", "-dev"]
     environment:

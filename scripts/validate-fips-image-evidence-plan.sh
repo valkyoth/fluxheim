@@ -21,9 +21,9 @@ require_text() {
 }
 
 for container in "$openssl_container" "$rustls_container"; do
-    require_text "$container" 'ubi-minimal:9.6@sha256:'
-    require_text "$container" 'rustup/archive/1.28.2/'
-    require_text "$container" 'RUST_TOOLCHAIN=1.97.0'
+    require_text "$container" 'ubi-minimal:9.8@sha256:'
+    require_text "$container" 'rustup/archive/1.29.0/'
+    require_text "$container" 'RUST_TOOLCHAIN=1.97.1'
     require_text "$container" 'binaries.sha256'
     require_text "$container" 'cargo-tree.txt'
     require_text "$container" 'USER 65532:65532'
