@@ -36,12 +36,25 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-for command in curl python3 sha256sum; do
+for command in curl python3; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "Wasm binary smoke requires $command" >&2
         exit 1
     fi
 done
+
+if command -v sha256sum >/dev/null 2>&1; then
+    sha256_file() {
+        sha256sum "$1" | awk '{print $1}'
+    }
+elif command -v shasum >/dev/null 2>&1; then
+    sha256_file() {
+        shasum -a 256 "$1" | awk '{print $1}'
+    }
+else
+    echo "Wasm binary smoke requires sha256sum or shasum" >&2
+    exit 1
+fi
 
 ports=$(python3 - <<'PY'
 import socket
@@ -79,7 +92,7 @@ do
 done
 
 digest() {
-    sha256sum "$TMP_DIR/plugins/$1.wasm" | awk '{print $1}'
+    sha256_file "$TMP_DIR/plugins/$1.wasm"
 }
 
 IRULES_SHA=$(digest irules-access-policy)

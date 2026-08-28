@@ -525,6 +525,9 @@ Optional Quay repository secrets and variables:
 
 The workflow publishes OS-variant tags for the full/default image profile:
 
+The `1.8.1` development line retains this naming contract; substitute
+`v1.8.1` for `v1.8.0` when testing release candidates.
+
 - `v1.8.0-wolfi`, `v1.8.0-alpine`, `v1.8.0-suse-micro`, `v1.8.0-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch

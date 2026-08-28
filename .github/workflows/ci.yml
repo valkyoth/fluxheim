@@ -249,9 +249,21 @@ jobs:
         run: scripts/reproducible_build_check.sh
 
   macos-portable:
-    name: macOS portable gate
-    runs-on: macos-15
+    name: macOS ${{ matrix.arch }} portable gate
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: Apple Silicon
+            runner: macos-15
+            target: aarch64-apple-darwin
+            label: aarch64-macos
+          - arch: Intel
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            label: x86_64-macos
 
     steps:
       - name: Checkout repository
@@ -259,6 +271,11 @@ jobs:
 
       - name: Install Rust toolchain
         run: rustup show
+
+      - name: Verify native macOS target
+        run: |
+          target="$(rustc -vV | sed -n 's/^host: //p')"
+          test "${target}" = "${{ matrix.target }}"
 
       - name: Check macOS portable profiles
         run: |
@@ -270,16 +287,14 @@ jobs:
           cargo check --locked --no-default-features --features profile-wasm --bin fluxheim
           cargo check --locked --no-default-features --features profile-development --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
 
-      - name: Run macOS developer smoke
-        run: sh scripts/smoke_macos_dev.sh
+      - name: Run macOS native parity smoke
+        run: sh scripts/smoke_macos_native_parity.sh
 
-      - name: Build macOS full and Wasm portable archives
+      - name: Build all macOS portable archives
         run: |
           version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | sed -n '1p')"
-          target="$(rustc -vV | sed -n 's/^host: //p')"
-          scripts/build_release_assets.sh "${version}" --kind macos --profile full
-          scripts/build_release_assets.sh "${version}" --kind macos --profile wasm
-          FLUXHEIM_BIN="$(pwd)/target/${target}/release/fluxheim" \
+          scripts/build_release_assets.sh "${version}" --kind macos
+          FLUXHEIM_BIN="$(pwd)/dist/fluxheim-${version}-wasm-${{ matrix.label }}/fluxheim" \
             scripts/smoke_wasm_policy_examples_binary.sh
 
   windows-x86_64-portable:

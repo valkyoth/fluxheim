@@ -217,13 +217,20 @@ scripts/validate_portable_release_plan.py
 ```
 
 Build the seven portable profiles on a matching supported host. During
-`1.8.0`, native CI builds representative macOS `full` and `wasm` archives.
-Windows is plan-only until native runtime and archive work begins in `1.8.2`;
-do not publish Windows artifacts before that gate is restored:
+`1.8.1`, native CI builds every public archive profile on Apple Silicon and
+Intel macOS runners. Windows is plan-only until native runtime and archive work
+begins in `1.8.2`; do not publish Windows artifacts before that gate is
+restored:
 
 ```bash
 scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos
+sh scripts/smoke_macos_native_parity.sh
 ```
+
+The native matrix must also execute
+`scripts/smoke_wasm_policy_examples_binary.sh` against the staged `wasm`
+archive binary. Do not substitute source-tree Wasm tests for packaged-binary
+evidence.
 
 Future Windows binaries retain `.exe`; both operating systems use matching
 `.tar.gz` and `.zip` payload contracts. These archives are unsigned previews,

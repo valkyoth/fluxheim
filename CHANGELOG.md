@@ -7,6 +7,27 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.8.1 - Unreleased
+
+### Added
+
+- Add native Apple Silicon and Intel macOS CI gates for every public portable
+  archive profile.
+- Add a native macOS live parity orchestrator covering static and proxy
+  serving, downstream and verified upstream TLS, memory and disk cache, admin
+  operations, load balancing, local observability, and packaged Wasm policy
+  execution.
+- Add a portable verified-upstream-TLS smoke using a temporary private CA and
+  hostname validation.
+
+### Changed
+
+- Expand macOS release validation from representative `full` and `wasm`
+  archives to the complete `full`, `wasm`, `cache`, `proxy`, `load-balancer`,
+  `php`, and `config-tester` matrix.
+- Make the packaged Wasm smoke use either `sha256sum` or the macOS-native
+  `shasum -a 256` command.
+
 ## 1.8.0 - 2026-07-23
 
 ### Added

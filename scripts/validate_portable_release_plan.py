@@ -13,6 +13,7 @@ from portable_release_plan import PLATFORMS, PROFILES, release_plan
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILDER = ROOT / "scripts" / "build_release_assets.sh"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 
 def package_version() -> str:
@@ -70,6 +71,17 @@ def main() -> int:
     builder = BUILDER.read_text(encoding="utf-8")
     if "scripts/portable_release_plan.py" not in builder:
         raise ValueError("release builder does not consume the shared Python plan")
+
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    for runner in ("macos-15", "macos-15-intel"):
+        if f"runner: {runner}" not in workflow:
+            raise ValueError(f"macOS portable gate is missing native runner {runner}")
+    if 'scripts/build_release_assets.sh "${version}" --kind macos\n' not in workflow:
+        raise ValueError("macOS portable gate must build the complete profile matrix")
+    if "sh scripts/smoke_macos_native_parity.sh" not in workflow:
+        raise ValueError("macOS portable gate must run the native live parity smoke")
+    if "wasm-${{ matrix.label }}/fluxheim" not in workflow:
+        raise ValueError("macOS portable gate must smoke the staged Wasm archive binary")
 
     version = package_version()
     for platform in PLATFORMS:

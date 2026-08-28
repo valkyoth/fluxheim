@@ -82,6 +82,13 @@ TESTS: tuple[TestEntry, ...] = (
         "Runs the broad local binary smoke covering core proxy, cache, LB, stream, and admin paths.",
     ),
     TestEntry(
+        "upstream-tls",
+        "Verified upstream TLS smoke",
+        "tls",
+        ("scripts/smoke_upstream_tls_local.sh",),
+        "Proxies a live request to a temporary HTTPS origin using a private CA and hostname verification.",
+    ),
+    TestEntry(
         "native-http1",
         "Native HTTP/1 proxy smoke",
         "smoke",

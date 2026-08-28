@@ -1,15 +1,17 @@
 # macOS Development Support
 
 Fluxheim `1.4.4` established Level 1 macOS development support. Fluxheim
-`1.8.0` adds the shared unsigned portable archive contract and native macOS CI
-for representative `full` and `wasm` profiles. This remains a portable preview,
-not a signed or notarized production package.
+`1.8.0` added the shared unsigned portable archive contract. Fluxheim `1.8.1`
+builds every public archive profile in native Apple Silicon and Intel CI and
+expands the live macOS parity suite. This remains a portable preview, not a
+signed or notarized production package.
 
 Linux remains the production baseline for native packages, systemd units,
 containers, FIPS/ISO evidence, and complete release-gate parity. The native
 Fluxheim runtime now removes the former Pingora portability qualification;
-remaining work is macOS-specific live parity, filesystem-policy review,
-service integration, signing, and notarization.
+the `1.8.1` native matrix and documented filesystem boundary close the planned
+portable parity scope. Native service integration, extended-ACL enforcement,
+signing, and notarization remain later work.
 
 ## Supported Scope
 
@@ -67,6 +69,26 @@ The smoke script writes all runtime state under `target/` by default and does
 not touch `/run`, `/var/lib`, `/var/cache`, `/var/log`, launchd, or system
 service locations.
 
+Run the native subsystem parity suite with:
+
+```bash
+sh scripts/smoke_macos_native_parity.sh
+```
+
+This exercises live static and proxy serving, downstream TLS, verified
+upstream TLS with a temporary private CA, local static and proxy cache,
+admin operations, load balancing, and local metrics/exporter health. Native
+CI then executes all four Wasm policy examples through the binary staged in
+the `wasm` archive. The macOS suite deliberately does not launch disposable
+Prometheus or Jaeger containers; the Linux release gate retains that external
+collector integration proof.
+
+The verified upstream TLS path can also be run independently:
+
+```bash
+sh scripts/smoke_upstream_tls_local.sh
+```
+
 ## Local Runtime Paths
 
 macOS development configs should use project-local paths, or a private
@@ -89,12 +111,46 @@ packaging defaults for Linux service deployments. Do not place Fluxheim runtime
 state directly under `/tmp`; Fluxheim's filesystem trust checks reject
 world-writable parents.
 
+## Foreground Deployment
+
+Fluxheim `1.8.1` supports an explicitly foreground macOS deployment mode. Run
+the portable binary under a user-selected process supervisor:
+
+```bash
+./fluxheim --config "$HOME/.config/fluxheim/fluxheim.toml"
+```
+
+Keep `[server.process].daemon = false` and send `SIGTERM` for bounded graceful
+shutdown. Fluxheim does not yet ship or claim a supported launchd service
+definition; signing, notarization, launchd packaging, and privileged-port
+installation remain later `1.8` work.
+
+## APFS, ACL, And Symlink Boundaries
+
+macOS is a Unix target, so Fluxheim applies the same owner, POSIX mode, path
+depth, and no-follow checks used by its trusted configuration and secret
+loaders. Trusted inputs must be owned by root or the Fluxheim process user,
+must not have group/world write mode bits, and must not traverse symlinks.
+
+Default APFS volumes are commonly case-insensitive. Do not create config,
+certificate, cache, snapshot, or Wasm paths that differ only by letter case;
+Fluxheim treats the filesystem's resolved identity as authoritative. Keep
+cache, snapshot, and ACME state on a local filesystem with reliable advisory
+locking and atomic rename behavior.
+
+The generic Unix trust helper validates ownership and POSIX mode bits but does
+not enumerate macOS extended ACL entries. Before using a portable archive for
+a high-assurance deployment, inspect trusted paths with `ls -le` and remove
+ACL grants that let another account modify them. This is an operator boundary
+of the unsigned portable preview, not a claim of complete macOS ACL policy
+validation.
+
 ## Release Assets
 
 Build the common portable profile matrix on macOS with:
 
 ```bash
-RELEASE_VERSION=1.8.0
+RELEASE_VERSION=1.8.1
 scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos
 ```
 
@@ -103,9 +159,9 @@ This produces separate `full`, `wasm`, `cache`, `proxy`, `load-balancer`,
 combined developer archive remains available through `--kind macos-dev`.
 Preferred portable naming examples:
 
-- `fluxheim-1.8.0-full-aarch64-macos.tar.gz`
-- `fluxheim-1.8.0-wasm-aarch64-macos.zip`
-- `fluxheim-1.8.0-full-x86_64-macos.tar.gz`
+- `fluxheim-1.8.1-full-aarch64-macos.tar.gz`
+- `fluxheim-1.8.1-wasm-aarch64-macos.zip`
+- `fluxheim-1.8.1-full-x86_64-macos.tar.gz`
 
 Universal macOS binaries are optional and can be produced with `lipo` from
 separate Intel and Apple Silicon builds, but per-target tarballs are simpler

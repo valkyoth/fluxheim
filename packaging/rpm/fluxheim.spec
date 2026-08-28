@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.8.0
+Version:        1.8.1
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -157,6 +157,13 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Fri Aug 28 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.8.1-1
+- Start native Apple Silicon and Intel macOS parity gates.
+- Build all seven public portable archive profiles on both macOS
+  architectures while retaining the unsigned-preview policy.
+- Add live native macOS subsystem parity and verified upstream TLS smokes, and
+  document foreground operation plus APFS, ACL, locking, and symlink limits.
+
 * Thu Jul 23 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.8.0-1
 - Add an explicit Wasm release profile while keeping the normal full RPM
   feature set Wasm-free.

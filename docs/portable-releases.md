@@ -63,10 +63,14 @@ validation: published macOS archives must be built on macOS.
 
 ## Current Support Level
 
-The `1.8.0` CI baseline compiles the portable static-site, reverse-proxy,
-full, Wasm, and development profiles on native macOS, and builds representative
-macOS `full` and `wasm` archives. The complete seven-profile naming and feature
-contract is checked without compiling on every supported CI host.
+The `1.8.0` CI baseline compiled the portable static-site, reverse-proxy,
+full, Wasm, and development profiles on native macOS and built representative
+`full` and `wasm` archives. The `1.8.1` development gate runs on native Apple
+Silicon and Intel hosts, builds all seven public archive profiles on both
+architectures, and exercises live static, proxy, downstream/upstream TLS,
+cache, admin, load-balancer, local observability, and packaged Wasm behavior.
+External Prometheus and Jaeger collector integration remains in the Linux gate
+because the macOS portable gate does not require a container runtime.
 
 `1.8.0` does not publish Windows binaries. Fluxheim deliberately rejects
 configuration-file loading on Windows until native owner and ACL trust checks
@@ -80,7 +84,9 @@ profile builds, and archives are `1.8.2` work.
 
 Live platform parity remains staged:
 
-- `1.8.1` expands native macOS runtime and archive smoke coverage.
+- `1.8.1` completes the defined unsigned native macOS runtime and archive
+  smoke matrix while retaining explicit foreground and filesystem-policy
+  limitations.
 - `1.8.2` expands native Windows runtime and archive smoke coverage.
 - `1.8.3` compares all published profiles and records intentional platform
   differences.
