@@ -3238,9 +3238,13 @@ Stable scope:
 - `v1.8.3`: cross-platform parity hardening. Compare Linux, macOS, and Windows
   behavior profile by profile, close practical gaps, document intentional
   differences, add `scripts/test_starter.py` platform entries, and require
-  stable/deep gates to prove every published portable artifact. Unsigned
-  archives must be clearly labeled and accompanied by checksums and
-  provenance; users remain responsible for local trust-policy exceptions.
+  stable/deep gates to prove every published portable artifact. Evaluate a
+  capability-style storage-bin lifecycle that retains validated root,
+  data-directory, shard, manifest, and index descriptors instead of reopening
+  assembled paths for each operation; retain the documented dedicated-UID/root
+  boundary unless that redesign lands. Unsigned archives must be clearly
+  labeled and accompanied by checksums and provenance; users remain responsible
+  for local trust-policy exceptions.
 - `v1.8.4`: company-backed signing foundation, conditional on Fluxheim having
   the required legal publisher identity and credentials. Add Apple Developer
   ID signing/notarization and Windows Authenticode without making unavailable
@@ -4874,7 +4878,8 @@ circular dependencies.
   Unix-only behavior.
 - `v1.8.3`: cross-platform parity hardening, platform test-starter entries,
   documented intentional differences, and stable/deep release-gate evidence
-  for every published archive.
+  for every published archive. Evaluate lifetime-retained storage-bin
+  descriptors as defense in depth against a hostile same-UID/root local actor.
 - `v1.8.4`: company-backed Apple Developer ID and Windows Authenticode signing
   foundation once the legal publisher identity and credentials exist.
 - `v1.8.5`: notarized macOS and signed Windows installer delivery, including

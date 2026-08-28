@@ -49,6 +49,8 @@ identity.
 
 ## Diagnostic And Filesystem Hardening
 
+- Remove stale reviewed-warning text for dependencies and exceptions that are
+  no longer present in the current all-feature dependency and audit policy.
 - ACME, TLS, cache-encryption, stream-proxy, load-balancer, and background-task
   diagnostics retain actionable status without disclosing configured
   certificate, private-key, socket, route, key-identifier, or trusted-network
@@ -59,3 +61,6 @@ identity.
 - Regression coverage exercises symlinked, missing, and non-directory
   storage-bin path components, along with descriptor-relative PHP-FPM process
   inspection and admitted ACME reload test paths.
+- Document that storage-bin mutation assumes a dedicated Fluxheim UID/root
+  boundary, and track lifetime-retained directory descriptors as additional
+  hardening for an exceptionally hostile local actor.

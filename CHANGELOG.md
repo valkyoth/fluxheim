@@ -38,6 +38,9 @@ behavior when the change improves security or project direction.
 
 ### Security
 
+- Remove obsolete protobuf, daemonize, derivative, and rustls-pemfile advisory
+  commentary now that the current all-feature graph and audit policy contain no
+  corresponding exceptions.
 - Redact certificate and private-key paths, key identifiers, socket paths,
   route identities, trusted-network values, and raw provider errors from
   operator diagnostics while retaining bounded operational status.
@@ -46,6 +49,8 @@ behavior when the change improves security or project direction.
   paths.
 - Make ACME reload and PHP-FPM lifecycle tests use admitted temporary paths and
   descriptor-relative process inspection.
+- Document the storage-bin dedicated-UID/root mutation boundary and track
+  lifetime-retained directory descriptors as later local defense in depth.
 
 ## 1.8.0 - 2026-07-23
 

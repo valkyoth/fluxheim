@@ -2508,6 +2508,10 @@ Do not share one RWX storage-bin root between replicas unless cross-node lock
 behavior has been explicitly tested; high-assurance deployments should enforce
 single-writer ownership through orchestration as well. Peer fill is the
 supported mechanism for sharing cache warmth between independent roots.
+The storage-bin trust boundary also assumes no unrelated process running as
+the Fluxheim UID or root mutates the cache tree between operations. Use a
+dedicated service identity and do not grant cache sidecars write access to the
+same root.
 
 `[cache.disk.encryption]` is disabled by default. When `enabled = true` with
 `provider = "local"`, Fluxheim encrypts disk cache objects with AES-256-GCM

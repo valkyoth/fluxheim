@@ -292,6 +292,13 @@ internal cache implementation.
   remaining replica can acquire the lease without changing persisted metadata.
   High-assurance deployments must also enforce single-writer ownership at the
   orchestration layer.
+- Storage-bin path checks and no-follow opens assume that unrelated software
+  cannot mutate the cache root as the Fluxheim process UID or as root between
+  operations. Do not share that identity with cache-management sidecars or
+  maintenance jobs. Retaining validated root, data-directory, shard, manifest,
+  and index descriptors for the allocator lifetime is tracked as additional
+  defense in depth for an exceptionally hostile local same-UID/root threat
+  model; it is not part of the current remote-request security boundary.
 - Native disk-cache lookup is admitted through a dedicated blocking-work class.
   Saturation is distinct from a cache miss: Fluxheim serves an eligible stale
   memory object when available and otherwise returns `503` without contacting
