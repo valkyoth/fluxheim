@@ -477,7 +477,7 @@ directory as a plugin root:
 ```yaml
 services:
   fluxheim:
-    image: ghcr.io/valkyoth/fluxheim:v1.8.0-wasm-wolfi
+    image: ghcr.io/valkyoth/fluxheim:v1.8.1-wasm-wolfi
     volumes:
       - /srv/infra/fluxheim/plugins:/etc/fluxheim/plugins:ro,Z
 ```
@@ -512,7 +512,7 @@ Use one of these deployment models deliberately:
 Example derivative image:
 
 ```dockerfile
-FROM ghcr.io/valkyoth/fluxheim:v1.8.0-wasm-wolfi@sha256:REPLACE_WITH_MANIFEST_DIGEST
+FROM ghcr.io/valkyoth/fluxheim:v1.8.1-wasm-wolfi@sha256:REPLACE_WITH_MANIFEST_DIGEST
 
 USER 0:0
 RUN mkdir -p /etc/fluxheim/plugins \

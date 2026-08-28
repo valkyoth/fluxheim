@@ -163,6 +163,9 @@ fi
   retaining the unsigned-preview policy; Intel macOS is unsupported.
 - Add live native macOS subsystem parity and verified upstream TLS smokes, and
   document foreground operation plus APFS, ACL, locking, and symlink limits.
+- Refresh compatible dependencies and release tooling, redact sensitive
+  diagnostics, and harden cache path inspection with descriptor-relative
+  no-follow traversal.
 
 * Thu Jul 23 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.8.0-1
 - Add an explicit Wasm release profile while keeping the normal full RPM

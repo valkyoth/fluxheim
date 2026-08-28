@@ -7,7 +7,7 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.8.1 - Unreleased
+## 1.8.1 - 2026-08-28
 
 ### Added
 
@@ -22,6 +22,8 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- Refresh compatible Rust dependencies, CI actions, container bases, and the
+  pinned Rust 1.98 toolchain used by source, container, and RPM builds.
 - Expand macOS release validation from representative `full` and `wasm`
   archives to the complete `full`, `wasm`, `cache`, `proxy`, `load-balancer`,
   `php`, and `config-tester` matrix.
@@ -32,6 +34,8 @@ behavior when the change improves security or project direction.
   diagnostic HTML.
 - Refresh the reviewed vendored `instant-acme` patch-policy digests after its
   intentional `base64-ng 2.0.1` dependency update.
+- Clarify static-certificate ACME companion output without exposing configured
+  certificate or key paths.
 - Verify private Unix listener pathname permissions after restrictive-umask
   binding instead of calling `fchmod` on a socket descriptor, which macOS
   rejects with `EINVAL`.

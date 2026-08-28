@@ -4,8 +4,6 @@ Fluxheim 1.8.1 expands the unsigned macOS portable line from its initial
 archive baseline toward native runtime parity on Apple Silicon. Intel macOS is
 not a supported release target.
 
-This release is under development.
-
 ## Native macOS Archives
 
 - Run the macOS portable gate on a native Apple Silicon GitHub-hosted runner.
@@ -17,6 +15,8 @@ This release is under development.
 
 ## Native Runtime Evidence
 
+- Refresh compatible Rust dependencies, CI actions, container bases, and the
+  pinned Rust 1.98 toolchain used across release evidence.
 - Add one native macOS orchestrator for live static and proxy serving,
   downstream TLS, verified upstream TLS, local static and proxy cache, admin
   operations, load balancing, and local metrics/exporter health.
@@ -32,6 +32,8 @@ This release is under development.
   `shasum`.
 - Refresh the reviewed vendored `instant-acme` policy digests for the
   intentional `base64-ng 2.0.1` dependency update.
+- Clarify static-certificate ACME companion output while keeping certificate
+  and private-key paths out of diagnostics.
 - Keep local admin and certificate-reload sockets at verified mode `0600`
   without relying on descriptor `fchmod`, allowing the native admin runtime to
   start on macOS where that socket operation returns `EINVAL`.

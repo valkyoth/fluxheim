@@ -352,11 +352,11 @@ Official container images are published to GitHub Container Registry and Quay:
 - `ghcr.io/valkyoth/fluxheim`
 - `quay.io/valkyoth/fluxheim`
 
-Release tags use the same profile/OS suffixes on both registries. The first
-The `1.8.x` image line adds a dedicated Wasm profile. Tags include
-`v1.8.0-wolfi`, `v1.8.0-wasm-wolfi`, `v1.8.0-cache-wolfi`,
-`v1.8.0-proxy-wolfi`, `v1.8.0-load-balancer-wolfi`, and
-`v1.8.0-php-wolfi`. Wasm is not included in the unsuffixed full image.
+Release tags use the same profile/OS suffixes on both registries. The `1.8.x`
+image line adds a dedicated Wasm profile. Tags include `v1.8.1-wolfi`,
+`v1.8.1-wasm-wolfi`, `v1.8.1-cache-wolfi`, `v1.8.1-proxy-wolfi`,
+`v1.8.1-load-balancer-wolfi`, and `v1.8.1-php-wolfi`. Wasm is not included in
+the unsuffixed full image.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
 tag. The GitHub Release page is published under `v1.5.15-release` because the
@@ -427,16 +427,16 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Current Development: 1.8.1 macOS Portable Parity
+## Current Release: 1.8.1 macOS Portable Parity
 
-Fluxheim does not treat every planned idea as stable. Development is now on
-the `1.8` platform-parity line. Release `1.8.0` packages the completed Wasm
+Fluxheim does not treat every planned idea as stable. Fluxheim is now on the
+`1.8` platform-parity line. Release `1.8.0` packages the completed Wasm
 line as an explicit image/archive profile and establishes the shared portable
-archive contract. Development version `1.8.1` expands unsigned `v1.8.1` macOS
-archives and native tests on Apple Silicon. Intel macOS is not a supported
-release target. The normal `full`
-profile remains Wasm-free, and Windows remains plan-only until native runtime
-work in `1.8.2`. Signing and installer work follows platform parity. See
+archive contract. Release `1.8.1` expands unsigned macOS archives and native
+tests on Apple Silicon. Intel macOS is not a supported release target. The
+normal `full` profile remains Wasm-free, and Windows remains plan-only until
+native runtime work in `1.8.2`. Signing and installer work follows platform
+parity. See
 [Portable Releases](docs/portable-releases.md) for the shared archive contract,
 current platform support level, and unsigned-preview policy.
 

@@ -28,8 +28,8 @@ Windows binaries retain their `.exe` suffix. Archive names use normalized
 platform labels such as:
 
 ```text
-fluxheim-1.8.0-wasm-x86_64-linux.zip
-fluxheim-1.8.0-wasm-aarch64-macos.tar.gz
+fluxheim-1.8.1-wasm-x86_64-linux.zip
+fluxheim-1.8.1-wasm-aarch64-macos.tar.gz
 ```
 
 Windows will use the same naming contract from `1.8.2`; `1.8.0` does not
@@ -38,9 +38,9 @@ publish a Windows archive.
 The shared matrix can be inspected without compiling:
 
 ```bash
-scripts/build_release_assets.sh 1.8.0 --kind linux --plan
-scripts/build_release_assets.sh 1.8.0 --kind macos --plan
-scripts/build_release_assets.sh 1.8.0 --kind windows --plan
+scripts/build_release_assets.sh 1.8.1 --kind linux --plan
+scripts/build_release_assets.sh 1.8.1 --kind macos --plan
+scripts/build_release_assets.sh 1.8.1 --kind windows --plan
 scripts/validate_portable_release_plan.py
 ```
 
@@ -51,7 +51,7 @@ Git Bash, or WSL on Windows.
 Build on the operating system and architecture represented by the target:
 
 ```bash
-scripts/build_release_assets.sh 1.8.0 --kind macos --profile wasm
+scripts/build_release_assets.sh 1.8.1 --kind macos --profile wasm
 ```
 
 Cross-compiling a Windows MSVC binary from Linux is not an authoritative
@@ -65,7 +65,7 @@ validation: published macOS archives must be built on macOS.
 
 The `1.8.0` CI baseline compiled the portable static-site, reverse-proxy,
 full, Wasm, and development profiles on native macOS and built representative
-`full` and `wasm` archives. The `1.8.1` development gate runs on native Apple
+`full` and `wasm` archives. The `1.8.1` release gate runs on native Apple
 Silicon, builds all seven public archive profiles for ARM64 macOS, and exercises
 live static, proxy, downstream/upstream TLS, cache, admin, load-balancer, local
 observability, and packaged Wasm behavior. Intel macOS is not a supported
