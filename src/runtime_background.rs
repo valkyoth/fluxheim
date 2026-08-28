@@ -60,10 +60,7 @@ pub(super) fn certificate_reload_control_service(
     };
 
     let listener = fluxheim_server::replace_private_unix_listener(control_plan.socket_path())?;
-    log::info!(
-        "certificate reload control socket enabled at {}",
-        control_plan.socket_path().display()
-    );
+    log::info!("certificate reload control socket enabled");
 
     Ok(Some(crate::background::background_service_for_spec(
         task,
@@ -415,11 +412,9 @@ async fn run_acme_renewal_tick(
                 #[cfg(feature = "metrics")]
                 crate::metrics::record_acme_event("renewed");
                 log::info!(
-                    "ACME renewed vhost={} issuer={} cert={} key={} challenges={}",
+                    "ACME renewed vhost={} issuer={} certificate=installed challenges={}",
                     outcome.vhost_name,
                     outcome.issuer,
-                    outcome.certificate.cert_path.display(),
-                    outcome.certificate.key_path.display(),
                     outcome.published_challenges
                 );
             }

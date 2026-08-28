@@ -138,11 +138,38 @@ upstream_ca_path = "$TMP_DIR/tls/ca.pem"
 upstream_http_version = "http1"
 EOF
 
-openssl s_server \
-    -accept "127.0.0.1:$ORIGIN_PORT" \
-    -cert "$TMP_DIR/tls/origin.pem" \
-    -key "$TMP_DIR/tls/origin-key.pem" \
-    -www > "$TMP_DIR/origin.log" 2>&1 &
+python3 - \
+    "$ORIGIN_PORT" \
+    "$TMP_DIR/tls/origin.pem" \
+    "$TMP_DIR/tls/origin-key.pem" > "$TMP_DIR/origin.log" 2>&1 <<'PY' &
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import ssl
+import sys
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def do_GET(self):
+        body = b"fluxheim-verified-upstream-tls\n"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, _format, *_args):
+        pass
+
+
+port, certificate, private_key = sys.argv[1:]
+context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.load_cert_chain(certificate, private_key)
+server = ThreadingHTTPServer(("127.0.0.1", int(port)), Handler)
+server.socket = context.wrap_socket(server.socket, server_side=True)
+server.serve_forever()
+PY
 ORIGIN_PID=$!
 
 origin_ready=0
@@ -178,7 +205,7 @@ while [ "$attempt" -lt 100 ]; do
     if curl -fsS \
         -H 'Host: proxy.test' \
         "http://127.0.0.1:$FLUXHEIM_PORT/" > "$TMP_DIR/response.txt" 2>/dev/null \
-        && grep -F 's_server' "$TMP_DIR/response.txt" >/dev/null
+        && grep -Fx 'fluxheim-verified-upstream-tls' "$TMP_DIR/response.txt" >/dev/null
     then
         echo "verified upstream TLS smoke: ok"
         exit 0

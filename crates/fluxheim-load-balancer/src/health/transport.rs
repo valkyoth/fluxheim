@@ -167,8 +167,7 @@ pub(super) fn configured_tcp_health_check_tls_inner(
     if !native_certs.errors.is_empty() {
         log::warn!(
             target: "fluxheim::security",
-            "TCP health check TLS trust store loaded with {} certificate errors",
-            native_certs.errors.len()
+            "one or more native trust roots could not be loaded for TCP health-check TLS"
         );
     }
     let mut roots = rustls::RootCertStore::empty();

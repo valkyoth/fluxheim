@@ -230,12 +230,10 @@ fn write_pending_key(
             .map_err(|error| account_store_io_error(pending_path, error))?;
         sync_account_directory(directory)
     })();
-    if result.is_err()
-        && let Err(error) = sanitize_and_remove_pending_key(directory, &temporary)
-    {
+    if result.is_err() && sanitize_and_remove_pending_key(directory, &temporary).is_err() {
         log::error!(
             target: "fluxheim::security",
-            "failed to sanitize pending ACME account-key temporary file: {error}"
+            "failed to sanitize pending ACME account-key temporary file"
         );
     }
     result

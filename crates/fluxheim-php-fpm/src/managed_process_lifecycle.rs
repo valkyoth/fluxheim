@@ -291,8 +291,41 @@ fn managed_php_fpm_sleep_until_restart(shutdown: &AtomicBool, restart_failures: 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::terminate_managed_php_fpm_child;
+    use std::io::Read as _;
     use std::os::unix::process::CommandExt as _;
     use std::time::{Duration, Instant};
+
+    fn read_process_stat(pid: u32) -> std::io::Result<String> {
+        let proc = rustix::fs::open(
+            "/proc",
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::DIRECTORY
+                | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(std::io::Error::from)?;
+        let process = rustix::fs::openat(
+            &proc,
+            pid.to_string(),
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::DIRECTORY
+                | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(std::io::Error::from)?;
+        let stat = rustix::fs::openat(
+            &process,
+            "stat",
+            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(std::io::Error::from)?;
+        let mut contents = String::new();
+        std::fs::File::from(stat).read_to_string(&mut contents)?;
+        Ok(contents)
+    }
 
     #[test]
     fn forced_cleanup_terminates_managed_process_group() {
@@ -320,10 +353,9 @@ mod tests {
         terminate_managed_php_fpm_child(&mut child);
 
         assert!(child.try_wait().expect("master status").is_some());
-        let worker_proc = std::path::PathBuf::from(format!("/proc/{worker_pid}/stat"));
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
-            match std::fs::read_to_string(&worker_proc) {
+            match read_process_stat(worker_pid) {
                 Ok(stat) if !stat.contains(") Z ") && Instant::now() < deadline => {
                     std::thread::sleep(Duration::from_millis(10));
                 }

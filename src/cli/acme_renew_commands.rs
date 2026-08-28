@@ -38,28 +38,20 @@ pub(super) fn run_acme_renew_command(
             "skipped"
         };
         println!(
-            "target: {} status={} issuer={} domains={} cert={} key={}",
+            "target: {} status={} issuer={} domains={} certificate=managed",
             target.vhost_name,
             status,
             target.issuer,
-            target.domains.join(","),
-            target.certificate.cert_path.display(),
-            target.certificate.key_path.display()
+            target.domains.join(",")
         );
     }
     if queue.is_empty() {
         println!(
-            "acme state: tls_enabled={} acme_enabled={} renewal_enabled={} storage={} vhosts={}",
+            "acme state: tls_enabled={} acme_enabled={} renewal_enabled={} storage_configured={} vhosts={}",
             config.tls.enabled,
             config.tls.acme.enabled,
             config.tls.acme.renewal.enabled,
-            config
-                .tls
-                .acme
-                .storage
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "<none>".to_owned()),
+            config.tls.acme.storage.is_some(),
             config.vhosts.len()
         );
         for vhost in &config.vhosts {
@@ -90,12 +82,8 @@ pub(super) fn run_acme_renew_command(
     }
     for outcome in &run.renewed {
         println!(
-            "renewed: {} issuer={} cert={} key={} challenges={}",
-            outcome.vhost_name,
-            outcome.issuer,
-            outcome.certificate.cert_path.display(),
-            outcome.certificate.key_path.display(),
-            outcome.published_challenges
+            "renewed: {} issuer={} certificate=installed challenges={}",
+            outcome.vhost_name, outcome.issuer, outcome.published_challenges
         );
     }
     for failure in &run.failed {

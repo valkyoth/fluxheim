@@ -264,8 +264,7 @@ impl NativeDiskCacheEncryption {
         if count == NATIVE_DISK_CACHE_GCM_RANDOM_NONCE_WARNING_AT {
             log::warn!(
                 target: "fluxheim::security",
-                "native local disk-cache encryption key_id={} is approaching the AES-GCM random-nonce invocation limit; rotate the local cache encryption key",
-                self.key_id
+                "native local disk-cache encryption is approaching the AES-GCM random-nonce invocation limit; rotate the local cache encryption key"
             );
         }
         Ok(())

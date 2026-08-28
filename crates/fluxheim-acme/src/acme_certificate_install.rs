@@ -174,10 +174,9 @@ pub(super) fn install_certificate_files(
     result
 }
 
-fn log_acme_certificate_recovery_error(action: &str, path: &Path, error: &dyn fmt::Display) {
+fn log_acme_certificate_recovery_error(_action: &str, _path: &Path, _error: &dyn fmt::Display) {
     log::error!(
         target: "fluxheim::security",
-        "ACME certificate install recovery failed while {action} at {}: {error}",
-        path.display()
+        "ACME certificate install recovery failed; operator intervention may be required"
     );
 }

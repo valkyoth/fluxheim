@@ -126,13 +126,11 @@ fn print_acme_targets(config: &Config) -> Result<(), Box<dyn Error + Send + Sync
     println!("acme targets: {}", targets.len());
     for target in targets {
         println!(
-            "target: {} issuer={} challenge={:?} domains={} cert={} key={}",
+            "target: {} issuer={} challenge={:?} domains={} certificate=managed",
             target.vhost_name,
             target.issuer,
             target.challenge,
-            target.domains.join(","),
-            target.certificate.cert_path.display(),
-            target.certificate.key_path.display()
+            target.domains.join(",")
         );
     }
     Ok(())

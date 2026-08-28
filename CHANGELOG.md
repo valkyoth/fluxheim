@@ -27,6 +27,22 @@ behavior when the change improves security or project direction.
   `php`, and `config-tester` matrix.
 - Make the packaged Wasm smoke use either `sha256sum` or the macOS-native
   `shasum -a 256` command.
+- Make the verified-upstream-TLS smoke use a deterministic HTTPS origin and
+  response marker across Linux and macOS instead of platform-specific OpenSSL
+  diagnostic HTML.
+- Refresh the reviewed vendored `instant-acme` patch-policy digests after its
+  intentional `base64-ng 2.0.1` dependency update.
+
+### Security
+
+- Redact certificate and private-key paths, key identifiers, socket paths,
+  route identities, trusted-network values, and raw provider errors from
+  operator diagnostics while retaining bounded operational status.
+- Inspect storage-bin paths through descriptor-relative, no-follow filesystem
+  operations so symlink checks do not reopen attacker-influenced assembled
+  paths.
+- Make ACME reload and PHP-FPM lifecycle tests use admitted temporary paths and
+  descriptor-relative process inspection.
 
 ## 1.8.0 - 2026-07-23
 

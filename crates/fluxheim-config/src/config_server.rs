@@ -149,10 +149,10 @@ impl ServerConfig {
                     value: proxy.clone(),
                 });
             }
-            if let Some(prefix) = trusted_proxy_ipv6_prefix_broader_than_32(proxy) {
+            if trusted_proxy_ipv6_prefix_broader_than_32(proxy).is_some() {
                 log::warn!(
                     target: "fluxheim::security",
-                    "server.trusted_proxies entry {proxy:?} uses IPv6 prefix /{prefix} (<32); verify this allocation is fully controlled by the intended provider"
+                    "server.trusted_proxies contains an IPv6 prefix broader than /32; verify the allocation is fully controlled by the intended provider"
                 );
             }
         }

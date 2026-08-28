@@ -248,10 +248,11 @@ mod tests {
     fn certificate_reload_request_sends_control_command() {
         use std::io::{Read, Write};
 
-        let root = std::env::temp_dir().join(format!("fh-acme-reload-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir(&root).unwrap();
-        let socket = root.join("reload.sock");
+        let root = tempfile::Builder::new()
+            .prefix("fh-acme-reload-")
+            .tempdir()
+            .unwrap();
+        let socket = root.path().join("reload.sock");
         let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
         let handle = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
@@ -273,11 +274,11 @@ mod tests {
     fn certificate_reload_response_is_bounded() {
         use std::io::{Read, Write};
 
-        let root =
-            std::env::temp_dir().join(format!("fh-acme-reload-bounded-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir(&root).unwrap();
-        let socket = root.join("reload.sock");
+        let root = tempfile::Builder::new()
+            .prefix("fh-acme-bounded-")
+            .tempdir()
+            .unwrap();
+        let socket = root.path().join("reload.sock");
         let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
         let handle = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();

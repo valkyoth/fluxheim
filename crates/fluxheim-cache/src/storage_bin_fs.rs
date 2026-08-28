@@ -126,26 +126,63 @@ pub(crate) fn storage_bin_path_contains_symlink(root: &Path, path: &Path) -> std
         return Ok(true);
     };
 
-    for component in relative.components() {
-        if !matches!(component, std::path::Component::Normal(_)) {
+    let components = relative
+        .components()
+        .map(|component| match component {
+            std::path::Component::Normal(name) => Ok(name),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "storage-bin path contains a non-normal component",
+            )),
+        })
+        .collect::<std::io::Result<Vec<_>>>()?;
+
+    let mut directory = match rustix::fs::open(
+        root,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+    ) {
+        Ok(directory) => directory,
+        Err(error) if error == rustix::io::Errno::LOOP => return Ok(true),
+        Err(error) => return Err(storage_bin_rustix_to_io_error(error)),
+    };
+
+    for (index, name) in components.iter().enumerate() {
+        let stat =
+            match rustix::fs::statat(&directory, *name, rustix::fs::AtFlags::SYMLINK_NOFOLLOW) {
+                Ok(stat) => stat,
+                Err(error) if error == rustix::io::Errno::NOENT => return Ok(false),
+                Err(error) => return Err(storage_bin_rustix_to_io_error(error)),
+            };
+        let file_type = rustix::fs::FileType::from_raw_mode(stat.st_mode);
+        if file_type.is_symlink() {
             return Ok(true);
         }
-    }
-
-    let mut current = root.to_path_buf();
-    for component in relative.components() {
-        current.push(component.as_os_str());
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => {
-                return Err(std::io::Error::new(
-                    error.kind(),
-                    format!("inspect storage-bin path {}: {error}", current.display()),
-                ));
-            }
+        if index + 1 == components.len() {
+            continue;
         }
+        if !file_type.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotADirectory,
+                "storage-bin path component is not a directory",
+            ));
+        }
+        directory = match rustix::fs::openat(
+            &directory,
+            *name,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::DIRECTORY
+                | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::empty(),
+        ) {
+            Ok(directory) => directory,
+            Err(error) if error == rustix::io::Errno::LOOP => return Ok(true),
+            Err(error) => return Err(storage_bin_rustix_to_io_error(error)),
+        };
     }
 
     Ok(false)

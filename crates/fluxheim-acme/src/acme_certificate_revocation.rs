@@ -257,8 +257,7 @@ pub(super) fn recover_interrupted_revocation(
             ensure_quarantined_pair(directory, paths, &journal, directory_fd)?;
             log::error!(
                 target: "fluxheim::security",
-                "recovered confirmed ACME revocation at {}; replacement certificate is required",
-                directory.display()
+                "recovered confirmed ACME revocation; replacement certificate is required"
             );
             clear_revocation_journal(directory, directory_fd)
         }

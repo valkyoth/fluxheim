@@ -84,10 +84,7 @@ impl StreamProxyService {
         let trusted_sources = parse_stream_trusted_sources(route)?;
         if route.downstream_proxy_protocol != DownstreamProxyProtocol::Off {
             log::info!(
-                "stream route {} downstream PROXY protocol {:?} receive enabled for {} trusted source(s)",
-                route.name,
-                route.downstream_proxy_protocol,
-                trusted_sources.len()
+                "stream downstream PROXY protocol receive is enabled for a configured route"
             );
         }
         Ok(Self {

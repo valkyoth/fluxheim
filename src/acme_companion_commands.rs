@@ -58,10 +58,8 @@ pub(super) fn run_revoke(
     ))?;
     request_certificate_reload(&config)?;
     println!(
-        "acme certificate revoke: vhost={vhost} status=quarantined replacement_required={} cert={} key={}",
-        outcome.replacement_required,
-        outcome.quarantined_certificate.display(),
-        outcome.quarantined_private_key.display()
+        "acme certificate revoke: vhost={vhost} status=quarantined replacement_required={}",
+        outcome.replacement_required
     );
     Ok(())
 }
@@ -167,11 +165,7 @@ pub(super) fn run_doctor(
         );
     }
     println!("{}", account_rollover_capability_status());
-    println!(
-        "acme doctor: ok targets={} storage={} online={online}",
-        targets.len(),
-        storage.display()
-    );
+    println!("acme doctor: ok targets={} online={online}", targets.len());
     Ok(())
 }
 
@@ -318,12 +312,8 @@ pub(super) fn run_renew(
     let renewed_count = run.renewed.len();
     for outcome in &run.renewed {
         println!(
-            "renewed: {} issuer={} cert={} key={} challenges={}",
-            outcome.vhost_name,
-            outcome.issuer,
-            outcome.certificate.cert_path.display(),
-            outcome.certificate.key_path.display(),
-            outcome.published_challenges
+            "renewed: {} issuer={} certificate=installed challenges={}",
+            outcome.vhost_name, outcome.issuer, outcome.published_challenges
         );
     }
     for failure in &run.failed {
@@ -365,13 +355,11 @@ pub(super) fn print_targets(
     println!("acme targets: {}", targets.len());
     for target in targets {
         println!(
-            "target: {} issuer={} challenge={:?} domains={} cert={} key={}",
+            "target: {} issuer={} challenge={:?} domains={} certificate=managed",
             target.vhost_name,
             target.issuer,
             target.challenge,
-            target.domains.join(","),
-            target.certificate.cert_path.display(),
-            target.certificate.key_path.display()
+            target.domains.join(",")
         );
     }
     Ok(())
@@ -408,16 +396,14 @@ pub(super) fn print_status(
             .map(system_time_epoch_secs)
             .unwrap_or_else(|| "missing".to_owned());
         println!(
-            "target: {} status={} due_now={} due_at={} not_after={} issuer={} domains={} cert={} key={}",
+            "target: {} status={} due_now={} due_at={} not_after={} issuer={} domains={} certificate=managed",
             item.target.vhost_name,
             status,
             item.due_now,
             system_time_epoch_secs(item.due_at),
             not_after,
             item.target.issuer,
-            item.target.domains.join(","),
-            item.target.certificate.cert_path.display(),
-            item.target.certificate.key_path.display()
+            item.target.domains.join(",")
         );
     }
     Ok(())

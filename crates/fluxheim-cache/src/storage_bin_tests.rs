@@ -11,6 +11,7 @@ use crate::storage_bin::{
     StorageBinObjectLocation, prepare_storage_bin_layout, read_storage_bin_index,
     storage_bin_index_path, write_storage_bin_index,
 };
+use crate::storage_bin_fs::storage_bin_path_contains_symlink;
 
 fn storage_bin_plan() -> DiskTierPlan {
     DiskTierPlan {
@@ -86,6 +87,75 @@ fn storage_bin_manifest_rejects_special_file_without_blocking() {
 
     let error = prepare_storage_bin_layout(&layout).unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+}
+
+#[cfg(unix)]
+fn storage_bin_test_root_fd(root: &std::path::Path) -> std::os::fd::OwnedFd {
+    rustix::fs::open(
+        root,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+    )
+    .unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn storage_bin_descriptor_walk_rejects_symlinked_component() {
+    let root = tempfile::tempdir().unwrap();
+    let root_fd = storage_bin_test_root_fd(root.path());
+    let linked = root.path().join("linked");
+    rustix::fs::mkdirat(
+        &root_fd,
+        "real",
+        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR | rustix::fs::Mode::XUSR,
+    )
+    .unwrap();
+    rustix::fs::symlinkat("real", &root_fd, "linked").unwrap();
+
+    assert!(storage_bin_path_contains_symlink(root.path(), &linked.join("object")).unwrap());
+}
+
+#[cfg(unix)]
+#[test]
+fn storage_bin_descriptor_walk_allows_missing_normal_leaf() {
+    let root = tempfile::tempdir().unwrap();
+    let root_fd = storage_bin_test_root_fd(root.path());
+    let data = root.path().join("data");
+    rustix::fs::mkdirat(
+        &root_fd,
+        "data",
+        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR | rustix::fs::Mode::XUSR,
+    )
+    .unwrap();
+
+    assert!(!storage_bin_path_contains_symlink(root.path(), &data.join("missing")).unwrap());
+}
+
+#[cfg(unix)]
+#[test]
+fn storage_bin_descriptor_walk_rejects_non_directory_intermediate() {
+    let root = tempfile::tempdir().unwrap();
+    let root_fd = storage_bin_test_root_fd(root.path());
+    let regular = root.path().join("regular");
+    rustix::fs::openat(
+        &root_fd,
+        "regular",
+        rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::EXCL
+            | rustix::fs::OFlags::WRONLY
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+    )
+    .unwrap();
+
+    let error =
+        storage_bin_path_contains_symlink(root.path(), &regular.join("object")).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::NotADirectory);
 }
 
 #[test]

@@ -22,11 +22,16 @@ This release is under development.
   operations, load balancing, and local metrics/exporter health.
 - Add an independently runnable verified-upstream-TLS smoke that creates a
   temporary private CA and requires certificate and hostname verification.
+- Serve a deterministic marker from that temporary HTTPS origin so Linux and
+  macOS validate identical proxy behavior without depending on
+  platform-specific `openssl s_server` output.
 - Retain external Prometheus and Jaeger collector integration in the Linux
   release gate so the macOS portable gate does not depend on a container
   runtime.
 - Make the packaged Wasm smoke portable across GNU `sha256sum` and macOS
   `shasum`.
+- Refresh the reviewed vendored `instant-acme` policy digests for the
+  intentional `base64-ng 2.0.1` dependency update.
 
 ## Deployment Boundary
 
@@ -38,3 +43,16 @@ extended-ACL operator boundary, and the local-filesystem locking requirement.
 These archives remain unsigned and are not notarized. SHA-256 checksums prove
 artifact integrity against release metadata but do not establish publisher
 identity.
+
+## Diagnostic And Filesystem Hardening
+
+- ACME, TLS, cache-encryption, stream-proxy, load-balancer, and background-task
+  diagnostics retain actionable status without disclosing configured
+  certificate, private-key, socket, route, key-identifier, or trusted-network
+  values.
+- Storage-bin symlink inspection walks from an opened trusted root with
+  descriptor-relative, no-follow operations instead of reopening assembled
+  paths.
+- Regression coverage exercises symlinked, missing, and non-directory
+  storage-bin path components, along with descriptor-relative PHP-FPM process
+  inspection and admitted ACME reload test paths.

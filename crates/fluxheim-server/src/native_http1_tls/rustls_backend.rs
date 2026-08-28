@@ -113,10 +113,10 @@ fn root_store(ca_path: Option<&Path>) -> Result<RootCertStore, NativeHttp1Error>
         }
     } else {
         let native = rustls_native_certs::load_native_certs();
-        for error in native.errors {
+        if !native.errors.is_empty() {
             log::warn!(
                 target: "fluxheim::native_http1",
-                "failed to load one native trust root for native HTTP/1 upstream TLS: {error}"
+                "one or more native trust roots could not be loaded for native HTTP/1 upstream TLS"
             );
         }
         for cert in native.certs {
