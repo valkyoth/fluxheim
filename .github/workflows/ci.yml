@@ -249,21 +249,9 @@ jobs:
         run: scripts/reproducible_build_check.sh
 
   macos-portable:
-    name: macOS ${{ matrix.arch }} portable gate
-    runs-on: ${{ matrix.runner }}
+    name: macOS Apple Silicon portable gate
+    runs-on: macos-15
     timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: Apple Silicon
-            runner: macos-15
-            target: aarch64-apple-darwin
-            label: aarch64-macos
-          - arch: Intel
-            runner: macos-15-intel
-            target: x86_64-apple-darwin
-            label: x86_64-macos
 
     steps:
       - name: Checkout repository
@@ -275,7 +263,7 @@ jobs:
       - name: Verify native macOS target
         run: |
           target="$(rustc -vV | sed -n 's/^host: //p')"
-          test "${target}" = "${{ matrix.target }}"
+          test "${target}" = "aarch64-apple-darwin"
 
       - name: Check macOS portable profiles
         run: |
@@ -294,7 +282,7 @@ jobs:
         run: |
           version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | sed -n '1p')"
           scripts/build_release_assets.sh "${version}" --kind macos
-          FLUXHEIM_BIN="$(pwd)/dist/fluxheim-${version}-wasm-${{ matrix.label }}/fluxheim" \
+          FLUXHEIM_BIN="$(pwd)/dist/fluxheim-${version}-wasm-aarch64-macos/fluxheim" \
             scripts/smoke_wasm_policy_examples_binary.sh
 
   windows-x86_64-portable:

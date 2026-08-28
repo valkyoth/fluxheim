@@ -73,20 +73,25 @@ def main() -> int:
         raise ValueError("release builder does not consume the shared Python plan")
 
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
-    for runner in ("macos-15", "macos-15-intel"):
-        if f"runner: {runner}" not in workflow:
-            raise ValueError(f"macOS portable gate is missing native runner {runner}")
+    if "runs-on: macos-15" not in workflow:
+        raise ValueError("macOS portable gate is missing its Apple Silicon runner")
+    if "aarch64-apple-darwin" not in workflow:
+        raise ValueError("macOS portable gate does not verify its Apple Silicon target")
+    if "macos-15-intel" in workflow or "x86_64-apple-darwin" in workflow:
+        raise ValueError("macOS portable gate still advertises unsupported Intel macOS")
     if 'scripts/build_release_assets.sh "${version}" --kind macos\n' not in workflow:
         raise ValueError("macOS portable gate must build the complete profile matrix")
     if "sh scripts/smoke_macos_native_parity.sh" not in workflow:
         raise ValueError("macOS portable gate must run the native live parity smoke")
-    if "wasm-${{ matrix.label }}/fluxheim" not in workflow:
+    if "wasm-aarch64-macos/fluxheim" not in workflow:
         raise ValueError("macOS portable gate must smoke the staged Wasm archive binary")
 
     version = package_version()
     for platform in PLATFORMS:
         validate_platform(version, *platform)
     expect_plan_rejection(version, "windows", "x86_64-unknown-linux-gnu")
+    expect_plan_rejection(version, "macos", "x86_64-apple-darwin")
+    expect_plan_rejection(version, "macos-dev", "x86_64-apple-darwin")
     expect_plan_rejection(version, "linux", "../../escape")
     print("portable release plan: ok")
     return 0

@@ -1361,10 +1361,11 @@ Release shape:
     Rust target/toolchain, CMake when selected features need it, and optional
     Homebrew PHP-FPM for managed PHP development tests;
   - document release artifacts by normalized target labels:
-    `aarch64-macos` for Apple Silicon Macs, `x86_64-macos` for Intel Macs,
-    `aarch64-linux` for Linux ARM64, and `x86_64-linux` for the main Linux
-    x86_64 build. Do not publish one ambiguous "ARM" artifact, and do not use
-    machine-local `target-cpu=native` tuning for public release binaries;
+    `aarch64-macos` for Apple Silicon Macs, `aarch64-linux` for Linux ARM64,
+    and `x86_64-linux` for the main Linux x86_64 build. Intel macOS is not a
+    supported release target. Do not publish one ambiguous "ARM" artifact,
+    and do not use machine-local `target-cpu=native` tuning for public release
+    binaries;
   - keep Linux as the production support baseline. macOS support is for
     contributor development and local site testing until Pingora's macOS
     support is no longer experimental and Fluxheim has regular macOS smoke
@@ -3222,11 +3223,12 @@ Stable scope:
   examples, document the read-only plugin mount and hash-pinned plugin config,
   and define one archive/profile contract for Linux, macOS, and Windows.
 - `v1.8.1`: unsigned macOS portable parity. Build the same supported public
-  archive profiles for Apple Silicon and Intel where runners are available,
-  using the same archive names, layout, documentation, checksums, and smoke
-  expectations as Linux. Add live static, proxy, TLS, cache, admin,
-  load-balancer, observability, and Wasm tests, plus launchd or an explicitly
-  documented foreground deployment mode and APFS/ACL/symlink review.
+  archive profiles for Apple Silicon, using the same archive names, layout,
+  documentation, checksums, and smoke expectations as Linux. Intel macOS is
+  outside the supported release matrix. Add live static, proxy, TLS, cache,
+  admin, load-balancer, observability, and Wasm tests, plus launchd or an
+  explicitly documented foreground deployment mode and APFS/ACL/symlink
+  review.
 - `v1.8.2`: unsigned Windows portable parity. Build MSVC archives for the same
   supported profiles and both archive formats, run live static, proxy, TLS,
   cache, admin, load-balancer, observability, and Wasm tests, and define
@@ -4864,9 +4866,9 @@ circular dependencies.
   `full` Wasm-free, add `profile-wasm`, a Wasm image and release archive, both
   `.tar.gz` and `.zip` formats, a read-only plugin mount contract, and a live
   packaged-binary Wasm smoke.
-- `v1.8.1`: unsigned macOS portable parity for Apple Silicon and Intel, using
-  the same supported profile names, archive layout, checksums, docs, and live
-  evidence as Linux.
+- `v1.8.1`: unsigned macOS portable parity for Apple Silicon, using the same
+  supported profile names, archive layout, checksums, docs, and live evidence
+  as Linux. Intel macOS is not a supported release target.
 - `v1.8.2`: unsigned Windows MSVC portable parity with the same supported
   profile/archive contract and explicit replacements or limitations for
   Unix-only behavior.

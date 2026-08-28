@@ -1,19 +1,19 @@
 # Fluxheim 1.8.1 Release Notes
 
 Fluxheim 1.8.1 expands the unsigned macOS portable line from its initial
-archive baseline toward native runtime parity on Apple Silicon and Intel.
+archive baseline toward native runtime parity on Apple Silicon. Intel macOS is
+not a supported release target.
 
 This release is under development.
 
 ## Native macOS Archives
 
-- Run the macOS portable gate on native Apple Silicon and Intel GitHub-hosted
-  runners.
+- Run the macOS portable gate on a native Apple Silicon GitHub-hosted runner.
 - Build matching `.tar.gz` and `.zip` archives for the `full`, `wasm`, `cache`,
-  `proxy`, `load-balancer`, `php`, and `config-tester` profiles on both
-  architectures.
+  `proxy`, `load-balancer`, `php`, and `config-tester` profiles for ARM64
+  macOS.
 - Execute the packaged Wasm policy examples from the staged Wasm archive on
-  each native architecture.
+  Apple Silicon.
 
 ## Native Runtime Evidence
 

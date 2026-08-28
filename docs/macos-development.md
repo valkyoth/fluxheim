@@ -2,9 +2,9 @@
 
 Fluxheim `1.4.4` established Level 1 macOS development support. Fluxheim
 `1.8.0` added the shared unsigned portable archive contract. Fluxheim `1.8.1`
-builds every public archive profile in native Apple Silicon and Intel CI and
-expands the live macOS parity suite. This remains a portable preview, not a
-signed or notarized production package.
+builds every public archive profile in native Apple Silicon CI and expands the
+live macOS parity suite. Intel macOS is not a supported release target. This
+remains a portable preview, not a signed or notarized production package.
 
 Linux remains the production baseline for native packages, systemd units,
 containers, FIPS/ISO evidence, and complete release-gate parity. The native
@@ -18,7 +18,6 @@ signing, and notarization remain later work.
 | Target | Scope |
 | --- | --- |
 | `aarch64-apple-darwin` | Primary Apple Silicon developer target for M-series Macs. |
-| `x86_64-apple-darwin` | Intel Mac developer target when a maintainer can test it. |
 | `aarch64-unknown-linux-gnu` | Linux ARM64 release target, released as `aarch64-linux`. |
 | `x86_64-unknown-linux-gnu` | Main Linux production release target, released as `x86_64-linux`. |
 
@@ -161,9 +160,6 @@ Preferred portable naming examples:
 
 - `fluxheim-1.8.1-full-aarch64-macos.tar.gz`
 - `fluxheim-1.8.1-wasm-aarch64-macos.zip`
-- `fluxheim-1.8.1-full-x86_64-macos.tar.gz`
 
-Universal macOS binaries are optional and can be produced with `lipo` from
-separate Intel and Apple Silicon builds, but per-target tarballs are simpler
-and clearer for Fluxheim's current support level. See
-[Portable Releases](portable-releases.md) for unsigned-preview limitations.
+Fluxheim does not publish Intel or universal macOS binaries. See [Portable
+Releases](portable-releases.md) for unsigned-preview limitations.

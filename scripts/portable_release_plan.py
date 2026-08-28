@@ -27,7 +27,6 @@ TARGET_LABELS = {
     "x86_64-unknown-linux-musl": "x86_64-linux",
     "aarch64-unknown-linux-gnu": "aarch64-linux",
     "aarch64-unknown-linux-musl": "aarch64-linux",
-    "x86_64-apple-darwin": "x86_64-macos",
     "aarch64-apple-darwin": "aarch64-macos",
     "x86_64-pc-windows-msvc": "x86_64-windows",
     "aarch64-pc-windows-msvc": "aarch64-windows",
@@ -45,8 +44,10 @@ def _validate_inputs(version: str, kind: str, target: str, profile: str) -> None
         raise ValueError(f"unsupported release profile: {profile}")
     if kind == "linux" and "-linux-" not in target:
         raise ValueError(f"--kind linux requires a Linux target, got {target}")
-    if kind in {"macos", "macos-dev"} and not target.endswith("-apple-darwin"):
-        raise ValueError(f"--kind {kind} requires an Apple Darwin target, got {target}")
+    if kind in {"macos", "macos-dev"} and target != "aarch64-apple-darwin":
+        raise ValueError(
+            f"--kind {kind} supports only aarch64-apple-darwin, got {target}"
+        )
     if kind == "windows" and not target.endswith("-windows-msvc"):
         raise ValueError(f"--kind windows requires a Windows MSVC target, got {target}")
     if kind == "macos-dev" and profile != "all":

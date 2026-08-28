@@ -157,7 +157,6 @@ triple:
 | --- | --- |
 | `x86_64-unknown-linux-gnu` | `x86_64-linux` |
 | `aarch64-unknown-linux-gnu` | `aarch64-linux` |
-| `x86_64-apple-darwin` | `x86_64-macos` |
 | `aarch64-apple-darwin` | `aarch64-macos` |
 | `x86_64-pc-windows-msvc` | `x86_64-windows` |
 | `aarch64-pc-windows-msvc` | `aarch64-windows` |
@@ -217,10 +216,10 @@ scripts/validate_portable_release_plan.py
 ```
 
 Build the seven portable profiles on a matching supported host. During
-`1.8.1`, native CI builds every public archive profile on Apple Silicon and
-Intel macOS runners. Windows is plan-only until native runtime and archive work
-begins in `1.8.2`; do not publish Windows artifacts before that gate is
-restored:
+`1.8.1`, native CI builds every public archive profile on Apple Silicon. Intel
+macOS is not a supported release target. Windows is plan-only until native
+runtime and archive work begins in `1.8.2`; do not publish Windows artifacts
+before that gate is restored:
 
 ```bash
 scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos
@@ -245,10 +244,9 @@ scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos-dev
 ```
 
 Apple Silicon Macs produce
-`fluxheim-${RELEASE_VERSION}-dev-aarch64-macos.{tar.gz,zip}`. Intel Macs
-produce `fluxheim-${RELEASE_VERSION}-dev-x86_64-macos.{tar.gz,zip}`. These
-remain unsigned development conveniences and are separate from the portable
-profile matrix.
+`fluxheim-${RELEASE_VERSION}-dev-aarch64-macos.{tar.gz,zip}`. These remain
+unsigned development conveniences and are separate from the portable profile
+matrix. Intel macOS developer archives are not published.
 
 Record all runtime and config-tester binary checksums.
 
@@ -346,11 +344,12 @@ On GitHub:
    `dist/fluxheim-${RELEASE_VERSION}-config-tester-{x86_64,aarch64}-linux.{tar.gz,zip}`.
 8. If the release includes unsigned portable previews, upload every
    successfully gated profile from
-   `dist/fluxheim-${RELEASE_VERSION}-{full,wasm,cache,proxy,load-balancer,php,config-tester}-{aarch64,x86_64}-{macos,windows}.{tar.gz,zip}`.
+   `dist/fluxheim-${RELEASE_VERSION}-{full,wasm,cache,proxy,load-balancer,php,config-tester}-aarch64-macos.{tar.gz,zip}`
+   and any separately gated Windows profiles.
    Do not upload an untested target or describe these files as signed
    installers.
 9. If a legacy combined macOS developer artifact is needed, upload
-   `dist/fluxheim-${RELEASE_VERSION}-dev-{aarch64,x86_64}-macos.{tar.gz,zip}`.
+   `dist/fluxheim-${RELEASE_VERSION}-dev-aarch64-macos.{tar.gz,zip}`.
 10. Upload `target/release-evidence/fluxheim.spdx.json`.
 11. Upload `target/release-evidence/fluxheim.cyclonedx.json`.
 12. Publish the release.

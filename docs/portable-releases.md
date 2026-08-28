@@ -66,9 +66,10 @@ validation: published macOS archives must be built on macOS.
 The `1.8.0` CI baseline compiled the portable static-site, reverse-proxy,
 full, Wasm, and development profiles on native macOS and built representative
 `full` and `wasm` archives. The `1.8.1` development gate runs on native Apple
-Silicon and Intel hosts, builds all seven public archive profiles on both
-architectures, and exercises live static, proxy, downstream/upstream TLS,
-cache, admin, load-balancer, local observability, and packaged Wasm behavior.
+Silicon, builds all seven public archive profiles for ARM64 macOS, and exercises
+live static, proxy, downstream/upstream TLS, cache, admin, load-balancer, local
+observability, and packaged Wasm behavior. Intel macOS is not a supported
+release target and does not receive official archives.
 External Prometheus and Jaeger collector integration remains in the Linux gate
 because the macOS portable gate does not require a container runtime.
 

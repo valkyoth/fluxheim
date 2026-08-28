@@ -81,9 +81,6 @@ case "$target" in
     aarch64-unknown-linux-gnu | aarch64-unknown-linux-musl)
         label="aarch64-linux"
         ;;
-    x86_64-apple-darwin)
-        label="x86_64-macos"
-        ;;
     aarch64-apple-darwin)
         label="aarch64-macos"
         ;;

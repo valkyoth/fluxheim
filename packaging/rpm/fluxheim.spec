@@ -158,9 +158,9 @@ fi
 
 %changelog
 * Fri Aug 28 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.8.1-1
-- Start native Apple Silicon and Intel macOS parity gates.
-- Build all seven public portable archive profiles on both macOS
-  architectures while retaining the unsigned-preview policy.
+- Start the native Apple Silicon macOS parity gate.
+- Build all seven public portable archive profiles for ARM64 macOS while
+  retaining the unsigned-preview policy; Intel macOS is unsupported.
 - Add live native macOS subsystem parity and verified upstream TLS smokes, and
   document foreground operation plus APFS, ACL, locking, and symlink limits.
 

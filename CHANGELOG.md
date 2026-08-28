@@ -11,8 +11,8 @@ behavior when the change improves security or project direction.
 
 ### Added
 
-- Add native Apple Silicon and Intel macOS CI gates for every public portable
-  archive profile.
+- Add a native Apple Silicon macOS CI gate for every public portable archive
+  profile; Intel macOS is not a supported release target.
 - Add a native macOS live parity orchestrator covering static and proxy
   serving, downstream and verified upstream TLS, memory and disk cache, admin
   operations, load balancing, local observability, and packaged Wasm policy

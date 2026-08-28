@@ -83,7 +83,6 @@ release. Include whether the dependency is direct or transitive.
   - `fluxheim-VERSION-php-aarch64-linux.tar.gz`
   - `fluxheim-VERSION-config-tester-aarch64-linux.tar.gz`
   - `fluxheim-VERSION-dev-aarch64-macos.tar.gz` when published
-  - `fluxheim-VERSION-dev-x86_64-macos.tar.gz` when published
 - SBOM checksums:
 - Reproducible build hash:
 - Container digests:
