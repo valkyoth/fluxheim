@@ -164,12 +164,14 @@ pub(super) fn run_doctor(
             if online { "ok" } else { "not-checked" }
         );
     }
-    println!("{}", account_rollover_capability_status());
+    println!(
+        "acme capability: account-rollover=unavailable reason=client-cannot-prejournal-replacement-key"
+    );
     println!("acme doctor: ok targets={} online={online}", targets.len());
     Ok(())
 }
 
-#[cfg(feature = "acme-client")]
+#[cfg(all(feature = "acme-client", test))]
 pub(super) fn account_rollover_capability_status() -> &'static str {
     "acme capability: account-rollover=unavailable reason=client-cannot-prejournal-replacement-key"
 }
