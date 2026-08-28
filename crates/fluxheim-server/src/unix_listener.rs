@@ -50,9 +50,19 @@ fn bind_private_unix_listener(path: &Path) -> io::Result<UnixListener> {
         None,
     )?;
     bind_private_socket_path(&socket, &address)?;
-    if let Err(error) = rustix::fs::fchmod(&socket, PRIVATE_UNIX_LISTENER_MODE) {
+    let metadata = match rustix::fs::lstat(path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            let _ = rustix::fs::unlink(path);
+            return Err(error.into());
+        }
+    };
+    if metadata.st_mode & 0o777 != PRIVATE_UNIX_LISTENER_MODE.bits() {
         let _ = rustix::fs::unlink(path);
-        return Err(error.into());
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "private Unix listener was not created with mode 0600",
+        ));
     }
     if let Err(error) = rustix::net::listen(&socket, PRIVATE_UNIX_LISTENER_BACKLOG) {
         let _ = rustix::fs::unlink(path);

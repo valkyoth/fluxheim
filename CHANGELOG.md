@@ -32,6 +32,9 @@ behavior when the change improves security or project direction.
   diagnostic HTML.
 - Refresh the reviewed vendored `instant-acme` patch-policy digests after its
   intentional `base64-ng 2.0.1` dependency update.
+- Verify private Unix listener pathname permissions after restrictive-umask
+  binding instead of calling `fchmod` on a socket descriptor, which macOS
+  rejects with `EINVAL`.
 
 ### Security
 

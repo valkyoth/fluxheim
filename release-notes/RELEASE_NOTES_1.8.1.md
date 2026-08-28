@@ -32,6 +32,9 @@ This release is under development.
   `shasum`.
 - Refresh the reviewed vendored `instant-acme` policy digests for the
   intentional `base64-ng 2.0.1` dependency update.
+- Keep local admin and certificate-reload sockets at verified mode `0600`
+  without relying on descriptor `fchmod`, allowing the native admin runtime to
+  start on macOS where that socket operation returns `EINVAL`.
 
 ## Deployment Boundary
 
