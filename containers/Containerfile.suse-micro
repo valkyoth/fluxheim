@@ -1,5 +1,5 @@
-ARG RUST_IMAGE=docker.io/library/rust:1.97.1-alpine3.23@sha256:c4a364ddbf684fe038e6fa6a4f25b30c8dc85247423e0e660676ece0d17be4a2
-ARG RUNTIME_IMAGE=registry.suse.com/suse/sl-micro/6.2/base-os-container:latest@sha256:3f0f52e7f4055048893c39b6bf039db9c573f5ce999cd45367de5016acf5839b
+ARG RUST_IMAGE=docker.io/library/rust:1.98.0-alpine3.23@sha256:4743b6231029d726d7a0f81d730a7c9f4eff23225a4499c01e275efb5e260235
+ARG RUNTIME_IMAGE=registry.suse.com/suse/sl-micro/6.2/base-os-container:latest@sha256:c440abe8baa0d246ed2960038751c1072af3274e2570beb6ed8aaeabcff3bb14
 ARG FLUXHEIM_CONFIG=packaging/container/fluxheim.toml
 
 FROM ${RUST_IMAGE} AS builder

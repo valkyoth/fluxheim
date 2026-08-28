@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use fluxheim_common::test_support::unique_temp_path;
 use prometheus::Encoder;
-use zeroize::Zeroizing;
 
 use crate::config::{
     CacheConfig, CacheDiskConfig, CacheMemoryConfig, CachePeerConfig, CachePeerFillConfig, Config,

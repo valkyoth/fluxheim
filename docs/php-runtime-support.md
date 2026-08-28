@@ -16,7 +16,7 @@ Use this implementation model:
    supervises php-fpm, and connects to its private socket while still using the
    same FastCGI request path as external php-fpm.
 
-As of the current review, `fastcgi-client 0.11.1` is available for the php-fpm
+As of the current review, `fastcgi-client 0.12.0` is used for the php-fpm
 path under Apache-2.0. Pure-Rust PHP/phprs support is no longer planned for the
 1.3 line because managed php-fpm covers the useful zero-admin deployment goal
 without adopting an immature interpreter. `ripht-php-sapi 0.1.0-rc.7` remains an
@@ -30,7 +30,7 @@ Implemented feature flags:
 
 ```toml
 php = ["proxy", "web"]
-php-fpm = ["php", "dep:fastcgi-client", "dep:tokio", "fastcgi-client/runtime-tokio"]
+php-fpm = ["php", "dep:fastcgi-client", "dep:tokio", "fastcgi-client/tokio"]
 ```
 
 `php-fpm` is the only PHP runtime feature in the 1.3 line. Managed php-fpm is a

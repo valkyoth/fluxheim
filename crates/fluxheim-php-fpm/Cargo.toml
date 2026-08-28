@@ -2,17 +2,17 @@
 name = "fluxheim-php-fpm"
 version = "1.8.0"
 edition = "2024"
-rust-version = "1.97.1"
+rust-version = "1.98.0"
 license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim PHP-FPM protocol and runtime boundary."
 
 [dependencies]
-fastcgi-client = { version = "0.11.1", default-features = false, features = ["runtime-tokio"] }
+fastcgi-client = { version = "0.12.0", default-features = false, features = ["tokio"] }
 fluxheim-config = { path = "../fluxheim-config", features = ["php-fpm"] }
 fluxheim-protocol = { path = "../fluxheim-protocol" }
 getrandom = "0.4.3"
-log = "0.4.33"
+log = "0.4.34"
 percent-encoding = "2.3.2"
 rustix = { version = "1.1.4", features = ["fs", "net", "process"] }
 sanitization = { version = "2.0.3", features = ["alloc"] }

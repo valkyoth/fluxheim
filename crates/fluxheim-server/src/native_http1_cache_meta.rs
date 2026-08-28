@@ -220,7 +220,7 @@ fn native_disk_meta_optional_sha256(value: &str) -> Option<Option<[u8; 32]>> {
         return None;
     }
     let mut digest = [0_u8; 32];
-    for (output, pair) in digest.iter_mut().zip(value.as_bytes().chunks_exact(2)) {
+    for (output, pair) in digest.iter_mut().zip(value.as_bytes().as_chunks::<2>().0) {
         *output = (native_hex_nibble(pair[0])? << 4) | native_hex_nibble(pair[1])?;
     }
     Some(Some(digest))

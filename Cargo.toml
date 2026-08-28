@@ -2,7 +2,7 @@
 name = "fluxheim"
 version = "1.8.0"
 edition = "2024"
-rust-version = "1.97.1"
+rust-version = "1.98.0"
 license = "EUPL-1.2"
 publish = false
 description = "A modular Rust edge gateway for websites, caching, and load balancing."
@@ -155,7 +155,7 @@ php-fpm = [
     "dep:fastcgi-client",
     "dep:fluxheim-php-fpm",
     "dep:tokio",
-    "fastcgi-client/runtime-tokio",
+    "fastcgi-client/tokio",
     "fluxheim-config/php-fpm",
     "fluxheim-server/php-fpm",
 ]
@@ -250,13 +250,13 @@ profile-iso19790-rustls = ["profile-fips-rustls", "tls-rustls-iso19790"]
 
 [dependencies]
 arc-swap = "1.9.2"
-async-trait = { version = "0.1.91", optional = true }
-aws-lc-rs = { version = "1.17.3", default-features = false, features = ["fips"], optional = true }
-base64-ng = { version = "1.3.9", optional = true }
+async-trait = { version = "0.1.92", optional = true }
+aws-lc-rs = { version = "1.18.0", default-features = false, features = ["fips"], optional = true }
+base64-ng = { version = "2.0.1", optional = true }
 bytes = { version = "1.12.1", optional = true }
-clap = { version = "4.6.4", features = ["derive", "env"] }
+clap = { version = "4.6.6", features = ["derive", "env"] }
 env_logger = "0.11.11"
-fastcgi-client = { version = "0.11.1", default-features = false, optional = true }
+fastcgi-client = { version = "0.12.0", default-features = false, optional = true }
 fluxheim-common = { path = "crates/fluxheim-common" }
 fluxheim-acme = { path = "crates/fluxheim-acme", optional = true }
 fluxheim-compression = { path = "crates/fluxheim-compression" }
@@ -275,20 +275,20 @@ fluxheim-tls = { path = "crates/fluxheim-tls" }
 fluxheim-web = { path = "crates/fluxheim-web", optional = true }
 fluxheim-wasm = { path = "crates/fluxheim-wasm", optional = true }
 fluxheim-openssl-fips-support = { path = "vendor/fluxheim-openssl-fips-support", optional = true }
-futures = "0.3.33"
+futures = "0.3.34"
 getrandom = "0.4.3"
 httpdate = { version = "1.0.3", optional = true }
-http = { version = "1.4.2", optional = true }
-log = "0.4.33"
+http = { version = "1.5.0", optional = true }
+log = "0.4.34"
 mime_guess = { version = "2.0.5", optional = true }
-moka = { version = "0.12.15", default-features = false, features = ["sync"], optional = true }
+moka = { version = "0.12.16", default-features = false, features = ["sync"], optional = true }
 openssl = { version = "0.10.81", optional = true }
 percent-encoding = { version = "2.3.2", optional = true }
 prometheus = { version = "0.14.0", optional = true }
 regex = "1.13.1"
 ring = { version = "0.17.14", optional = true }
 rpassword = { version = "7.5.4", optional = true }
-rustls = { version = "0.23.42", optional = true, default-features = false, features = ["std", "tls12", "logging"] }
+rustls = { version = "0.23.43", optional = true, default-features = false, features = ["std", "tls12", "logging"] }
 rustls-native-certs = { version = "0.8.4", optional = true }
 rustix = { version = "1.1.4", features = ["fs", "net", "process"], optional = true }
 sha2 = { version = "0.11.0", optional = true }
@@ -298,9 +298,9 @@ tokio-openssl = { version = "0.6.5", optional = true }
 tokio-rustls = { version = "0.26.4", optional = true, default-features = false, features = ["logging", "tls12"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", optional = true }
-thiserror = "2.0.19"
-toml = "1.1.3"
-ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"], optional = true }
+thiserror = "2.0.20"
+toml = "1.1.4"
+ureq = { version = "3.4.0", default-features = false, features = ["json", "rustls"], optional = true }
 zeroize = { version = "1.9.0", features = ["derive"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -309,11 +309,11 @@ libsystemd = { version = "0.7.2", optional = true }
 
 [dev-dependencies]
 brotli = { version = "8.0.4", default-features = false, features = ["std"] }
-flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
 fluxheim-common = { path = "crates/fluxheim-common", features = ["test-support"] }
 fluxheim-config = { path = "crates/fluxheim-config", features = ["test-support"] }
 proptest = "1.11.0"
-rcgen = { version = "0.14.8", default-features = false, features = ["pem", "ring"] }
+rcgen = { version = "0.14.9", default-features = false, features = ["pem", "ring"] }
 tempfile = "3.27.0"
 zstd = { version = "0.13.3", default-features = false }
 

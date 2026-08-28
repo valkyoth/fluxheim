@@ -313,9 +313,10 @@ mod tests {
         use std::ffi::OsString;
         use std::io::{Read, Write};
 
-        let root = std::env::temp_dir().join(format!("fh-acme-reload-cli-{}", std::process::id()));
+        let root = std::path::PathBuf::from("target").join(format!("ar-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir(&root).unwrap();
+        let root = root.canonicalize().unwrap();
         let socket = root.join("reload.sock");
         let config = root.join("fluxheim.toml");
         std::fs::write(

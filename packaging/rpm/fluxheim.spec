@@ -1,5 +1,5 @@
 %global fluxheim_features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
-%global rust_min_version 1.97
+%global rust_min_version 1.98
 %bcond_without tests
 
 %{!?_tmpfilesdir:%global _tmpfilesdir %{_prefix}/lib/tmpfiles.d}
@@ -183,7 +183,7 @@ fi
 - Complete the native HTTP/1 parser and proxy boundary audit with bounded
   chunking, strict authority/target validation, and protocol fuzz coverage.
 - Preserve noncritical background services at the critical-watchdog ownership
-  boundary and require Rust 1.97 for packaged builds.
+  boundary and require Rust 1.98 for packaged builds.
 
 * Mon Jul 13 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.10-1
 - Add selectable live smokes for all four Wasm migration-example families.

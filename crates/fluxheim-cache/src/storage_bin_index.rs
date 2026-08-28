@@ -195,7 +195,7 @@ fn storage_bin_hex_decode_string(value: &str) -> std::io::Result<String> {
     bytes.try_reserve_exact(value.len() / 2).map_err(|_| {
         invalid_index("storage-bin index key allocation exceeds available capacity")
     })?;
-    for chunk in value.as_bytes().chunks_exact(2) {
+    for chunk in value.as_bytes().as_chunks::<2>().0 {
         let high = storage_bin_hex_nibble(chunk[0])
             .ok_or_else(|| invalid_index("invalid storage-bin index hex key"))?;
         let low = storage_bin_hex_nibble(chunk[1])

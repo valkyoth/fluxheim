@@ -119,7 +119,7 @@ optional = true
 version = "0.22"
 
 [dependencies.base64-ng]
-version = "1.3.7"
+version = "2.0.1"
 
 [dependencies.bytes]
 version = "1"
