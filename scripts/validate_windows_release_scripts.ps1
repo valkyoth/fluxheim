@@ -8,7 +8,8 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $scripts = @(
     'scripts/build_release_assets.ps1',
     'scripts/prepare_windows_release_builder.ps1',
-    'scripts/run_windows_release_builder.ps1'
+    'scripts/run_windows_release_builder.ps1',
+    'scripts/smoke_windows_native.ps1'
 )
 
 foreach ($relative in $scripts) {
@@ -23,6 +24,20 @@ foreach ($relative in $scripts) {
     if ($errors.Count -gt 0) {
         $messages = $errors | ForEach-Object { $_.Message }
         throw "$relative has PowerShell parse errors: $($messages -join '; ')"
+    }
+}
+
+$smoke = Get-Content -LiteralPath (Join-Path $root 'scripts/smoke_windows_native.ps1') -Raw
+foreach ($required in @(
+    '--validate-config',
+    'windows-static-ok',
+    'x-content-type-options',
+    'x-cache-status',
+    "expected MISS",
+    "expected HIT"
+)) {
+    if (-not $smoke.Contains($required)) {
+        throw "Windows native smoke is missing required behavior: $required"
     }
 }
 
