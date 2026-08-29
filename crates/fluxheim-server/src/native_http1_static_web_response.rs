@@ -226,6 +226,7 @@ fn open_static_body_file(file: &NativeStaticFile) -> io::Result<File> {
     Ok(opened)
 }
 
+#[cfg(unix)]
 fn open_static_body_file_at_root(
     file: &NativeStaticFile,
     relative_path: &Path,
@@ -264,6 +265,82 @@ fn open_static_body_file_at_root(
                 .map_err(io::Error::from)?;
             return Ok(File::from(file));
         }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "static body path is empty",
+    ))
+}
+
+#[cfg(windows)]
+fn open_static_body_file_at_root(
+    file: &NativeStaticFile,
+    relative_path: &Path,
+) -> io::Result<File> {
+    use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, SECURITY_IDENTIFICATION,
+        SECURITY_SQOS_PRESENT,
+    };
+
+    let mut current = file.root.clone();
+    let mut components = relative_path.components().peekable();
+    while let Some(component) = components.next() {
+        let Component::Normal(name) = component else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "static body path is not relative",
+            ));
+        };
+        current.push(name);
+        let metadata = std::fs::symlink_metadata(&current)?;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "static body path contains a reparse point",
+            ));
+        }
+        if components.peek().is_some() {
+            if !metadata.is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotADirectory,
+                    "static body path component is not a directory",
+                ));
+            }
+            continue;
+        }
+        if !metadata.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "static body path is not a regular file",
+            ));
+        }
+
+        let opened = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION)
+            .open(&current)?;
+        let opened_metadata = opened.metadata()?;
+        if !opened_metadata.is_file()
+            || opened_metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "static body path changed during secure open",
+            ));
+        }
+        let path_handle = same_file::Handle::from_path(&current)?;
+        let opened_handle = same_file::Handle::from_file(opened.try_clone()?)?;
+        if path_handle != opened_handle {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "static body path changed during secure open",
+            ));
+        }
+        return Ok(opened);
     }
 
     Err(io::Error::new(

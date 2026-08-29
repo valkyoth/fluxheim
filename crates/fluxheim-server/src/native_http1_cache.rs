@@ -11,7 +11,11 @@ use zeroize::Zeroizing;
 
 #[path = "native_http1_cache_backend.rs"]
 mod native_http1_cache_backend;
+#[cfg(unix)]
 #[path = "native_http1_cache_disk_path.rs"]
+mod native_http1_cache_disk_path;
+#[cfg(windows)]
+#[path = "native_http1_cache_disk_path_windows.rs"]
 mod native_http1_cache_disk_path;
 #[path = "native_http1_cache_encryption.rs"]
 mod native_http1_cache_encryption;
