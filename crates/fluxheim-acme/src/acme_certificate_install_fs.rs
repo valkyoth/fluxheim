@@ -145,6 +145,8 @@ pub(super) fn ensure_safe_directory(
     directory: &Path,
     ownership: &ManagedCertificateOwnership,
 ) -> Result<(), AcmeCertificateInstallError> {
+    #[cfg(not(unix))]
+    let _ = (directory, mode, directory_fd);
     #[cfg(unix)]
     {
         let directory_fd = match (
@@ -391,6 +393,7 @@ pub(super) fn open_safe_certificate_directory(
     })
 }
 
+#[cfg(unix)]
 pub(super) fn certificate_file_name_in_directory<'a>(
     directory: &Path,
     path: &'a Path,
@@ -447,6 +450,8 @@ pub(super) fn sync_directory(
     path: &Path,
     directory_fd: Option<&CertificateDirectoryFd>,
 ) -> Result<(), AcmeCertificateInstallError> {
+    #[cfg(not(unix))]
+    let _ = directory_fd;
     #[cfg(unix)]
     if let Some(directory_fd) = directory_fd {
         return rustix::fs::fsync(directory_fd).map_err(|error| AcmeCertificateInstallError::Io {

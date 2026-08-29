@@ -1,5 +1,7 @@
 use super::super::*;
-use super::fs_ops::{CertificateDirectoryFd, certificate_file_name_in_directory};
+use super::fs_ops::CertificateDirectoryFd;
+#[cfg(unix)]
+use super::fs_ops::certificate_file_name_in_directory;
 
 pub(super) fn backup_existing_file(
     directory: &Path,
@@ -7,6 +9,8 @@ pub(super) fn backup_existing_file(
     backup: &Path,
     directory_fd: Option<&CertificateDirectoryFd>,
 ) -> Result<bool, AcmeCertificateInstallError> {
+    #[cfg(not(unix))]
+    let _ = (directory, directory_fd);
     #[cfg(unix)]
     if let Some(directory_fd) = directory_fd {
         let path_name = certificate_file_name_in_directory(directory, path)?;
@@ -75,6 +79,8 @@ fn ensure_backup_slot_is_empty(
     path: &Path,
     directory_fd: Option<&CertificateDirectoryFd>,
 ) -> Result<(), AcmeCertificateInstallError> {
+    #[cfg(not(unix))]
+    let _ = (directory, directory_fd);
     #[cfg(unix)]
     if let Some(directory_fd) = directory_fd {
         let name = certificate_file_name_in_directory(directory, path)?;
@@ -109,6 +115,8 @@ pub(super) fn cleanup_backup(
     path: &Path,
     directory_fd: Option<&CertificateDirectoryFd>,
 ) -> Result<(), AcmeCertificateInstallError> {
+    #[cfg(not(unix))]
+    let _ = (directory, directory_fd);
     #[cfg(unix)]
     if let Some(directory_fd) = directory_fd {
         let name = certificate_file_name_in_directory(directory, path)?;
@@ -138,6 +146,8 @@ pub(super) fn restore_backup(
     destination: &Path,
     directory_fd: Option<&CertificateDirectoryFd>,
 ) -> io::Result<()> {
+    #[cfg(not(unix))]
+    let _ = (directory, directory_fd);
     #[cfg(unix)]
     if let Some(directory_fd) = directory_fd {
         let backup_name = certificate_file_name_in_directory(directory, backup)
@@ -171,6 +181,7 @@ pub(super) fn restore_backup(
     }
 }
 
+#[cfg(unix)]
 fn acme_install_error_to_io_error(error: AcmeCertificateInstallError) -> io::Error {
     match error {
         AcmeCertificateInstallError::Io { error, .. } => error,

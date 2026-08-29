@@ -361,6 +361,8 @@ fn read_revocation_journal(
     directory: &Path,
     directory_fd: Option<&CertificateDirectoryFd>,
 ) -> Result<Option<RevocationJournal>, AcmeCertificateInstallError> {
+    #[cfg(not(unix))]
+    let _ = directory_fd;
     let path = directory.join(REVOCATION_JOURNAL_FILE);
     #[cfg(unix)]
     let file = {

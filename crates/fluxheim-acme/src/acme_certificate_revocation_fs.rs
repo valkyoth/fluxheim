@@ -1,4 +1,6 @@
-use super::fs_ops::{CertificateDirectoryFd, certificate_file_name_in_directory};
+use super::fs_ops::CertificateDirectoryFd;
+#[cfg(unix)]
+use super::fs_ops::certificate_file_name_in_directory;
 use super::*;
 
 pub(super) fn ensure_existing_regular_file(
@@ -21,6 +23,8 @@ pub(super) fn certificate_file_exists_regular(
     path: &Path,
     directory_fd: Option<&CertificateDirectoryFd>,
 ) -> Result<bool, AcmeCertificateInstallError> {
+    #[cfg(not(unix))]
+    let _ = (directory, directory_fd);
     #[cfg(unix)]
     if let Some(directory_fd) = directory_fd {
         let name = certificate_file_name_in_directory(directory, path)?;

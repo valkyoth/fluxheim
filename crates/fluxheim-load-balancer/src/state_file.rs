@@ -22,6 +22,7 @@ const O_NOFOLLOW: i32 = 0o400000;
 const O_NOFOLLOW: i32 = 0x0100;
 
 const MAX_RUNTIME_STATE_FILE_BYTES: u64 = 16 * 1024 * 1024;
+#[cfg(unix)]
 const RUNTIME_STATE_FILE_MODE: u32 = 0o600;
 
 pub(super) fn load_runtime_state_file(
