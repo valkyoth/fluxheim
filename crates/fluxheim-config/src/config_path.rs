@@ -44,7 +44,7 @@ pub fn validate_non_world_writable_parent(
         return Ok(());
     };
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     match crate::fs_trust::existing_parent_has_insecure_write_permissions(path) {
         Ok(true) => {
             return Err(ConfigError::UnsafePath {
@@ -58,7 +58,7 @@ pub fn validate_non_world_writable_parent(
         }
     }
 
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     let _ = (field, path);
 
     Ok(())
@@ -84,11 +84,22 @@ pub fn validate_private_state_directory(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(path_inspection_failed(field, path, error)),
     };
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+    if metadata_is_link_like(&metadata) || !metadata.is_dir() {
         return Err(ConfigError::UnsafePath {
             field,
             path: path.to_path_buf(),
         });
+    }
+    #[cfg(windows)]
+    match crate::fs_trust::existing_path_or_parent_has_insecure_write_permissions(path) {
+        Ok(true) => {
+            return Err(ConfigError::UnsafePath {
+                field,
+                path: path.to_path_buf(),
+            });
+        }
+        Ok(false) => {}
+        Err(error) => return Err(path_inspection_failed(field, path, error)),
     }
     #[cfg(unix)]
     {
@@ -149,7 +160,7 @@ pub fn validate_required_process_path(field: &'static str, path: &Path) -> Resul
             return Err(path_inspection_failed(field, path, error));
         }
     }
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     match crate::fs_trust::existing_parent_has_insecure_write_permissions(path) {
         Ok(true) => {
             return Err(ConfigError::UnsafePath {
@@ -189,7 +200,7 @@ pub fn path_existing_prefix_contains_symlink(path: &Path) -> std::io::Result<boo
     for component in path.components() {
         current.push(component);
         match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(metadata) if metadata_is_link_like(&metadata) => return Ok(true),
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
             Err(error) => return Err(error),
@@ -197,4 +208,18 @@ pub fn path_existing_prefix_contains_symlink(path: &Path) -> std::io::Result<boo
     }
 
     Ok(false)
+}
+
+#[cfg(not(windows))]
+fn metadata_is_link_like(metadata: &std::fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
+}
+
+#[cfg(windows)]
+fn metadata_is_link_like(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+
+    metadata.file_attributes()
+        & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+        != 0
 }

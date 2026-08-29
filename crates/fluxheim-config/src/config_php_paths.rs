@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::{ConfigError, ProxyErrorPageConfig};
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 use crate::config_path::validate_non_world_writable_parent;
 use crate::config_path::{
     path_existing_prefix_contains_symlink, path_inspection_failed, validate_path,
@@ -16,7 +16,7 @@ pub(crate) fn validate_php_request_body_spool_dir(
     path: &Path,
 ) -> Result<(), ConfigError> {
     validate_path(field.clone(), Some(path))?;
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     match crate::fs_trust::existing_path_or_parent_has_insecure_write_permissions(path) {
         Ok(true) => {
             return Err(ConfigError::UnsafePath {
@@ -29,7 +29,7 @@ pub(crate) fn validate_php_request_body_spool_dir(
             return Err(path_inspection_failed(field, path, error));
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     validate_non_world_writable_parent(field.clone(), Some(path))?;
 
     match fs::symlink_metadata(path) {
