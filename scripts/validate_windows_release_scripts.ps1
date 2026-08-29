@@ -41,6 +41,17 @@ foreach ($required in @(
     }
 }
 
+$buildScript = Get-Content -LiteralPath (Join-Path $root 'build.rs') -Raw
+foreach ($required in @(
+    'CARGO_CFG_TARGET_OS',
+    'CARGO_CFG_TARGET_ENV',
+    'cargo:rustc-link-arg-bins=/STACK:8388608'
+)) {
+    if (-not $buildScript.Contains($required)) {
+        throw "Windows build script is missing required stack-reserve contract: $required"
+    }
+}
+
 $builder = Get-Content -LiteralPath (Join-Path $root 'scripts/build_release_assets.ps1') -Raw
 foreach ($required in @(
     'scripts/portable_release_plan.py',

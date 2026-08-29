@@ -1,5 +1,6 @@
 fn main() {
     emit_version_metadata();
+    emit_windows_stack_reserve();
 
     let tls_backends = [
         ("tls-rustls", "CARGO_FEATURE_TLS_RUSTLS"),
@@ -29,6 +30,16 @@ fn main() {
         fail(
             "privacy-mode cannot be combined with metrics; zero-retention builds must not compile request metrics",
         );
+    }
+}
+
+fn emit_windows_stack_reserve() {
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    if target_os == "windows" && target_env == "msvc" {
+        // Windows defaults PE executables to a 1 MiB main-thread stack. Full config
+        // validation constructs the native router and requires Linux/macOS-equivalent headroom.
+        println!("cargo:rustc-link-arg-bins=/STACK:8388608");
     }
 }
 
