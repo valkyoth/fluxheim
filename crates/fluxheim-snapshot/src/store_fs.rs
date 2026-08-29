@@ -24,7 +24,9 @@ use std::os::unix::fs::PermissionsExt;
 
 pub(crate) const MAX_CURRENT_SNAPSHOT_POINTER_BYTES: u64 = 4096;
 pub(crate) const MAX_SNAPSHOT_FILE_BYTES: u64 = 16 * 1024 * 1024;
+#[cfg(unix)]
 pub(crate) const SNAPSHOT_DIR_MODE: u32 = 0o700;
+#[cfg(unix)]
 pub(crate) const SNAPSHOT_FILE_MODE: u32 = 0o600;
 
 pub(crate) fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), SnapshotError> {

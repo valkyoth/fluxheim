@@ -1,5 +1,7 @@
 use std::fs::File;
-use std::io::{self, Read as _};
+#[cfg(unix)]
+use std::io;
+use std::io::Read as _;
 use std::path::Path;
 use std::sync::Arc;
 

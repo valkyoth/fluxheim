@@ -1,4 +1,5 @@
 use std::io;
+#[cfg(unix)]
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 

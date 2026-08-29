@@ -178,14 +178,36 @@ impl fastcgi_client::io::AsyncRead for PhpSpoolReader {
             let offset = this.offset;
             let read_len = buffer.len().min(PHP_SPOOL_POSITIONAL_READ_BYTES);
             this.pending = Some(tokio::task::spawn_blocking(move || {
-                use std::os::unix::fs::FileExt as _;
-
                 let mut bytes = SecretVec::from_fn(read_len, |_| 0);
-                let read = bytes.with_secret_mut(|bytes| file.read_at(bytes, offset))?;
+                let read = bytes.with_secret_mut(|bytes| {
+                    read_php_request_body_spool_at(&file, bytes, offset)
+                })?;
                 Ok((bytes, read))
             }));
         }
     }
+}
+
+#[cfg(unix)]
+fn read_php_request_body_spool_at(
+    file: &std::fs::File,
+    buffer: &mut [u8],
+    offset: u64,
+) -> io::Result<usize> {
+    use std::os::unix::fs::FileExt as _;
+
+    file.read_at(buffer, offset)
+}
+
+#[cfg(windows)]
+fn read_php_request_body_spool_at(
+    file: &std::fs::File,
+    buffer: &mut [u8],
+    offset: u64,
+) -> io::Result<usize> {
+    use std::os::windows::fs::FileExt as _;
+
+    file.seek_read(buffer, offset)
 }
 
 #[cfg(not(unix))]

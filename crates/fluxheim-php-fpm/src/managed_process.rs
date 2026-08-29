@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use fluxheim_config::{PhpConfig, PhpFpmMode};
 
+#[cfg(unix)]
 use crate::managed_config::{managed_php_fpm_config, managed_php_fpm_instance_name};
 #[cfg(unix)]
 use crate::managed_spawn::{ensure_managed_php_fpm_directory, write_managed_php_fpm_config_file};
@@ -102,10 +103,10 @@ pub fn managed_php_fpm_from_config(
     #[cfg(not(unix))]
     {
         let _ = (scope, metric_pool, config);
-        return Err(io::Error::new(
+        Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "managed php-fpm requires Unix sockets",
-        ));
+        ))
     }
     #[cfg(unix)]
     {
