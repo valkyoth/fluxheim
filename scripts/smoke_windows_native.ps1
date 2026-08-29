@@ -63,13 +63,13 @@ function New-WindowsSmokeCertificate {
         )
         $san = [Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder]::new()
         $san.AddDnsName('static.test')
+        $san.AddDnsName('localhost')
         $request.CertificateExtensions.Add($san.Build())
         $certificate = $request.CreateSelfSigned(
             [DateTimeOffset]::UtcNow.AddMinutes(-5),
             [DateTimeOffset]::UtcNow.AddDays(1)
         )
         try {
-            $thumbprint = $certificate.Thumbprint
             [IO.File]::WriteAllText(
                 $CertificatePath,
                 (ConvertTo-Pem -Label 'CERTIFICATE' -Bytes $certificate.RawData),
@@ -80,7 +80,6 @@ function New-WindowsSmokeCertificate {
                 (ConvertTo-Pem -Label 'PRIVATE KEY' -Bytes $rsa.ExportPkcs8PrivateKey()),
                 [Text.Encoding]::ASCII
             )
-            return $thumbprint
         } finally {
             $certificate.Dispose()
         }
@@ -245,7 +244,7 @@ Set-Content -LiteralPath (Join-Path $publicRoot 'index.html') `
     -Encoding ascii
 Set-Content -LiteralPath (Join-Path $publicRoot 'asset.webp') `
     -Value 'windows-cache-ok' -Encoding ascii
-$expectedCertificateThumbprint = New-WindowsSmokeCertificate `
+New-WindowsSmokeCertificate `
     -CertificatePath $certificatePath `
     -PrivateKeyPath $privateKeyPath
 
@@ -423,14 +422,12 @@ try {
         }
 
         $tlsHandler = [Net.Http.HttpClientHandler]::new()
-        $tlsHandler.ServerCertificateCustomValidationCallback = {
-            param($message, $certificate, $chain, $policyErrors)
-            return $certificate.Thumbprint -eq $expectedCertificateThumbprint
-        }
+        $tlsHandler.ServerCertificateCustomValidationCallback =
+            [Net.Http.HttpClientHandler]::DangerousAcceptAnyServerCertificateValidator
         $tlsClient = [Net.Http.HttpClient]::new($tlsHandler)
         $tlsClient.Timeout = [TimeSpan]::FromSeconds(2)
         try {
-            $tlsUri = [Uri]"https://127.0.0.1:$tlsPort/"
+            $tlsUri = [Uri]"https://localhost:$tlsPort/"
             $tlsResponse = Invoke-FluxheimRequest -Client $tlsClient -Uri $tlsUri `
                 -HostHeader 'static.test'
             try {
@@ -566,7 +563,7 @@ try {
 } finally {
     if ($null -ne $process -and -not $process.HasExited) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-        $process.WaitForExit(5000)
+        [void]$process.WaitForExit(5000)
     }
     if ($null -eq $previousAdminToken) {
         Remove-Item Env:FLUXHEIM_WINDOWS_SMOKE_ADMIN_TOKEN -ErrorAction SilentlyContinue

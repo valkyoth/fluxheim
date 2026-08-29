@@ -326,7 +326,7 @@ try {
 } finally {
     if ($null -ne $process -and -not $process.HasExited) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-        $process.WaitForExit(5000)
+        [void]$process.WaitForExit(5000)
     }
     if ($null -ne $origin) {
         $origin.Dispose()
