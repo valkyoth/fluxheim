@@ -80,15 +80,14 @@ release target and does not receive official archives.
 External Prometheus and Jaeger collector integration remains in the Linux gate
 because the macOS portable gate does not require a container runtime.
 
-`1.8.0` does not publish Windows binaries. Fluxheim deliberately rejects
-configuration-file loading on Windows until native owner and ACL trust checks
-replace the Unix ownership and mode checks, and the cache storage path still
-depends on descriptor-relative Unix filesystem operations. It does not
-silently weaken either security boundary to make a preview compile. The
-Windows CI planning gate validates archive names and feature sets and executes
-a platform-specific regression proving unsupported config trust checks fail
-closed. Runtime config loading, path trust, cache storage, service integration,
-profile builds, and archives are `1.8.2` work.
+`1.8.0` did not publish Windows binaries. The active `1.8.2` line implements
+native owner/ACL trust checks for configuration and runtime paths, Windows-safe
+static and cache file handling, all seven MSVC profile builds, and a native
+static/memory-cache live smoke. These checks preserve the existing trust
+boundary instead of replacing it with permissive cross-platform fallbacks.
+Proxy, TLS, admin, load-balancer, observability, Wasm, certificate-storage,
+shutdown, and archive evidence continue to be expanded and must pass natively
+on both x86_64 and ARM64 before Windows archives are published.
 
 Live platform parity remains staged:
 
@@ -103,7 +102,10 @@ Linux-only deployment material can still be present inside an archive as
 documentation, but it is not a native integration promise. In particular:
 
 - systemd and RPM units are Linux deployment assets;
-- Windows does not support Unix-domain control paths in the same way as Linux;
+- the TCP admin listener is the portable Windows control plane; the local Unix
+  operations socket is unavailable and must remain disabled;
+- Unix socket activation, upgrade sockets, and certificate-reload sockets do
+  not yet have Windows service/control-channel replacements;
 - managed PHP-FPM process supervision is Unix-only, while external TCP
   FastCGI remains the portable PHP path;
 - launchd and Windows service integration are later platform milestones.

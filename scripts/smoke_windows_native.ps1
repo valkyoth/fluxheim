@@ -50,7 +50,11 @@ function Invoke-FluxheimRequest {
 }
 
 $runId = [Guid]::NewGuid().ToString('N')
-$testRoot = Join-Path $root "target\fluxheim-windows-smoke\$runId"
+$temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+if (-not [IO.Path]::IsPathFullyQualified($temporaryRoot)) {
+    throw "Windows temporary directory is not fully qualified: $temporaryRoot"
+}
+$testRoot = Join-Path $temporaryRoot "fluxheim-windows-smoke-$runId"
 $publicRoot = Join-Path $testRoot 'public'
 $runtimeRoot = Join-Path $testRoot 'run'
 $configPath = Join-Path $testRoot 'fluxheim.toml'

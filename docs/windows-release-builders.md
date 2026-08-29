@@ -71,8 +71,9 @@ then independently:
 5. requires byte-identical ZIP hashes and emits checksums plus machine-readable
    commit, architecture, test-scope, and reproducibility evidence.
 
-The script fails when `scripts/smoke_windows_native.ps1` is absent. That is an
-intentional release block while the 1.8.2 runtime parity work is incomplete.
+The script fails when `scripts/smoke_windows_native.ps1` is absent or any
+native runtime assertion fails. This remains an intentional release block
+until the complete 1.8.2 parity matrix passes on both architectures.
 
 Windows outputs are unsigned `.zip` previews. Do not disable SmartScreen or
 execution policy globally. Authenticode, MSI/MSIX, Store delivery, and service

@@ -3232,8 +3232,9 @@ Stable scope:
   explicitly documented foreground deployment mode and APFS/ACL/symlink
   review.
 - `v1.8.2`: unsigned Windows portable parity. Build MSVC archives for the same
-  supported profiles and both archive formats, run live static, proxy, TLS,
-  cache, admin, load-balancer, observability, and Wasm tests, and define
+  supported profiles, generate both archive formats for internal payload
+  equivalence, publish ZIP only, run live static, proxy, TLS, cache, admin,
+  load-balancer, observability, and Wasm tests, and define
   Windows path, ACL, file-locking, shutdown, service, certificate-storage, and
   Unix-control-path replacements. Any unsupported profile must be named and
   justified rather than silently omitted.

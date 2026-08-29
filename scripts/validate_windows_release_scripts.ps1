@@ -30,6 +30,7 @@ foreach ($relative in $scripts) {
 $smoke = Get-Content -LiteralPath (Join-Path $root 'scripts/smoke_windows_native.ps1') -Raw
 foreach ($required in @(
     '--validate-config',
+    '[IO.Path]::GetTempPath()',
     'windows-static-ok',
     'x-content-type-options',
     'x-cache-status',
@@ -39,6 +40,9 @@ foreach ($required in @(
     if (-not $smoke.Contains($required)) {
         throw "Windows native smoke is missing required behavior: $required"
     }
+}
+if ($smoke.Contains('target\fluxheim-windows-smoke')) {
+    throw 'Windows native smoke must not place trusted runtime inputs below the inherited checkout ACL'
 }
 
 $buildScript = Get-Content -LiteralPath (Join-Path $root 'build.rs') -Raw
