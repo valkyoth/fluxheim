@@ -322,3 +322,10 @@ jobs:
       - name: Run Windows native runtime parity smoke
         shell: pwsh
         run: scripts/smoke_windows_native.ps1
+
+      - name: Run Windows packaged Wasm policy smoke
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value
+          scripts/build_release_assets.ps1 -Version $version -Architecture x86_64 -Profile wasm
+          scripts/smoke_windows_wasm_archive.ps1 -Version $version -Architecture x86_64

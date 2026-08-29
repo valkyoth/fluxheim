@@ -9,7 +9,8 @@ $scripts = @(
     'scripts/build_release_assets.ps1',
     'scripts/prepare_windows_release_builder.ps1',
     'scripts/run_windows_release_builder.ps1',
-    'scripts/smoke_windows_native.ps1'
+    'scripts/smoke_windows_native.ps1',
+    'scripts/smoke_windows_wasm_archive.ps1'
 )
 
 foreach ($relative in $scripts) {
@@ -55,6 +56,21 @@ if ($smoke.Contains('target\fluxheim-windows-smoke')) {
     throw 'Windows native smoke must not place trusted runtime inputs below the inherited checkout ACL'
 }
 
+$wasmSmoke = Get-Content -LiteralPath `
+    (Join-Path $root 'scripts/smoke_windows_wasm_archive.ps1') -Raw
+foreach ($required in @(
+    'Expand-Archive',
+    'irules-access-policy.wasm',
+    'Get-FileHash',
+    'windows-wasm-origin-ok',
+    'wasm access denied',
+    'archived Windows Wasm policy allow/deny smoke: ok'
+)) {
+    if (-not $wasmSmoke.Contains($required)) {
+        throw "Windows Wasm archive smoke is missing required behavior: $required"
+    }
+}
+
 $buildScript = Get-Content -LiteralPath (Join-Path $root 'build.rs') -Raw
 foreach ($required in @(
     'CARGO_CFG_TARGET_OS',
@@ -98,9 +114,10 @@ foreach ($required in @(
     'tag -v',
     'cargo.exe test --workspace --locked',
     'smoke_windows_native.ps1',
+    'smoke_windows_wasm_archive.ps1',
     'archive_count=7',
     'reproducible=true',
-    'test_scope=workspace-and-native-live-smoke'
+    'test_scope=workspace-native-live-and-archived-wasm-smoke'
 )) {
     if (-not $release.Contains($required)) {
         throw "Windows release runner is missing required evidence: $required"

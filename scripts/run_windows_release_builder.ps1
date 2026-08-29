@@ -125,6 +125,12 @@ try {
     $secondBuild = Join-Path $runRoot 'second'
     Build-ArchiveSet -Destination $firstBuild
     Build-ArchiveSet -Destination $secondBuild
+    $wasmSmoke = Join-Path $sourceRoot 'scripts\smoke_windows_wasm_archive.ps1'
+    if (-not (Test-Path -LiteralPath $wasmSmoke -PathType Leaf)) {
+        throw 'archived Windows Wasm smoke is required before release evidence can be produced'
+    }
+    & pwsh.exe -NoProfile -File $wasmSmoke -Version $Version -Architecture $Architecture
+    if ($LASTEXITCODE -ne 0) { throw 'archived Windows Wasm smoke failed' }
 
     $firstHashes = @{}
     Get-ChildItem -LiteralPath $firstBuild -Filter '*.zip' -File | ForEach-Object {
@@ -169,7 +175,7 @@ try {
         "commit=$tagCommit"
         "architecture=$Architecture"
         "rust_host=$host"
-        'test_scope=workspace-and-native-live-smoke'
+        'test_scope=workspace-native-live-and-archived-wasm-smoke'
         'archive_count=7'
         'reproducible=true'
     ) | Set-Content -LiteralPath (Join-Path $outputRoot "release-evidence-$targetLabel.txt") -Encoding ascii
