@@ -1,7 +1,5 @@
 [CmdletBinding()]
-param(
-    [string]$FluxheimBin = ''
-)
+param()
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -9,16 +7,13 @@ Set-StrictMode -Version Latest
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $root
 
-if ([string]::IsNullOrWhiteSpace($FluxheimBin)) {
-    $features = 'profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp'
-    & cargo.exe build --locked --no-default-features --features $features --bin fluxheim
-    if ($LASTEXITCODE -ne 0) {
-        throw 'native Windows smoke binary build failed'
-    }
-    $FluxheimBin = Join-Path $root 'target\debug\fluxheim.exe'
+$features = 'profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp'
+& cargo.exe build --locked --no-default-features --features $features --bin fluxheim
+if ($LASTEXITCODE -ne 0) {
+    throw 'native Windows smoke binary build failed'
 }
 
-$binary = (Resolve-Path -LiteralPath $FluxheimBin).Path
+$binary = (Resolve-Path -LiteralPath (Join-Path $root 'target\debug\fluxheim.exe')).Path
 if (-not $binary.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase)) {
     throw "native Windows smoke requires a Windows executable: $binary"
 }
