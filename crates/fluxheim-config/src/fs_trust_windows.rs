@@ -1,7 +1,9 @@
 use std::path::{Component, Path, PathBuf};
 
-use windows_permissions::constants::{AccessRights, AceFlags, AceType, SecurityInformation};
-use windows_permissions::{LocalBox, SecurityDescriptor, Sid, WindowsSecure as _};
+use windows_permissions::constants::{
+    AccessRights, AceFlags, AceType, SeObjectType, SecurityInformation,
+};
+use windows_permissions::{LocalBox, SecurityDescriptor, Sid};
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
 const MAX_PERMISSION_INSPECTION_DEPTH: usize = 256;
@@ -36,8 +38,7 @@ pub(crate) fn opened_file_has_insecure_owner_or_write_permissions(
     if metadata_is_reparse_point(&metadata) || !metadata.is_file() {
         return Ok(true);
     }
-    let descriptor =
-        file.security_descriptor(SecurityInformation::Owner | SecurityInformation::Dacl)?;
+    let descriptor = file_security_descriptor(file)?;
     security_descriptor_is_insecure(&descriptor, InspectedPathRole::ExistingObject)
 }
 
@@ -74,9 +75,7 @@ fn existing_path_has_insecure_write_permissions(path: &Path) -> std::io::Result<
         if metadata_is_reparse_point(&metadata) {
             return Ok(true);
         }
-        let descriptor = current
-            .as_os_str()
-            .security_descriptor(SecurityInformation::Owner | SecurityInformation::Dacl)?;
+        let descriptor = path_security_descriptor(&current)?;
         if security_descriptor_is_insecure(&descriptor, role)? {
             return Ok(true);
         }
@@ -85,6 +84,22 @@ fn existing_path_has_insecure_write_permissions(path: &Path) -> std::io::Result<
             return Ok(false);
         }
     }
+}
+
+fn file_security_descriptor(file: &std::fs::File) -> std::io::Result<LocalBox<SecurityDescriptor>> {
+    windows_permissions::wrappers::GetSecurityInfo(
+        file,
+        SeObjectType::SE_FILE_OBJECT,
+        SecurityInformation::Owner | SecurityInformation::Dacl,
+    )
+}
+
+fn path_security_descriptor(path: &Path) -> std::io::Result<LocalBox<SecurityDescriptor>> {
+    windows_permissions::wrappers::GetNamedSecurityInfo(
+        path.as_os_str(),
+        SeObjectType::SE_FILE_OBJECT,
+        SecurityInformation::Owner | SecurityInformation::Dacl,
+    )
 }
 
 fn absolute_path(path: &Path) -> std::io::Result<PathBuf> {
@@ -216,7 +231,8 @@ mod tests {
         existing_path_has_insecure_write_permissions,
         opened_file_has_insecure_owner_or_write_permissions,
     };
-    use windows_permissions::{LocalBox, SecurityDescriptor, WindowsSecure as _};
+    use windows_permissions::constants::{SeObjectType, SecurityInformation};
+    use windows_permissions::{LocalBox, SecurityDescriptor};
 
     #[test]
     fn default_temporary_file_is_trusted() {
@@ -237,7 +253,16 @@ mod tests {
         .parse()
         .unwrap();
         let mut opened = file.reopen().unwrap();
-        opened.set_dacl(descriptor.dacl().unwrap()).unwrap();
+        windows_permissions::wrappers::SetSecurityInfo(
+            &mut opened,
+            SeObjectType::SE_FILE_OBJECT,
+            SecurityInformation::Dacl,
+            None,
+            None,
+            descriptor.dacl(),
+            None,
+        )
+        .unwrap();
 
         assert!(opened_file_has_insecure_owner_or_write_permissions(&opened).unwrap());
     }
@@ -253,7 +278,16 @@ mod tests {
         .parse()
         .unwrap();
         let mut opened = file.reopen().unwrap();
-        opened.set_dacl(descriptor.dacl().unwrap()).unwrap();
+        windows_permissions::wrappers::SetSecurityInfo(
+            &mut opened,
+            SeObjectType::SE_FILE_OBJECT,
+            SecurityInformation::Dacl,
+            None,
+            None,
+            descriptor.dacl(),
+            None,
+        )
+        .unwrap();
 
         assert!(!opened_file_has_insecure_owner_or_write_permissions(&opened).unwrap());
     }
