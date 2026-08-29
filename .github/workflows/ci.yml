@@ -286,9 +286,9 @@ jobs:
             scripts/smoke_wasm_policy_examples_binary.sh
 
   windows-x86_64-portable:
-    name: Windows x86_64 portability planning gate
+    name: Windows x86_64 portable compile gate
     runs-on: windows-2025
-    timeout-minutes: 30
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
@@ -308,3 +308,13 @@ jobs:
           pwsh -NoProfile -File scripts/build_release_assets.ps1 -Version "${version}" -Architecture x86_64 -Plan
           pwsh -NoProfile -File scripts/build_release_assets.ps1 -Version "${version}" -Architecture aarch64 -Plan
           cargo test --locked -p fluxheim-config --no-default-features filesystem_trust_checks_fail_closed_when_platform_support_is_absent
+
+      - name: Compile Windows portable profiles
+        run: |
+          cargo check --locked --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp --bin fluxheim --bin fluxheim-acme
+          cargo check --locked --no-default-features --features profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp --bin fluxheim --bin fluxheim-acme
+          cargo check --locked --no-default-features --features profile-cache-edge,acme-client --bin fluxheim --bin fluxheim-acme
+          cargo check --locked --no-default-features --features profile-proxy-edge,acme-client --bin fluxheim --bin fluxheim-acme
+          cargo check --locked --no-default-features --features profile-load-balancer-edge,acme-client --bin fluxheim --bin fluxheim-acme
+          cargo check --locked --no-default-features --features profile-web-server,php-fpm,acme-client --bin fluxheim --bin fluxheim-acme
+          cargo check --locked --no-default-features --features profile-development --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
