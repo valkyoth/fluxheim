@@ -1,7 +1,19 @@
+#[cfg(not(windows))]
 use std::path::Path;
 
 #[cfg(unix)]
 const MAX_PERMISSION_INSPECTION_DEPTH: usize = 256;
+
+#[cfg(windows)]
+#[path = "fs_trust_windows.rs"]
+mod windows;
+#[cfg(windows)]
+pub(crate) use windows::opened_file_has_insecure_owner_or_write_permissions;
+#[cfg(windows)]
+pub use windows::{
+    existing_parent_has_insecure_write_permissions,
+    existing_path_or_parent_has_insecure_write_permissions,
+};
 
 #[cfg(unix)]
 pub fn existing_parent_has_insecure_write_permissions(path: &Path) -> std::io::Result<bool> {
@@ -14,7 +26,7 @@ pub fn existing_parent_has_insecure_write_permissions(path: &Path) -> std::io::R
     existing_path_has_insecure_write_permissions(&current)
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn existing_parent_has_insecure_write_permissions(_path: &Path) -> std::io::Result<bool> {
     Err(unsupported_filesystem_trust_error())
 }
@@ -26,7 +38,7 @@ pub fn existing_path_or_parent_has_insecure_write_permissions(
     existing_path_has_insecure_write_permissions(path)
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn existing_path_or_parent_has_insecure_write_permissions(
     _path: &Path,
 ) -> std::io::Result<bool> {
@@ -91,9 +103,10 @@ fn stat_has_insecure_owner_or_write_permissions(
 }
 
 #[cfg(unix)]
-pub(crate) fn metadata_has_insecure_owner_or_write_permissions(
-    metadata: &std::fs::Metadata,
+pub(crate) fn opened_file_has_insecure_owner_or_write_permissions(
+    file: &std::fs::File,
 ) -> std::io::Result<bool> {
+    let metadata = file.metadata()?;
     use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 
     let process_uid = rustix::process::geteuid().as_raw();
@@ -104,14 +117,14 @@ pub(crate) fn metadata_has_insecure_owner_or_write_permissions(
     )
 }
 
-#[cfg(not(unix))]
-pub(crate) fn metadata_has_insecure_owner_or_write_permissions(
-    _metadata: &std::fs::Metadata,
+#[cfg(not(any(unix, windows)))]
+pub(crate) fn opened_file_has_insecure_owner_or_write_permissions(
+    _file: &std::fs::File,
 ) -> std::io::Result<bool> {
     Err(unsupported_filesystem_trust_error())
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn unsupported_filesystem_trust_error() -> std::io::Error {
     std::io::Error::new(
         std::io::ErrorKind::Unsupported,
@@ -172,7 +185,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, not(unix)))]
+#[cfg(all(test, not(any(unix, windows))))]
 mod non_unix_tests {
     use super::{
         existing_parent_has_insecure_write_permissions,

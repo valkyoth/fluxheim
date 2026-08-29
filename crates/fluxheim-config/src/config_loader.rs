@@ -22,6 +22,13 @@ use config_loader_trust::{
 
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
+#[cfg(windows)]
+use std::os::windows::fs::OpenOptionsExt;
+
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::{
+    FILE_FLAG_OPEN_REPARSE_POINT, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
+};
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 const O_NOFOLLOW: i32 = 0o400000;
@@ -211,15 +218,19 @@ pub fn read_regular_config_file_to_string(path: &Path) -> Result<String, ConfigL
     options.read(true);
     #[cfg(unix)]
     options.custom_flags(O_NOFOLLOW);
+    #[cfg(windows)]
+    options
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
 
     let mut file = options.open(path).map_err(ConfigLoadError::Read)?;
     let opened_metadata = file.metadata().map_err(ConfigLoadError::Read)?;
-    if !opened_metadata.is_file() || !same_config_file(&path_metadata, &opened_metadata) {
+    if !opened_metadata.is_file() || !same_config_file(path, &path_metadata, &file) {
         return Err(ConfigLoadError::InvalidPath {
             path: path.to_path_buf(),
         });
     }
-    ensure_trusted_opened_config_file(&opened_metadata, path)?;
+    ensure_trusted_opened_config_file(&file, path)?;
     if opened_metadata.len() > MAX_CONFIG_FILE_BYTES {
         return Err(ConfigLoadError::Read(std::io::Error::new(
             std::io::ErrorKind::InvalidData,

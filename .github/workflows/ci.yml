@@ -307,7 +307,7 @@ jobs:
           version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | sed -n '1p')"
           pwsh -NoProfile -File scripts/build_release_assets.ps1 -Version "${version}" -Architecture x86_64 -Plan
           pwsh -NoProfile -File scripts/build_release_assets.ps1 -Version "${version}" -Architecture aarch64 -Plan
-          cargo test --locked -p fluxheim-config --no-default-features filesystem_trust_checks_fail_closed_when_platform_support_is_absent
+          cargo test --locked -p fluxheim-config --no-default-features fs_trust::windows::tests
 
       - name: Compile Windows portable profiles
         run: |

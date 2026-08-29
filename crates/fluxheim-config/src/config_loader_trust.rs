@@ -18,10 +18,10 @@ pub(super) fn ensure_trusted_config_path(path: &Path) -> Result<(), ConfigLoadEr
 }
 
 pub(super) fn ensure_trusted_opened_config_file(
-    metadata: &Metadata,
+    file: &std::fs::File,
     path: &Path,
 ) -> Result<(), ConfigLoadError> {
-    if crate::fs_trust::metadata_has_insecure_owner_or_write_permissions(metadata)
+    if crate::fs_trust::opened_file_has_insecure_owner_or_write_permissions(file)
         .map_err(ConfigLoadError::Read)?
     {
         return Err(ConfigLoadError::Read(std::io::Error::new(
@@ -33,14 +33,46 @@ pub(super) fn ensure_trusted_opened_config_file(
 }
 
 #[cfg(unix)]
-pub(super) fn same_config_file(path_metadata: &Metadata, opened_metadata: &Metadata) -> bool {
+pub(super) fn same_config_file(
+    _path: &Path,
+    path_metadata: &Metadata,
+    opened_file: &std::fs::File,
+) -> bool {
     use std::os::unix::fs::MetadataExt as _;
 
+    let Ok(opened_metadata) = opened_file.metadata() else {
+        return false;
+    };
     path_metadata.dev() == opened_metadata.dev() && path_metadata.ino() == opened_metadata.ino()
 }
 
-#[cfg(not(unix))]
-pub(super) fn same_config_file(path_metadata: &Metadata, opened_metadata: &Metadata) -> bool {
+#[cfg(windows)]
+pub(super) fn same_config_file(
+    path: &Path,
+    _path_metadata: &Metadata,
+    opened_file: &std::fs::File,
+) -> bool {
+    let Ok(path_handle) = same_file::Handle::from_path(path) else {
+        return false;
+    };
+    let Ok(opened_file) = opened_file.try_clone() else {
+        return false;
+    };
+    let Ok(opened_handle) = same_file::Handle::from_file(opened_file) else {
+        return false;
+    };
+    path_handle == opened_handle
+}
+
+#[cfg(not(any(unix, windows)))]
+pub(super) fn same_config_file(
+    _path: &Path,
+    path_metadata: &Metadata,
+    opened_file: &std::fs::File,
+) -> bool {
+    let Ok(opened_metadata) = opened_file.metadata() else {
+        return false;
+    };
     path_metadata.len() == opened_metadata.len()
         && path_metadata.modified().ok() == opened_metadata.modified().ok()
 }
@@ -91,8 +123,8 @@ mod tests {
         std::fs::write(&second, "[server]\n").unwrap();
 
         let first_metadata = std::fs::symlink_metadata(&first).unwrap();
-        let second_metadata = std::fs::File::open(&second).unwrap().metadata().unwrap();
+        let second_file = std::fs::File::open(&second).unwrap();
 
-        assert!(!same_config_file(&first_metadata, &second_metadata));
+        assert!(!same_config_file(&first, &first_metadata, &second_file));
     }
 }
