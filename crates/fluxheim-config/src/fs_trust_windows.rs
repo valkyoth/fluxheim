@@ -31,7 +31,7 @@ pub fn existing_path_or_parent_has_insecure_write_permissions(
     existing_path_has_insecure_write_permissions(path)
 }
 
-pub(crate) fn opened_file_has_insecure_owner_or_write_permissions(
+pub fn opened_file_has_insecure_owner_or_write_permissions(
     file: &std::fs::File,
 ) -> std::io::Result<bool> {
     let metadata = file.metadata()?;

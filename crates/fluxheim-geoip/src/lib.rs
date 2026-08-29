@@ -515,11 +515,31 @@ mod geoip_runtime {
         ))
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    fn validate_mmdb_permissions(file: &File, path: &Path) -> io::Result<()> {
+        let path_is_insecure =
+            fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(
+                path,
+            )?;
+        let opened_file_is_insecure =
+            fluxheim_config::fs_trust::opened_file_has_insecure_owner_or_write_permissions(file)?;
+        if path_is_insecure || opened_file_is_insecure {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "GeoIP database has an untrusted Windows owner or writable ACL: {}",
+                    path.display()
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    #[cfg(all(not(unix), not(windows)))]
     fn validate_mmdb_permissions(_file: &File, _path: &Path) -> io::Result<()> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
-            "GeoIP database ACL validation is not implemented on this platform",
+            "GeoIP database permission validation is not implemented on this platform",
         ))
     }
 

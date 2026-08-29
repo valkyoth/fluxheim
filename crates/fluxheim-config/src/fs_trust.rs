@@ -8,7 +8,7 @@ const MAX_PERMISSION_INSPECTION_DEPTH: usize = 256;
 #[path = "fs_trust_windows.rs"]
 mod windows;
 #[cfg(windows)]
-pub(crate) use windows::opened_file_has_insecure_owner_or_write_permissions;
+pub use windows::opened_file_has_insecure_owner_or_write_permissions;
 #[cfg(windows)]
 pub use windows::{
     existing_parent_has_insecure_write_permissions,
