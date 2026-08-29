@@ -145,8 +145,6 @@ pub(super) fn ensure_safe_directory(
     directory: &Path,
     ownership: &ManagedCertificateOwnership,
 ) -> Result<(), AcmeCertificateInstallError> {
-    #[cfg(not(unix))]
-    let _ = (directory, mode, directory_fd);
     #[cfg(unix)]
     {
         let directory_fd = match (
@@ -301,6 +299,8 @@ pub(super) fn write_new_file(
     owner: ManagedCertificateOwner,
     directory_fd: Option<&CertificateDirectoryFd>,
 ) -> Result<(), AcmeCertificateInstallError> {
+    #[cfg(not(unix))]
+    let _ = (directory, mode, directory_fd);
     #[cfg(unix)]
     if let Some(directory_fd) = directory_fd {
         let name = certificate_file_name_in_directory(directory, path)?;
@@ -419,7 +419,7 @@ pub(super) fn rename_certificate_file(
     directory: &Path,
     source: &Path,
     destination: &Path,
-    #[cfg_attr(not(unix), allow(unused_variables))] directory_fd: Option<&CertificateDirectoryFd>,
+    directory_fd: Option<&CertificateDirectoryFd>,
 ) -> Result<(), AcmeCertificateInstallError> {
     #[cfg(unix)]
     {
@@ -439,6 +439,7 @@ pub(super) fn rename_certificate_file(
 
     #[cfg(not(unix))]
     {
+        let _ = (directory, directory_fd);
         fs::rename(source, destination).map_err(|error| AcmeCertificateInstallError::Io {
             path: destination.to_path_buf(),
             error,
