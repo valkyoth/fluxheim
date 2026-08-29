@@ -36,39 +36,86 @@ pub(super) fn init_logging(
 pub(super) fn open_log_file(path: &Path, append: bool) -> std::io::Result<File> {
     reject_log_path_symlink_prefix(path)?;
 
-    let mut flags =
-        rustix::fs::OFlags::CREATE | rustix::fs::OFlags::WRONLY | rustix::fs::OFlags::CLOEXEC;
-    if append {
-        flags |= rustix::fs::OFlags::APPEND;
-    } else {
-        flags |= rustix::fs::OFlags::TRUNC;
+    #[cfg(windows)]
+    {
+        return open_log_file_windows(path, append);
     }
 
     #[cfg(unix)]
     {
-        flags |= rustix::fs::OFlags::NOFOLLOW;
-    }
+        let mut flags =
+            rustix::fs::OFlags::CREATE | rustix::fs::OFlags::WRONLY | rustix::fs::OFlags::CLOEXEC;
+        if append {
+            flags |= rustix::fs::OFlags::APPEND;
+        } else {
+            flags |= rustix::fs::OFlags::TRUNC;
+        }
 
-    let fd = rustix::fs::open(
-        path,
-        flags,
-        rustix::fs::Mode::RUSR
-            | rustix::fs::Mode::WUSR
-            | rustix::fs::Mode::RGRP
-            | rustix::fs::Mode::WGRP
-            | rustix::fs::Mode::ROTH
-            | rustix::fs::Mode::WOTH,
-    )
-    .map_err(rustix_to_io_error)?;
-    let file = File::from(fd);
+        flags |= rustix::fs::OFlags::NOFOLLOW;
+
+        let fd = rustix::fs::open(
+            path,
+            flags,
+            rustix::fs::Mode::RUSR
+                | rustix::fs::Mode::WUSR
+                | rustix::fs::Mode::RGRP
+                | rustix::fs::Mode::WGRP
+                | rustix::fs::Mode::ROTH
+                | rustix::fs::Mode::WOTH,
+        )
+        .map_err(rustix_to_io_error)?;
+        let file = File::from(fd);
+        let metadata = file.metadata()?;
+        if !metadata.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("log path is not a regular file: {}", path.display()),
+            ));
+        }
+
+        Ok(file)
+    }
+}
+
+#[cfg(windows)]
+fn open_log_file_windows(path: &Path, append: bool) -> std::io::Result<File> {
+    use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, SECURITY_IDENTIFICATION,
+        SECURITY_SQOS_PRESENT,
+    };
+
+    if fluxheim_config::fs_trust::existing_parent_has_insecure_write_permissions(path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "log path has an untrusted owner or writable parent component",
+        ));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options
+        .create(true)
+        .write(true)
+        .append(append)
+        .truncate(!append)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
+    let file = options.open(path)?;
     let metadata = file.metadata()?;
-    if !metadata.is_file() {
+    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             format!("log path is not a regular file: {}", path.display()),
         ));
     }
-
+    let path_handle = same_file::Handle::from_path(path)?;
+    let opened_handle = same_file::Handle::from_file(file.try_clone()?)?;
+    if path_handle != opened_handle {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "log path changed during secure open",
+        ));
+    }
     Ok(file)
 }
 
@@ -77,7 +124,7 @@ fn reject_log_path_symlink_prefix(path: &Path) -> std::io::Result<()> {
     for component in path.components() {
         current.push(component);
         match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
+            Ok(metadata) if metadata_is_link_like(&metadata) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     format!("log path contains symlink component: {}", current.display()),
@@ -91,8 +138,23 @@ fn reject_log_path_symlink_prefix(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {
     std::io::Error::from_raw_os_error(error.raw_os_error())
+}
+
+#[cfg(unix)]
+fn metadata_is_link_like(metadata: &std::fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
+}
+
+#[cfg(windows)]
+fn metadata_is_link_like(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+
+    metadata.file_attributes()
+        & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+        != 0
 }
 
 pub(super) fn write_text_log_record(

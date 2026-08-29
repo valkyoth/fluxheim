@@ -72,7 +72,7 @@ fn validate_static_certificate_storage(
                         path: certificate.cert_path.clone(),
                     });
                 }
-                Ok(_) => {}
+                Ok(_) => validate_certificate_permissions(scope, &certificate.cert_path, issues),
                 Err(error) => issues.push(TlsStorageIssue::CertificateReadFailed {
                     scope: scope.to_owned(),
                     path: certificate.cert_path.clone(),
@@ -219,7 +219,7 @@ fn path_contains_symlink(path: &Path) -> io::Result<bool> {
     for component in path.components() {
         current.push(component);
         match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(metadata) if metadata_is_link_like(&metadata) => return Ok(true),
             Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
             Err(error) => return Err(error),
@@ -227,6 +227,20 @@ fn path_contains_symlink(path: &Path) -> io::Result<bool> {
     }
 
     Ok(false)
+}
+
+#[cfg(unix)]
+fn metadata_is_link_like(metadata: &fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
+}
+
+#[cfg(windows)]
+fn metadata_is_link_like(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+
+    metadata.file_attributes()
+        & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+        != 0
 }
 
 fn push_certificate_world_writable_parent_issue(
@@ -346,6 +360,30 @@ fn symlink_inspection_error(error: io::Error) -> String {
 }
 
 #[cfg(unix)]
+fn validate_certificate_permissions(
+    _scope: &str,
+    _path: &Path,
+    _issues: &mut Vec<TlsStorageIssue>,
+) {
+}
+
+#[cfg(windows)]
+fn validate_certificate_permissions(scope: &str, path: &Path, issues: &mut Vec<TlsStorageIssue>) {
+    match fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(path) {
+        Ok(true) => issues.push(TlsStorageIssue::CertificatePathHasUntrustedWindowsAcl {
+            scope: scope.to_owned(),
+            path: path.to_path_buf(),
+        }),
+        Ok(false) => {}
+        Err(error) => issues.push(TlsStorageIssue::CertificateReadFailed {
+            scope: scope.to_owned(),
+            path: path.to_path_buf(),
+            message: error_message(error),
+        }),
+    }
+}
+
+#[cfg(unix)]
 fn validate_key_permissions(
     scope: &str,
     path: &Path,
@@ -375,6 +413,27 @@ fn validate_key_permissions(
     }
 }
 
+#[cfg(windows)]
+fn validate_key_permissions(
+    scope: &str,
+    path: &Path,
+    _metadata: &fs::Metadata,
+    issues: &mut Vec<TlsStorageIssue>,
+) {
+    match fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(path) {
+        Ok(true) => issues.push(TlsStorageIssue::PrivateKeyPathHasUntrustedWindowsAcl {
+            scope: scope.to_owned(),
+            path: path.to_path_buf(),
+        }),
+        Ok(false) => {}
+        Err(error) => issues.push(TlsStorageIssue::PrivateKeyReadFailed {
+            scope: scope.to_owned(),
+            path: path.to_path_buf(),
+            message: error_message(error),
+        }),
+    }
+}
+
 #[cfg(unix)]
 fn validate_acme_storage_permissions(
     path: &Path,
@@ -399,6 +458,24 @@ fn validate_acme_storage_permissions(
             owner_uid,
             process_uid,
         });
+    }
+}
+
+#[cfg(windows)]
+fn validate_acme_storage_permissions(
+    path: &Path,
+    _metadata: &fs::Metadata,
+    issues: &mut Vec<TlsStorageIssue>,
+) {
+    match fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(path) {
+        Ok(true) => issues.push(TlsStorageIssue::AcmeStoragePathHasUntrustedWindowsAcl {
+            path: path.to_path_buf(),
+        }),
+        Ok(false) => {}
+        Err(error) => issues.push(TlsStorageIssue::AcmeStorageReadFailed {
+            path: path.to_path_buf(),
+            message: error_message(error),
+        }),
     }
 }
 
@@ -432,6 +509,30 @@ fn validate_acme_eab_secret_permissions(
             owner_uid,
             process_uid,
         });
+    }
+}
+
+#[cfg(windows)]
+fn validate_acme_eab_secret_permissions(
+    issuer: &str,
+    field: &'static str,
+    path: &Path,
+    _metadata: &fs::Metadata,
+    issues: &mut Vec<TlsStorageIssue>,
+) {
+    match fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(path) {
+        Ok(true) => issues.push(TlsStorageIssue::AcmeEabSecretPathHasUntrustedWindowsAcl {
+            issuer: issuer.to_owned(),
+            field,
+            path: path.to_path_buf(),
+        }),
+        Ok(false) => {}
+        Err(error) => issues.push(TlsStorageIssue::AcmeEabSecretReadFailed {
+            issuer: issuer.to_owned(),
+            field,
+            path: path.to_path_buf(),
+            message: error_message(error),
+        }),
     }
 }
 

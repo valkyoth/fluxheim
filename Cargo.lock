@@ -1191,6 +1191,7 @@ dependencies = [
  "rustix",
  "rustls",
  "rustls-native-certs",
+ "same-file",
  "sanitization",
  "serde",
  "serde_json",
@@ -1202,6 +1203,7 @@ dependencies = [
  "tokio-rustls",
  "toml",
  "ureq",
+ "windows-sys 0.61.2",
  "zeroize",
  "zstd",
 ]

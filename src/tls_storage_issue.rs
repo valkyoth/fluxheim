@@ -29,6 +29,10 @@ pub enum TlsStorageIssue {
         scope: String,
         path: PathBuf,
     },
+    CertificatePathHasUntrustedWindowsAcl {
+        scope: String,
+        path: PathBuf,
+    },
     PrivateKeyReadFailed {
         scope: String,
         path: PathBuf,
@@ -39,6 +43,10 @@ pub enum TlsStorageIssue {
         path: PathBuf,
     },
     PrivateKeyPathHasWorldWritableParent {
+        scope: String,
+        path: PathBuf,
+    },
+    PrivateKeyPathHasUntrustedWindowsAcl {
         scope: String,
         path: PathBuf,
     },
@@ -69,6 +77,11 @@ pub enum TlsStorageIssue {
         field: &'static str,
         path: PathBuf,
     },
+    AcmeEabSecretPathHasUntrustedWindowsAcl {
+        issuer: String,
+        field: &'static str,
+        path: PathBuf,
+    },
     InsecureAcmeEabSecretPermissions {
         issuer: String,
         field: &'static str,
@@ -90,6 +103,9 @@ pub enum TlsStorageIssue {
         path: PathBuf,
     },
     AcmeStoragePathHasWorldWritableParent {
+        path: PathBuf,
+    },
+    AcmeStoragePathHasUntrustedWindowsAcl {
         path: PathBuf,
     },
     InsecureAcmeStoragePermissions {
@@ -125,6 +141,11 @@ impl Display for TlsStorageIssue {
                 "{scope}.cert_path {} uses a group- or world-writable parent directory",
                 path.display()
             ),
+            Self::CertificatePathHasUntrustedWindowsAcl { scope, path } => write!(
+                formatter,
+                "{scope}.cert_path {} has an untrusted Windows owner or writable ACL",
+                path.display()
+            ),
             Self::PrivateKeyReadFailed {
                 scope,
                 path,
@@ -142,6 +163,11 @@ impl Display for TlsStorageIssue {
             Self::PrivateKeyPathHasWorldWritableParent { scope, path } => write!(
                 formatter,
                 "{scope}.key_path {} uses a group- or world-writable parent directory",
+                path.display()
+            ),
+            Self::PrivateKeyPathHasUntrustedWindowsAcl { scope, path } => write!(
+                formatter,
+                "{scope}.key_path {} has an untrusted Windows owner or writable ACL",
                 path.display()
             ),
             Self::InsecurePrivateKeyPermissions { scope, path, mode } => write!(
@@ -188,6 +214,15 @@ impl Display for TlsStorageIssue {
                 "tls.acme.issuers.{issuer}.eab.{field}_file {} uses a group- or world-writable parent directory",
                 path.display()
             ),
+            Self::AcmeEabSecretPathHasUntrustedWindowsAcl {
+                issuer,
+                field,
+                path,
+            } => write!(
+                formatter,
+                "tls.acme.issuers.{issuer}.eab.{field}_file {} has an untrusted Windows owner or writable ACL",
+                path.display()
+            ),
             Self::InsecureAcmeEabSecretPermissions {
                 issuer,
                 field,
@@ -223,6 +258,11 @@ impl Display for TlsStorageIssue {
             Self::AcmeStoragePathHasWorldWritableParent { path } => write!(
                 formatter,
                 "tls.acme.storage {} uses a group- or world-writable parent directory",
+                path.display()
+            ),
+            Self::AcmeStoragePathHasUntrustedWindowsAcl { path } => write!(
+                formatter,
+                "tls.acme.storage {} has an untrusted Windows owner or writable ACL",
                 path.display()
             ),
             Self::InsecureAcmeStoragePermissions { path, mode } => write!(
