@@ -62,6 +62,7 @@ foreach ($required in @(
     'Expand-Archive',
     'irules-access-policy.wasm',
     'Get-FileHash',
+    'FluxheimWindowsWasmSmokeOrigin.ServeAsync(client)',
     'windows-wasm-origin-ok',
     'wasm access denied',
     'archived Windows Wasm policy allow/deny smoke: ok'

@@ -84,7 +84,7 @@ public sealed class FluxheimWindowsWasmSmokeOrigin : IDisposable
             {
                 return;
             }
-            _ = Task.Run(() => this.ServeAsync(client));
+            _ = Task.Run(() => FluxheimWindowsWasmSmokeOrigin.ServeAsync(client));
         }
     }
 
