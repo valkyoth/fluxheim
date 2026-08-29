@@ -1,10 +1,14 @@
+use std::os::windows::fs::OpenOptionsExt as _;
 use std::path::{Component, Path, PathBuf};
 
 use windows_permissions::constants::{
     AccessRights, AceFlags, AceType, SeObjectType, SecurityInformation,
 };
 use windows_permissions::{LocalBox, SecurityDescriptor, Sid};
-use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+use windows_sys::Win32::Storage::FileSystem::{
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
+};
 
 const MAX_PERMISSION_INSPECTION_DEPTH: usize = 256;
 const TRUSTED_INSTALLER_SID: &str =
@@ -47,10 +51,10 @@ fn existing_path_has_insecure_write_permissions(path: &Path) -> std::io::Result<
     let mut inspected_depth = 0usize;
     let mut missing_component = false;
 
-    loop {
+    let mut opened = loop {
         check_inspection_depth(&mut inspected_depth)?;
-        match std::fs::symlink_metadata(&current) {
-            Ok(_) => break,
+        match open_path_for_trust_inspection(&current) {
+            Ok(file) => break file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 missing_component = true;
                 if !current.pop() {
@@ -62,7 +66,7 @@ fn existing_path_has_insecure_write_permissions(path: &Path) -> std::io::Result<
             }
             Err(error) => return Err(error),
         }
-    }
+    };
 
     let mut role = if missing_component {
         InspectedPathRole::CreationParent
@@ -71,11 +75,11 @@ fn existing_path_has_insecure_write_permissions(path: &Path) -> std::io::Result<
     };
     loop {
         check_inspection_depth(&mut inspected_depth)?;
-        let metadata = std::fs::symlink_metadata(&current)?;
+        let metadata = opened.metadata()?;
         if metadata_is_reparse_point(&metadata) {
             return Ok(true);
         }
-        let descriptor = path_security_descriptor(&current)?;
+        let descriptor = file_security_descriptor(&opened)?;
         if security_descriptor_is_insecure(&descriptor, role)? {
             return Ok(true);
         }
@@ -83,20 +87,22 @@ fn existing_path_has_insecure_write_permissions(path: &Path) -> std::io::Result<
         if !current.pop() {
             return Ok(false);
         }
+        opened = open_path_for_trust_inspection(&current)?;
     }
+}
+
+fn open_path_for_trust_inspection(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
+    options.open(path)
 }
 
 fn file_security_descriptor(file: &std::fs::File) -> std::io::Result<LocalBox<SecurityDescriptor>> {
     windows_permissions::wrappers::GetSecurityInfo(
         file,
-        SeObjectType::SE_FILE_OBJECT,
-        SecurityInformation::Owner | SecurityInformation::Dacl,
-    )
-}
-
-fn path_security_descriptor(path: &Path) -> std::io::Result<LocalBox<SecurityDescriptor>> {
-    windows_permissions::wrappers::GetNamedSecurityInfo(
-        path.as_os_str(),
         SeObjectType::SE_FILE_OBJECT,
         SecurityInformation::Owner | SecurityInformation::Dacl,
     )
@@ -240,6 +246,14 @@ mod tests {
 
         assert!(!existing_path_has_insecure_write_permissions(file.path()).unwrap());
         assert!(!opened_file_has_insecure_owner_or_write_permissions(file.as_file()).unwrap());
+    }
+
+    #[test]
+    fn missing_descendant_uses_trusted_existing_parent_handle() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing").join("config.toml");
+
+        assert!(!existing_path_has_insecure_write_permissions(&missing).unwrap());
     }
 
     #[test]

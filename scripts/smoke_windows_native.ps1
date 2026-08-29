@@ -64,6 +64,7 @@ function New-WindowsSmokeCertificate {
         $san = [Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder]::new()
         $san.AddDnsName('static.test')
         $san.AddDnsName('localhost')
+        $san.AddIpAddress([Net.IPAddress]::Loopback)
         $request.CertificateExtensions.Add($san.Build())
         $certificate = $request.CreateSelfSigned(
             [DateTimeOffset]::UtcNow.AddMinutes(-5),
@@ -425,9 +426,9 @@ try {
         $tlsHandler.ServerCertificateCustomValidationCallback =
             [Net.Http.HttpClientHandler]::DangerousAcceptAnyServerCertificateValidator
         $tlsClient = [Net.Http.HttpClient]::new($tlsHandler)
-        $tlsClient.Timeout = [TimeSpan]::FromSeconds(2)
+        $tlsClient.Timeout = [TimeSpan]::FromSeconds(5)
         try {
-            $tlsUri = [Uri]"https://localhost:$tlsPort/"
+            $tlsUri = [Uri]"https://127.0.0.1:$tlsPort/"
             $tlsResponse = Invoke-FluxheimRequest -Client $tlsClient -Uri $tlsUri `
                 -HostHeader 'static.test'
             try {

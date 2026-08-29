@@ -39,7 +39,7 @@ foreach ($required in @(
     "expected HIT",
     'New-WindowsSmokeCertificate',
     'tls_listen',
-    'https://localhost:',
+    'https://127.0.0.1:',
     'DangerousAcceptAnyServerCertificateValidator',
     'FluxheimWindowsSmokeOrigin',
     'origin-one path=/windows-proxy',
