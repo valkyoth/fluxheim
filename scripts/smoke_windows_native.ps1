@@ -37,17 +37,130 @@ function ConvertTo-TomlPath {
 function Invoke-FluxheimRequest {
     param(
         [Parameter(Mandatory = $true)][Net.Http.HttpClient]$Client,
-        [Parameter(Mandatory = $true)][Uri]$Uri
+        [Parameter(Mandatory = $true)][Uri]$Uri,
+        [string]$HostHeader,
+        [string]$BearerToken
     )
 
     $request = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::Get, $Uri)
-    $request.Headers.Host = 'static.test'
+    if (-not [string]::IsNullOrEmpty($HostHeader)) {
+        $request.Headers.Host = $HostHeader
+    }
+    if (-not [string]::IsNullOrEmpty($BearerToken)) {
+        $request.Headers.Authorization = [Net.Http.Headers.AuthenticationHeaderValue]::new(
+            'Bearer',
+            $BearerToken
+        )
+    }
     try {
         return $Client.SendAsync($request).GetAwaiter().GetResult()
     } finally {
         $request.Dispose()
     }
 }
+
+Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+
+public sealed class FluxheimWindowsSmokeOrigin : IDisposable
+{
+    private readonly TcpListener listener;
+    private readonly string label;
+    private readonly CancellationTokenSource cancellation = new CancellationTokenSource();
+    private Task acceptLoop;
+
+    public FluxheimWindowsSmokeOrigin(int port, string label)
+    {
+        this.listener = new TcpListener(IPAddress.Loopback, port);
+        this.label = label;
+    }
+
+    public void Start()
+    {
+        this.listener.Start();
+        this.acceptLoop = Task.Run(() => this.AcceptLoopAsync());
+    }
+
+    private async Task AcceptLoopAsync()
+    {
+        while (!this.cancellation.IsCancellationRequested)
+        {
+            TcpClient client;
+            try
+            {
+                client = await this.listener.AcceptTcpClientAsync().ConfigureAwait(false);
+            }
+            catch (Exception) when (this.cancellation.IsCancellationRequested)
+            {
+                return;
+            }
+
+            _ = Task.Run(() => this.ServeAsync(client));
+        }
+    }
+
+    private async Task ServeAsync(TcpClient client)
+    {
+        using (client)
+        using (NetworkStream stream = client.GetStream())
+        {
+            byte[] request = new byte[16384];
+            int used = 0;
+            while (used < request.Length)
+            {
+                int read = await stream.ReadAsync(request, used, request.Length - used)
+                    .ConfigureAwait(false);
+                if (read == 0)
+                {
+                    return;
+                }
+                used += read;
+                if (used >= 4 && request[used - 4] == 13 && request[used - 3] == 10 &&
+                    request[used - 2] == 13 && request[used - 1] == 10)
+                {
+                    break;
+                }
+            }
+
+            string firstLine = Encoding.ASCII.GetString(request, 0, used).Split('\n')[0].Trim();
+            string[] fields = firstLine.Split(' ');
+            string target = fields.Length >= 2 ? fields[1] : "/";
+            byte[] body = Encoding.ASCII.GetBytes(this.label + " path=" + target + "\n");
+            string headers = "HTTP/1.1 200 OK\r\n" +
+                "Content-Type: text/plain; charset=ascii\r\n" +
+                "Content-Length: " + body.Length + "\r\n" +
+                "X-Origin: " + this.label + "\r\n" +
+                "Connection: close\r\n\r\n";
+            byte[] encodedHeaders = Encoding.ASCII.GetBytes(headers);
+            await stream.WriteAsync(encodedHeaders, 0, encodedHeaders.Length).ConfigureAwait(false);
+            await stream.WriteAsync(body, 0, body.Length).ConfigureAwait(false);
+        }
+    }
+
+    public void Dispose()
+    {
+        this.cancellation.Cancel();
+        this.listener.Stop();
+        if (this.acceptLoop != null)
+        {
+            try
+            {
+                this.acceptLoop.GetAwaiter().GetResult();
+            }
+            catch (Exception) when (this.cancellation.IsCancellationRequested)
+            {
+            }
+        }
+        this.cancellation.Dispose();
+    }
+}
+'@
 
 $runId = [Guid]::NewGuid().ToString('N')
 $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
@@ -57,13 +170,17 @@ if (-not [IO.Path]::IsPathFullyQualified($temporaryRoot)) {
 $testRoot = Join-Path $temporaryRoot "fluxheim-windows-smoke-$runId"
 $publicRoot = Join-Path $testRoot 'public'
 $runtimeRoot = Join-Path $testRoot 'run'
+$snapshotRoot = Join-Path $testRoot 'snapshots'
 $configPath = Join-Path $testRoot 'fluxheim.toml'
 $stdoutPath = Join-Path $testRoot 'fluxheim.stdout.log'
 $stderrPath = Join-Path $testRoot 'fluxheim.stderr.log'
 $process = $null
+$originOne = $null
+$originTwo = $null
+$previousAdminToken = $env:FLUXHEIM_WINDOWS_SMOKE_ADMIN_TOKEN
 $succeeded = $false
 
-New-Item -ItemType Directory -Force -Path $publicRoot, $runtimeRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $publicRoot, $runtimeRoot, $snapshotRoot | Out-Null
 Set-Content -LiteralPath (Join-Path $publicRoot 'index.html') `
     -Value '<!doctype html><title>Fluxheim Windows smoke</title><h1>windows-static-ok</h1>' `
     -Encoding ascii
@@ -71,8 +188,13 @@ Set-Content -LiteralPath (Join-Path $publicRoot 'asset.webp') `
     -Value 'windows-cache-ok' -Encoding ascii
 
 $port = Get-FreeTcpPort
+$adminPort = Get-FreeTcpPort
+$metricsPort = Get-FreeTcpPort
+$originOnePort = Get-FreeTcpPort
+$originTwoPort = Get-FreeTcpPort
 $publicToml = ConvertTo-TomlPath $publicRoot
 $runtimeToml = ConvertTo-TomlPath $runtimeRoot
+$snapshotToml = ConvertTo-TomlPath $snapshotRoot
 $config = @"
 [server]
 listen = ["127.0.0.1:$port"]
@@ -83,6 +205,21 @@ trusted_proxies = []
 pid_file = "$runtimeToml/fluxheim.pid"
 upgrade_sock = "$runtimeToml/fluxheim-upgrade.sock"
 certificate_reload_sock = "$runtimeToml/fluxheim-cert-reload.sock"
+
+[admin]
+enabled = true
+listen = "127.0.0.1:$adminPort"
+require_loopback = true
+token_env = "FLUXHEIM_WINDOWS_SMOKE_ADMIN_TOKEN"
+snapshot_store = "$snapshotToml"
+
+[admin.health]
+unauthenticated = true
+
+[metrics]
+enabled = true
+listen = "127.0.0.1:$metricsPort"
+require_loopback = true
 
 [logging]
 level = "warn"
@@ -128,10 +265,38 @@ root = "$publicToml"
 index_files = ["index.html"]
 deny_dotfiles = true
 cache_control = "public, max-age=60"
+
+[[vhosts]]
+name = "proxy.test"
+hosts = ["proxy.test"]
+
+[vhosts.proxy]
+upstreams = ["127.0.0.1:$originOnePort"]
+upstream_tls = false
+
+[[vhosts]]
+name = "load-balancer.test"
+hosts = ["load-balancer.test"]
+
+[vhosts.proxy]
+upstreams = ["127.0.0.1:$originOnePort", "127.0.0.1:$originTwoPort"]
+upstream_aliases = ["origin-one", "origin-two"]
+upstream_tls = false
+
+[vhosts.proxy.load_balance]
+selection = "round-robin"
+max_iterations = 64
+all_down_status = 503
 "@
 Set-Content -LiteralPath $configPath -Value $config -Encoding utf8
 
 try {
+    $originOne = [FluxheimWindowsSmokeOrigin]::new($originOnePort, 'origin-one')
+    $originTwo = [FluxheimWindowsSmokeOrigin]::new($originTwoPort, 'origin-two')
+    $originOne.Start()
+    $originTwo.Start()
+
+    $env:FLUXHEIM_WINDOWS_SMOKE_ADMIN_TOKEN = 'windows-admin-smoke-token'
     & $binary --config $configPath --validate-config
     if ($LASTEXITCODE -ne 0) {
         throw 'native Windows smoke configuration validation failed'
@@ -154,7 +319,8 @@ try {
                 throw "Fluxheim exited before readiness with code $($process.ExitCode)"
             }
             try {
-                $response = Invoke-FluxheimRequest -Client $client -Uri $baseUri
+                $response = Invoke-FluxheimRequest -Client $client -Uri $baseUri `
+                    -HostHeader 'static.test'
                 if ([int]$response.StatusCode -eq 200) {
                     break
                 }
@@ -180,7 +346,8 @@ try {
         }
 
         $assetUri = [Uri]"http://127.0.0.1:$port/asset.webp"
-        $first = Invoke-FluxheimRequest -Client $client -Uri $assetUri
+        $first = Invoke-FluxheimRequest -Client $client -Uri $assetUri `
+            -HostHeader 'static.test'
         try {
             $firstBody = $first.Content.ReadAsStringAsync().GetAwaiter().GetResult()
             $firstStatus = ($first.Headers.GetValues('x-cache-status') | Select-Object -First 1)
@@ -194,7 +361,8 @@ try {
             $first.Dispose()
         }
 
-        $second = Invoke-FluxheimRequest -Client $client -Uri $assetUri
+        $second = Invoke-FluxheimRequest -Client $client -Uri $assetUri `
+            -HostHeader 'static.test'
         try {
             $secondBody = $second.Content.ReadAsStringAsync().GetAwaiter().GetResult()
             $secondStatus = ($second.Headers.GetValues('x-cache-status') | Select-Object -First 1)
@@ -207,13 +375,87 @@ try {
         } finally {
             $second.Dispose()
         }
+
+        $proxyUri = [Uri]"http://127.0.0.1:$port/windows-proxy"
+        $proxyResponse = Invoke-FluxheimRequest -Client $client -Uri $proxyUri `
+            -HostHeader 'proxy.test'
+        try {
+            $proxyBody = $proxyResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            if ([int]$proxyResponse.StatusCode -ne 200 -or
+                -not $proxyBody.Contains('origin-one path=/windows-proxy')) {
+                throw 'native Windows reverse-proxy response mismatch'
+            }
+        } finally {
+            $proxyResponse.Dispose()
+        }
+
+        $loadBalancerOrigins = [Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::Ordinal
+        )
+        for ($requestIndex = 0; $requestIndex -lt 8; $requestIndex++) {
+            $loadBalancerUri = [Uri]"http://127.0.0.1:$port/windows-lb/$requestIndex"
+            $loadBalancerResponse = Invoke-FluxheimRequest -Client $client `
+                -Uri $loadBalancerUri -HostHeader 'load-balancer.test'
+            try {
+                if ([int]$loadBalancerResponse.StatusCode -ne 200) {
+                    throw 'native Windows load-balancer response was not HTTP 200'
+                }
+                $loadBalancerBody = $loadBalancerResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                if ($loadBalancerBody.Contains('origin-one')) {
+                    [void]$loadBalancerOrigins.Add('origin-one')
+                }
+                if ($loadBalancerBody.Contains('origin-two')) {
+                    [void]$loadBalancerOrigins.Add('origin-two')
+                }
+            } finally {
+                $loadBalancerResponse.Dispose()
+            }
+        }
+        if ($loadBalancerOrigins.Count -ne 2) {
+            throw "native Windows load balancer reached only: $($loadBalancerOrigins -join ', ')"
+        }
+
+        $adminHealthUri = [Uri]"http://127.0.0.1:$adminPort/_fluxheim/health"
+        $adminHealth = Invoke-FluxheimRequest -Client $client -Uri $adminHealthUri
+        try {
+            if ([int]$adminHealth.StatusCode -ne 200) {
+                throw 'native Windows admin health endpoint was not HTTP 200'
+            }
+        } finally {
+            $adminHealth.Dispose()
+        }
+
+        $adminStatusUri = [Uri]"http://127.0.0.1:$adminPort/_fluxheim/status"
+        $adminStatus = Invoke-FluxheimRequest -Client $client -Uri $adminStatusUri `
+            -BearerToken 'windows-admin-smoke-token'
+        try {
+            $adminBody = $adminStatus.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            if ([int]$adminStatus.StatusCode -ne 200 -or
+                -not $adminBody.Contains('"status":"ok"')) {
+                throw 'native Windows authenticated admin status response mismatch'
+            }
+        } finally {
+            $adminStatus.Dispose()
+        }
+
+        $metricsUri = [Uri]"http://127.0.0.1:$metricsPort/metrics"
+        $metricsResponse = Invoke-FluxheimRequest -Client $client -Uri $metricsUri
+        try {
+            $metricsBody = $metricsResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            if ([int]$metricsResponse.StatusCode -ne 200 -or
+                -not $metricsBody.Contains('fluxheim_proxy_requests_total')) {
+                throw 'native Windows metrics endpoint omitted Fluxheim proxy metrics'
+            }
+        } finally {
+            $metricsResponse.Dispose()
+        }
     } finally {
         $client.Dispose()
         $handler.Dispose()
     }
 
     $succeeded = $true
-    Write-Host 'native Windows static and memory-cache smoke: ok'
+    Write-Host 'native Windows static/cache/proxy/load-balancer/admin/metrics smoke: ok'
 } catch {
     if (Test-Path -LiteralPath $stderrPath -PathType Leaf) {
         Get-Content -LiteralPath $stderrPath | Write-Error
@@ -223,6 +465,17 @@ try {
     if ($null -ne $process -and -not $process.HasExited) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
         $process.WaitForExit(5000)
+    }
+    if ($null -eq $previousAdminToken) {
+        Remove-Item Env:FLUXHEIM_WINDOWS_SMOKE_ADMIN_TOKEN -ErrorAction SilentlyContinue
+    } else {
+        $env:FLUXHEIM_WINDOWS_SMOKE_ADMIN_TOKEN = $previousAdminToken
+    }
+    if ($null -ne $originOne) {
+        $originOne.Dispose()
+    }
+    if ($null -ne $originTwo) {
+        $originTwo.Dispose()
     }
     if ($succeeded -and $env:FLUXHEIM_SMOKE_KEEP_LOGS -ne '1') {
         Remove-Item -LiteralPath $testRoot -Recurse -Force

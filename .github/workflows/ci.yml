@@ -319,6 +319,6 @@ jobs:
           cargo check --locked --no-default-features --features profile-web-server,php-fpm,acme-client --bin fluxheim --bin fluxheim-acme
           cargo check --locked --no-default-features --features profile-development --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
 
-      - name: Run Windows native static and cache smoke
+      - name: Run Windows native runtime parity smoke
         shell: pwsh
         run: scripts/smoke_windows_native.ps1

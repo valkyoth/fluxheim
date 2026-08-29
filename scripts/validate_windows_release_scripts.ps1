@@ -35,7 +35,13 @@ foreach ($required in @(
     'x-content-type-options',
     'x-cache-status',
     "expected MISS",
-    "expected HIT"
+    "expected HIT",
+    'FluxheimWindowsSmokeOrigin',
+    'origin-one path=/windows-proxy',
+    'load-balancer.test',
+    '/_fluxheim/health',
+    '/_fluxheim/status',
+    'fluxheim_proxy_requests_total'
 )) {
     if (-not $smoke.Contains($required)) {
         throw "Windows native smoke is missing required behavior: $required"
