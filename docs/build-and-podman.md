@@ -18,6 +18,11 @@ they were built on. For portable release artifacts, omit the flag.
 The cross-platform profile and archive contract is documented in
 [Portable Releases](portable-releases.md).
 
+The `v1.8.2` development line adds native Windows x86_64 and ARM64 release
+builder automation. Linux cross-builds do not stand in for the Windows MSVC
+SDK, ACL, locking, or live-runtime gates. See
+[Windows Release Builders](windows-release-builders.md).
+
 Feature-reduced builds keep the binary small and reduce dependency surface:
 
 ```bash

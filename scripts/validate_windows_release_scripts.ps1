@@ -1,0 +1,73 @@
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$scripts = @(
+    'scripts/build_release_assets.ps1',
+    'scripts/prepare_windows_release_builder.ps1',
+    'scripts/run_windows_release_builder.ps1'
+)
+
+foreach ($relative in $scripts) {
+    $path = Join-Path $root $relative
+    $tokens = $null
+    $errors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile(
+        $path,
+        [ref]$tokens,
+        [ref]$errors
+    )
+    if ($errors.Count -gt 0) {
+        $messages = $errors | ForEach-Object { $_.Message }
+        throw "$relative has PowerShell parse errors: $($messages -join '; ')"
+    }
+}
+
+$builder = Get-Content -LiteralPath (Join-Path $root 'scripts/build_release_assets.ps1') -Raw
+foreach ($required in @(
+    'scripts/portable_release_plan.py',
+    'scripts/create_release_archives.py',
+    'x86_64-pc-windows-msvc',
+    'aarch64-pc-windows-msvc'
+)) {
+    if (-not $builder.Contains($required)) {
+        throw "Windows archive builder is missing required contract: $required"
+    }
+}
+
+$preparation = Get-Content -LiteralPath (Join-Path $root 'scripts/prepare_windows_release_builder.ps1') -Raw
+foreach ($required in @(
+    'PasswordAuthentication no',
+    'AuthenticationMethods publickey',
+    'AllowedSourceCidr',
+    'TagAllowedSignersFile',
+    'icacls.exe',
+    'sshd.exe',
+    'Get-NetFirewallRule'
+)) {
+    if (-not $preparation.Contains($required)) {
+        throw "Windows preparation script is missing required hardening: $required"
+    }
+}
+
+$release = Get-Content -LiteralPath (Join-Path $root 'scripts/run_windows_release_builder.ps1') -Raw
+foreach ($required in @(
+    'tag -v',
+    'cargo.exe test --workspace --locked',
+    'smoke_windows_native.ps1',
+    'archive_count=7',
+    'reproducible=true',
+    'test_scope=workspace-and-native-live-smoke'
+)) {
+    if (-not $release.Contains($required)) {
+        throw "Windows release runner is missing required evidence: $required"
+    }
+}
+if ($release.Contains('checkout main') -or $release.Contains('|| git checkout')) {
+    throw 'Windows release runner must not fall back from the requested tag'
+}
+
+Write-Host 'Windows release scripts: ok'

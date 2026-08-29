@@ -32,10 +32,13 @@ publish `.zip` once its native gate is complete. Windows binaries retain their
 ```text
 fluxheim-VERSION-wasm-x86_64-linux.tar.gz
 fluxheim-VERSION-wasm-aarch64-macos.tar.gz
+fluxheim-VERSION-wasm-x86_64-windows.zip
+fluxheim-VERSION-wasm-aarch64-windows.zip
 ```
 
-Windows will use the same naming contract from `1.8.2`; `1.8.0` does not
-publish a Windows archive.
+Windows uses the same naming contract during `1.8.2` development. Do not
+publish those archives until the native runtime and release evidence gates pass
+on both architectures.
 
 The shared matrix can be inspected without compiling:
 
@@ -44,12 +47,13 @@ VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | sed -n '1p')"
 scripts/build_release_assets.sh "$VERSION" --kind linux --plan
 scripts/build_release_assets.sh "$VERSION" --kind macos --plan
 scripts/build_release_assets.sh "$VERSION" --kind windows --plan
+python scripts/portable_release_plan.py "$VERSION" --kind windows --target aarch64-pc-windows-msvc
 scripts/validate_portable_release_plan.py
 ```
 
-The shell asset builder and cross-platform validator consume the same native
-Python release-plan module. Plan validation therefore does not require Bash,
-Git Bash, or WSL on Windows.
+The POSIX and PowerShell asset builders consume the same native Python
+release-plan module. Plan validation and Windows packaging therefore do not
+require Git Bash or WSL.
 
 Build on the operating system and architecture represented by the target:
 
@@ -59,10 +63,10 @@ scripts/build_release_assets.sh "$VERSION" --kind macos --profile wasm
 
 Cross-compiling a Windows MSVC binary from Linux is not an authoritative
 release proof because the MSVC linker and Windows SDK are absent. The Windows
-CI runner validates the shared archive plan and fail-closed configuration
-boundary in `1.8.0`; native Windows runtime and archive builds begin with the
-`1.8.2` parity work. The same host-native rule applies to Apple SDK and linker
-validation: published macOS archives must be built on macOS.
+release builders must run natively on x86_64 and ARM64 hosts and use
+`scripts/build_release_assets.ps1`. See
+[Windows Release Builders](windows-release-builders.md). The same host-native
+rule applies to Apple SDK and linker validation.
 
 ## Current Support Level
 

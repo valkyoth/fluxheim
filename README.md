@@ -135,6 +135,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Config module split | ✅ | `1.4.3`; config loading, shared helpers, domain validation, and large config tests are split into focused `config_*` modules while keeping `crate::config::*` stable. |
 | Load-balancer module split | ✅ | `1.5.0`; health checks, backend state, persistence, selection algorithms, backend policy/status, and file/DNS discovery are split into focused `load_balancer/*` modules while keeping `crate::load_balancer::*` stable. |
 | macOS portable builds | 🧪 | `1.4.4` established Apple Silicon development support; `1.8.0` added the shared unsigned archive contract, and `1.8.1` builds all seven public profiles and runs the native subsystem parity suite on Apple Silicon. Archives remain unsigned previews. Intel macOS is not a supported release target. |
+| Windows portable builds | 🧪 | `1.8.2` is the active native MSVC parity line for x86_64 and ARM64. The seven-profile plan and dedicated-builder automation are defined; archives remain unpublished until native ACL, runtime, live-smoke, and reproducibility gates pass on both architectures. |
 | GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional bounded local MMDB support with trusted-file enforcement for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. The [GeoIP guide](docs/geoip.md) includes a pinned real CIRCL database proof for static, proxy, and load-balancer paths. |
 | Pingora-free runtime | ✅ | `1.6.34`; normal Fluxheim builds no longer compile Pingora crates. Server/listener/TLS, HTTP/1, HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and background-service paths run through Fluxheim-owned Rust crates. |
 | HTTP/3/QUIC | ❌ | Planned as a Fluxheim-owned `1.9` protocol milestone using the Rust `quinn`/`h3` stack after the `1.8` macOS/Windows production parity line. |
@@ -427,17 +428,18 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Current Release: 1.8.1 macOS Portable Parity
+## Current Development: 1.8.2 Windows Portable Parity
 
 Fluxheim does not treat every planned idea as stable. Fluxheim is now on the
 `1.8` platform-parity line. Release `1.8.0` packages the completed Wasm
 line as an explicit image/archive profile and establishes the shared portable
-archive contract. Release `1.8.1` expands unsigned macOS archives and native
-tests on Apple Silicon. Intel macOS is not a supported release target. The
-normal `full` profile remains Wasm-free, and Windows remains plan-only until
-native runtime work in `1.8.2`. Signing and installer work follows platform
-parity. The unsigned macOS CLI preview publishes `.tar.gz` only; the builder's
-ZIP output is retained for internal payload-equivalence validation. See
+archive contract. Release `1.8.1` completed the defined unsigned Apple Silicon
+macOS parity gate. Development `v1.8.2` now targets native Windows x86_64 and
+ARM64 MSVC archives without weakening filesystem trust or cache-storage
+boundaries. The normal `full` profile remains Wasm-free. Signing and installer
+work follows platform parity. The unsigned macOS CLI preview publishes
+`.tar.gz` only; Windows will publish `.zip` only after both native gates pass.
+See
 [Portable Releases](docs/portable-releases.md) for the shared archive contract,
 current platform support level, and unsigned-preview policy.
 
@@ -559,6 +561,7 @@ moves to the following Fluxheim-owned `1.9` protocol line based on the Rust
 - [WASM Extensibility](docs/wasm-extensibility.md)
 - [Wasm Policy Example Parity](docs/wasm-policy-example-parity.md)
 - [Portable Releases](docs/portable-releases.md)
+- [Windows Release Builders](docs/windows-release-builders.md)
 - [Zero-Downtime Upgrades](docs/zero-downtime-upgrades.md)
 - [Crypto RPC Edge](docs/crypto-rpc-edge.md)
 - [External Authorization Request](docs/auth-request.md)

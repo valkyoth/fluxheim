@@ -215,16 +215,20 @@ Validate the common operating-system archive plan without compiling:
 scripts/validate_portable_release_plan.py
 ```
 
-Build the seven portable profiles on a matching supported host. During
-`1.8.1`, native CI builds every public archive profile on Apple Silicon. Intel
-macOS is not a supported release target. Windows is plan-only until native
-runtime and archive work begins in `1.8.2`; do not publish Windows artifacts
-before that gate is restored:
+Build the seven portable profiles on a matching supported host. Native CI
+builds every public archive profile on Apple Silicon. Intel macOS is not a
+supported release target. During `1.8.2`, Windows archives additionally require
+separate native x86_64 and ARM64 builder evidence; do not publish either
+architecture when one platform gate is incomplete:
 
 ```bash
 scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos
 sh scripts/smoke_macos_native_parity.sh
 ```
+
+Run `scripts/run_windows_release_builder.ps1` separately on the prepared native
+x86_64 and ARM64 hosts. The exact-tag Linux aggregator can invoke both hosts
+over OpenSSH. See [Windows Release Builders](windows-release-builders.md).
 
 The native matrix must also execute
 `scripts/smoke_wasm_policy_examples_binary.sh` against the staged `wasm`

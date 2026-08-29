@@ -86,6 +86,15 @@ def main() -> int:
     if "wasm-aarch64-macos/fluxheim" not in workflow:
         raise ValueError("macOS portable gate must smoke the staged Wasm archive binary")
 
+    windows_targets = {
+        target for kind, target, _label, _suffix in PLATFORMS if kind == "windows"
+    }
+    if windows_targets != {
+        "x86_64-pc-windows-msvc",
+        "aarch64-pc-windows-msvc",
+    }:
+        raise ValueError("portable plan must contain both Windows MSVC architectures")
+
     version = package_version()
     for platform in PLATFORMS:
         validate_platform(version, *platform)

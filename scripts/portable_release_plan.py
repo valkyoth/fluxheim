@@ -21,6 +21,7 @@ PLATFORMS = (
     ("linux", "x86_64-unknown-linux-gnu", "x86_64-linux", ""),
     ("macos", "aarch64-apple-darwin", "aarch64-macos", ""),
     ("windows", "x86_64-pc-windows-msvc", "x86_64-windows", ".exe"),
+    ("windows", "aarch64-pc-windows-msvc", "aarch64-windows", ".exe"),
 )
 TARGET_LABELS = {
     "x86_64-unknown-linux-gnu": "x86_64-linux",

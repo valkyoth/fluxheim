@@ -1,0 +1,183 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^[0-9]+[.][0-9]+[.][0-9]+(?:-[0-9A-Za-z.-]+)?$')]
+    [string]$Version,
+
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^[0-9]+[.][0-9]+[.][0-9]+$')]
+    [string]$RustVersion,
+
+    [Parameter(Mandatory = $true)]
+    [ValidateSet('x86_64', 'aarch64')]
+    [string]$Architecture,
+
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^[0-9a-fA-F]{40}$')]
+    [string]$ExpectedCommit,
+
+    [ValidatePattern('^https://github[.]com/[0-9A-Za-z_.-]+/[0-9A-Za-z_.-]+[.]git$')]
+    [string]$RepositoryUrl = 'https://github.com/valkyoth/fluxheim.git',
+
+    [ValidatePattern('^[A-Za-z]:\\[A-Za-z0-9_.\\-]+$')]
+    [string]$WorkspaceRoot = 'C:\FluxheimBuild'
+)
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+$expectedArchitecture = if ($Architecture -eq 'x86_64') { 'X64' } else { 'Arm64' }
+$actualArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+if ($actualArchitecture -ne $expectedArchitecture) {
+    throw "expected native $expectedArchitecture host, found $actualArchitecture"
+}
+
+$tag = "v$Version"
+$targetLabel = if ($Architecture -eq 'x86_64') { 'x86_64-windows' } else { 'aarch64-windows' }
+$allowedSigners = Join-Path $WorkspaceRoot 'trusted\allowed_signers'
+if (-not (Test-Path -LiteralPath $allowedSigners -PathType Leaf)) {
+    throw "trusted tag allowed-signers file is missing: $allowedSigners"
+}
+
+$requiredCommands = 'git.exe', 'rustup.exe', 'rustc.exe', 'cargo.exe', 'python.exe'
+foreach ($command in $requiredCommands) {
+    if ($null -eq (Get-Command $command -ErrorAction SilentlyContinue)) {
+        throw "required release command is unavailable: $command"
+    }
+}
+
+$runId = [Guid]::NewGuid().ToString('N')
+$runRoot = Join-Path $WorkspaceRoot "runs\$runId"
+$sourceRoot = Join-Path $runRoot 'source'
+$outputRoot = Join-Path $WorkspaceRoot "output\$Version\$Architecture"
+New-Item -ItemType Directory -Force -Path $runRoot | Out-Null
+
+try {
+    & git.exe clone --no-checkout --filter=blob:none $RepositoryUrl $sourceRoot
+    if ($LASTEXITCODE -ne 0) { throw 'repository clone failed' }
+    Set-Location $sourceRoot
+    & git.exe fetch --force --depth=1 origin "refs/tags/$tag`:refs/tags/$tag"
+    if ($LASTEXITCODE -ne 0) { throw "exact tag fetch failed: $tag" }
+
+    $tagCommit = (& git.exe rev-parse "$tag^{commit}").Trim()
+    if ($LASTEXITCODE -ne 0 -or $tagCommit -ne $ExpectedCommit.ToLowerInvariant()) {
+        throw "tag commit $tagCommit does not match expected commit $ExpectedCommit"
+    }
+    & git.exe -c "gpg.ssh.allowedSignersFile=$allowedSigners" tag -v $tag 2>&1 |
+        Set-Content -LiteralPath (Join-Path $runRoot 'tag-verification.txt') -Encoding utf8
+    if ($LASTEXITCODE -ne 0) { throw "signed tag verification failed: $tag" }
+    & git.exe checkout --detach $tag
+    if ($LASTEXITCODE -ne 0) { throw "tag checkout failed: $tag" }
+
+    & rustup.exe toolchain install $RustVersion --profile minimal
+    if ($LASTEXITCODE -ne 0) { throw "Rust toolchain installation failed: $RustVersion" }
+    & rustup.exe override set $RustVersion
+    if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain override failed' }
+
+    $host = (& rustc.exe -vV | Select-String '^host: ' | ForEach-Object { $_.Line.Substring(6) })
+    $expectedHost = if ($Architecture -eq 'x86_64') {
+        'x86_64-pc-windows-msvc'
+    } else {
+        'aarch64-pc-windows-msvc'
+    }
+    if ($host -ne $expectedHost) {
+        throw "Rust host $host does not match release target $expectedHost"
+    }
+
+    & python.exe scripts/validate_portable_release_plan.py
+    if ($LASTEXITCODE -ne 0) { throw 'portable release-plan validation failed' }
+    & cargo.exe test --workspace --locked
+    if ($LASTEXITCODE -ne 0) { throw 'native Windows workspace tests failed' }
+    $nativeSmoke = Join-Path $sourceRoot 'scripts\smoke_windows_native.ps1'
+    if (-not (Test-Path -LiteralPath $nativeSmoke -PathType Leaf)) {
+        throw 'native Windows live smoke is required before release evidence can be produced'
+    }
+    & pwsh.exe -NoProfile -File $nativeSmoke
+    if ($LASTEXITCODE -ne 0) { throw 'native Windows live smoke failed' }
+
+    function Build-ArchiveSet {
+        param([Parameter(Mandatory = $true)][string]$Destination)
+
+        if (Test-Path -LiteralPath (Join-Path $sourceRoot 'target')) {
+            Remove-Item -LiteralPath (Join-Path $sourceRoot 'target') -Recurse -Force
+        }
+        if (Test-Path -LiteralPath (Join-Path $sourceRoot 'dist')) {
+            Remove-Item -LiteralPath (Join-Path $sourceRoot 'dist') -Recurse -Force
+        }
+        & pwsh.exe -NoProfile -File scripts/build_release_assets.ps1 `
+            -Version $Version -Architecture $Architecture
+        if ($LASTEXITCODE -ne 0) { throw 'Windows archive build failed' }
+
+        New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+        $archives = @(Get-ChildItem -LiteralPath (Join-Path $sourceRoot 'dist') `
+            -Filter "fluxheim-$Version-*-$targetLabel.zip" -File)
+        if ($archives.Count -ne 7) {
+            throw "expected seven Windows ZIP archives, found $($archives.Count)"
+        }
+        foreach ($archive in $archives) {
+            & python.exe -m zipfile -t $archive.FullName
+            if ($LASTEXITCODE -ne 0) { throw "invalid ZIP archive: $($archive.Name)" }
+            Copy-Item -LiteralPath $archive.FullName -Destination $Destination
+        }
+    }
+
+    $firstBuild = Join-Path $runRoot 'first'
+    $secondBuild = Join-Path $runRoot 'second'
+    Build-ArchiveSet -Destination $firstBuild
+    Build-ArchiveSet -Destination $secondBuild
+
+    $firstHashes = @{}
+    Get-ChildItem -LiteralPath $firstBuild -Filter '*.zip' -File | ForEach-Object {
+        $firstHashes[$_.Name] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    $secondHashes = @{}
+    Get-ChildItem -LiteralPath $secondBuild -Filter '*.zip' -File | ForEach-Object {
+        $secondHashes[$_.Name] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    if ($firstHashes.Count -ne $secondHashes.Count) {
+        throw 'reproducible Windows builds produced different archive counts'
+    }
+    foreach ($name in $firstHashes.Keys) {
+        if (-not $secondHashes.ContainsKey($name) -or $firstHashes[$name] -ne $secondHashes[$name]) {
+            throw "Windows archive is not reproducible: $name"
+        }
+    }
+
+    if (Test-Path -LiteralPath $outputRoot) {
+        Remove-Item -LiteralPath $outputRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
+    Copy-Item -Path (Join-Path $secondBuild '*.zip') -Destination $outputRoot
+    Copy-Item -LiteralPath (Join-Path $runRoot 'tag-verification.txt') -Destination $outputRoot
+
+    $checksumLines = @($secondHashes.GetEnumerator() | Sort-Object Name | ForEach-Object {
+        "$($_.Value)  $($_.Name)"
+    })
+    $checksumFile = Join-Path $outputRoot "SHA256SUMS-$targetLabel.txt"
+    Set-Content -LiteralPath $checksumFile -Value $checksumLines -Encoding ascii
+
+    $manifestBytes = [Text.Encoding]::UTF8.GetBytes(($checksumLines -join "`n") + "`n")
+    $manifestHash = [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData($manifestBytes)
+    ).ToLowerInvariant()
+    Set-Content -LiteralPath (Join-Path $outputRoot "REPRODUCIBLE-BUILD-SHA256-$targetLabel.txt") `
+        -Value "$manifestHash  archive-set-manifest" -Encoding ascii
+
+    @(
+        "version=$Version"
+        "tag=$tag"
+        "commit=$tagCommit"
+        "architecture=$Architecture"
+        "rust_host=$host"
+        'test_scope=workspace-and-native-live-smoke'
+        'archive_count=7'
+        'reproducible=true'
+    ) | Set-Content -LiteralPath (Join-Path $outputRoot "release-evidence-$targetLabel.txt") -Encoding ascii
+
+    Write-Host "Windows release evidence written to $outputRoot"
+} finally {
+    Set-Location ($env:SystemDrive + '\')
+    if (Test-Path -LiteralPath $runRoot) {
+        Remove-Item -LiteralPath $runRoot -Recurse -Force
+    }
+}

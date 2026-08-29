@@ -7,6 +7,21 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.8.2 - Unreleased
+
+### Added
+
+- Start native unsigned Windows portable parity for x86_64 and ARM64 MSVC
+  hosts, with one validated seven-profile archive contract for both targets.
+- Add PowerShell-native Windows archive tooling and fail-closed release-builder
+  preparation for dedicated Azure or operator-managed build hosts.
+
+### Changed
+
+- Require Windows release evidence to identify the exact signed tag commit,
+  native host architecture, test scope, archive checksums, and reproducible
+  build hashes before the Linux release aggregator accepts it.
+
 ## 1.8.1 - 2026-08-28
 
 ### Added
