@@ -3224,8 +3224,10 @@ Stable scope:
   and define one archive/profile contract for Linux, macOS, and Windows.
 - `v1.8.1`: unsigned macOS portable parity. Build the same supported public
   archive profiles for Apple Silicon, using the same archive names, layout,
-  documentation, checksums, and smoke expectations as Linux. Intel macOS is
-  outside the supported release matrix. Add live static, proxy, TLS, cache,
+  documentation, checksums, and smoke expectations as Linux. Build tar and ZIP
+  internally for payload-equivalence validation, but publish only `.tar.gz`
+  for the terminal-oriented unsigned CLI preview. Intel macOS is outside the
+  supported release matrix. Add live static, proxy, TLS, cache,
   admin, load-balancer, observability, and Wasm tests, plus launchd or an
   explicitly documented foreground deployment mode and APFS/ACL/symlink
   review.
@@ -4872,7 +4874,9 @@ circular dependencies.
   packaged-binary Wasm smoke.
 - `v1.8.1`: unsigned macOS portable parity for Apple Silicon, using the same
   supported profile names, archive layout, checksums, docs, and live evidence
-  as Linux. Intel macOS is not a supported release target.
+  as Linux. Publish `.tar.gz` only while ZIP remains an internal equivalence
+  check and signed/notarized installers are unavailable. Intel macOS is not a
+  supported release target.
 - `v1.8.2`: unsigned Windows MSVC portable parity with the same supported
   profile/archive contract and explicit replacements or limitations for
   Unix-only behavior.

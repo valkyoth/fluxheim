@@ -231,10 +231,11 @@ The native matrix must also execute
 archive binary. Do not substitute source-tree Wasm tests for packaged-binary
 evidence.
 
-Future Windows binaries retain `.exe`; both operating systems use matching
-`.tar.gz` and `.zip` payload contracts. These archives are unsigned previews,
-not notarized or Authenticode-signed installers. See
-[Portable Releases](portable-releases.md).
+Future Windows binaries retain `.exe`. The builder creates matching `.tar.gz`
+and `.zip` payloads as an equivalence check, but public release formats are
+platform-native: `.tar.gz` for Linux and the unsigned macOS CLI preview, and
+`.zip` for Windows. These archives are unsigned previews, not notarized or
+Authenticode-signed installers. See [Portable Releases](portable-releases.md).
 
 The older combined macOS development artifact remains available for local
 developer workflows:
@@ -244,9 +245,9 @@ scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos-dev
 ```
 
 Apple Silicon Macs produce
-`fluxheim-${RELEASE_VERSION}-dev-aarch64-macos.{tar.gz,zip}`. These remain
-unsigned development conveniences and are separate from the portable profile
-matrix. Intel macOS developer archives are not published.
+`fluxheim-${RELEASE_VERSION}-dev-aarch64-macos.{tar.gz,zip}` for local
+validation. These remain unsigned development conveniences and are not public
+release assets. Intel macOS developer archives are not published.
 
 Record all runtime and config-tester binary checksums.
 
@@ -338,21 +339,21 @@ On GitHub:
 3. Select the tag from `$TAG`.
 4. Use `$TITLE` as the release title.
 5. Paste the contents of `$RELEASE_NOTES`.
-6. Upload both formats of every runtime profile archive built in step 4:
-   `dist/fluxheim-${RELEASE_VERSION}-{full,wasm,cache,proxy,load-balancer,php}-{x86_64,aarch64}-linux.{tar.gz,zip}`.
-7. Upload both formats of the unified config-tester archive built in step 4:
-   `dist/fluxheim-${RELEASE_VERSION}-config-tester-{x86_64,aarch64}-linux.{tar.gz,zip}`.
+6. Upload the `.tar.gz` runtime profile archives built for Linux:
+   `dist/fluxheim-${RELEASE_VERSION}-{full,wasm,cache,proxy,load-balancer,php}-{x86_64,aarch64}-linux.tar.gz`.
+7. Upload the `.tar.gz` unified config-tester archives built for Linux:
+   `dist/fluxheim-${RELEASE_VERSION}-config-tester-{x86_64,aarch64}-linux.tar.gz`.
 8. If the release includes unsigned portable previews, upload every
-   successfully gated profile from
-   `dist/fluxheim-${RELEASE_VERSION}-{full,wasm,cache,proxy,load-balancer,php,config-tester}-aarch64-macos.{tar.gz,zip}`
-   and any separately gated Windows profiles.
+   successfully gated macOS `.tar.gz` profile from
+   `dist/fluxheim-${RELEASE_VERSION}-{full,wasm,cache,proxy,load-balancer,php,config-tester}-aarch64-macos.tar.gz`,
+   plus `SHA256SUMS-aarch64-macos.txt`. Upload only `.zip` for any separately
+   gated Windows profiles. ZIP output from the macOS builder is
+   validation-only.
    Do not upload an untested target or describe these files as signed
    installers.
-9. If a legacy combined macOS developer artifact is needed, upload
-   `dist/fluxheim-${RELEASE_VERSION}-dev-aarch64-macos.{tar.gz,zip}`.
-10. Upload `target/release-evidence/fluxheim.spdx.json`.
-11. Upload `target/release-evidence/fluxheim.cyclonedx.json`.
-12. Publish the release.
+9. Upload `target/release-evidence/fluxheim.spdx.json`.
+10. Upload `target/release-evidence/fluxheim.cyclonedx.json`.
+11. Publish the release.
 
 It is normal to publish before every evidence field is filled. Source archives
 and container digests are available only after the tag/release and image

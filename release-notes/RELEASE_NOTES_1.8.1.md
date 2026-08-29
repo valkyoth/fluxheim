@@ -7,9 +7,9 @@ not a supported release target.
 ## Native macOS Archives
 
 - Run the macOS portable gate on a native Apple Silicon GitHub-hosted runner.
-- Build matching `.tar.gz` and `.zip` archives for the `full`, `wasm`, `cache`,
+- Build matching `.tar.gz` and `.zip` payloads for the `full`, `wasm`, `cache`,
   `proxy`, `load-balancer`, `php`, and `config-tester` profiles for ARM64
-  macOS.
+  macOS, verify their equivalence, and publish only the `.tar.gz` CLI archives.
 - Execute the packaged Wasm policy examples from the staged Wasm archive on
   Apple Silicon.
 
@@ -48,6 +48,10 @@ extended-ACL operator boundary, and the local-filesystem locking requirement.
 These archives remain unsigned and are not notarized. SHA-256 checksums prove
 artifact integrity against release metadata but do not establish publisher
 identity.
+
+The public preview uses a terminal-oriented `.tar.gz` download, checksum,
+extraction, and installation workflow. ZIP remains an internal payload check;
+signed and notarized graphical installation remains later platform work.
 
 ## Diagnostic And Filesystem Hardening
 

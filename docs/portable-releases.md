@@ -22,14 +22,16 @@ Each supported operating-system target uses the same public profile names:
 `full` intentionally remains Wasm-free. Select `wasm` when in-process policy
 execution and its reviewed proxy-ABI and WASI capability surfaces are needed.
 
-Every staged directory is emitted as both `.tar.gz` and `.zip`. The archive
-builder verifies that both formats contain the same paths and file payloads.
-Windows binaries retain their `.exe` suffix. Archive names use normalized
-platform labels such as:
+Every staged directory is emitted internally as both `.tar.gz` and `.zip` so
+the archive builder can verify that both formats contain the same paths and
+file payloads. Publication format is platform-specific: Linux publishes
+`.tar.gz`, unsigned macOS CLI previews publish `.tar.gz`, and Windows will
+publish `.zip` once its native gate is complete. Windows binaries retain their
+`.exe` suffix. Archive names use normalized platform labels such as:
 
 ```text
-fluxheim-1.8.1-wasm-x86_64-linux.zip
-fluxheim-1.8.1-wasm-aarch64-macos.tar.gz
+fluxheim-VERSION-wasm-x86_64-linux.tar.gz
+fluxheim-VERSION-wasm-aarch64-macos.tar.gz
 ```
 
 Windows will use the same naming contract from `1.8.2`; `1.8.0` does not
@@ -38,9 +40,10 @@ publish a Windows archive.
 The shared matrix can be inspected without compiling:
 
 ```bash
-scripts/build_release_assets.sh 1.8.1 --kind linux --plan
-scripts/build_release_assets.sh 1.8.1 --kind macos --plan
-scripts/build_release_assets.sh 1.8.1 --kind windows --plan
+VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | sed -n '1p')"
+scripts/build_release_assets.sh "$VERSION" --kind linux --plan
+scripts/build_release_assets.sh "$VERSION" --kind macos --plan
+scripts/build_release_assets.sh "$VERSION" --kind windows --plan
 scripts/validate_portable_release_plan.py
 ```
 
@@ -51,7 +54,7 @@ Git Bash, or WSL on Windows.
 Build on the operating system and architecture represented by the target:
 
 ```bash
-scripts/build_release_assets.sh 1.8.1 --kind macos --profile wasm
+scripts/build_release_assets.sh "$VERSION" --kind macos --profile wasm
 ```
 
 Cross-compiling a Windows MSVC binary from Linux is not an authoritative
@@ -110,6 +113,43 @@ macOS archives are unsigned portable previews until Fluxheim has company-backed
 publisher credentials. Windows archives will follow the same policy when they
 begin in `1.8.2`. SHA-256 checksums prove downloaded-byte integrity against the
 published release metadata; they do not establish a signed publisher identity.
+
+The public macOS preview uses only `.tar.gz`. Fluxheim is a command-line server,
+and the documented terminal download and extraction flow avoids presenting an
+unsigned ZIP as a Finder installation experience. ZIP remains an internal
+archive-equivalence check and is not attached to the GitHub release. This is a
+temporary distribution policy, not a substitute for Developer ID signing and
+notarization.
+
+Install a runtime profile without embedding a release number in automation:
+
+```bash
+VERSION="REPLACE_WITH_RELEASE_VERSION"
+PROFILE="full"
+ARCHIVE="fluxheim-${VERSION}-${PROFILE}-aarch64-macos.tar.gz"
+BASE_URL="https://github.com/valkyoth/fluxheim/releases/download/v${VERSION}"
+
+curl -fLO "${BASE_URL}/${ARCHIVE}"
+curl -fLO "${BASE_URL}/SHA256SUMS-aarch64-macos.txt"
+grep "  ${ARCHIVE}$" SHA256SUMS-aarch64-macos.txt | shasum -a 256 -c -
+tar -xzf "$ARCHIVE"
+
+install -d "$HOME/.local/bin"
+install -m 0755 "fluxheim-${VERSION}-${PROFILE}-aarch64-macos/fluxheim" \
+  "$HOME/.local/bin/fluxheim"
+install -m 0755 "fluxheim-${VERSION}-${PROFILE}-aarch64-macos/fluxheim-acme" \
+  "$HOME/.local/bin/fluxheim-acme"
+```
+
+Ensure `$HOME/.local/bin` is on `PATH`. The `config-tester` profile contains
+`fluxheim-config-tester` instead of the two runtime binaries. Administrators
+may install into `/usr/local/bin` with appropriate privileges instead.
+
+Use the terminal workflow above even if the archive was first downloaded in a
+browser. Do not disable Gatekeeper globally. If Finder or another graphical
+extractor produces a quarantined executable, download and extract it again with
+the documented command-line workflow. Signed and notarized `.pkg`/`.dmg`
+installation is a later platform milestone.
 
 Operators are responsible for local Gatekeeper, SmartScreen, ACL, and
 execution-policy decisions for these unsigned archives. Fluxheim will not

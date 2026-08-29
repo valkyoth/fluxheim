@@ -149,17 +149,27 @@ validation.
 Build the common portable profile matrix on macOS with:
 
 ```bash
-RELEASE_VERSION=1.8.1
+RELEASE_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | sed -n '1p')"
 scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos
 ```
 
 This produces separate `full`, `wasm`, `cache`, `proxy`, `load-balancer`,
-`php`, and `config-tester` archives in both `.tar.gz` and `.zip`. The older
-combined developer archive remains available through `--kind macos-dev`.
-Preferred portable naming examples:
+`php`, and `config-tester` archives. The builder creates both `.tar.gz` and
+`.zip` internally and proves that their payloads match. Only `.tar.gz` is
+published for the unsigned macOS CLI preview; ZIP is validation-only until
+Fluxheim can ship a Developer ID-signed and notarized installer. The older
+combined developer archive remains available through `--kind macos-dev` but
+is not a public release asset. Portable naming is version-independent:
 
-- `fluxheim-1.8.1-full-aarch64-macos.tar.gz`
-- `fluxheim-1.8.1-wasm-aarch64-macos.zip`
+- `fluxheim-VERSION-full-aarch64-macos.tar.gz`
+- `fluxheim-VERSION-wasm-aarch64-macos.tar.gz`
 
 Fluxheim does not publish Intel or universal macOS binaries. See [Portable
 Releases](portable-releases.md) for unsigned-preview limitations.
+
+For installation, checksum verification, Gatekeeper boundaries, and the
+terminal-only preview workflow, follow the
+[Unsigned Preview Policy](portable-releases.md#unsigned-preview-policy). Do not
+present these archives as a Finder installer or advise users to disable
+platform security. A signed/notarized graphical installation workflow replaces
+this temporary preview policy once publisher credentials are available.

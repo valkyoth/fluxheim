@@ -436,7 +436,8 @@ archive contract. Release `1.8.1` expands unsigned macOS archives and native
 tests on Apple Silicon. Intel macOS is not a supported release target. The
 normal `full` profile remains Wasm-free, and Windows remains plan-only until
 native runtime work in `1.8.2`. Signing and installer work follows platform
-parity. See
+parity. The unsigned macOS CLI preview publishes `.tar.gz` only; the builder's
+ZIP output is retained for internal payload-equivalence validation. See
 [Portable Releases](docs/portable-releases.md) for the shared archive contract,
 current platform support level, and unsigned-preview policy.
 
