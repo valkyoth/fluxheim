@@ -252,9 +252,8 @@ mod tests {
         )
         .parse()
         .unwrap();
-        let mut opened = file.reopen().unwrap();
-        windows_permissions::wrappers::SetSecurityInfo(
-            &mut opened,
+        windows_permissions::wrappers::SetNamedSecurityInfo(
+            file.path(),
             SeObjectType::SE_FILE_OBJECT,
             SecurityInformation::Dacl,
             None,
@@ -263,6 +262,7 @@ mod tests {
             None,
         )
         .unwrap();
+        let opened = file.reopen().unwrap();
 
         assert!(opened_file_has_insecure_owner_or_write_permissions(&opened).unwrap());
     }
@@ -277,9 +277,8 @@ mod tests {
         )
         .parse()
         .unwrap();
-        let mut opened = file.reopen().unwrap();
-        windows_permissions::wrappers::SetSecurityInfo(
-            &mut opened,
+        windows_permissions::wrappers::SetNamedSecurityInfo(
+            file.path(),
             SeObjectType::SE_FILE_OBJECT,
             SecurityInformation::Dacl,
             None,
@@ -288,6 +287,7 @@ mod tests {
             None,
         )
         .unwrap();
+        let opened = file.reopen().unwrap();
 
         assert!(!opened_file_has_insecure_owner_or_write_permissions(&opened).unwrap());
     }
