@@ -13,13 +13,17 @@ required-features = ["runtime"]
 
 [features]
 default = []
-runtime = ["dep:fluxheim-config", "dep:maxminddb", "dep:rustix"]
+runtime = ["dep:fluxheim-config", "dep:maxminddb", "dep:rustix", "dep:same-file"]
 
 [dependencies]
 fluxheim-config = { path = "../fluxheim-config", features = ["geoip"], optional = true }
 log = "0.4.34"
 maxminddb = { version = "0.30.3", optional = true }
 rustix = { version = "1.1.4", features = ["process"], optional = true }
+same-file = { version = "1.0.6", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }

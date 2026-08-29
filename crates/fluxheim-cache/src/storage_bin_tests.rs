@@ -11,6 +11,7 @@ use crate::storage_bin::{
     StorageBinObjectLocation, prepare_storage_bin_layout, read_storage_bin_index,
     storage_bin_index_path, write_storage_bin_index,
 };
+#[cfg(unix)]
 use crate::storage_bin_fs::storage_bin_path_contains_symlink;
 
 fn storage_bin_plan() -> DiskTierPlan {

@@ -1248,6 +1248,7 @@ dependencies = [
  "rustix",
  "tempfile",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1293,6 +1294,8 @@ dependencies = [
  "log",
  "maxminddb",
  "rustix",
+ "same-file",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

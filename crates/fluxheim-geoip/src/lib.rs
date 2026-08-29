@@ -77,7 +77,9 @@ mod geoip_runtime {
     mod tests;
     mod value;
 
-    use file_path::{O_NOFOLLOW, path_contains_symlink};
+    #[cfg(unix)]
+    use file_path::O_NOFOLLOW;
+    use file_path::path_contains_symlink;
     use value::{admitted_geoip_total, normalized_asn, normalized_country};
 
     const MAX_GEOIP_DATABASE_BYTES: u64 = 512 * 1024 * 1024;
@@ -331,7 +333,22 @@ mod geoip_runtime {
         options.open(path)
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    fn open_regular_mmdb(path: &Path) -> io::Result<File> {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_OPEN_REPARSE_POINT, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
+        };
+
+        let mut options = OpenOptions::new();
+        options
+            .read(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
+        options.open(path)
+    }
+
+    #[cfg(all(not(unix), not(windows)))]
     fn open_regular_mmdb(path: &Path) -> io::Result<File> {
         OpenOptions::new().read(true).open(path)
     }
@@ -361,7 +378,9 @@ mod geoip_runtime {
         }
         let file = open_regular_mmdb(path)?;
         let opened_metadata = file.metadata()?;
-        if !opened_metadata.is_file() || !same_mmdb_file(&path_metadata, &opened_metadata) {
+        if !opened_metadata.is_file()
+            || !same_mmdb_file(path, &file, &path_metadata, &opened_metadata)?
+        {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 format!(
@@ -390,16 +409,39 @@ mod geoip_runtime {
     }
 
     #[cfg(unix)]
-    fn same_mmdb_file(path_metadata: &Metadata, opened_metadata: &Metadata) -> bool {
+    fn same_mmdb_file(
+        _path: &Path,
+        _file: &File,
+        path_metadata: &Metadata,
+        opened_metadata: &Metadata,
+    ) -> io::Result<bool> {
         use std::os::unix::fs::MetadataExt as _;
 
-        path_metadata.dev() == opened_metadata.dev() && path_metadata.ino() == opened_metadata.ino()
+        Ok(path_metadata.dev() == opened_metadata.dev()
+            && path_metadata.ino() == opened_metadata.ino())
     }
 
-    #[cfg(not(unix))]
-    fn same_mmdb_file(path_metadata: &Metadata, opened_metadata: &Metadata) -> bool {
-        path_metadata.len() == opened_metadata.len()
-            && path_metadata.modified().ok() == opened_metadata.modified().ok()
+    #[cfg(windows)]
+    fn same_mmdb_file(
+        path: &Path,
+        file: &File,
+        _path_metadata: &Metadata,
+        _opened_metadata: &Metadata,
+    ) -> io::Result<bool> {
+        let path_handle = same_file::Handle::from_path(path)?;
+        let opened_handle = same_file::Handle::from_file(file.try_clone()?)?;
+        Ok(path_handle == opened_handle)
+    }
+
+    #[cfg(all(not(unix), not(windows)))]
+    fn same_mmdb_file(
+        _path: &Path,
+        _file: &File,
+        path_metadata: &Metadata,
+        opened_metadata: &Metadata,
+    ) -> io::Result<bool> {
+        Ok(path_metadata.len() == opened_metadata.len()
+            && path_metadata.modified().ok() == opened_metadata.modified().ok())
     }
 
     #[cfg(unix)]

@@ -35,11 +35,25 @@ pub(super) fn path_contains_symlink(path: &Path) -> io::Result<bool> {
     for component in path.components() {
         current.push(component);
         match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(metadata) if metadata_is_symlink_or_reparse_point(&metadata) => return Ok(true),
             Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
             Err(error) => return Err(error),
         }
     }
     Ok(false)
+}
+
+#[cfg(windows)]
+fn metadata_is_symlink_or_reparse_point(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+
+    metadata.file_attributes()
+        & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+        != 0
+}
+
+#[cfg(not(windows))]
+fn metadata_is_symlink_or_reparse_point(metadata: &fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
 }

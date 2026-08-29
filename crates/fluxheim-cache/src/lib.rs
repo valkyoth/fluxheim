@@ -22,6 +22,10 @@ pub mod request;
 pub mod storage;
 pub mod storage_bin;
 mod storage_bin_alloc;
+#[cfg(not(windows))]
+mod storage_bin_fs;
+#[cfg(windows)]
+#[path = "storage_bin_fs_windows.rs"]
 mod storage_bin_fs;
 mod storage_bin_index;
 mod storage_bin_manifest;
