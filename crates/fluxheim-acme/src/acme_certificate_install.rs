@@ -14,12 +14,13 @@ mod revocation_fs;
 use backup::{backup_existing_file, cleanup_backup};
 #[cfg(not(unix))]
 use fs_ops::CertificateDirectoryFd;
+#[cfg(unix)]
+use fs_ops::open_safe_certificate_directory;
 #[cfg(not(unix))]
 pub(crate) use fs_ops::reject_existing_symlink_in_path;
 use fs_ops::{
     ManagedCertificateOwnership, certificate_directory, ensure_safe_destination,
-    ensure_safe_directory, managed_certificate_ownership, open_safe_certificate_directory,
-    rename_certificate_file, write_new_file,
+    ensure_safe_directory, managed_certificate_ownership, rename_certificate_file, write_new_file,
 };
 use recovery::{
     CertificateInstallPhase, begin_certificate_install, complete_certificate_install,

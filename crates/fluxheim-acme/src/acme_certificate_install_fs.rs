@@ -391,7 +391,6 @@ pub(super) fn open_safe_certificate_directory(
     })
 }
 
-#[cfg(unix)]
 pub(super) fn certificate_file_name_in_directory<'a>(
     directory: &Path,
     path: &'a Path,
@@ -404,7 +403,9 @@ pub(super) fn certificate_file_name_in_directory<'a>(
     }
     path.file_name()
         .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty() && !name.contains('/'))
+        .filter(|name| {
+            !name.is_empty() && !name.contains('/') && !name.contains('\\') && !name.contains(':')
+        })
         .ok_or_else(|| AcmeCertificateInstallError::UnsafePath {
             path: path.to_path_buf(),
             message: "certificate path must end in a safe file name".to_owned(),

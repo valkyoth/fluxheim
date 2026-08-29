@@ -128,8 +128,8 @@ impl AcmeMutationLock {
                 .open(directory.join(ACME_MUTATION_LOCK_FILE))?;
             match file.try_lock() {
                 Ok(()) => Ok(Some(Self { file })),
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
-                Err(error) => Err(error),
+                Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+                Err(std::fs::TryLockError::Error(error)) => Err(error),
             }
         }
     }

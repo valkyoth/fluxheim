@@ -1,9 +1,10 @@
 use super::backup::cleanup_backup;
+#[cfg(all(feature = "acme-client", unix))]
+use super::fs_ops::open_safe_certificate_directory;
 use super::fs_ops::{CertificateDirectoryFd, rename_certificate_file, sync_directory};
 #[cfg(feature = "acme-client")]
 use super::fs_ops::{
-    ManagedCertificateOwner, certificate_directory, managed_certificate_owner,
-    open_safe_certificate_directory, write_new_file,
+    ManagedCertificateOwner, certificate_directory, managed_certificate_owner, write_new_file,
 };
 #[cfg(feature = "acme-client")]
 use super::revocation_fs::read_bounded_regular_file;
