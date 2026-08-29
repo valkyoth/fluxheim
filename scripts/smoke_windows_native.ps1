@@ -34,6 +34,61 @@ function ConvertTo-TomlPath {
     return $Path.Replace('\', '/')
 }
 
+function ConvertTo-Pem {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][byte[]]$Bytes
+    )
+
+    $encoded = [Convert]::ToBase64String(
+        $Bytes,
+        [Base64FormattingOptions]::InsertLineBreaks
+    )
+    return "-----BEGIN $Label-----`r`n$encoded`r`n-----END $Label-----`r`n"
+}
+
+function New-WindowsSmokeCertificate {
+    param(
+        [Parameter(Mandatory = $true)][string]$CertificatePath,
+        [Parameter(Mandatory = $true)][string]$PrivateKeyPath
+    )
+
+    $rsa = [Security.Cryptography.RSA]::Create(2048)
+    try {
+        $request = [Security.Cryptography.X509Certificates.CertificateRequest]::new(
+            'CN=static.test',
+            $rsa,
+            [Security.Cryptography.HashAlgorithmName]::SHA256,
+            [Security.Cryptography.RSASignaturePadding]::Pkcs1
+        )
+        $san = [Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder]::new()
+        $san.AddDnsName('static.test')
+        $request.CertificateExtensions.Add($san.Build())
+        $certificate = $request.CreateSelfSigned(
+            [DateTimeOffset]::UtcNow.AddMinutes(-5),
+            [DateTimeOffset]::UtcNow.AddDays(1)
+        )
+        try {
+            $thumbprint = $certificate.Thumbprint
+            [IO.File]::WriteAllText(
+                $CertificatePath,
+                (ConvertTo-Pem -Label 'CERTIFICATE' -Bytes $certificate.RawData),
+                [Text.Encoding]::ASCII
+            )
+            [IO.File]::WriteAllText(
+                $PrivateKeyPath,
+                (ConvertTo-Pem -Label 'PRIVATE KEY' -Bytes $rsa.ExportPkcs8PrivateKey()),
+                [Text.Encoding]::ASCII
+            )
+            return $thumbprint
+        } finally {
+            $certificate.Dispose()
+        }
+    } finally {
+        $rsa.Dispose()
+    }
+}
+
 function Invoke-FluxheimRequest {
     param(
         [Parameter(Mandatory = $true)][Net.Http.HttpClient]$Client,
@@ -171,6 +226,9 @@ $testRoot = Join-Path $temporaryRoot "fluxheim-windows-smoke-$runId"
 $publicRoot = Join-Path $testRoot 'public'
 $runtimeRoot = Join-Path $testRoot 'run'
 $snapshotRoot = Join-Path $testRoot 'snapshots'
+$tlsRoot = Join-Path $testRoot 'tls'
+$certificatePath = Join-Path $tlsRoot 'certificate.pem'
+$privateKeyPath = Join-Path $tlsRoot 'private-key.pem'
 $configPath = Join-Path $testRoot 'fluxheim.toml'
 $stdoutPath = Join-Path $testRoot 'fluxheim.stdout.log'
 $stderrPath = Join-Path $testRoot 'fluxheim.stderr.log'
@@ -180,14 +238,19 @@ $originTwo = $null
 $previousAdminToken = $env:FLUXHEIM_WINDOWS_SMOKE_ADMIN_TOKEN
 $succeeded = $false
 
-New-Item -ItemType Directory -Force -Path $publicRoot, $runtimeRoot, $snapshotRoot | Out-Null
+New-Item -ItemType Directory -Force `
+    -Path $publicRoot, $runtimeRoot, $snapshotRoot, $tlsRoot | Out-Null
 Set-Content -LiteralPath (Join-Path $publicRoot 'index.html') `
     -Value '<!doctype html><title>Fluxheim Windows smoke</title><h1>windows-static-ok</h1>' `
     -Encoding ascii
 Set-Content -LiteralPath (Join-Path $publicRoot 'asset.webp') `
     -Value 'windows-cache-ok' -Encoding ascii
+$expectedCertificateThumbprint = New-WindowsSmokeCertificate `
+    -CertificatePath $certificatePath `
+    -PrivateKeyPath $privateKeyPath
 
 $port = Get-FreeTcpPort
+$tlsPort = Get-FreeTcpPort
 $adminPort = Get-FreeTcpPort
 $metricsPort = Get-FreeTcpPort
 $originOnePort = Get-FreeTcpPort
@@ -195,9 +258,12 @@ $originTwoPort = Get-FreeTcpPort
 $publicToml = ConvertTo-TomlPath $publicRoot
 $runtimeToml = ConvertTo-TomlPath $runtimeRoot
 $snapshotToml = ConvertTo-TomlPath $snapshotRoot
+$certificateToml = ConvertTo-TomlPath $certificatePath
+$privateKeyToml = ConvertTo-TomlPath $privateKeyPath
 $config = @"
 [server]
 listen = ["127.0.0.1:$port"]
+tls_listen = ["127.0.0.1:$tlsPort"]
 default_vhost = "static.test"
 trusted_proxies = []
 
@@ -237,8 +303,12 @@ referrer_policy = "no-referrer"
 unset = ["server", "x-powered-by"]
 
 [tls]
-enabled = false
+enabled = true
 backend = "rustls"
+
+[[tls.certificates]]
+cert_path = "$certificateToml"
+key_path = "$privateKeyToml"
 
 [cache]
 enabled = false
@@ -246,6 +316,13 @@ enabled = false
 [[vhosts]]
 name = "static.test"
 hosts = ["static.test"]
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "$certificateToml"
+key_path = "$privateKeyToml"
 
 [vhosts.cache]
 enabled = true
@@ -343,6 +420,31 @@ try {
             }
         } finally {
             $response.Dispose()
+        }
+
+        $tlsHandler = [Net.Http.HttpClientHandler]::new()
+        $tlsHandler.ServerCertificateCustomValidationCallback = {
+            param($message, $certificate, $chain, $policyErrors)
+            return $certificate.Thumbprint -eq $expectedCertificateThumbprint
+        }
+        $tlsClient = [Net.Http.HttpClient]::new($tlsHandler)
+        $tlsClient.Timeout = [TimeSpan]::FromSeconds(2)
+        try {
+            $tlsUri = [Uri]"https://127.0.0.1:$tlsPort/"
+            $tlsResponse = Invoke-FluxheimRequest -Client $tlsClient -Uri $tlsUri `
+                -HostHeader 'static.test'
+            try {
+                $tlsBody = $tlsResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                if ([int]$tlsResponse.StatusCode -ne 200 -or
+                    -not $tlsBody.Contains('windows-static-ok')) {
+                    throw 'native Windows TLS response mismatch'
+                }
+            } finally {
+                $tlsResponse.Dispose()
+            }
+        } finally {
+            $tlsClient.Dispose()
+            $tlsHandler.Dispose()
         }
 
         $assetUri = [Uri]"http://127.0.0.1:$port/asset.webp"
@@ -455,7 +557,7 @@ try {
     }
 
     $succeeded = $true
-    Write-Host 'native Windows static/cache/proxy/load-balancer/admin/metrics smoke: ok'
+    Write-Host 'native Windows static/TLS/cache/proxy/load-balancer/admin/metrics smoke: ok'
 } catch {
     if (Test-Path -LiteralPath $stderrPath -PathType Leaf) {
         Get-Content -LiteralPath $stderrPath | Write-Error
