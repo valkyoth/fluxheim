@@ -253,11 +253,18 @@ function Invoke-FluxheimRequest {
     param(
         [Parameter(Mandatory = $true)][Net.Http.HttpClient]$Client,
         [Parameter(Mandatory = $true)][Uri]$Uri,
+        [ValidateSet('GET', 'POST')][string]$Method = 'GET',
         [string]$HostHeader,
-        [string]$BearerToken
+        [string]$BearerToken,
+        [string]$SnapshotMessage
     )
 
-    $request = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::Get, $Uri)
+    $httpMethod = if ($Method -eq 'POST') {
+        [Net.Http.HttpMethod]::Post
+    } else {
+        [Net.Http.HttpMethod]::Get
+    }
+    $request = [Net.Http.HttpRequestMessage]::new($httpMethod, $Uri)
     if (-not [string]::IsNullOrEmpty($HostHeader)) {
         $request.Headers.Host = $HostHeader
     }
@@ -266,6 +273,9 @@ function Invoke-FluxheimRequest {
             'Bearer',
             $BearerToken
         )
+    }
+    if (-not [string]::IsNullOrEmpty($SnapshotMessage)) {
+        $request.Headers.Add('X-Fluxheim-Message', $SnapshotMessage)
     }
     try {
         return $Client.SendAsync($request).GetAwaiter().GetResult()
@@ -469,6 +479,7 @@ $tlsRoot = Join-Path $testRoot 'tls'
 $certificatePath = Join-Path $tlsRoot 'certificate.pem'
 $privateKeyPath = Join-Path $tlsRoot 'private-key.pem'
 $upstreamCaPath = Join-Path $tlsRoot 'upstream-ca.pem'
+$snapshotIntegrityKeyPath = Join-Path $testRoot 'snapshot-integrity.key'
 $configPath = Join-Path $testRoot 'fluxheim.toml'
 $stdoutPath = Join-Path $testRoot 'fluxheim.stdout.log'
 $stderrPath = Join-Path $testRoot 'fluxheim.stderr.log'
@@ -493,6 +504,15 @@ Set-Content -LiteralPath (Join-Path $publicRoot 'index.html') `
     -Encoding ascii
 Set-Content -LiteralPath (Join-Path $publicRoot 'asset.webp') `
     -Value 'windows-cache-ok' -Encoding ascii
+$snapshotIntegrityKey = [byte[]]::new(32)
+$snapshotIntegrityRng = [Security.Cryptography.RandomNumberGenerator]::Create()
+try {
+    $snapshotIntegrityRng.GetBytes($snapshotIntegrityKey)
+    [IO.File]::WriteAllBytes($snapshotIntegrityKeyPath, $snapshotIntegrityKey)
+} finally {
+    $snapshotIntegrityRng.Dispose()
+    [Array]::Clear($snapshotIntegrityKey, 0, $snapshotIntegrityKey.Length)
+}
 New-WindowsSmokeCertificate `
     -CertificatePath $certificatePath `
     -PrivateKeyPath $privateKeyPath
@@ -510,6 +530,7 @@ $publicToml = ConvertTo-TomlPath $publicRoot
 $cacheToml = ConvertTo-TomlPath $cacheRoot
 $runtimeToml = ConvertTo-TomlPath $runtimeRoot
 $snapshotToml = ConvertTo-TomlPath $snapshotRoot
+$snapshotIntegrityKeyToml = ConvertTo-TomlPath $snapshotIntegrityKeyPath
 $certificateToml = ConvertTo-TomlPath $certificatePath
 $privateKeyToml = ConvertTo-TomlPath $privateKeyPath
 $upstreamCaToml = ConvertTo-TomlPath $upstreamCaPath
@@ -533,6 +554,7 @@ listen = "127.0.0.1:$adminPort"
 require_loopback = true
 token_env = "FLUXHEIM_WINDOWS_SMOKE_ADMIN_TOKEN"
 snapshot_store = "$snapshotToml"
+snapshot_integrity_key_file = "$snapshotIntegrityKeyToml"
 
 [admin.health]
 unauthenticated = true
@@ -922,6 +944,87 @@ try {
             $adminStatus.Dispose()
         }
 
+        $adminSnapshotUri = [Uri]"http://127.0.0.1:$adminPort/_fluxheim/snapshot"
+        $baselineSnapshotResponse = Invoke-FluxheimRequest -Client $client `
+            -Uri $adminSnapshotUri -Method POST `
+            -BearerToken 'windows-admin-smoke-token' `
+            -SnapshotMessage 'windows native baseline'
+        try {
+            $baselineSnapshotBody = $baselineSnapshotResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            $baselineSnapshot = $baselineSnapshotBody | ConvertFrom-Json
+            if ([int]$baselineSnapshotResponse.StatusCode -ne 201 -or
+                $baselineSnapshot.status -ne 'ok' -or
+                [string]::IsNullOrWhiteSpace([string]$baselineSnapshot.snapshot)) {
+                throw 'native Windows baseline snapshot creation failed'
+            }
+            $baselineSnapshotId = [string]$baselineSnapshot.snapshot
+        } finally {
+            $baselineSnapshotResponse.Dispose()
+        }
+
+        $candidateSnapshotResponse = Invoke-FluxheimRequest -Client $client `
+            -Uri $adminSnapshotUri -Method POST `
+            -BearerToken 'windows-admin-smoke-token' `
+            -SnapshotMessage 'windows native candidate'
+        try {
+            $candidateSnapshotBody = $candidateSnapshotResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            $candidateSnapshot = $candidateSnapshotBody | ConvertFrom-Json
+            if ([int]$candidateSnapshotResponse.StatusCode -ne 201 -or
+                $candidateSnapshot.status -ne 'ok' -or
+                [string]::IsNullOrWhiteSpace([string]$candidateSnapshot.snapshot) -or
+                [string]$candidateSnapshot.snapshot -eq $baselineSnapshotId) {
+                throw 'native Windows candidate snapshot creation failed'
+            }
+            $candidateSnapshotId = [string]$candidateSnapshot.snapshot
+        } finally {
+            $candidateSnapshotResponse.Dispose()
+        }
+
+        $adminSnapshotsUri = [Uri]"http://127.0.0.1:$adminPort/_fluxheim/snapshots"
+        $snapshotsResponse = Invoke-FluxheimRequest -Client $client `
+            -Uri $adminSnapshotsUri -BearerToken 'windows-admin-smoke-token'
+        try {
+            $snapshotsBody = $snapshotsResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            $snapshots = $snapshotsBody | ConvertFrom-Json
+            $snapshotIds = @($snapshots.snapshots | ForEach-Object { [string]$_.id })
+            if ([int]$snapshotsResponse.StatusCode -ne 200 -or
+                $snapshots.status -ne 'ok' -or
+                $snapshotIds.Count -ne 2 -or
+                $baselineSnapshotId -notin $snapshotIds -or
+                $candidateSnapshotId -notin $snapshotIds) {
+                throw 'native Windows snapshot listing failed'
+            }
+        } finally {
+            $snapshotsResponse.Dispose()
+        }
+
+        $adminRollbackUri = [Uri]"http://127.0.0.1:$adminPort/_fluxheim/rollback"
+        $rollbackResponse = Invoke-FluxheimRequest -Client $client `
+            -Uri $adminRollbackUri -Method POST `
+            -BearerToken 'windows-admin-smoke-token'
+        try {
+            $rollbackBody = $rollbackResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            $rollback = $rollbackBody | ConvertFrom-Json
+            if ([int]$rollbackResponse.StatusCode -ne 200 -or
+                $rollback.status -ne 'ok' -or
+                [string]$rollback.rollback_target -ne $baselineSnapshotId -or
+                [bool]$rollback.live_apply) {
+                throw 'native Windows snapshot rollback failed'
+            }
+        } finally {
+            $rollbackResponse.Dispose()
+        }
+        $currentSnapshotPath = Join-Path $snapshotRoot 'current'
+        $currentSnapshotId = (Get-Content -LiteralPath $currentSnapshotPath -Raw).Trim()
+        if ($currentSnapshotId -ne $baselineSnapshotId) {
+            throw 'native Windows snapshot rollback did not persist the current pointer'
+        }
+        & $binary snapshots --store $snapshotRoot `
+            --integrity-key-file $snapshotIntegrityKeyPath doctor
+        if ($LASTEXITCODE -ne 0) {
+            throw 'native Windows snapshot integrity doctor failed'
+        }
+
         $metricsUri = [Uri]"http://127.0.0.1:$metricsPort/metrics"
         $metricsResponse = Invoke-FluxheimRequest -Client $client -Uri $metricsUri
         try {
@@ -1106,7 +1209,7 @@ try {
     $gracefulProcessId = $null
 
     $succeeded = $true
-    Write-Host 'native Windows static/downstream+upstream-TLS/memory+disk-cache/proxy/load-balancer/admin/metrics/graceful-shutdown smoke: ok'
+    Write-Host 'native Windows static/downstream+upstream-TLS/memory+disk-cache/proxy/load-balancer/admin/snapshot/metrics/graceful-shutdown smoke: ok'
 } catch {
     if (Test-Path -LiteralPath $stderrPath -PathType Leaf) {
         [Console]::Error.WriteLine((Get-Content -LiteralPath $stderrPath -Raw))

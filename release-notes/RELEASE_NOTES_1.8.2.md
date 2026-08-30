@@ -11,7 +11,8 @@ same seven public profiles used by Linux and Apple Silicon macOS.
   toolchain and deny Windows-target compiler warnings.
 - Run the complete workspace suite plus live static, proxy, downstream and
   verified upstream TLS, memory and persistent storage-bin cache,
-  load-balancer, admin, metrics, ACME storage, crash-restart recovery,
+  load-balancer, integrity-authenticated snapshot create/list/rollback and
+  doctor verification, admin, metrics, ACME storage, crash-restart recovery,
   CTRL_BREAK shutdown, and packaged-Wasm tests.
 - Replace Unix-only filesystem, path, locking, shutdown, and
   certificate-storage assumptions with reviewed Windows-native behavior while

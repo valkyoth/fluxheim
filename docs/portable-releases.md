@@ -84,7 +84,8 @@ because the macOS portable gate does not require a container runtime.
 native owner/ACL trust checks for configuration and runtime paths, Windows-safe
 static and cache file handling, all seven MSVC profile builds, and native live
 static, downstream/upstream TLS, memory and persistent disk cache, proxy,
-load-balancer, admin, metrics, graceful-shutdown, external FastCGI, ACME
+load-balancer, integrity-authenticated snapshot create/list/rollback and doctor
+verification, admin, metrics, graceful-shutdown, external FastCGI, ACME
 storage, and packaged-Wasm checks. Every packaged executable must also launch
 and report the expected version. These checks preserve the existing trust
 boundary instead of replacing it with permissive cross-platform fallbacks, and

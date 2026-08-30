@@ -120,6 +120,17 @@ foreach ($required in @(
     'load-balancer.test',
     '/_fluxheim/health',
     '/_fluxheim/status',
+    "[ValidateSet('GET', 'POST')][string]`$Method = 'GET'",
+    "`$request.Headers.Add('X-Fluxheim-Message', `$SnapshotMessage)",
+    'windows native baseline',
+    'windows native candidate',
+    '/_fluxheim/snapshots',
+    '/_fluxheim/rollback',
+    'native Windows snapshot rollback did not persist the current pointer',
+    '$snapshotIntegrityRng.GetBytes($snapshotIntegrityKey)',
+    'snapshot_integrity_key_file = "$snapshotIntegrityKeyToml"',
+    '--integrity-key-file $snapshotIntegrityKeyPath doctor',
+    'native Windows snapshot integrity doctor failed',
     'fluxheim_proxy_requests_total'
 )) {
     if (-not $smoke.Contains($required)) {
