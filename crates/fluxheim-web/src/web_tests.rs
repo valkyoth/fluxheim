@@ -307,7 +307,7 @@ fn forced_refresh_ignores_static_revalidation() {
 
 #[test]
 fn formats_static_cache_identity() {
-    let modified = UNIX_EPOCH + std::time::Duration::new(10, 20);
+    let modified = UNIX_EPOCH + std::time::Duration::new(10, 200);
     assert_eq!(
         static_cache_identity(StaticCacheIdentity {
             path: Path::new("/srv/site/app.js"),
@@ -315,7 +315,7 @@ fn formats_static_cache_identity() {
             modified: Some(modified),
             device_inode: None,
         }),
-        "/srv/site/app.js:123:10:20"
+        "/srv/site/app.js:123:10:200"
     );
     assert_eq!(
         static_cache_identity(StaticCacheIdentity {
@@ -324,6 +324,6 @@ fn formats_static_cache_identity() {
             modified: Some(modified),
             device_inode: Some((7, 9)),
         }),
-        "/srv/site/app.js:7:9:123:10:20"
+        "/srv/site/app.js:7:9:123:10:200"
     );
 }
