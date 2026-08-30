@@ -24,6 +24,21 @@ mod tests {
         assert!(matches!(error, SnapshotError::UnsafeStoreRoot { .. }));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn accepts_canonical_windows_test_store_path() {
+        let root = unique_temp_path("snapshot-canonical-windows-root");
+        std::fs::create_dir(&root).unwrap();
+        let store = SnapshotStore::new(&root);
+
+        store
+            .snapshot_config(&Config::default(), Some("initial"))
+            .unwrap();
+
+        assert_eq!(store.list().unwrap().len(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn rejects_symlinked_snapshot_store_root() {

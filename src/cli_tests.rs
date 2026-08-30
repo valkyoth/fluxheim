@@ -18,6 +18,19 @@ struct TestDir {
     path: PathBuf,
 }
 
+fn toml_path_literal(path: &Path) -> String {
+    toml::Value::String(path.to_string_lossy().into_owned()).to_string()
+}
+
+#[test]
+fn toml_path_literal_escapes_windows_separators() {
+    let expected = r"C:\FluxheimBuild\config\fluxheim.toml";
+    let document = format!("path = {}", toml_path_literal(Path::new(expected)));
+    let value: toml::Value = toml::from_str(&document).unwrap();
+
+    assert_eq!(value["path"].as_str(), Some(expected));
+}
+
 impl TestDir {
     fn new(name: &str) -> Self {
         let path = unique_temp_path(name);
@@ -49,17 +62,17 @@ impl TestDir {
                     enabled = true
 
                     [[tls.certificates]]
-                    cert_path = "{}"
-                    key_path = "{}"
+                    cert_path = {}
+                    key_path = {}
 
                     [tls.acme]
                     enabled = true
-                    storage = "{}"
+                    storage = {}
                     contact_email = "admin@example.test"
                     "#,
-                cert.display(),
-                key.display(),
-                acme.display()
+                toml_path_literal(cert),
+                toml_path_literal(key),
+                toml_path_literal(acme)
             ),
         )
         .expect("write config");
@@ -94,9 +107,9 @@ impl TestDir {
                     hosts = ["{host}"]
 
                     [vhosts.web]
-                    root = "{}"
+                    root = {}
                     "#,
-                root.display()
+                toml_path_literal(root)
             ),
         )
         .expect("write config");
@@ -126,9 +139,9 @@ impl TestDir {
                     path_prefix = "/assets/"
 
                     [vhosts.routes.web]
-                    root = "{}"
+                    root = {}
                     "#,
-                root.display()
+                toml_path_literal(root)
             ),
         )
         .expect("write config");
@@ -147,9 +160,9 @@ impl TestDir {
                     hosts = ["web-disabled.test"]
 
                     [vhosts.web]
-                    root = "{}"
+                    root = {}
                     "#,
-                root.display()
+                toml_path_literal(root)
             ),
         )
         .expect("write config");
@@ -190,13 +203,13 @@ impl TestDir {
 
                     [vhosts.php]
                     enabled = true
-                    root = "{}"
+                    root = {}
 
                     [vhosts.php.fpm]
                     tcp = "127.0.0.1:9000"
                     allow_private_tcp_upstreams = true
                     "#,
-                root.display()
+                toml_path_literal(root)
             ),
         )
         .expect("write config");
