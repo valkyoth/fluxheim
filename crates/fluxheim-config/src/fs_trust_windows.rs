@@ -47,7 +47,8 @@ pub fn opened_file_has_insecure_owner_or_write_permissions(
 }
 
 fn existing_path_has_insecure_write_permissions(path: &Path) -> std::io::Result<bool> {
-    let mut current = absolute_path(path)?;
+    let mut current = absolute_path(path)
+        .map_err(|error| inspection_error("normalize ACL inspection path", error))?;
     let mut inspected_depth = 0usize;
     let mut missing_component = false;
 
@@ -64,7 +65,9 @@ fn existing_path_has_insecure_write_permissions(path: &Path) -> std::io::Result<
                     ));
                 }
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                return Err(inspection_error("open existing ACL inspection path", error));
+            }
         }
     };
 
@@ -75,20 +78,30 @@ fn existing_path_has_insecure_write_permissions(path: &Path) -> std::io::Result<
     };
     loop {
         check_inspection_depth(&mut inspected_depth)?;
-        let metadata = opened.metadata()?;
+        let metadata = opened
+            .metadata()
+            .map_err(|error| inspection_error("read ACL inspection metadata", error))?;
         if metadata_is_reparse_point(&metadata) {
             return Ok(true);
         }
-        let descriptor = file_security_descriptor(&opened)?;
-        if security_descriptor_is_insecure(&descriptor, role)? {
+        let descriptor = file_security_descriptor(&opened)
+            .map_err(|error| inspection_error("read ACL security descriptor", error))?;
+        if security_descriptor_is_insecure(&descriptor, role)
+            .map_err(|error| inspection_error("evaluate ACL security descriptor", error))?
+        {
             return Ok(true);
         }
         role = InspectedPathRole::Ancestor;
         if !current.pop() {
             return Ok(false);
         }
-        opened = open_path_for_trust_inspection(&current)?;
+        opened = open_path_for_trust_inspection(&current)
+            .map_err(|error| inspection_error("open ACL ancestor path", error))?;
     }
+}
+
+fn inspection_error(operation: &'static str, error: std::io::Error) -> std::io::Error {
+    std::io::Error::new(error.kind(), format!("{operation}: {error}"))
 }
 
 fn open_path_for_trust_inspection(path: &Path) -> std::io::Result<std::fs::File> {
@@ -253,6 +266,16 @@ mod tests {
         let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
 
         existing_path_has_insecure_write_permissions(&executable).unwrap();
+    }
+
+    #[test]
+    fn newly_created_file_beside_executable_is_inspectable() {
+        let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
+        let directory = executable.parent().unwrap();
+        let file = tempfile::NamedTempFile::new_in(directory).unwrap();
+
+        existing_path_has_insecure_write_permissions(file.path()).unwrap();
+        opened_file_has_insecure_owner_or_write_permissions(file.as_file()).unwrap();
     }
 
     #[test]
