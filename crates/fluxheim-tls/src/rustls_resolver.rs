@@ -65,7 +65,7 @@ pub enum RustlsDownstreamCertificateError {
         cert_path: PathBuf,
         key_path: PathBuf,
         #[source]
-        source: rustls::Error,
+        source: Box<rustls::Error>,
     },
     #[error(
         "failed to inspect managed certificate paths; cert={cert_path} key={key_path}: {source}"
@@ -253,7 +253,7 @@ pub fn load_rustls_certified_key_from_paths(
         RustlsDownstreamCertificateError::InvalidCertificateKey {
             cert_path: cert_path.to_path_buf(),
             key_path: key_path.to_path_buf(),
-            source,
+            source: Box::new(source),
         }
     })?;
     let certified = CertifiedKey::new(certs, signing_key);
@@ -261,7 +261,7 @@ pub fn load_rustls_certified_key_from_paths(
         RustlsDownstreamCertificateError::InvalidCertificateKey {
             cert_path: cert_path.to_path_buf(),
             key_path: key_path.to_path_buf(),
-            source,
+            source: Box::new(source),
         }
     })?;
     Ok(certified)

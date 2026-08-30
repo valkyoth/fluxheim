@@ -214,7 +214,17 @@ fn open_regular_eab_secret_file(
         .map_err(|error| eab_file_error(issuer, field, path, error))
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+fn open_regular_eab_secret_file(
+    issuer: &str,
+    field: &'static str,
+    path: &Path,
+) -> Result<std::fs::File, AcmeSecretLoadError> {
+    fluxheim_config::fs_trust::open_confidential_file(path)
+        .map_err(|error| eab_file_error(issuer, field, path, error))
+}
+
+#[cfg(all(not(target_os = "linux"), not(windows)))]
 fn open_regular_eab_secret_file(
     issuer: &str,
     field: &'static str,

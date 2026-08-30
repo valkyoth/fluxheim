@@ -246,7 +246,9 @@ fn write_storage_bin_manifest(
         file.sync_all()
             .map_err(|error| storage_bin_io_context("flush temporary manifest", error))?;
         path.rename_from(&temp_path)
-            .map_err(|error| storage_bin_io_context("replace manifest", error))
+            .map_err(|error| storage_bin_io_context("replace manifest", error))?;
+        path.sync_parent_directory()
+            .map_err(|error| storage_bin_io_context("flush manifest directory", error))
     })();
     if write_result.is_err() {
         let _ = temp_path.remove_file();

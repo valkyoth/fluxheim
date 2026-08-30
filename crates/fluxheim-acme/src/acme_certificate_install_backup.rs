@@ -1,7 +1,7 @@
 use super::super::*;
-use super::fs_ops::CertificateDirectoryFd;
 #[cfg(unix)]
 use super::fs_ops::certificate_file_name_in_directory;
+use super::fs_ops::{CertificateDirectoryFd, certificate_metadata_is_link};
 
 pub(super) fn backup_existing_file(
     directory: &Path,
@@ -52,7 +52,7 @@ pub(super) fn backup_existing_file(
     }
 
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+        Ok(metadata) if certificate_metadata_is_link(&metadata) || !metadata.is_file() => {
             Err(AcmeCertificateInstallError::UnsafePath {
                 path: path.to_path_buf(),
                 message: "destination is not a real file".to_owned(),
@@ -172,7 +172,7 @@ pub(super) fn restore_backup(
     }
 
     match fs::symlink_metadata(backup) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => Err(
+        Ok(metadata) if certificate_metadata_is_link(&metadata) || !metadata.is_file() => Err(
             io::Error::new(io::ErrorKind::InvalidData, "backup is not a regular file"),
         ),
         Ok(_) => fs::rename(backup, destination),

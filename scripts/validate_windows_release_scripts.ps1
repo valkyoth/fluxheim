@@ -98,7 +98,7 @@ foreach ($required in @(
     'New-WindowsSmokeCertificate',
     'New-WindowsSmokeUpstreamCertificate',
     '[Security.Cryptography.X509Certificates.RSACertificateExtensions]::CopyWithPrivateKey(',
-    '[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::UserKeySet',
+    '[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet',
     '[Array]::Clear($pkcs12, 0, $pkcs12.Length)',
     'public string LastError',
     'Interlocked.Exchange(ref this.lastError, diagnostic.ToString())',
@@ -143,11 +143,66 @@ if ($smoke.Contains('$issuedCertificate.CopyWithPrivateKey(')) {
 if ($smoke.Contains('X509KeyStorageFlags]::PersistKeySet')) {
     throw 'Windows native smoke must not persist generated TLS private keys'
 }
+if ($smoke.Contains('X509KeyStorageFlags]::UserKeySet')) {
+    throw 'Windows native smoke must not place generated TLS private keys in the user key store'
+}
+
+$windowsTrust = Get-Content -LiteralPath `
+    (Join-Path $root 'crates/fluxheim-config/src/fs_trust_windows.rs') -Raw
+foreach ($required in @(
+    'TrustPolicy::ConfidentialSecret',
+    'AccessRights::GenericRead',
+    'AccessRights::FileGenericRead',
+    'AccessRights::Bit6',
+    'FILE_FLAG_OPEN_REPARSE_POINT',
+    'opened_file_has_insecure_confidential_permissions',
+    'harden_confidential_file',
+    'GENERIC_WRITE | READ_CONTROL | FILE_READ_ATTRIBUTES',
+    'SecurityInformation::ProtectedDacl'
+)) {
+    if (-not $windowsTrust.Contains($required)) {
+        throw "Windows filesystem trust is missing required behavior: $required"
+    }
+}
+
+$windowsTrustTests = Get-Content -LiteralPath `
+    (Join-Path $root 'crates/fluxheim-config/src/fs_trust_windows_tests.rs') -Raw
+foreach ($required in @(
+    'everyone_read_access_is_only_rejected_for_confidential_files',
+    'confidential_hardening_removes_inherited_everyone_access',
+    'everyone_delete_child_access_on_directory_is_rejected',
+    'real_directory_flush_succeeds'
+)) {
+    if (-not $windowsTrustTests.Contains($required)) {
+        throw "Windows filesystem trust tests are missing required regression: $required"
+    }
+}
+
+$windowsCapability = Get-Content -LiteralPath `
+    (Join-Path $root 'crates/fluxheim-windows-security/src/lib.rs') -Raw
+foreach ($required in @(
+    'NtCreateFile',
+    'RootDirectory: parent.as_raw_handle() as HANDLE',
+    'OBJ_DONT_REPARSE',
+    'FILE_OPEN_REPARSE_POINT',
+    'rejects_directory_junction_component'
+)) {
+    if (-not $windowsCapability.Contains($required)) {
+        throw "Windows handle-relative filesystem boundary is missing required behavior: $required"
+    }
+}
+
+$staticResponse = Get-Content -LiteralPath `
+    (Join-Path $root 'crates/fluxheim-server/src/native_http1_static_web_response.rs') -Raw
+if (-not $staticResponse.Contains('fluxheim_windows_security::open_regular_file_beneath')) {
+    throw 'Windows static serving must use the handle-relative no-reparse filesystem boundary'
+}
 
 $runtimeShutdown = Get-Content -LiteralPath (Join-Path $root 'src/runtime_shutdown.rs') -Raw
 foreach ($required in @(
     'tokio::signal::windows::{ctrl_break, ctrl_c}',
-    'let mut terminate = ctrl_break().ok()',
+    'failed to register Windows CTRL_C shutdown handler',
+    'failed to register Windows CTRL_BREAK shutdown handler',
     'signal.recv().await'
 )) {
     if (-not $runtimeShutdown.Contains($required)) {
@@ -174,11 +229,37 @@ foreach ($relative in @(
     $cachePathBoundary = Get-Content -LiteralPath (Join-Path $root $relative) -Raw
     foreach ($required in @(
         'Component::Prefix(_) | Component::CurDir => continue',
-        'Component::ParentDir => return Ok(true)'
+        'Component::ParentDir => return Ok(true)',
+        'FILE_SHARE_DELETE',
+        'existing_path_or_parent_has_insecure_write_permissions'
     )) {
         if (-not $cachePathBoundary.Contains($required)) {
             throw "$relative is missing Windows absolute-path handling: $required"
         }
+    }
+}
+
+$diskCachePath = Get-Content -LiteralPath `
+    (Join-Path $root 'crates/fluxheim-server/src/native_http1_cache_disk_path_windows.rs') -Raw
+foreach ($required in @(
+    'file.take(max_bytes.saturating_add(1))',
+    'native disk cache object changed while reading and exceeds read limit'
+)) {
+    if (-not $diskCachePath.Contains($required)) {
+        throw "Windows disk-cache read is missing required bound: $required"
+    }
+}
+
+$phpSpool = Get-Content -LiteralPath `
+    (Join-Path $root 'crates/fluxheim-php-fpm/src/request_body.rs') -Raw
+foreach ($required in @(
+    'FILE_FLAG_DELETE_ON_CLOSE',
+    'FILE_ATTRIBUTE_TEMPORARY',
+    'FILE_SHARE_DELETE',
+    'harden_confidential_file'
+)) {
+    if (-not $phpSpool.Contains($required)) {
+        throw "Windows PHP request spool is missing required behavior: $required"
     }
 }
 if ($smoke.Contains('target\fluxheim-windows-smoke')) {
@@ -242,6 +323,7 @@ foreach ($required in @(
 $preparation = Get-Content -LiteralPath (Join-Path $root 'scripts/prepare_windows_release_builder.ps1') -Raw
 foreach ($required in @(
     'PasswordAuthentication no',
+    'KbdInteractiveAuthentication no',
     'AuthenticationMethods publickey',
     'AllowedSourceCidr',
     'TagAllowedSignersFile',
@@ -251,6 +333,16 @@ foreach ($required in @(
 )) {
     if (-not $preparation.Contains($required)) {
         throw "Windows preparation script is missing required hardening: $required"
+    }
+}
+foreach ($required in @(
+    '$trustedDirectory /inheritance:r',
+    '$allowedSigners /inheritance:r',
+    '$BuildUser`:R',
+    'Administrators:F'
+)) {
+    if (-not $preparation.Contains($required)) {
+        throw "Windows preparation trust anchor is missing required ACL policy: $required"
     }
 }
 

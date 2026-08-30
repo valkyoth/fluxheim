@@ -94,6 +94,13 @@ Local development and CI should keep build environments low-trust by default:
 
 ## Human Review Roadmap
 
+Security-critical dependencies may receive a scoped manual review before the
+workspace-wide `cargo-vet` rollout. The current Windows filesystem trust
+boundary and its exact locked dependency evidence are recorded in
+[Windows Filesystem Security Audit](dependency-audits/windows-filesystem-security.md).
+`scripts/validate_windows_security_audit.py` fails the normal checks when that
+reviewed version or checksum drifts.
+
 Fluxheim should add `cargo-vet` after the 1.4.0 proxy-parity release
 stabilizes.
 

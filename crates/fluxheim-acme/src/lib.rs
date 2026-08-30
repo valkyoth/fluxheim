@@ -483,28 +483,7 @@ fn write_challenge_file(path: &Path, contents: &[u8]) -> io::Result<()> {
 pub(crate) fn sync_directory_io(path: &Path) -> io::Result<()> {
     #[cfg(windows)]
     {
-        use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
-
-        use windows_sys::Win32::Storage::FileSystem::{
-            FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-            SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
-        };
-
-        let directory = fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-            .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION)
-            .open(path)?;
-        let metadata = directory.metadata()?;
-        if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "ACME durability path must be a real directory",
-            ));
-        }
-        // Windows has no supported equivalent of fsync on a directory handle.
-        // The replaced file itself is flushed before this validation step.
-        Ok(())
+        fluxheim_config::fs_trust::sync_directory(path)
     }
 
     #[cfg(not(windows))]

@@ -35,6 +35,14 @@ compile_error!(
 );
 
 pub(super) fn read_upstream_tls_file(path: &Path) -> Result<Vec<u8>, NativeHttp1Error> {
+    read_upstream_tls_input(path, false)
+}
+
+pub(super) fn read_upstream_tls_secret_file(path: &Path) -> Result<Vec<u8>, NativeHttp1Error> {
+    read_upstream_tls_input(path, true)
+}
+
+fn read_upstream_tls_input(path: &Path, confidential: bool) -> Result<Vec<u8>, NativeHttp1Error> {
     let safe_path = canonical_upstream_tls_file_path(path)?;
     let metadata = std::fs::symlink_metadata(&safe_path).map_err(NativeHttp1Error::Io)?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
@@ -47,15 +55,25 @@ pub(super) fn read_upstream_tls_file(path: &Path) -> Result<Vec<u8>, NativeHttp1
         )));
     }
 
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(UPSTREAM_TLS_O_NOFOLLOW);
-    }
-
-    let file = options.open(&safe_path).map_err(NativeHttp1Error::Io)?;
+    #[cfg(windows)]
+    let file = if confidential {
+        fluxheim_config::fs_trust::open_confidential_file(&safe_path)
+            .map_err(NativeHttp1Error::Io)?
+    } else {
+        std::fs::File::open(&safe_path).map_err(NativeHttp1Error::Io)?
+    };
+    #[cfg(not(windows))]
+    let file = {
+        let _ = confidential;
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(UPSTREAM_TLS_O_NOFOLLOW);
+        }
+        options.open(&safe_path).map_err(NativeHttp1Error::Io)?
+    };
     let metadata = file.metadata().map_err(NativeHttp1Error::Io)?;
     if !metadata.is_file() {
         return Err(NativeHttp1Error::Io(io::Error::new(

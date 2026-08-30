@@ -16,8 +16,8 @@ use crate::config_proxy::MAX_PROXY_UPSTREAMS;
 #[path = "config_loader_trust.rs"]
 mod config_loader_trust;
 use config_loader_trust::{
-    ConfigFileState, ensure_trusted_config_path, ensure_trusted_opened_config_file,
-    same_config_file,
+    ConfigFileState, capture_config_path_identity, ensure_trusted_config_path,
+    ensure_trusted_opened_config_file, same_config_file,
 };
 
 #[cfg(unix)]
@@ -213,6 +213,7 @@ pub fn read_regular_config_file_to_string(path: &Path) -> Result<String, ConfigL
             path: path.to_path_buf(),
         });
     }
+    let path_identity = capture_config_path_identity(path).map_err(ConfigLoadError::Read)?;
 
     let mut options = OpenOptions::new();
     options.read(true);
@@ -225,7 +226,8 @@ pub fn read_regular_config_file_to_string(path: &Path) -> Result<String, ConfigL
 
     let mut file = options.open(path).map_err(ConfigLoadError::Read)?;
     let opened_metadata = file.metadata().map_err(ConfigLoadError::Read)?;
-    if !opened_metadata.is_file() || !same_config_file(path, &path_metadata, &file) {
+    if !opened_metadata.is_file() || !same_config_file(path, &path_metadata, &path_identity, &file)
+    {
         return Err(ConfigLoadError::InvalidPath {
             path: path.to_path_buf(),
         });

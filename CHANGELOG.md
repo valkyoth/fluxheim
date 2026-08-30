@@ -31,6 +31,22 @@ behavior when the change improves security or project direction.
   and Schannel-compatible ephemeral test credentials instead of weakening the
   existing filesystem and TLS trust boundaries.
 
+### Security
+
+- Separate Windows integrity-only ACL checks from confidential-secret checks,
+  reject untrusted credential readers and directory delete-child rights, and
+  apply protected DACLs to newly created secret and private-state objects.
+- Make Windows static-file traversal handle-relative with reparse processing
+  disabled for every component; reject untrusted writable runtime ancestors as
+  the common cache, ACME, snapshot, logging, PHP spool, and configuration
+  boundary.
+- Bound disk-cache reads against concurrent file growth, permit Windows cache
+  replacement and purge while readers are active, and make temporary PHP body
+  spools delete-on-close.
+- Record and automatically pin the scoped source audit for the Windows ACL
+  dependency and isolate first-party unsafe Windows filesystem calls in one
+  reviewed crate.
+
 ## 1.8.1 - 2026-08-28
 
 ### Added

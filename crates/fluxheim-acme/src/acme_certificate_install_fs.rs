@@ -1,5 +1,9 @@
 use super::super::*;
 
+#[path = "acme_certificate_install_write.rs"]
+mod write;
+pub(super) use write::{certificate_metadata_is_link, write_new_file};
+
 #[cfg(unix)]
 pub(super) type CertificateDirectoryFd = rustix::fd::OwnedFd;
 
@@ -42,7 +46,8 @@ pub(crate) struct UnixFileOwner {
 pub(crate) type ManagedCertificateOwner = Option<UnixFileOwner>;
 
 #[cfg(not(unix))]
-pub(crate) type ManagedCertificateOwner = ();
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ManagedCertificateOwner;
 
 #[derive(Debug)]
 pub(crate) struct ManagedCertificateOwnership {
@@ -61,7 +66,9 @@ impl ManagedCertificateOwnership {
             self.owner
         }
         #[cfg(not(unix))]
-        {}
+        {
+            ManagedCertificateOwner
+        }
     }
 }
 
@@ -186,6 +193,21 @@ pub(super) fn ensure_safe_directory(
     #[cfg(not(unix))]
     {
         reject_existing_symlink_in_path(directory)?;
+        #[cfg(windows)]
+        if directory.exists()
+            && fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(
+                directory,
+            )
+            .map_err(|error| AcmeCertificateInstallError::Io {
+                path: directory.to_path_buf(),
+                error,
+            })?
+        {
+            return Err(AcmeCertificateInstallError::UnsafePath {
+                path: directory.to_path_buf(),
+                message: "existing certificate directory has an untrusted ACL".to_owned(),
+            });
+        }
         fs::create_dir_all(directory).map_err(|error| AcmeCertificateInstallError::Io {
             path: directory.to_path_buf(),
             error,
@@ -203,6 +225,14 @@ pub(super) fn ensure_safe_directory(
                 message: "path is not a real directory".to_owned(),
             });
         }
+
+        #[cfg(windows)]
+        fluxheim_config::fs_trust::harden_private_directory(directory).map_err(|error| {
+            AcmeCertificateInstallError::Io {
+                path: directory.to_path_buf(),
+                error,
+            }
+        })?;
 
         Ok(())
     }
@@ -303,110 +333,6 @@ pub(crate) fn reject_existing_symlink_in_path(
     }
 
     Ok(())
-}
-
-#[cfg(all(not(unix), windows))]
-fn certificate_metadata_is_link(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt as _;
-
-    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
-
-    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(all(not(unix), not(windows)))]
-fn certificate_metadata_is_link(metadata: &fs::Metadata) -> bool {
-    metadata.file_type().is_symlink()
-}
-
-pub(super) fn write_new_file(
-    directory: &Path,
-    path: &Path,
-    contents: &[u8],
-    mode: u32,
-    owner: ManagedCertificateOwner,
-    directory_fd: Option<&CertificateDirectoryFd>,
-) -> Result<(), AcmeCertificateInstallError> {
-    #[cfg(not(unix))]
-    let _ = (directory, mode, directory_fd);
-    #[cfg(unix)]
-    if let Some(directory_fd) = directory_fd {
-        let name = certificate_file_name_in_directory(directory, path)?;
-        let raw_mode = certificate_file_raw_mode(path, mode)?;
-        let fd = rustix::fs::openat(
-            directory_fd,
-            name,
-            rustix::fs::OFlags::WRONLY
-                | rustix::fs::OFlags::CREATE
-                | rustix::fs::OFlags::EXCL
-                | rustix::fs::OFlags::NOFOLLOW
-                | rustix::fs::OFlags::CLOEXEC,
-            rustix::fs::Mode::from_raw_mode(raw_mode),
-        )
-        .map_err(|error| AcmeCertificateInstallError::Io {
-            path: path.to_path_buf(),
-            error: error.into(),
-        })?;
-        let mut file = fs::File::from(fd);
-        apply_owner_to_file(&file, path, owner)?;
-        file.write_all(contents)
-            .and_then(|()| file.sync_all())
-            .map_err(|error| AcmeCertificateInstallError::Io {
-                path: path.to_path_buf(),
-                error,
-            })?;
-        return Ok(());
-    }
-
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(mode);
-        options.custom_flags(UNIX_O_NOFOLLOW);
-    }
-
-    let mut file = options
-        .open(path)
-        .map_err(|error| AcmeCertificateInstallError::Io {
-            path: path.to_path_buf(),
-            error,
-        })?;
-    apply_owner_to_file(&file, path, owner)?;
-    file.write_all(contents)
-        .map_err(|error| AcmeCertificateInstallError::Io {
-            path: path.to_path_buf(),
-            error,
-        })?;
-    file.sync_all()
-        .map_err(|error| AcmeCertificateInstallError::Io {
-            path: path.to_path_buf(),
-            error,
-        })
-}
-
-#[cfg(all(unix, target_os = "macos"))]
-fn certificate_file_raw_mode(
-    path: &Path,
-    mode: u32,
-) -> Result<rustix::fs::RawMode, AcmeCertificateInstallError> {
-    mode.try_into()
-        .map_err(|_| AcmeCertificateInstallError::Io {
-            path: path.to_path_buf(),
-            error: io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "certificate file mode is unsupported on this platform",
-            ),
-        })
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn certificate_file_raw_mode(
-    _path: &Path,
-    mode: u32,
-) -> Result<rustix::fs::RawMode, AcmeCertificateInstallError> {
-    Ok(mode)
 }
 
 #[cfg(unix)]

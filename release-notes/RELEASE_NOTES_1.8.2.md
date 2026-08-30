@@ -25,6 +25,19 @@ same seven public profiles used by Linux and Apple Silicon macOS.
   normal Windows CI host so target-specific compile failures surface before a
   native ARM64 release-builder run. This check does not execute ARM64 code and
   is not accepted as release evidence.
+- Enforce confidential Windows ACLs for TLS, ACME, admin, metrics, snapshot,
+  cache-encryption, peer-fill, and discovery credentials; new private files and
+  directories receive protected DACLs before secret bytes are written.
+- Open Windows static response files through retained directory handles with
+  reparse traversal disabled, and reject untrusted writable cache, state,
+  logging, configuration, ACME, and PHP-spool ancestors.
+- Preserve Windows cache purge/refresh semantics with delete-sharing, bound
+  cache reads across concurrent growth, make snapshot/ACME/cache directory
+  flushes real, and use delete-on-close request-body spool files.
+- Pin and record the manual review evidence for the exact
+  `windows-permissions` dependency checksum and isolate first-party unsafe
+  Windows path traversal in the narrowly scoped
+  `fluxheim-windows-security` crate.
 
 ## Remaining Release Blocks
 

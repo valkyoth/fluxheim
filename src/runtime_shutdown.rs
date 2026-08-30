@@ -45,8 +45,20 @@ pub(super) async fn wait_native_runtime_shutdown_signal() {
     {
         use tokio::signal::windows::{ctrl_break, ctrl_c};
 
-        let mut interrupt = ctrl_c().ok();
-        let mut terminate = ctrl_break().ok();
+        let mut interrupt = ctrl_c().map_or_else(
+            |error| {
+                log::warn!("failed to register Windows CTRL_C shutdown handler: {error}");
+                None
+            },
+            Some,
+        );
+        let mut terminate = ctrl_break().map_or_else(
+            |error| {
+                log::warn!("failed to register Windows CTRL_BREAK shutdown handler: {error}");
+                None
+            },
+            Some,
+        );
         tokio::select! {
             _ = async {
                 if let Some(signal) = &mut interrupt {

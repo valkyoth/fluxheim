@@ -6,6 +6,13 @@ use crate::config::{AcmeConfig, Config, StaticCertificateConfig};
 
 use super::{ACME_STORAGE_MODE, PRIVATE_KEY_MODE, TlsStorageCheck, TlsStorageIssue};
 
+#[path = "tls_storage_permissions.rs"]
+mod permissions;
+use permissions::{
+    validate_acme_eab_secret_permissions, validate_acme_storage_permissions,
+    validate_certificate_permissions, validate_key_permissions,
+};
+
 pub fn validate_tls_storage(config: &Config) -> TlsStorageCheck {
     let mut issues = Vec::new();
 
@@ -332,188 +339,6 @@ fn symlink_inspection_error(error: io::Error) -> String {
         "failed to inspect path for symlinks: {}",
         error_message(error)
     )
-}
-
-#[cfg(unix)]
-fn validate_certificate_permissions(
-    _scope: &str,
-    _path: &Path,
-    _issues: &mut Vec<TlsStorageIssue>,
-) {
-}
-
-#[cfg(windows)]
-fn validate_certificate_permissions(scope: &str, path: &Path, issues: &mut Vec<TlsStorageIssue>) {
-    match fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(path) {
-        Ok(true) => issues.push(TlsStorageIssue::CertificatePathHasUntrustedWindowsAcl {
-            scope: scope.to_owned(),
-            path: path.to_path_buf(),
-        }),
-        Ok(false) => {}
-        Err(error) => issues.push(TlsStorageIssue::CertificateReadFailed {
-            scope: scope.to_owned(),
-            path: path.to_path_buf(),
-            message: error_message(error),
-        }),
-    }
-}
-
-#[cfg(unix)]
-fn validate_key_permissions(
-    scope: &str,
-    path: &Path,
-    metadata: &fs::Metadata,
-    issues: &mut Vec<TlsStorageIssue>,
-) {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
-
-    let mode = metadata.permissions().mode() & 0o777;
-    if !secure_private_key_mode(mode) {
-        issues.push(TlsStorageIssue::InsecurePrivateKeyPermissions {
-            scope: scope.to_owned(),
-            path: path.to_path_buf(),
-            mode,
-        });
-    }
-
-    let owner_uid = metadata.uid();
-    let process_uid = current_effective_uid();
-    if owner_uid != process_uid {
-        issues.push(TlsStorageIssue::PrivateKeyOwnerMismatch {
-            scope: scope.to_owned(),
-            path: path.to_path_buf(),
-            owner_uid,
-            process_uid,
-        });
-    }
-}
-
-#[cfg(windows)]
-fn validate_key_permissions(
-    scope: &str,
-    path: &Path,
-    _metadata: &fs::Metadata,
-    issues: &mut Vec<TlsStorageIssue>,
-) {
-    match fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(path) {
-        Ok(true) => issues.push(TlsStorageIssue::PrivateKeyPathHasUntrustedWindowsAcl {
-            scope: scope.to_owned(),
-            path: path.to_path_buf(),
-        }),
-        Ok(false) => {}
-        Err(error) => issues.push(TlsStorageIssue::PrivateKeyReadFailed {
-            scope: scope.to_owned(),
-            path: path.to_path_buf(),
-            message: error_message(error),
-        }),
-    }
-}
-
-#[cfg(unix)]
-fn validate_acme_storage_permissions(
-    path: &Path,
-    metadata: &fs::Metadata,
-    issues: &mut Vec<TlsStorageIssue>,
-) {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
-
-    let mode = metadata.permissions().mode() & 0o777;
-    if !secure_acme_storage_mode(mode) {
-        issues.push(TlsStorageIssue::InsecureAcmeStoragePermissions {
-            path: path.to_path_buf(),
-            mode,
-        });
-    }
-
-    let owner_uid = metadata.uid();
-    let process_uid = current_effective_uid();
-    if owner_uid != process_uid {
-        issues.push(TlsStorageIssue::AcmeStorageOwnerMismatch {
-            path: path.to_path_buf(),
-            owner_uid,
-            process_uid,
-        });
-    }
-}
-
-#[cfg(windows)]
-fn validate_acme_storage_permissions(
-    path: &Path,
-    _metadata: &fs::Metadata,
-    issues: &mut Vec<TlsStorageIssue>,
-) {
-    match fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(path) {
-        Ok(true) => issues.push(TlsStorageIssue::AcmeStoragePathHasUntrustedWindowsAcl {
-            path: path.to_path_buf(),
-        }),
-        Ok(false) => {}
-        Err(error) => issues.push(TlsStorageIssue::AcmeStorageReadFailed {
-            path: path.to_path_buf(),
-            message: error_message(error),
-        }),
-    }
-}
-
-#[cfg(unix)]
-fn validate_acme_eab_secret_permissions(
-    issuer: &str,
-    field: &'static str,
-    path: &Path,
-    metadata: &fs::Metadata,
-    issues: &mut Vec<TlsStorageIssue>,
-) {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
-
-    let mode = metadata.permissions().mode() & 0o777;
-    if !secure_private_key_mode(mode) {
-        issues.push(TlsStorageIssue::InsecureAcmeEabSecretPermissions {
-            issuer: issuer.to_owned(),
-            field,
-            path: path.to_path_buf(),
-            mode,
-        });
-    }
-
-    let owner_uid = metadata.uid();
-    let process_uid = current_effective_uid();
-    if owner_uid != process_uid {
-        issues.push(TlsStorageIssue::AcmeEabSecretOwnerMismatch {
-            issuer: issuer.to_owned(),
-            field,
-            path: path.to_path_buf(),
-            owner_uid,
-            process_uid,
-        });
-    }
-}
-
-#[cfg(windows)]
-fn validate_acme_eab_secret_permissions(
-    issuer: &str,
-    field: &'static str,
-    path: &Path,
-    _metadata: &fs::Metadata,
-    issues: &mut Vec<TlsStorageIssue>,
-) {
-    match fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(path) {
-        Ok(true) => issues.push(TlsStorageIssue::AcmeEabSecretPathHasUntrustedWindowsAcl {
-            issuer: issuer.to_owned(),
-            field,
-            path: path.to_path_buf(),
-        }),
-        Ok(false) => {}
-        Err(error) => issues.push(TlsStorageIssue::AcmeEabSecretReadFailed {
-            issuer: issuer.to_owned(),
-            field,
-            path: path.to_path_buf(),
-            message: error_message(error),
-        }),
-    }
-}
-
-#[cfg(unix)]
-fn current_effective_uid() -> u32 {
-    rustix::process::geteuid().as_raw()
 }
 
 fn error_message(error: io::Error) -> String {

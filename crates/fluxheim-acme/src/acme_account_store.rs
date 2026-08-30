@@ -1,8 +1,9 @@
 use std::fs;
 use std::io;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::Path;
-#[cfg(any(feature = "acme-client", not(unix)))]
+
+#[cfg(feature = "acme-client")]
 use std::path::PathBuf;
 
 use sanitization::SecretVec;
@@ -10,11 +11,19 @@ use sanitization::SecretVec;
 #[cfg(feature = "acme-client")]
 #[path = "acme_account_bootstrap.rs"]
 mod bootstrap;
+#[path = "acme_account_store_fs.rs"]
+mod fs_ops;
 #[cfg(all(feature = "acme-client", test))]
 pub(crate) use bootstrap::begin_account_bootstrap;
 #[cfg(feature = "acme-client")]
 pub(crate) use bootstrap::{
     AccountBootstrap, PendingAccountBootstrap, try_begin_account_bootstrap,
+};
+#[cfg(not(unix))]
+use fs_ops::reject_existing_symlink_in_account_path;
+use fs_ops::{
+    account_store_io_error, open_regular_account_credentials_file, sync_account_directory,
+    write_account_credentials_file,
 };
 
 #[cfg(target_os = "linux")]
@@ -374,6 +383,18 @@ pub(crate) fn ensure_safe_account_directory(directory: &Path) -> Result<(), Acme
     #[cfg(not(unix))]
     {
         reject_existing_symlink_in_account_path(directory)?;
+        #[cfg(windows)]
+        if directory.exists()
+            && fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(
+                directory,
+            )
+            .map_err(|error| account_store_io_error(directory, error))?
+        {
+            return Err(AcmeAccountStoreError::UnsafePath {
+                path: directory.to_path_buf(),
+                message: "existing account directory has an untrusted ACL".to_owned(),
+            });
+        }
         fs::create_dir_all(directory).map_err(|error| account_store_io_error(directory, error))?;
         reject_existing_symlink_in_account_path(directory)?;
         let metadata = fs::symlink_metadata(directory)
@@ -384,6 +405,10 @@ pub(crate) fn ensure_safe_account_directory(directory: &Path) -> Result<(), Acme
                 message: "path is not a real directory".to_owned(),
             });
         }
+
+        #[cfg(windows)]
+        fluxheim_config::fs_trust::harden_private_directory(directory)
+            .map_err(|error| account_store_io_error(directory, error))?;
 
         Ok(())
     }
@@ -400,109 +425,5 @@ pub(crate) fn ensure_safe_account_destination(path: &Path) -> Result<(), AcmeAcc
         Ok(_) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(account_store_io_error(path, error)),
-    }
-}
-
-#[cfg(not(unix))]
-fn reject_existing_symlink_in_account_path(path: &Path) -> Result<(), AcmeAccountStoreError> {
-    use std::path::Component;
-
-    let mut current = PathBuf::new();
-    for component in path.components() {
-        current.push(component);
-        if matches!(
-            component,
-            Component::Prefix(_) | Component::RootDir | Component::CurDir
-        ) {
-            continue;
-        }
-        if matches!(component, Component::ParentDir) {
-            return Err(AcmeAccountStoreError::UnsafePath {
-                path: current,
-                message: "path contains parent traversal".to_owned(),
-            });
-        }
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) if account_metadata_is_link(&metadata) => {
-                return Err(AcmeAccountStoreError::UnsafePath {
-                    path: current,
-                    message: "path contains a link or reparse point".to_owned(),
-                });
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(account_store_io_error(&current, error)),
-        }
-    }
-
-    Ok(())
-}
-
-#[cfg(all(not(unix), windows))]
-fn account_metadata_is_link(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt as _;
-
-    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
-
-    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(all(not(unix), not(windows)))]
-fn account_metadata_is_link(metadata: &fs::Metadata) -> bool {
-    metadata.file_type().is_symlink()
-}
-
-fn write_account_credentials_file(
-    path: &Path,
-    contents: &[u8],
-) -> Result<(), AcmeAccountStoreError> {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-
-    let mut file = options
-        .open(path)
-        .map_err(|error| account_store_io_error(path, error))?;
-    file.write_all(contents)
-        .map_err(|error| account_store_io_error(path, error))?;
-    file.sync_all()
-        .map_err(|error| account_store_io_error(path, error))
-}
-
-fn sync_account_directory(path: &Path) -> Result<(), AcmeAccountStoreError> {
-    crate::sync_directory_io(path).map_err(|error| account_store_io_error(path, error))
-}
-
-#[cfg(target_os = "linux")]
-fn open_regular_account_credentials_file(path: &Path) -> io::Result<std::fs::File> {
-    use std::os::unix::fs::OpenOptionsExt;
-
-    std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(UNIX_O_NOFOLLOW)
-        .open(path)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn open_regular_account_credentials_file(path: &Path) -> io::Result<std::fs::File> {
-    let metadata = std::fs::symlink_metadata(path)?;
-    if !metadata.file_type().is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "not a regular file",
-        ));
-    }
-
-    std::fs::File::open(path)
-}
-
-fn account_store_io_error(path: &Path, error: io::Error) -> AcmeAccountStoreError {
-    AcmeAccountStoreError::Io {
-        path: path.to_path_buf(),
-        error,
     }
 }

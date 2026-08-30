@@ -29,6 +29,7 @@ members = [
     "crates/fluxheim-php-fpm",
     "crates/fluxheim-load-balancer",
     "crates/fluxheim-wasm",
+    "crates/fluxheim-windows-security",
 ]
 exclude = ["vendor/fluxheim-openssl-fips-support"]
 resolver = "3"

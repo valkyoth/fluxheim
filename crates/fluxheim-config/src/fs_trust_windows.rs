@@ -5,6 +5,7 @@ use windows_permissions::constants::{
     AccessRights, AceFlags, AceType, SeObjectType, SecurityInformation,
 };
 use windows_permissions::{LocalBox, SecurityDescriptor, Sid};
+use windows_sys::Win32::Foundation::GENERIC_WRITE;
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_READ_ATTRIBUTES, READ_CONTROL, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
@@ -19,6 +20,12 @@ enum InspectedPathRole {
     ExistingObject,
     CreationParent,
     Ancestor,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum TrustPolicy {
+    IntegrityOnly,
+    ConfidentialSecret,
 }
 
 pub fn existing_parent_has_insecure_write_permissions(path: &Path) -> std::io::Result<bool> {
@@ -38,12 +45,110 @@ pub fn existing_path_or_parent_has_insecure_write_permissions(
 pub fn opened_file_has_insecure_owner_or_write_permissions(
     file: &std::fs::File,
 ) -> std::io::Result<bool> {
+    opened_file_has_insecure_permissions(file, TrustPolicy::IntegrityOnly)
+}
+
+pub fn opened_file_has_insecure_confidential_permissions(
+    file: &std::fs::File,
+) -> std::io::Result<bool> {
+    opened_file_has_insecure_permissions(file, TrustPolicy::ConfidentialSecret)
+}
+
+pub fn open_confidential_file(path: &Path) -> std::io::Result<std::fs::File> {
+    if existing_parent_has_insecure_write_permissions(path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "confidential file has an untrusted parent ACL",
+        ));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if metadata_is_reparse_point(&metadata) || !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "confidential path is a reparse point or is not a regular file",
+        ));
+    }
+    if same_file::Handle::from_path(path)? != same_file::Handle::from_file(file.try_clone()?)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "confidential path changed during secure open",
+        ));
+    }
+    if opened_file_has_insecure_confidential_permissions(&file)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "confidential file has an untrusted ACL",
+        ));
+    }
+    Ok(file)
+}
+
+fn opened_file_has_insecure_permissions(
+    file: &std::fs::File,
+    policy: TrustPolicy,
+) -> std::io::Result<bool> {
     let metadata = file.metadata()?;
     if metadata_is_reparse_point(&metadata) || !metadata.is_file() {
         return Ok(true);
     }
     let descriptor = file_security_descriptor(file)?;
-    security_descriptor_is_insecure(&descriptor, InspectedPathRole::ExistingObject)
+    security_descriptor_is_insecure(&descriptor, InspectedPathRole::ExistingObject, policy)
+}
+
+pub fn harden_confidential_file(file: &mut std::fs::File) -> std::io::Result<()> {
+    harden_object(file)
+}
+
+pub fn harden_private_directory(path: &Path) -> std::io::Result<()> {
+    let mut directory = open_path_for_acl_update(path)?;
+    let metadata = directory.metadata()?;
+    if metadata_is_reparse_point(&metadata) || !metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "private directory is a reparse point or is not a directory",
+        ));
+    }
+    harden_object(&mut directory)
+}
+
+pub fn sync_directory(path: &Path) -> std::io::Result<()> {
+    let directory = open_path_for_directory_sync(path)?;
+    let metadata = directory.metadata()?;
+    if metadata_is_reparse_point(&metadata) || !metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "directory sync target is a reparse point or is not a directory",
+        ));
+    }
+    if same_file::Handle::from_path(path)? != same_file::Handle::from_file(directory.try_clone()?)?
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "directory sync target changed during secure open",
+        ));
+    }
+    directory.sync_all()
+}
+
+fn harden_object<H: std::os::windows::io::AsRawHandle>(handle: &mut H) -> std::io::Result<()> {
+    let current = windows_permissions::utilities::current_process_sid()?;
+    let descriptor: LocalBox<SecurityDescriptor> =
+        format!("D:P(A;;FA;;;{current})(A;;FA;;;SY)(A;;FA;;;BA)").parse()?;
+    windows_permissions::wrappers::SetSecurityInfo(
+        handle,
+        SeObjectType::SE_FILE_OBJECT,
+        SecurityInformation::Dacl | SecurityInformation::ProtectedDacl,
+        None,
+        None,
+        descriptor.dacl(),
+        None,
+    )
 }
 
 fn existing_path_has_insecure_write_permissions(path: &Path) -> std::io::Result<bool> {
@@ -86,7 +191,7 @@ fn existing_path_has_insecure_write_permissions(path: &Path) -> std::io::Result<
         }
         let descriptor = file_security_descriptor(&opened)
             .map_err(|error| inspection_error("read ACL security descriptor", error))?;
-        if security_descriptor_is_insecure(&descriptor, role)
+        if security_descriptor_is_insecure(&descriptor, role, TrustPolicy::IntegrityOnly)
             .map_err(|error| inspection_error("evaluate ACL security descriptor", error))?
         {
             return Ok(true);
@@ -108,6 +213,26 @@ fn open_path_for_trust_inspection(path: &Path) -> std::io::Result<std::fs::File>
     let mut options = std::fs::OpenOptions::new();
     options
         .access_mode(READ_CONTROL | FILE_READ_ATTRIBUTES)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
+    options.open(path)
+}
+
+fn open_path_for_acl_update(path: &Path) -> std::io::Result<std::fs::File> {
+    use windows_sys::Win32::Storage::FileSystem::WRITE_DAC;
+
+    let mut options = std::fs::OpenOptions::new();
+    options
+        .access_mode(READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
+    options.open(path)
+}
+
+fn open_path_for_directory_sync(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options
+        .access_mode(GENERIC_WRITE | READ_CONTROL | FILE_READ_ATTRIBUTES)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
         .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
     options.open(path)
@@ -150,6 +275,7 @@ fn absolute_path(path: &Path) -> std::io::Result<PathBuf> {
 fn security_descriptor_is_insecure(
     descriptor: &SecurityDescriptor,
     role: InspectedPathRole,
+    policy: TrustPolicy,
 ) -> std::io::Result<bool> {
     let trusted_sids = trusted_sids()?;
     let Some(owner) = descriptor.owner() else {
@@ -161,7 +287,7 @@ fn security_descriptor_is_insecure(
     let Some(dacl) = descriptor.dacl() else {
         return Ok(true);
     };
-    let dangerous_rights = dangerous_rights(role);
+    let dangerous_rights = dangerous_rights(role, policy);
     for index in 0..dacl.len() {
         let Some(ace) = dacl.get_ace(index) else {
             return Ok(true);
@@ -182,12 +308,13 @@ fn security_descriptor_is_insecure(
     Ok(false)
 }
 
-fn dangerous_rights(role: InspectedPathRole) -> AccessRights {
+fn dangerous_rights(role: InspectedPathRole, policy: TrustPolicy) -> AccessRights {
     let takeover = AccessRights::GenericAll
         | AccessRights::Delete
         | AccessRights::WriteDac
-        | AccessRights::WriteOwner;
-    match role {
+        | AccessRights::WriteOwner
+        | AccessRights::Bit6;
+    let writes = match role {
         InspectedPathRole::Ancestor => takeover | AccessRights::Bit6,
         InspectedPathRole::ExistingObject | InspectedPathRole::CreationParent => {
             takeover
@@ -197,6 +324,15 @@ fn dangerous_rights(role: InspectedPathRole) -> AccessRights {
                 | AccessRights::Bit4
                 | AccessRights::Bit8
         }
+    };
+    if policy == TrustPolicy::ConfidentialSecret {
+        writes
+            | AccessRights::GenericRead
+            | AccessRights::FileGenericRead
+            | AccessRights::Bit0
+            | AccessRights::Bit3
+    } else {
+        writes
     }
 }
 
@@ -245,103 +381,5 @@ fn check_inspection_depth(inspected_depth: &mut usize) -> std::io::Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        existing_path_has_insecure_write_permissions,
-        opened_file_has_insecure_owner_or_write_permissions,
-    };
-    use windows_permissions::constants::{SeObjectType, SecurityInformation};
-    use windows_permissions::{LocalBox, SecurityDescriptor};
-
-    #[test]
-    fn default_temporary_file_is_trusted() {
-        let file = tempfile::NamedTempFile::new().unwrap();
-
-        assert!(!existing_path_has_insecure_write_permissions(file.path()).unwrap());
-        assert!(!opened_file_has_insecure_owner_or_write_permissions(file.as_file()).unwrap());
-    }
-
-    #[test]
-    fn shared_fluxheim_test_root_and_missing_descendant_are_trusted() {
-        let root = fluxheim_common::test_support::test_root();
-        let missing = root.join("missing-security-test").join("config.toml");
-
-        assert!(!existing_path_has_insecure_write_permissions(&root).unwrap());
-        assert!(!existing_path_has_insecure_write_permissions(&missing).unwrap());
-    }
-
-    #[test]
-    fn canonical_executable_path_is_inspectable() {
-        let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
-
-        existing_path_has_insecure_write_permissions(&executable).unwrap();
-    }
-
-    #[test]
-    fn newly_created_file_beside_executable_is_inspectable() {
-        let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
-        let directory = executable.parent().unwrap();
-        let file = tempfile::NamedTempFile::new_in(directory).unwrap();
-
-        existing_path_has_insecure_write_permissions(file.path()).unwrap();
-        opened_file_has_insecure_owner_or_write_permissions(file.as_file()).unwrap();
-    }
-
-    #[test]
-    fn missing_descendant_uses_trusted_existing_parent_handle() {
-        let directory = tempfile::tempdir().unwrap();
-        let missing = directory.path().join("missing").join("config.toml");
-
-        assert!(!existing_path_has_insecure_write_permissions(&missing).unwrap());
-    }
-
-    #[test]
-    fn everyone_write_access_is_rejected() {
-        let file = tempfile::NamedTempFile::new().unwrap();
-        let current = windows_permissions::utilities::current_process_sid().unwrap();
-        let descriptor: LocalBox<SecurityDescriptor> = format!(
-            "D:P(A;;FA;;;{})(A;;FA;;;SY)(A;;FA;;;BA)(A;;FW;;;WD)",
-            current
-        )
-        .parse()
-        .unwrap();
-        windows_permissions::wrappers::SetNamedSecurityInfo(
-            file.path(),
-            SeObjectType::SE_FILE_OBJECT,
-            SecurityInformation::Dacl,
-            None,
-            None,
-            descriptor.dacl(),
-            None,
-        )
-        .unwrap();
-        let opened = file.reopen().unwrap();
-
-        assert!(opened_file_has_insecure_owner_or_write_permissions(&opened).unwrap());
-    }
-
-    #[test]
-    fn everyone_read_access_is_accepted() {
-        let file = tempfile::NamedTempFile::new().unwrap();
-        let current = windows_permissions::utilities::current_process_sid().unwrap();
-        let descriptor: LocalBox<SecurityDescriptor> = format!(
-            "D:P(A;;FA;;;{})(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;WD)",
-            current
-        )
-        .parse()
-        .unwrap();
-        windows_permissions::wrappers::SetNamedSecurityInfo(
-            file.path(),
-            SeObjectType::SE_FILE_OBJECT,
-            SecurityInformation::Dacl,
-            None,
-            None,
-            descriptor.dacl(),
-            None,
-        )
-        .unwrap();
-        let opened = file.reopen().unwrap();
-
-        assert!(!opened_file_has_insecure_owner_or_write_permissions(&opened).unwrap());
-    }
-}
+#[path = "fs_trust_windows_tests.rs"]
+mod tests;

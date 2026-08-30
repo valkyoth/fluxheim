@@ -55,6 +55,7 @@ impl AcmeCertificateReadLock {
                 .read(true)
                 .write(true)
                 .create(true)
+                .truncate(false)
                 .open(directory.join(ACME_MUTATION_LOCK_FILE))?;
             file.lock_shared()?;
             Ok(Self { file })
@@ -92,6 +93,7 @@ impl AcmeMutationLock {
                 .read(true)
                 .write(true)
                 .create(true)
+                .truncate(false)
                 .open(directory.join(ACME_MUTATION_LOCK_FILE))?;
             file.lock()?;
             Ok(Self { file })
@@ -125,6 +127,7 @@ impl AcmeMutationLock {
                 .read(true)
                 .write(true)
                 .create(true)
+                .truncate(false)
                 .open(directory.join(ACME_MUTATION_LOCK_FILE))?;
             match file.try_lock() {
                 Ok(()) => Ok(Some(Self { file })),

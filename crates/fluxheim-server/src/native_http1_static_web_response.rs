@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::{self, Read, Seek};
-use std::path::{Component, Path};
+#[cfg(unix)]
+use std::path::Component;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use fluxheim_cache::{request_cache_bypass_reason, request_cache_revalidation_requested};
@@ -278,75 +280,7 @@ fn open_static_body_file_at_root(
     file: &NativeStaticFile,
     relative_path: &Path,
 ) -> io::Result<File> {
-    use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
-
-    use windows_sys::Win32::Storage::FileSystem::{
-        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, SECURITY_IDENTIFICATION,
-        SECURITY_SQOS_PRESENT,
-    };
-
-    let mut current = file.root.clone();
-    let mut components = relative_path.components().peekable();
-    while let Some(component) = components.next() {
-        let Component::Normal(name) = component else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "static body path is not relative",
-            ));
-        };
-        current.push(name);
-        let metadata = std::fs::symlink_metadata(&current)?;
-        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "static body path contains a reparse point",
-            ));
-        }
-        if components.peek().is_some() {
-            if !metadata.is_dir() {
-                return Err(io::Error::new(
-                    io::ErrorKind::NotADirectory,
-                    "static body path component is not a directory",
-                ));
-            }
-            continue;
-        }
-        if !metadata.is_file() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "static body path is not a regular file",
-            ));
-        }
-
-        let opened = std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-            .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION)
-            .open(&current)?;
-        let opened_metadata = opened.metadata()?;
-        if !opened_metadata.is_file()
-            || opened_metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "static body path changed during secure open",
-            ));
-        }
-        let path_handle = same_file::Handle::from_path(&current)?;
-        let opened_handle = same_file::Handle::from_file(opened.try_clone()?)?;
-        if path_handle != opened_handle {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "static body path changed during secure open",
-            ));
-        }
-        return Ok(opened);
-    }
-
-    Err(io::Error::new(
-        io::ErrorKind::InvalidInput,
-        "static body path is empty",
-    ))
+    fluxheim_windows_security::open_regular_file_beneath(&file.root, relative_path)
 }
 
 pub(super) fn directory_listing_response(
@@ -388,120 +322,5 @@ fn static_reason(status: u16) -> &'static str {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-    use std::time::{Duration, Instant};
-
-    #[cfg(unix)]
-    use tempfile::TempDir;
-
-    use super::native_static_cache_expires_at;
-    #[cfg(unix)]
-    use super::open_static_body_file;
-    use crate::NativeHttp1Response;
-    use crate::native_http1_cache::{
-        NativeMemoryCacheEntry, NativeMemoryCacheState, native_cache_entry_weight,
-        prune_native_memory_cache,
-    };
-    #[cfg(unix)]
-    use crate::native_http1_static_web::NativeStaticFile;
-
-    #[test]
-    fn static_cache_entry_weight_includes_entry_overhead() {
-        let response = NativeHttp1Response::new(200, "OK", b"hello")
-            .with_header("cache-control", "max-age=60");
-        let raw_bytes = 5_u64 + "cache-control".len() as u64 + "max-age=60".len() as u64 + 4;
-
-        let weight = native_cache_entry_weight("cache-key", &response, 5);
-
-        assert!(weight >= raw_bytes + 256 + "cache-key".len() as u64 + "OK".len() as u64);
-    }
-
-    #[test]
-    fn static_cache_expiry_rejects_unrepresentable_ttl() {
-        assert!(native_static_cache_expires_at(Instant::now(), Duration::MAX).is_none());
-    }
-
-    #[test]
-    fn prune_static_cache_removes_expired_and_oldest_entries() {
-        let now = Instant::now();
-        let mut state = NativeMemoryCacheState::default();
-        state.objects.insert(
-            "expired".to_owned(),
-            cache_entry(
-                now - Duration::from_secs(30),
-                now - Duration::from_secs(1),
-                100,
-            ),
-        );
-        state.objects.insert(
-            "old".to_owned(),
-            cache_entry(
-                now - Duration::from_secs(20),
-                now + Duration::from_secs(60),
-                100,
-            ),
-        );
-        state.objects.insert(
-            "new".to_owned(),
-            cache_entry(
-                now - Duration::from_secs(10),
-                now + Duration::from_secs(60),
-                100,
-            ),
-        );
-        state.bytes = 300;
-
-        prune_native_memory_cache(&mut state, 150);
-
-        assert!(!state.objects.contains_key("expired"));
-        assert!(!state.objects.contains_key("old"));
-        assert!(state.objects.contains_key("new"));
-        assert_eq!(state.bytes, 100);
-    }
-
-    fn cache_entry(stored_at: Instant, expires_at: Instant, weight: u64) -> NativeMemoryCacheEntry {
-        NativeMemoryCacheEntry {
-            status: 200,
-            reason: "OK".to_owned(),
-            headers: Vec::new(),
-            content_length: Some(1),
-            body: Arc::from(*b"x"),
-            body_sha256: Arc::new(crate::native_http1_cache::native_cache_body_sha256(b"x")),
-            expires_at,
-            stale_while_revalidate_until: None,
-            stale_if_error_until: None,
-            stale_reuse_forbidden: false,
-            stored_at,
-            weight,
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn open_static_body_file_rejects_symlink_swapped_after_resolution() {
-        use std::time::SystemTime;
-
-        let root = TempDir::new().unwrap();
-        let asset = root.path().join("asset.txt");
-        let outside = root.path().join("outside.txt");
-        std::fs::write(&asset, b"safe").unwrap();
-        std::fs::write(&outside, b"outside").unwrap();
-        let root_path = root.path().canonicalize().unwrap();
-        let file = NativeStaticFile {
-            root: root_path.clone(),
-            path: root_path.join("asset.txt"),
-            mime: "text/plain; charset=utf-8",
-            len: 4,
-            modified: Some(SystemTime::UNIX_EPOCH),
-            device: 0,
-            inode: 0,
-        };
-
-        std::fs::remove_file(&asset).unwrap();
-        std::os::unix::fs::symlink(&outside, &asset).unwrap();
-
-        assert!(open_static_body_file(&file).is_err());
-        root.close().unwrap();
-    }
-}
+#[path = "native_http1_static_web_response_tests.rs"]
+mod tests;

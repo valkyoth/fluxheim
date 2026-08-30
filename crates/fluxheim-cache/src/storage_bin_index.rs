@@ -108,7 +108,8 @@ pub fn write_storage_bin_index(
             )?;
         }
         file.sync_all()?;
-        path.rename_from(&temp_path)
+        path.rename_from(&temp_path)?;
+        path.sync_parent_directory()
     })();
     if write_result.is_err() {
         let _ = temp_path.remove_file();

@@ -8,11 +8,15 @@ const MAX_PERMISSION_INSPECTION_DEPTH: usize = 256;
 #[path = "fs_trust_windows.rs"]
 mod windows;
 #[cfg(windows)]
-pub use windows::opened_file_has_insecure_owner_or_write_permissions;
-#[cfg(windows)]
 pub use windows::{
     existing_parent_has_insecure_write_permissions,
     existing_path_or_parent_has_insecure_write_permissions,
+};
+#[cfg(windows)]
+pub use windows::{
+    harden_confidential_file, harden_private_directory, open_confidential_file,
+    opened_file_has_insecure_confidential_permissions,
+    opened_file_has_insecure_owner_or_write_permissions, sync_directory,
 };
 
 #[cfg(unix)]
@@ -103,7 +107,7 @@ fn stat_has_insecure_owner_or_write_permissions(
 }
 
 #[cfg(unix)]
-pub(crate) fn opened_file_has_insecure_owner_or_write_permissions(
+pub fn opened_file_has_insecure_owner_or_write_permissions(
     file: &std::fs::File,
 ) -> std::io::Result<bool> {
     let metadata = file.metadata()?;
@@ -117,8 +121,30 @@ pub(crate) fn opened_file_has_insecure_owner_or_write_permissions(
     )
 }
 
+#[cfg(unix)]
+pub fn opened_file_has_insecure_confidential_permissions(
+    file: &std::fs::File,
+) -> std::io::Result<bool> {
+    let metadata = file.metadata()?;
+    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+
+    let process_uid = rustix::process::geteuid().as_raw();
+    let root_uid = path_stat_no_follow(Path::new("/"))?.st_uid;
+    Ok(
+        (metadata.uid() != 0 && metadata.uid() != process_uid && metadata.uid() != root_uid)
+            || metadata.permissions().mode() & 0o077 != 0,
+    )
+}
+
 #[cfg(not(any(unix, windows)))]
-pub(crate) fn opened_file_has_insecure_owner_or_write_permissions(
+pub fn opened_file_has_insecure_owner_or_write_permissions(
+    _file: &std::fs::File,
+) -> std::io::Result<bool> {
+    Err(unsupported_filesystem_trust_error())
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn opened_file_has_insecure_confidential_permissions(
     _file: &std::fs::File,
 ) -> std::io::Result<bool> {
     Err(unsupported_filesystem_trust_error())

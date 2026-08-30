@@ -85,6 +85,10 @@ if ($PSCmdlet.ShouldProcess($WorkspaceRoot, 'Create private release workspace'))
     Copy-Item -LiteralPath $TagAllowedSignersFile -Destination $allowedSigners -Force
     & icacls.exe $WorkspaceRoot /inheritance:r /grant:r "$BuildUser`:(OI)(CI)M" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'failed to secure release workspace' }
+    & icacls.exe $trustedDirectory /inheritance:r /grant:r "$BuildUser`:(OI)(CI)RX" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'failed to secure trusted release directory' }
+    & icacls.exe $allowedSigners /inheritance:r /grant:r "$BuildUser`:R" 'SYSTEM:F' 'Administrators:F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'failed to secure trusted tag signer policy' }
 }
 
 $sshdConfig = Join-Path $env:ProgramData 'ssh\sshd_config'
@@ -96,6 +100,8 @@ $escapedEnd = [regex]::Escape($endMarker)
 $config = [regex]::Replace($config, "(?ms)^$escapedBegin.*?^$escapedEnd\r?\n?", '')
 $block = @"
 $beginMarker
+PasswordAuthentication no
+KbdInteractiveAuthentication no
 Match User $BuildUser
     PubkeyAuthentication yes
     PasswordAuthentication no

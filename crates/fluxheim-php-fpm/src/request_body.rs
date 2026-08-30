@@ -278,7 +278,7 @@ pub fn create_php_request_body_spool_dir_sync(spool_dir: &Path) -> io::Result<()
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(windows)))]
 async fn create_php_request_body_spool_file_by_path(
     spool_dir: &Path,
 ) -> io::Result<tokio::fs::File> {
@@ -291,6 +291,48 @@ async fn create_php_request_body_spool_file_by_path(
             Ok(file) => {
                 tokio::fs::remove_file(&path).await?;
                 return Ok(file);
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                last_error = Some(error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "could not allocate PHP request body spool file",
+        )
+    }))
+}
+
+#[cfg(windows)]
+async fn create_php_request_body_spool_file_by_path(
+    spool_dir: &Path,
+) -> io::Result<tokio::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_TEMPORARY, FILE_FLAG_DELETE_ON_CLOSE, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    };
+
+    let mut last_error = None;
+    for _ in 0..16 {
+        let path = php_request_body_spool_path(spool_dir)?;
+        let mut options = std::fs::OpenOptions::new();
+        options
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .custom_flags(
+                FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE | FILE_FLAG_OPEN_REPARSE_POINT,
+            );
+        match options.open(&path) {
+            Ok(mut file) => {
+                fluxheim_config::fs_trust::harden_confidential_file(&mut file)?;
+                return Ok(tokio::fs::File::from_std(file));
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                 last_error = Some(error);
@@ -379,7 +421,6 @@ pub fn ensure_php_request_body_spool_dir(spool_dir: &Path) -> io::Result<()> {
             "PHP request body spool path is not a directory",
         ));
     }
-    #[cfg(unix)]
     if fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(spool_dir)?
     {
         return Err(io::Error::new(
@@ -387,5 +428,7 @@ pub fn ensure_php_request_body_spool_dir(spool_dir: &Path) -> io::Result<()> {
             "PHP request body spool directory is group/world writable",
         ));
     }
+    #[cfg(windows)]
+    fluxheim_config::fs_trust::harden_private_directory(spool_dir)?;
     Ok(())
 }

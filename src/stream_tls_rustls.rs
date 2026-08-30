@@ -14,7 +14,7 @@ use sanitization::SecretVec;
 use tokio_rustls::TlsConnector as RustlsTlsConnector;
 
 use crate::config::StreamRouteConfig;
-use crate::upstream_tls::read_upstream_tls_file;
+use crate::upstream_tls::{read_upstream_tls_file, read_upstream_tls_secret_file};
 
 pub(super) fn build_rustls_connector(route: &StreamRouteConfig) -> FluxResult<RustlsTlsConnector> {
     let roots = Arc::new(rustls_root_store(route.upstream_ca_path.as_deref())?);
@@ -121,7 +121,7 @@ fn rustls_client_cert_key(
 ) -> FluxResult<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>)> {
     let certs = rustls_certificates_from_file(cert_path, "upstream client certificate")?;
     let key_contents = SecretVec::from_vec(
-        read_upstream_tls_file(key_path)
+        read_upstream_tls_secret_file(key_path)
             .map_err(|error| FluxError::io("read stream upstream TLS private key", error))?,
     );
     let key = key_contents

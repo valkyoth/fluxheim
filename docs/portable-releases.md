@@ -100,6 +100,18 @@ That cross-check does not execute ARM64 code and is not release evidence.
 Native ARM64 execution and exact-tag, two-build reproducibility evidence from
 both dedicated cloud builders remain mandatory release blocks.
 
+Windows filesystem parity uses protected DACLs for newly created secret and
+private state, rejects untrusted read access to credentials, and rejects
+untrusted write or delete-child access throughout configured runtime paths.
+Static response bodies are opened component-by-component relative to retained
+directory handles with reparse processing disabled. Cache, snapshot, ACME,
+logging, PHP spool, and configuration paths also fail closed when an ancestor
+is writable by an untrusted principal. These controls deliberately trust the
+Fluxheim service identity, `SYSTEM`, and local Administrators; do not run
+untrusted workloads under the same Windows account or grant them Administrator
+access. Use a dedicated service account and dedicated runtime directories when
+the host runs mutually untrusted applications.
+
 Live platform parity remains staged:
 
 - `1.8.1` completes the defined unsigned native macOS runtime and archive

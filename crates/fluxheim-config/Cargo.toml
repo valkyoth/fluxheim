@@ -44,7 +44,7 @@ toml = "1.1.4"
 dunce = "1.0.5"
 same-file = "1.0.6"
 windows-permissions = "0.2.4"
-windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }

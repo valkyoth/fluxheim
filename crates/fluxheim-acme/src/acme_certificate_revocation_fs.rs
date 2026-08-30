@@ -1,6 +1,6 @@
-use super::fs_ops::CertificateDirectoryFd;
 #[cfg(unix)]
 use super::fs_ops::certificate_file_name_in_directory;
+use super::fs_ops::{CertificateDirectoryFd, certificate_metadata_is_link};
 use super::*;
 
 pub(super) fn ensure_existing_regular_file(
@@ -43,7 +43,7 @@ pub(super) fn certificate_file_exists_regular(
     }
 
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(true),
+        Ok(metadata) if metadata.is_file() && !certificate_metadata_is_link(&metadata) => Ok(true),
         Ok(_) => Err(AcmeCertificateInstallError::UnsafePath {
             path: path.to_path_buf(),
             message: "managed certificate path is not a regular file".to_owned(),

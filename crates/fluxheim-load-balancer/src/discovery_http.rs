@@ -1,4 +1,5 @@
 use std::fs;
+#[cfg(not(windows))]
 use std::fs::OpenOptions;
 use std::io;
 use std::io::Read;
@@ -144,11 +145,16 @@ fn read_http_discovery_bearer_token(path: &Path) -> io::Result<SecretString> {
         ));
     }
 
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    options.custom_flags(O_NOFOLLOW);
-    let file = options.open(path)?;
+    #[cfg(windows)]
+    let file = fluxheim_config::fs_trust::open_confidential_file(path)?;
+    #[cfg(not(windows))]
+    let file = {
+        let mut options = OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        options.custom_flags(O_NOFOLLOW);
+        options.open(path)?
+    };
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(io::Error::new(

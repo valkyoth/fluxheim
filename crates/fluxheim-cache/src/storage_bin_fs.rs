@@ -333,6 +333,10 @@ impl StorageBinSafePath {
         rustix::fs::unlinkat(&parent, name, rustix::fs::AtFlags::empty())
             .map_err(storage_bin_rustix_to_io_error)
     }
+
+    pub(crate) fn sync_parent_directory(&self) -> std::io::Result<()> {
+        self.open_parent_dir()?.sync_all()
+    }
 }
 
 fn storage_bin_rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {

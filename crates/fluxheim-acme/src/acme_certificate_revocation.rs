@@ -14,6 +14,12 @@ use super::revocation_fs::{
 };
 use super::*;
 use serde::{Deserialize, Serialize};
+
+#[cfg(all(test, feature = "acme-client"))]
+#[path = "acme_certificate_revocation_test_support.rs"]
+mod test_support;
+#[cfg(all(test, feature = "acme-client"))]
+pub(crate) use test_support::simulate_prepared_revocation_crash;
 const REVOCATION_JOURNAL_FILE: &str = ".revocation.transaction";
 const MAX_REVOCATION_JOURNAL_BYTES: u64 = 4096;
 
@@ -388,7 +394,9 @@ fn read_revocation_journal(
     };
     #[cfg(not(unix))]
     let file = match fs::symlink_metadata(&path) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+        Ok(metadata)
+            if super::fs_ops::certificate_metadata_is_link(&metadata) || !metadata.is_file() =>
+        {
             return Err(AcmeCertificateInstallError::UnsafePath {
                 path,
                 message: "ACME revocation journal is not a regular file".to_owned(),
@@ -465,38 +473,4 @@ fn validate_revocation_journal(
             message: "ACME revocation journal contains invalid file names".to_owned(),
         })
     }
-}
-
-#[cfg(all(test, feature = "acme-client"))]
-pub(crate) fn simulate_prepared_revocation_crash(
-    paths: &AcmeCertificatePaths,
-) -> Result<PathBuf, AcmeCertificateInstallError> {
-    let directory = certificate_directory(paths)?;
-    let owner = managed_certificate_owner(&directory)?;
-    let _lock =
-        AcmeMutationLock::acquire(&directory).map_err(|error| AcmeCertificateInstallError::Io {
-            path: directory.join(".fluxheim-acme.lock"),
-            error,
-        })?;
-    #[cfg(unix)]
-    let directory_fd = open_safe_certificate_directory(&directory)?;
-    #[cfg(unix)]
-    let directory_fd = Some(&directory_fd);
-    #[cfg(not(unix))]
-    let directory_fd: Option<&CertificateDirectoryFd> = None;
-    let transaction = unique_transaction_id().map_err(|error| AcmeCertificateInstallError::Io {
-        path: directory.clone(),
-        error,
-    })?;
-    let journal = RevocationJournal {
-        certificate_name: format!(".revoked-{transaction}-fullchain.pem"),
-        private_key_name: format!(".revoked-{transaction}-privkey.pem"),
-        transaction,
-        phase: RevocationPhase::Prepared,
-    };
-    write_revocation_journal(&directory, &journal, owner, directory_fd)?;
-    let quarantine = directory.join(&journal.certificate_name);
-    rename_certificate_file(&directory, &paths.cert_path, &quarantine, directory_fd)?;
-    sync_directory(&directory, directory_fd)?;
-    Ok(quarantine)
 }

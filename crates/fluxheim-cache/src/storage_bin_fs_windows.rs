@@ -2,8 +2,8 @@ use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
 use std::path::{Component, Path, PathBuf};
 
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, SECURITY_IDENTIFICATION,
-    SECURITY_SQOS_PRESENT,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
 };
 
 #[derive(Clone, Copy)]
@@ -224,6 +224,14 @@ impl StorageBinSafePath {
 
     fn validate_parent(&self) -> std::io::Result<()> {
         let (parent, _) = self.parent_and_name()?;
+        if fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(
+            parent,
+        )? {
+            return Err(unsafe_path_error(format!(
+                "storage-bin parent has an untrusted writable ACL: {}",
+                parent.display()
+            )));
+        }
         if path_contains_reparse_point(parent)? {
             return Err(unsafe_path_error(format!(
                 "storage-bin parent contains a reparse point: {}",
@@ -250,6 +258,7 @@ impl StorageBinSafePath {
             .read(read)
             .write(write)
             .create_new(create_new)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
             .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
         let file = options.open(&self.path)?;
@@ -257,6 +266,14 @@ impl StorageBinSafePath {
         if metadata_is_reparse_point(&metadata) || !metadata.is_file() {
             return Err(unsafe_path_error(format!(
                 "storage-bin path is not a real file: {}",
+                self.path.display()
+            )));
+        }
+        if same_file::Handle::from_path(&self.path)?
+            != same_file::Handle::from_file(file.try_clone()?)?
+        {
+            return Err(unsafe_path_error(format!(
+                "storage-bin path changed during secure open: {}",
                 self.path.display()
             )));
         }
@@ -291,6 +308,12 @@ impl StorageBinSafePath {
         self.validate_parent()?;
         reject_existing_reparse_point(&self.path)?;
         std::fs::remove_file(&self.path)
+    }
+
+    pub(crate) fn sync_parent_directory(&self) -> std::io::Result<()> {
+        let (parent, _) = self.parent_and_name()?;
+        self.validate_parent()?;
+        fluxheim_config::fs_trust::sync_directory(parent)
     }
 }
 

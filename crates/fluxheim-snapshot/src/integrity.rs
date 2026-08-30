@@ -9,7 +9,6 @@ use sanitization::{SecretVec, ct::ConstantTimeEq as _};
 use serde::{Deserialize, Serialize};
 
 use crate::store::SnapshotError;
-use crate::store_fs::require_private_regular_file;
 
 pub(crate) const MAX_INTEGRITY_KEY_BYTES: u64 = 4096;
 const MIN_INTEGRITY_KEY_BYTES: usize = 32;
@@ -75,9 +74,13 @@ impl SnapshotIntegrityKey {
             });
         }
         let mut file = open_secret_file(path)?;
-        require_private_regular_file(path).map_err(|_| SnapshotError::UnsafeIntegrityKey {
-            path: path.to_path_buf(),
-        })?;
+        if fluxheim_config::fs_trust::opened_file_has_insecure_confidential_permissions(&file)
+            .unwrap_or(true)
+        {
+            return Err(SnapshotError::UnsafeIntegrityKey {
+                path: path.to_path_buf(),
+            });
+        }
         let metadata = file.metadata().map_err(SnapshotError::Io)?;
         if !metadata.is_file() || metadata.len() > MAX_INTEGRITY_KEY_BYTES {
             return Err(SnapshotError::InvalidIntegrityKey);
@@ -357,7 +360,12 @@ fn open_secret_file(path: &Path) -> Result<File, SnapshotError> {
     Ok(fd.into())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn open_secret_file(path: &Path) -> Result<File, SnapshotError> {
+    fluxheim_config::fs_trust::open_confidential_file(path).map_err(SnapshotError::Io)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn open_secret_file(path: &Path) -> Result<File, SnapshotError> {
     File::open(path).map_err(SnapshotError::Io)
 }

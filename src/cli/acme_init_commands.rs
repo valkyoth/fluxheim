@@ -157,6 +157,9 @@ fn read_or_prompt_secret(
 ) -> Result<SecretString, Box<dyn Error + Send + Sync>> {
     if let Some(path) = path {
         validate_acme_init_output_path("secret input", path)?;
+        #[cfg(windows)]
+        let file = fluxheim_config::fs_trust::open_confidential_file(path)?;
+        #[cfg(not(windows))]
         let file = std::fs::File::open(path)?;
         let metadata = file.metadata()?;
         if !metadata.is_file() || metadata.len() > 4096 {
@@ -239,10 +242,9 @@ fn validate_acme_init_path(
         )
         .into());
     }
-    #[cfg(unix)]
     if existing_parent_has_insecure_write_permissions(path)? {
         return Err(format!(
-            "{field} must not be below a group- or world-writable parent: {}",
+            "{field} must not be below an untrusted writable parent: {}",
             path.display()
         )
         .into());
@@ -314,18 +316,47 @@ fn write_file_checked(
 
     #[cfg(not(unix))]
     {
+        #[cfg(windows)]
+        use std::os::windows::fs::OpenOptionsExt as _;
+
         let mut options = std::fs::OpenOptions::new();
         options.write(true);
         if force {
-            options.create(true).truncate(true);
+            options.create(true);
         } else {
             options.create_new(true);
         }
+        #[cfg(windows)]
+        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
         let mut file = options.open(path)?;
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt as _;
+
+            let metadata = file.metadata()?;
+            if !metadata.is_file()
+                || metadata.file_attributes()
+                    & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+                    != 0
+                || same_file::Handle::from_path(path)?
+                    != same_file::Handle::from_file(file.try_clone()?)?
+            {
+                return Err(format!(
+                    "output file changed during secure open or is a reparse point: {}",
+                    path.display()
+                )
+                .into());
+            }
+            fluxheim_config::fs_trust::harden_confidential_file(&mut file)?;
+        }
+        if force {
+            file.set_len(0)?;
+        }
         file.write_all(contents.as_bytes())?;
         file.sync_all()?;
     }
 
+    #[cfg(unix)]
     set_mode(path, mode)?;
     Ok(())
 }
@@ -363,7 +394,7 @@ fn existing_prefix_contains_symlink(
             continue;
         }
         match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(metadata) if acme_init_metadata_is_link(&metadata) => return Ok(true),
             Ok(_) => {}
             Err(error)
                 if error.kind() == io::ErrorKind::NotFound
@@ -377,11 +408,11 @@ fn existing_prefix_contains_symlink(
     Ok(false)
 }
 
-#[cfg(all(feature = "acme-client", unix))]
+#[cfg(feature = "acme-client")]
 fn existing_parent_has_insecure_write_permissions(
     path: &Path,
 ) -> Result<bool, Box<dyn Error + Send + Sync>> {
-    fluxheim_config::fs_trust::existing_parent_has_insecure_write_permissions(path)
+    fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(path)
         .map_err(|error| error.into())
 }
 
@@ -395,6 +426,30 @@ fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
 
 #[cfg(feature = "acme-client")]
 #[cfg(not(unix))]
-fn set_mode(_path: &Path, _mode: u32) -> io::Result<()> {
+fn set_mode(path: &Path, _mode: u32) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        let metadata = std::fs::symlink_metadata(path)?;
+        if metadata.is_dir() {
+            return fluxheim_config::fs_trust::harden_private_directory(path);
+        }
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    let _ = path;
     Ok(())
+}
+
+#[cfg(all(feature = "acme-client", windows))]
+fn acme_init_metadata_is_link(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+
+    metadata.file_attributes()
+        & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+        != 0
+}
+
+#[cfg(all(feature = "acme-client", not(windows)))]
+fn acme_init_metadata_is_link(metadata: &std::fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
 }

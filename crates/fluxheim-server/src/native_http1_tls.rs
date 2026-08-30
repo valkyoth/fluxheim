@@ -23,7 +23,7 @@ use crate::{NativeHttp1Error, NativeHttp1ProxyConfigError};
 
 mod file;
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
-use file::read_upstream_tls_file;
+use file::{read_upstream_tls_file, read_upstream_tls_secret_file};
 #[cfg(feature = "tls-rustls-backend")]
 mod rustls_backend;
 #[cfg(feature = "tls-rustls-backend")]
@@ -376,7 +376,7 @@ fn configure_openssl_client_cert(
             ),
         )));
     };
-    let key_contents = SecretVec::from_vec(read_upstream_tls_file(key_path)?);
+    let key_contents = SecretVec::from_vec(read_upstream_tls_secret_file(key_path)?);
     let key = key_contents
         .with_secret(PKey::private_key_from_pem)
         .map_err(|error| {

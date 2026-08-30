@@ -18,6 +18,9 @@ rustix = { version = "1.1.4", features = ["fs", "net", "process"] }
 sanitization = { version = "2.0.3", features = ["alloc"] }
 tokio = { version = "1.53.1", default-features = false, features = ["fs", "io-util", "net", "rt", "time"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }
 tempfile = "3.27.0"

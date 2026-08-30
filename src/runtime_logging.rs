@@ -38,7 +38,7 @@ pub(super) fn open_log_file(path: &Path, append: bool) -> std::io::Result<File> 
 
     #[cfg(windows)]
     {
-        return open_log_file_windows(path, append);
+        open_log_file_windows(path, append)
     }
 
     #[cfg(unix)]
@@ -92,15 +92,21 @@ fn open_log_file_windows(path: &Path, append: bool) -> std::io::Result<File> {
             "log path has an untrusted owner or writable parent component",
         ));
     }
-    let mut options = std::fs::OpenOptions::new();
-    options
-        .create(true)
-        .write(true)
-        .append(append)
-        .truncate(!append)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
-    let file = options.open(path)?;
+    let open = |create_new: bool| {
+        let mut options = std::fs::OpenOptions::new();
+        options
+            .create_new(create_new)
+            .write(true)
+            .append(append)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
+        options.open(path)
+    };
+    let (mut file, created) = match open(true) {
+        Ok(file) => (file, true),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (open(false)?, false),
+        Err(error) => return Err(error),
+    };
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
         return Err(std::io::Error::new(
@@ -115,6 +121,18 @@ fn open_log_file_windows(path: &Path, append: bool) -> std::io::Result<File> {
             std::io::ErrorKind::PermissionDenied,
             "log path changed during secure open",
         ));
+    }
+    if created {
+        fluxheim_config::fs_trust::harden_confidential_file(&mut file)?;
+    } else if fluxheim_config::fs_trust::opened_file_has_insecure_owner_or_write_permissions(&file)?
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "log file has an untrusted owner or writable ACL",
+        ));
+    }
+    if !append {
+        file.set_len(0)?;
     }
     Ok(file)
 }
@@ -152,10 +170,6 @@ pub(super) fn write_json_log_record(
     buf: &mut env_logger::fmt::Formatter,
     record: &log::Record<'_>,
 ) -> std::io::Result<()> {
-    if record.target() == "fluxheim::access" {
-        return writeln!(buf, "{}", record.args());
-    }
-
     writeln!(
         buf,
         "{}",

@@ -118,6 +118,15 @@ impl NativeHttp1StaticWeb {
             ));
         }
 
+        #[cfg(windows)]
+        if fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(root)?
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("web root has an untrusted writable ACL: {}", root.display()),
+            ));
+        }
+
         let root_metadata = std::fs::symlink_metadata(root).map_err(|error| {
             io::Error::new(
                 error.kind(),

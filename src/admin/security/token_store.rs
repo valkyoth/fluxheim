@@ -51,7 +51,6 @@ pub(in crate::admin) fn read_secret_file(
         .into());
     }
 
-    #[cfg(unix)]
     if fluxheim_config::fs_trust::existing_parent_has_insecure_write_permissions(path).map_err(
         |error| {
             format!(
@@ -61,13 +60,28 @@ pub(in crate::admin) fn read_secret_file(
         },
     )? {
         return Err(format!(
-            "admin token file {} must not be below a group- or world-writable directory",
+            "admin token file {} must not be below a group- or world-writable directory or untrusted Windows ACL",
             path.display()
         )
         .into());
     }
 
     let file = open_regular_secret_file(path)?;
+    #[cfg(windows)]
+    if fluxheim_config::fs_trust::opened_file_has_insecure_confidential_permissions(&file).map_err(
+        |error| {
+            format!(
+                "failed to inspect admin token file permissions {}: {error}",
+                path.display()
+            )
+        },
+    )? {
+        return Err(format!(
+            "admin token file {} has an untrusted owner or access permissions",
+            path.display()
+        )
+        .into());
+    }
     let metadata = file.metadata().map_err(|error| {
         format!(
             "failed to inspect admin token file {}: {error}",
@@ -144,23 +158,18 @@ fn rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {
     std::io::Error::from_raw_os_error(error.raw_os_error())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn open_regular_secret_file(path: &Path) -> Result<fs::File, Box<dyn Error + Send + Sync>> {
-    let metadata = fs::symlink_metadata(path).map_err(|error| {
+    fluxheim_config::fs_trust::open_confidential_file(path).map_err(|error| {
         format!(
-            "failed to inspect admin token file {}: {error}",
-            path.display()
-        )
-    })?;
-    if !metadata.file_type().is_file() {
-        return Err(format!("admin token file {} must be a regular file", path.display()).into());
-    }
-
-    fs::File::open(path).map_err(|error| {
-        format!(
-            "failed to open admin token file {}: {error}",
+            "failed to securely open admin token file {}: {error}",
             path.display()
         )
         .into()
     })
+}
+
+#[cfg(not(any(unix, windows)))]
+fn open_regular_secret_file(path: &Path) -> Result<fs::File, Box<dyn Error + Send + Sync>> {
+    fs::File::open(path).map_err(Into::into)
 }

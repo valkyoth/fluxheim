@@ -433,3 +433,15 @@ fn storage_bin_inspection_does_not_construct_unregistered_allocator() {
     );
     assert!(!root.exists());
 }
+
+#[test]
+fn disk_cache_file_read_is_bounded_after_metadata_check() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("bounded-cache-object");
+    std::fs::write(&path, b"12345").unwrap();
+
+    let error = super::read_native_disk_cache_file(&path, 4).unwrap_err();
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("exceeds read limit"));
+}

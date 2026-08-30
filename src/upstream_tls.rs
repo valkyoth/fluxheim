@@ -42,6 +42,16 @@ const MAX_UPSTREAM_TLS_FILE_BYTES: u64 = 1024 * 1024;
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 pub(crate) fn read_upstream_tls_file(path: &std::path::Path) -> io::Result<Vec<u8>> {
+    read_upstream_tls_input(path, false)
+}
+
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
+pub(crate) fn read_upstream_tls_secret_file(path: &std::path::Path) -> io::Result<Vec<u8>> {
+    read_upstream_tls_input(path, true)
+}
+
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
+fn read_upstream_tls_input(path: &std::path::Path, confidential: bool) -> io::Result<Vec<u8>> {
     let metadata = std::fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(io::Error::new(
@@ -53,15 +63,24 @@ pub(crate) fn read_upstream_tls_file(path: &std::path::Path) -> io::Result<Vec<u
         ));
     }
 
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(UPSTREAM_TLS_O_NOFOLLOW);
-    }
-
-    let file = options.open(path)?;
+    #[cfg(windows)]
+    let file = if confidential {
+        fluxheim_config::fs_trust::open_confidential_file(path)?
+    } else {
+        std::fs::File::open(path)?
+    };
+    #[cfg(not(windows))]
+    let file = {
+        let _ = confidential;
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(UPSTREAM_TLS_O_NOFOLLOW);
+        }
+        options.open(path)?
+    };
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(io::Error::new(

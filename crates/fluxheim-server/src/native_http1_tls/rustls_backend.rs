@@ -12,7 +12,7 @@ use rustls::{
 use sanitization::SecretVec;
 use tokio_rustls::TlsConnector;
 
-use super::file::read_upstream_tls_file;
+use super::file::{read_upstream_tls_file, read_upstream_tls_secret_file};
 use crate::NativeHttp1Error;
 
 pub(super) fn build_rustls_connector(
@@ -165,7 +165,7 @@ fn client_cert_key(
     key_path: &Path,
 ) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), NativeHttp1Error> {
     let certs = certificates_from_file(cert_path, "upstream client certificate")?;
-    let key_contents = SecretVec::from_vec(read_upstream_tls_file(key_path)?);
+    let key_contents = SecretVec::from_vec(read_upstream_tls_secret_file(key_path)?);
     let key = key_contents
         .with_secret(PrivateKeyDer::from_pem_slice)
         .map_err(|error| {

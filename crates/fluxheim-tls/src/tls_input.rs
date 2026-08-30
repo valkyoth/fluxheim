@@ -13,7 +13,7 @@ pub(crate) const MAX_CHAIN_CERTIFICATES: usize = 16;
 pub(crate) const MAX_CA_CERTIFICATES: usize = 4096;
 
 pub(crate) fn read_bounded_file(path: &Path, maximum: u64) -> io::Result<Vec<u8>> {
-    let (mut file, admitted) = open_admitted_file(path, maximum)?;
+    let (mut file, admitted) = open_admitted_file(path, maximum, false)?;
     let mut contents = Vec::new();
     contents.try_reserve_exact(admitted).map_err(|error| {
         io::Error::other(format!("failed to reserve bounded TLS input: {error}"))
@@ -25,12 +25,22 @@ pub(crate) fn read_bounded_file(path: &Path, maximum: u64) -> io::Result<Vec<u8>
 }
 
 pub(crate) fn read_bounded_secret(path: &Path, maximum: u64) -> io::Result<SecretVec> {
-    let (mut file, admitted) = open_admitted_file(path, maximum)?;
+    let (mut file, admitted) = open_admitted_file(path, maximum, true)?;
     read_admitted_secret(&mut file, admitted)
 }
 
-fn open_admitted_file(path: &Path, maximum: u64) -> io::Result<(File, usize)> {
-    let file = File::open(path)?;
+fn open_admitted_file(path: &Path, maximum: u64, confidential: bool) -> io::Result<(File, usize)> {
+    #[cfg(windows)]
+    let file = if confidential {
+        fluxheim_config::fs_trust::open_confidential_file(path)?
+    } else {
+        File::open(path)?
+    };
+    #[cfg(not(windows))]
+    let file = {
+        let _ = confidential;
+        File::open(path)?
+    };
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(io::Error::new(

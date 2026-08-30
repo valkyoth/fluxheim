@@ -3,6 +3,20 @@ use std::path::Path;
 
 use super::ConfigLoadError;
 
+pub(super) struct ConfigPathIdentity {
+    #[cfg(windows)]
+    handle: same_file::Handle,
+}
+
+pub(super) fn capture_config_path_identity(path: &Path) -> std::io::Result<ConfigPathIdentity> {
+    #[cfg(not(windows))]
+    let _ = path;
+    Ok(ConfigPathIdentity {
+        #[cfg(windows)]
+        handle: same_file::Handle::from_path(path)?,
+    })
+}
+
 pub(super) fn ensure_trusted_config_path(path: &Path) -> Result<(), ConfigLoadError> {
     match crate::fs_trust::existing_path_or_parent_has_insecure_write_permissions(path) {
         Ok(false) => Ok(()),
@@ -36,6 +50,7 @@ pub(super) fn ensure_trusted_opened_config_file(
 pub(super) fn same_config_file(
     _path: &Path,
     path_metadata: &Metadata,
+    _path_identity: &ConfigPathIdentity,
     opened_file: &std::fs::File,
 ) -> bool {
     use std::os::unix::fs::MetadataExt as _;
@@ -48,26 +63,25 @@ pub(super) fn same_config_file(
 
 #[cfg(windows)]
 pub(super) fn same_config_file(
-    path: &Path,
+    _path: &Path,
     _path_metadata: &Metadata,
+    path_identity: &ConfigPathIdentity,
     opened_file: &std::fs::File,
 ) -> bool {
-    let Ok(path_handle) = same_file::Handle::from_path(path) else {
+    let Ok(opened_clone) = opened_file.try_clone() else {
         return false;
     };
-    let Ok(opened_file) = opened_file.try_clone() else {
+    let Ok(opened_identity) = same_file::Handle::from_file(opened_clone) else {
         return false;
     };
-    let Ok(opened_handle) = same_file::Handle::from_file(opened_file) else {
-        return false;
-    };
-    path_handle == opened_handle
+    path_identity.handle == opened_identity
 }
 
 #[cfg(not(any(unix, windows)))]
 pub(super) fn same_config_file(
     _path: &Path,
     path_metadata: &Metadata,
+    _path_identity: &ConfigPathIdentity,
     opened_file: &std::fs::File,
 ) -> bool {
     let Ok(opened_metadata) = opened_file.metadata() else {
@@ -113,7 +127,7 @@ impl ConfigFileState {
 
 #[cfg(test)]
 mod tests {
-    use super::same_config_file;
+    use super::{capture_config_path_identity, same_config_file};
 
     #[test]
     fn descriptor_identity_rejects_replaced_config_file() {
@@ -123,8 +137,14 @@ mod tests {
         std::fs::write(&second, "[server]\n").unwrap();
 
         let first_metadata = std::fs::symlink_metadata(&first).unwrap();
+        let first_identity = capture_config_path_identity(&first).unwrap();
         let second_file = std::fs::File::open(&second).unwrap();
 
-        assert!(!same_config_file(&first, &first_metadata, &second_file));
+        assert!(!same_config_file(
+            &first,
+            &first_metadata,
+            &first_identity,
+            &second_file
+        ));
     }
 }

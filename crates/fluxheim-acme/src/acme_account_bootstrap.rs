@@ -4,6 +4,8 @@ use rustls::pki_types::PrivatePkcs8KeyDer;
 use sanitization::SecretVec;
 use sanitization::ct::ConstantTimeEq as _;
 use sha2::{Digest as _, Sha256};
+use std::io::Write as _;
+use std::path::PathBuf;
 
 const ACCOUNT_BOOTSTRAP_MAGIC: &[u8] = b"FLUXHEIM-ACME-ACCOUNT-KEY-V1\0";
 const ACCOUNT_BOOTSTRAP_ISSUER_HASH_BYTES: usize = 32;

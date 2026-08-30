@@ -1,7 +1,7 @@
 use super::backup::{cleanup_backup, restore_backup};
 use super::fs_ops::{
-    CertificateDirectoryFd, ManagedCertificateOwner, rename_certificate_file, sync_directory,
-    write_new_file,
+    CertificateDirectoryFd, ManagedCertificateOwner, certificate_metadata_is_link,
+    rename_certificate_file, sync_directory, write_new_file,
 };
 use super::*;
 use serde::{Deserialize, Serialize};
@@ -153,7 +153,7 @@ fn require_regular_backup(path: &Path) -> Result<(), AcmeCertificateInstallError
         path: path.to_path_buf(),
         error,
     })?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
+    if certificate_metadata_is_link(&metadata) || !metadata.is_file() {
         return Err(AcmeCertificateInstallError::UnsafePath {
             path: path.to_path_buf(),
             message: "ACME transaction backup is not a regular file".to_owned(),
@@ -198,7 +198,7 @@ fn read_journal(
             });
         }
     };
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
+    if certificate_metadata_is_link(&metadata) || !metadata.is_file() {
         return Err(AcmeCertificateInstallError::UnsafePath {
             path: path.to_path_buf(),
             message: "ACME install journal is not a regular file".to_owned(),

@@ -51,7 +51,6 @@ fn read_metrics_secret_file(
         .into());
     }
 
-    #[cfg(unix)]
     if fluxheim_config::fs_trust::existing_parent_has_insecure_write_permissions(path).map_err(
         |error| {
             format!(
@@ -154,7 +153,18 @@ fn open_regular_metrics_secret_file(path: &Path) -> Result<fs::File, Box<dyn Err
     Ok(fd.into())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn open_regular_metrics_secret_file(path: &Path) -> Result<fs::File, Box<dyn Error + Send + Sync>> {
+    fluxheim_config::fs_trust::open_confidential_file(path).map_err(|error| {
+        format!(
+            "failed to securely open metrics token file {}: {error}",
+            path.display()
+        )
+        .into()
+    })
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn open_regular_metrics_secret_file(path: &Path) -> Result<fs::File, Box<dyn Error + Send + Sync>> {
     if fs::symlink_metadata(path)
         .map_err(|error| {

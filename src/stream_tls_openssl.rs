@@ -8,7 +8,7 @@ use openssl::x509::{X509, store::X509StoreBuilder};
 use sanitization::SecretVec;
 
 use crate::config::StreamRouteConfig;
-use crate::upstream_tls::read_upstream_tls_file;
+use crate::upstream_tls::{read_upstream_tls_file, read_upstream_tls_secret_file};
 
 const OPENSSL_STREAM_UPSTREAM_TLS12_CIPHERS: &str = concat!(
     "ECDHE-ECDSA-AES256-GCM-SHA384:",
@@ -73,7 +73,7 @@ pub(super) fn build_openssl_connector(route: &StreamRouteConfig) -> FluxResult<S
         let cert_contents = read_upstream_tls_file(cert_path)
             .map_err(|error| FluxError::io("read stream upstream TLS client certificate", error))?;
         let key_contents = SecretVec::from_vec(
-            read_upstream_tls_file(key_path)
+            read_upstream_tls_secret_file(key_path)
                 .map_err(|error| FluxError::io("read stream upstream TLS private key", error))?,
         );
         let certs = X509::stack_from_pem(&cert_contents).map_err(|error| {

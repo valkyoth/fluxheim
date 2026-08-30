@@ -1249,6 +1249,7 @@ dependencies = [
  "getrandom 0.4.3",
  "http",
  "rustix",
+ "same-file",
  "tempfile",
  "tokio",
  "windows-sys 0.61.2",
@@ -1386,6 +1387,7 @@ dependencies = [
  "sanitization",
  "tempfile",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1426,6 +1428,7 @@ dependencies = [
  "fluxheim-tls",
  "fluxheim-wasm",
  "fluxheim-web",
+ "fluxheim-windows-security",
  "fs2",
  "getrandom 0.4.3",
  "h2",
@@ -1527,6 +1530,14 @@ dependencies = [
  "fluxheim-common",
  "httpdate",
  "percent-encoding",
+]
+
+[[package]]
+name = "fluxheim-windows-security"
+version = "1.8.2"
+dependencies = [
+ "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

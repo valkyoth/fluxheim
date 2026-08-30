@@ -79,6 +79,9 @@ fn write_atomically_with_mode(
             let mut options = OpenOptions::new();
             options.write(true).create_new(true);
             let mut file = options.open(&temp_path).map_err(SnapshotError::Io)?;
+            #[cfg(windows)]
+            fluxheim_config::fs_trust::harden_confidential_file(&mut file)
+                .map_err(SnapshotError::Io)?;
             #[cfg(unix)]
             fs::set_permissions(&temp_path, fs::Permissions::from_mode(SNAPSHOT_FILE_MODE))
                 .map_err(SnapshotError::Io)?;
@@ -122,7 +125,7 @@ pub(crate) fn open_private_lock_file(path: &Path) -> Result<File, SnapshotError>
     let file = open_private_lock_file_in_directory(parent, path)?;
 
     #[cfg(not(unix))]
-    let file = {
+    let mut file = {
         require_plain_write_destination(path)?;
         if path_exists_without_following_symlinks(path)? {
             require_private_regular_file(path)?;
@@ -132,6 +135,8 @@ pub(crate) fn open_private_lock_file(path: &Path) -> Result<File, SnapshotError>
         options.read(true).write(true).create(true);
         options.open(path).map_err(SnapshotError::Io)?
     };
+    #[cfg(windows)]
+    fluxheim_config::fs_trust::harden_confidential_file(&mut file).map_err(SnapshotError::Io)?;
     let metadata = file.metadata().map_err(SnapshotError::Io)?;
     if !metadata.is_file() {
         return Err(SnapshotError::UnsafeSnapshotPath {
@@ -182,6 +187,8 @@ pub(crate) fn regular_snapshot_file_exists(path: &Path) -> Result<bool, Snapshot
         });
     }
     require_private_path_metadata(path, &metadata)?;
+    #[cfg(windows)]
+    require_private_regular_file(path)?;
     Ok(true)
 }
 
@@ -243,6 +250,18 @@ pub(crate) fn ensure_real_directory(path: &Path) -> Result<(), SnapshotError> {
         }
         Some(metadata) => {
             require_private_path_metadata(path, &metadata)?;
+            #[cfg(windows)]
+            if fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(
+                path,
+            )
+            .map_err(SnapshotError::Io)?
+            {
+                return Err(SnapshotError::UnsafeSnapshotPath {
+                    path: path.to_path_buf(),
+                });
+            }
+            #[cfg(windows)]
+            set_private_directory_mode(path)?;
             return Ok(());
         }
         None => {}
@@ -327,10 +346,23 @@ fn open_regular_file(path: &Path) -> Result<File, SnapshotError> {
     })?
     .into();
     #[cfg(not(unix))]
-    let file = OpenOptions::new()
-        .read(true)
-        .open(path)
-        .map_err(SnapshotError::Io)?;
+    let file = {
+        #[cfg(windows)]
+        {
+            fluxheim_config::fs_trust::open_confidential_file(path).map_err(|_| {
+                SnapshotError::UnsafeSnapshotPath {
+                    path: path.to_path_buf(),
+                }
+            })?
+        }
+        #[cfg(not(windows))]
+        {
+            OpenOptions::new()
+                .read(true)
+                .open(path)
+                .map_err(SnapshotError::Io)?
+        }
+    };
     let metadata = file.metadata().map_err(SnapshotError::Io)?;
     if !metadata.is_file() {
         return Err(SnapshotError::UnsafeSnapshotPath {
@@ -382,7 +414,9 @@ fn set_private_directory_mode(path: &Path) -> Result<(), SnapshotError> {
     #[cfg(unix)]
     fs::set_permissions(path, fs::Permissions::from_mode(SNAPSHOT_DIR_MODE))
         .map_err(SnapshotError::Io)?;
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    fluxheim_config::fs_trust::harden_private_directory(path).map_err(SnapshotError::Io)?;
+    #[cfg(not(any(unix, windows)))]
     let _ = path;
     Ok(())
 }
@@ -395,9 +429,7 @@ pub(crate) fn sync_directory(path: &Path) -> Result<(), SnapshotError> {
 
     #[cfg(windows)]
     {
-        // Windows FlushFileBuffers requires a writable file handle and does not
-        // provide the Unix directory-fsync contract through std::fs::File.
-        require_real_directory(path)
+        fluxheim_config::fs_trust::sync_directory(path).map_err(SnapshotError::Io)
     }
 
     #[cfg(not(any(unix, windows)))]

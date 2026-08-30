@@ -112,7 +112,7 @@ pub(super) fn native_disk_cache_read_limit(max_object_bytes: fluxheim_config::By
 }
 
 pub(super) fn read_native_disk_cache_file(path: &Path, max_bytes: u64) -> std::io::Result<Vec<u8>> {
-    let mut file = NativeSafeDiskCachePath::from_path(path.to_path_buf()).open_existing_file()?;
+    let file = NativeSafeDiskCachePath::from_path(path.to_path_buf()).open_existing_file()?;
     let len = file.metadata()?.len();
     if len > max_bytes {
         return Err(std::io::Error::new(
@@ -121,7 +121,14 @@ pub(super) fn read_native_disk_cache_file(path: &Path, max_bytes: u64) -> std::i
         ));
     }
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)?;
+    file.take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "native disk cache object changed while reading and exceeds read limit",
+        ));
+    }
     Ok(bytes)
 }
 

@@ -25,6 +25,20 @@ fn json_escape_escapes_control_characters() {
 }
 
 #[test]
+fn access_target_json_cannot_inject_fields_or_lines() {
+    let record = log_record_json(
+        "2026-08-30T12:00:00Z",
+        "INFO",
+        "fluxheim::access",
+        "request\n\"forged\":true",
+    );
+
+    assert_eq!(record.matches('\n').count(), 0);
+    assert!(record.contains("request\\n\\\"forged\\\":true"));
+    assert!(!record.contains("\"forged\":true"));
+}
+
+#[test]
 fn native_runtime_manifest_preview_reports_ready_service_graph() {
     let mut config = crate::config::Config::default();
     config.server.listen = vec!["127.0.0.1:18080".to_owned()];
@@ -238,6 +252,21 @@ fn opens_regular_log_file_for_append() -> Result<(), Box<dyn std::error::Error +
     let file = open_log_file(&path, true)?;
 
     assert!(file.metadata()?.is_file());
+    let _ = std::fs::remove_file(&path);
+    Ok(())
+}
+
+#[test]
+fn opens_existing_log_file_for_verified_truncation()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let path = unique_temp_path("runtime-log-truncate").with_extension("log");
+    let _ = std::fs::remove_file(&path);
+    std::fs::write(&path, b"previous log contents")?;
+
+    let file = open_log_file(&path, false)?;
+    assert_eq!(file.metadata()?.len(), 0);
+
+    drop(file);
     let _ = std::fs::remove_file(&path);
     Ok(())
 }

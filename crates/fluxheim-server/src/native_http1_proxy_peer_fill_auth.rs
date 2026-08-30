@@ -88,7 +88,12 @@ fn open_regular_native_peer_fill_shared_secret_file(path: &Path) -> std::io::Res
     Ok(fd.into())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn open_regular_native_peer_fill_shared_secret_file(path: &Path) -> std::io::Result<std::fs::File> {
+    fluxheim_config::fs_trust::open_confidential_file(path)
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn open_regular_native_peer_fill_shared_secret_file(path: &Path) -> std::io::Result<std::fs::File> {
     let metadata = std::fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {

@@ -3,8 +3,8 @@ use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
 use std::path::{Component, Path, PathBuf};
 
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, SECURITY_IDENTIFICATION,
-    SECURITY_SQOS_PRESENT,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
 };
 
 const NATIVE_DISK_CACHE_READ_OVERHEAD_BYTES: u64 = 1024 * 1024;
@@ -99,7 +99,7 @@ pub(super) fn native_disk_cache_read_limit(max_object_bytes: fluxheim_config::By
 }
 
 pub(super) fn read_native_disk_cache_file(path: &Path, max_bytes: u64) -> std::io::Result<Vec<u8>> {
-    let mut file = NativeSafeDiskCachePath::from_path(path.to_path_buf()).open_existing_file()?;
+    let file = NativeSafeDiskCachePath::from_path(path.to_path_buf()).open_existing_file()?;
     let len = file.metadata()?.len();
     if len > max_bytes {
         return Err(std::io::Error::new(
@@ -108,7 +108,14 @@ pub(super) fn read_native_disk_cache_file(path: &Path, max_bytes: u64) -> std::i
         ));
     }
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)?;
+    file.take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "native disk cache object changed while reading and exceeds read limit",
+        ));
+    }
     Ok(bytes)
 }
 
@@ -130,6 +137,13 @@ impl NativeSafeDiskCachePath {
 
     fn validate_parent(&self) -> std::io::Result<()> {
         let parent = self.parent()?;
+        if fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(
+            parent,
+        )? {
+            return Err(unsafe_path_error(
+                "native disk cache parent has an untrusted writable ACL",
+            ));
+        }
         if path_contains_reparse_point(parent)? {
             return Err(unsafe_path_error(
                 "native disk cache parent contains a reparse point",
@@ -161,6 +175,7 @@ impl NativeSafeDiskCachePath {
             .write(write)
             .create(create)
             .create_new(create_new)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
             .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
         let file = options.open(&self.path)?;

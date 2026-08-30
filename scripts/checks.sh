@@ -116,6 +116,7 @@ config_tester() {
 cargo fmt --all --check
 scripts/validate-release-metadata.sh
 scripts/validate-modularity-policy.sh check
+python3 scripts/validate_windows_security_audit.py
 scripts/validate-instant-acme-patch.sh
 scripts/validate-fips-image-evidence-plan.sh
 scripts/capture-runtime-baseline.sh check

@@ -870,6 +870,9 @@ fn read_native_cache_encryption_key_file(path: &Path) -> std::io::Result<SecretB
 }
 
 fn read_native_cache_encryption_secret_file(path: &Path) -> std::io::Result<Zeroizing<String>> {
+    #[cfg(windows)]
+    let mut file = fluxheim_config::fs_trust::open_confidential_file(path)?;
+    #[cfg(not(windows))]
     let mut file = NativeSafeDiskCachePath::from_path(path.to_path_buf()).open_existing_file()?;
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.len() > 4096 {
