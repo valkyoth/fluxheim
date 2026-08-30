@@ -241,4 +241,9 @@ foreach ($required in @(
     }
 }
 
+$manifest = Get-Content -LiteralPath (Join-Path $root 'Cargo.toml') -Raw
+if (-not $manifest.Contains('exclude = ["vendor/fluxheim-openssl-fips-support"]')) {
+    throw 'Windows workspace tests must exclude the Unix/OpenSSL FIPS support shim'
+}
+
 Write-Host 'Windows release scripts: ok'

@@ -30,6 +30,7 @@ members = [
     "crates/fluxheim-load-balancer",
     "crates/fluxheim-wasm",
 ]
+exclude = ["vendor/fluxheim-openssl-fips-support"]
 resolver = "3"
 
 [features]

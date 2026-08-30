@@ -20,7 +20,9 @@ same seven public profiles used by Linux and Apple Silicon macOS.
   from dedicated Windows builders. Planning-only output is not releasable.
 - Run the complete workspace test suite on the normal Windows x86_64 gate and
   deny Windows-target compiler warnings before using cloud builders for final
-  x86_64 and ARM64 release evidence.
+  x86_64 and ARM64 release evidence. The Unix/OpenSSL FIPS support shim is
+  excluded as an independent workspace package while remaining covered by the
+  dedicated Linux OpenSSL-FIPS profiles.
 
 These archives remain unsigned previews. Authenticode and installer work stays
 deferred until company-backed publisher credentials are available.
