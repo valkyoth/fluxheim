@@ -267,14 +267,28 @@ pub(super) fn ensure_safe_destination(path: &Path) -> Result<(), AcmeCertificate
 pub(crate) fn reject_existing_symlink_in_path(
     path: &Path,
 ) -> Result<(), AcmeCertificateInstallError> {
+    use std::path::Component;
+
     let mut current = PathBuf::new();
     for component in path.components() {
         current.push(component);
+        if matches!(
+            component,
+            Component::Prefix(_) | Component::RootDir | Component::CurDir
+        ) {
+            continue;
+        }
+        if matches!(component, Component::ParentDir) {
+            return Err(AcmeCertificateInstallError::UnsafePath {
+                path: current,
+                message: "path contains parent traversal".to_owned(),
+            });
+        }
         match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
+            Ok(metadata) if certificate_metadata_is_link(&metadata) => {
                 return Err(AcmeCertificateInstallError::UnsafePath {
                     path: current,
-                    message: "path contains a symlink".to_owned(),
+                    message: "path contains a link or reparse point".to_owned(),
                 });
             }
             Ok(_) => {}
@@ -289,6 +303,20 @@ pub(crate) fn reject_existing_symlink_in_path(
     }
 
     Ok(())
+}
+
+#[cfg(all(not(unix), windows))]
+fn certificate_metadata_is_link(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn certificate_metadata_is_link(metadata: &fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
 }
 
 pub(super) fn write_new_file(
@@ -461,14 +489,8 @@ pub(super) fn sync_directory(
         });
     }
 
-    let directory = fs::File::open(path).map_err(|error| AcmeCertificateInstallError::Io {
+    crate::sync_directory_io(path).map_err(|error| AcmeCertificateInstallError::Io {
         path: path.to_path_buf(),
         error,
-    })?;
-    directory
-        .sync_all()
-        .map_err(|error| AcmeCertificateInstallError::Io {
-            path: path.to_path_buf(),
-            error,
-        })
+    })
 }

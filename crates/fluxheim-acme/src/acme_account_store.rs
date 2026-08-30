@@ -405,14 +405,28 @@ pub(crate) fn ensure_safe_account_destination(path: &Path) -> Result<(), AcmeAcc
 
 #[cfg(not(unix))]
 fn reject_existing_symlink_in_account_path(path: &Path) -> Result<(), AcmeAccountStoreError> {
+    use std::path::Component;
+
     let mut current = PathBuf::new();
     for component in path.components() {
         current.push(component);
+        if matches!(
+            component,
+            Component::Prefix(_) | Component::RootDir | Component::CurDir
+        ) {
+            continue;
+        }
+        if matches!(component, Component::ParentDir) {
+            return Err(AcmeAccountStoreError::UnsafePath {
+                path: current,
+                message: "path contains parent traversal".to_owned(),
+            });
+        }
         match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
+            Ok(metadata) if account_metadata_is_link(&metadata) => {
                 return Err(AcmeAccountStoreError::UnsafePath {
                     path: current,
-                    message: "path contains a symlink".to_owned(),
+                    message: "path contains a link or reparse point".to_owned(),
                 });
             }
             Ok(_) => {}
@@ -422,6 +436,20 @@ fn reject_existing_symlink_in_account_path(path: &Path) -> Result<(), AcmeAccoun
     }
 
     Ok(())
+}
+
+#[cfg(all(not(unix), windows))]
+fn account_metadata_is_link(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn account_metadata_is_link(metadata: &fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
 }
 
 fn write_account_credentials_file(
@@ -446,10 +474,7 @@ fn write_account_credentials_file(
 }
 
 fn sync_account_directory(path: &Path) -> Result<(), AcmeAccountStoreError> {
-    fs::File::open(path)
-        .map_err(|error| account_store_io_error(path, error))?
-        .sync_all()
-        .map_err(|error| account_store_io_error(path, error))
+    crate::sync_directory_io(path).map_err(|error| account_store_io_error(path, error))
 }
 
 #[cfg(target_os = "linux")]

@@ -1235,6 +1235,7 @@ dependencies = [
  "sha2 0.11.0",
  "tokio",
  "toml",
+ "windows-sys 0.61.2",
  "x509-parser",
 ]
 

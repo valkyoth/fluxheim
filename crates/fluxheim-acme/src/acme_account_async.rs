@@ -110,10 +110,7 @@ fn try_remove_account_credentials(
     ensure_safe_account_destination(&credentials_path.path)?;
     let removed = match fs::remove_file(&credentials_path.path) {
         Ok(()) => {
-            let directory_file = fs::File::open(directory)
-                .map_err(|error| account_async_store_io_error(directory, error))?;
-            directory_file
-                .sync_all()
+            crate::sync_directory_io(directory)
                 .map_err(|error| account_async_store_io_error(directory, error))?;
             true
         }
