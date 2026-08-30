@@ -323,8 +323,10 @@ fn open_ca_bundle_no_follow(path: &std::path::Path) -> std::io::Result<std::fs::
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use super::BoundedAcmeHttpClient;
     use super::{
-        BoundedAcmeHttpClient, MAX_ACME_RESPONSE_BYTES, collect_capped_body, valid_acme_endpoint,
+        MAX_ACME_RESPONSE_BYTES, collect_capped_body, valid_acme_endpoint,
         validate_acme_directory_response,
     };
     use bytes::Bytes;

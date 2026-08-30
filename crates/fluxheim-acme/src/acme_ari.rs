@@ -301,13 +301,31 @@ mod tests {
 
     #[test]
     fn cache_refresh_deadline_overflow_expires_immediately() {
-        let near_limit = UNIX_EPOCH
-            .checked_add(Duration::from_secs(i64::MAX as u64))
-            .unwrap();
+        let near_limit = latest_whole_second_after_unix_epoch();
+        assert!(near_limit.checked_add(Duration::from_secs(1)).is_none());
         assert_eq!(
             cache_refresh_after(near_limit, Duration::from_secs(86_400)),
             near_limit
         );
+    }
+
+    fn latest_whole_second_after_unix_epoch() -> SystemTime {
+        let mut valid_seconds = 0_u64;
+        let mut invalid_seconds = u64::MAX;
+        while valid_seconds + 1 < invalid_seconds {
+            let candidate = valid_seconds + (invalid_seconds - valid_seconds).div_ceil(2);
+            if UNIX_EPOCH
+                .checked_add(Duration::from_secs(candidate))
+                .is_some()
+            {
+                valid_seconds = candidate;
+            } else {
+                invalid_seconds = candidate;
+            }
+        }
+        UNIX_EPOCH
+            .checked_add(Duration::from_secs(valid_seconds))
+            .expect("the discovered SystemTime boundary must remain representable")
     }
 
     #[test]
