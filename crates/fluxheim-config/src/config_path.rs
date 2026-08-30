@@ -196,9 +196,20 @@ pub fn path_inspection_failed(
 
 pub fn path_existing_prefix_contains_symlink(path: &Path) -> std::io::Result<bool> {
     let mut current = PathBuf::new();
+    let mut components = path.components().peekable();
 
-    for component in path.components() {
+    while let Some(component) = components.next() {
         current.push(component);
+        #[cfg(windows)]
+        if matches!(component, Component::Prefix(_)) {
+            if !matches!(components.peek(), Some(Component::RootDir)) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "drive-relative Windows paths are not allowed",
+                ));
+            }
+            continue;
+        }
         match std::fs::symlink_metadata(&current) {
             Ok(metadata) if metadata_is_link_like(&metadata) => return Ok(true),
             Ok(_) => {}
@@ -222,4 +233,24 @@ fn metadata_is_link_like(metadata: &std::fs::Metadata) -> bool {
     metadata.file_attributes()
         & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
         != 0
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::path_existing_prefix_contains_symlink;
+
+    #[test]
+    fn canonical_extended_path_is_inspectable() {
+        let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
+
+        path_existing_prefix_contains_symlink(&executable).unwrap();
+    }
+
+    #[test]
+    fn drive_relative_path_is_rejected() {
+        let error = path_existing_prefix_contains_symlink(std::path::Path::new("C:config.toml"))
+            .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
 }
