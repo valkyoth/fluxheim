@@ -48,8 +48,9 @@ pub(crate) fn prepare_storage_bin_data_dir(
             data_dir.display()
         )));
     }
+    let canonical_root = root.canonicalize()?;
     let canonical = data_dir.canonicalize()?;
-    if !canonical.starts_with(root) {
+    if !canonical.starts_with(&canonical_root) {
         return Err(unsafe_path_error(format!(
             "storage-bin data directory escaped root: {}",
             canonical.display()
@@ -327,6 +328,19 @@ mod tests {
 
         assert_eq!(prepared, data.canonicalize().unwrap());
         assert!(!path_contains_reparse_point(&prepared).unwrap());
+    }
+
+    #[test]
+    fn storage_bin_data_directory_must_remain_below_root() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("cache");
+        let outside = temporary.path().join("outside");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+
+        let error = prepare_storage_bin_data_dir(&root, &outside).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
     }
 
     #[test]
