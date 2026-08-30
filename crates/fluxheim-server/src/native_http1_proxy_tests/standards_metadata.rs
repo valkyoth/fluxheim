@@ -277,11 +277,9 @@ async fn native_proxy_emits_rfc_9211_cache_status_from_real_outcomes() {
 
 #[tokio::test]
 async fn native_proxy_emits_low_cardinality_rfc_9209_failure() {
-    let unavailable = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .unwrap()
-        .local_addr()
-        .unwrap();
+    let unavailable_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let unavailable = unavailable_listener.local_addr().unwrap();
+    drop(unavailable_listener);
     let proxy = NativeHttp1Proxy::new(
         NativeHttp1Upstream::new(unavailable.to_string())
             .with_connect_timeout(Duration::from_millis(100)),
@@ -289,7 +287,10 @@ async fn native_proxy_emits_low_cardinality_rfc_9209_failure() {
     .with_header_policy(&metadata_headers());
     let response = downstream_get(proxy_listener_for(proxy).await, "/failure").await;
 
-    assert!(response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"));
+    assert!(
+        response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"),
+        "unexpected proxy failure response: {response:?}"
+    );
     assert_eq!(
         response_header(&response, "proxy-status"),
         Some("edge-gateway; error=connection_refused")

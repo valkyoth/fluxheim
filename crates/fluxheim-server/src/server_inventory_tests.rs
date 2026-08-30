@@ -165,6 +165,7 @@ fn server_plan_from_config_collects_listener_inventory() {
     assert!(plan.native_metrics_http_ready());
 }
 
+#[cfg(unix)]
 #[test]
 fn server_plan_collects_admin_ops_socket_plan() {
     let mut config = Config::default();
@@ -183,6 +184,24 @@ fn server_plan_collects_admin_ops_socket_plan() {
         std::path::Path::new("/run/fluxheim/admin.sock")
     );
     assert_eq!(ops_socket.mode_bits(), 0o660);
+}
+
+#[cfg(windows)]
+#[test]
+fn server_plan_marks_admin_ops_socket_unavailable() {
+    let mut config = Config::default();
+    config.admin.enabled = true;
+    config.admin.ops_socket.enabled = true;
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert!(plan.has_service(ServiceKind::AdminOpsSocket));
+    assert!(!plan.native_admin_ops_socket_ready());
+    assert!(matches!(
+        plan.native_runtime_manifest(),
+        Err(NativeRuntimeManifestError::Blocked { blockers })
+            if blockers == vec![NativeRuntimeCutoverBlocker::AdminOpsSocket]
+    ));
 }
 
 #[test]

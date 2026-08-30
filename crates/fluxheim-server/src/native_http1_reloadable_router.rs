@@ -138,8 +138,9 @@ mod tests {
     use super::*;
 
     fn redirect_config(target: &str) -> Config {
-        let process_root = tempfile::tempdir_in("target").unwrap();
-        let process_root_path = std::fs::canonicalize(process_root.path()).unwrap();
+        let process_root = fluxheim_common::test_support::unique_temp_path("reloadable-router");
+        std::fs::create_dir_all(&process_root).unwrap();
+        let process_root_path = std::fs::canonicalize(process_root).unwrap();
         Config::load_snapshot_bytes(
             format!(
                 r#"

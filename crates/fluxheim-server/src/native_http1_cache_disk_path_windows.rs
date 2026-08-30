@@ -3,8 +3,8 @@ use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
 use std::path::{Component, Path, PathBuf};
 
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, SECURITY_IDENTIFICATION,
+    SECURITY_SQOS_PRESENT,
 };
 
 const NATIVE_DISK_CACHE_READ_OVERHEAD_BYTES: u64 = 1024 * 1024;
@@ -211,25 +211,23 @@ impl NativeSafeDiskCachePath {
         std::fs::rename(&source.path, &self.path)
     }
 
+    pub(super) fn persist_tempfile(
+        &self,
+        temporary: tempfile::NamedTempFile,
+    ) -> std::io::Result<()> {
+        self.validate_parent()?;
+        reject_existing_reparse_point_if_present(&self.path)?;
+        let file = temporary.persist(&self.path).map_err(|error| error.error)?;
+        file.sync_all()
+    }
+
     pub(super) fn sync_parent_dir(&self) -> std::io::Result<()> {
-        let parent = self.parent()?;
-        if path_contains_reparse_point(parent)? {
-            return Err(unsafe_path_error(
-                "native disk cache parent contains a reparse point",
-            ));
+        self.validate_parent()?;
+        match self.open(true, true, false, false) {
+            Ok(file) => file.sync_all(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
         }
-        let directory = std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-            .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION)
-            .open(parent)?;
-        let metadata = directory.metadata()?;
-        if metadata_is_reparse_point(&metadata) || !metadata.is_dir() {
-            return Err(unsafe_path_error(
-                "native disk cache parent is not a real directory",
-            ));
-        }
-        directory.sync_all()
     }
 
     pub(super) fn remove_file(&self) -> std::io::Result<()> {
@@ -240,6 +238,12 @@ impl NativeSafeDiskCachePath {
 }
 
 fn path_contains_reparse_point(path: &Path) -> std::io::Result<bool> {
+    if path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Ok(true);
+    }
     let mut current = PathBuf::new();
     for component in path.components() {
         current.push(component.as_os_str());
@@ -308,7 +312,11 @@ fn unsafe_path_error(message: &'static str) -> std::io::Error {
 
 #[cfg(test)]
 mod tests {
-    use super::{path_contains_reparse_point, prepare_native_disk_cache_root};
+    use std::io::Write as _;
+
+    use super::{
+        NativeSafeDiskCachePath, path_contains_reparse_point, prepare_native_disk_cache_root,
+    };
 
     #[test]
     fn absolute_native_cache_root_skips_bare_windows_prefix() {
@@ -327,5 +335,21 @@ mod tests {
         let path = temporary.path().join("cache/../outside");
 
         assert!(path_contains_reparse_point(&path).unwrap());
+    }
+
+    #[test]
+    fn persisted_tempfile_replaces_existing_regular_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("state");
+        std::fs::write(&destination, b"old").unwrap();
+        let mut temporary = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
+        temporary.write_all(b"new").unwrap();
+        temporary.as_file().sync_all().unwrap();
+
+        NativeSafeDiskCachePath::from_path(destination.clone())
+            .persist_tempfile(temporary)
+            .unwrap();
+
+        assert_eq!(std::fs::read(destination).unwrap(), b"new");
     }
 }

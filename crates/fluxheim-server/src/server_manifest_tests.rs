@@ -34,7 +34,10 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
     config.server.listen = vec!["127.0.0.1:8080".to_owned()];
     config.admin.enabled = true;
     config.admin.listen = "127.0.0.1:9090".to_owned();
-    config.admin.ops_socket.enabled = true;
+    #[cfg(unix)]
+    {
+        config.admin.ops_socket.enabled = true;
+    }
     config.metrics.enabled = true;
     config.metrics.listen = "127.0.0.1:9091".to_owned();
     config.metrics.token_file = Some("/run/secrets/fluxheim-metrics-token".into());
@@ -79,7 +82,8 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
         plan.native_runtime_target_adapter(),
         RuntimeAdapterKind::NativeRuntime
     );
-    assert_eq!(manifest.services().len(), 6);
+    let expected_service_count = if cfg!(unix) { 6 } else { 5 };
+    assert_eq!(manifest.services().len(), expected_service_count);
     assert_eq!(launch_plan.manifest(), &manifest);
     assert_eq!(launch_plan.downstream_http1(), *plan.downstream_http1());
     assert_eq!(launch_plan.downstream_http2(), *plan.downstream_http2());
@@ -126,13 +130,16 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
             .collect::<Vec<_>>(),
         vec![ListenerProtocol::AdminHttp]
     );
-    assert!(
-        manifest
-            .service(ServiceKind::AdminOpsSocket)
-            .expect("ops service")
-            .listeners()
-            .is_empty()
-    );
+    #[cfg(unix)]
+    {
+        assert!(
+            manifest
+                .service(ServiceKind::AdminOpsSocket)
+                .expect("ops service")
+                .listeners()
+                .is_empty()
+        );
+    }
     assert_eq!(
         manifest
             .service(ServiceKind::MetricsHttp)
@@ -173,11 +180,9 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
         "native-runtime-manifest-service\tAdminControlPlane\tFluxheim Admin Control Plane\tAdminHttp@127.0.0.1:9090\n"
     ));
     assert!(tsv.contains("native-runtime-manifest-background-task\tkind\tname\tcritical\n"));
-    assert!(
-        launch_plan
-            .to_tsv()
-            .contains("native-runtime-launch-plan\tready\t6\t5\t0\toff\n")
-    );
+    assert!(launch_plan.to_tsv().contains(&format!(
+        "native-runtime-launch-plan\tready\t{expected_service_count}\t5\t0\toff\n"
+    )));
     assert!(
         launch_plan
             .to_tsv()
