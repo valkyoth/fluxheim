@@ -6,7 +6,7 @@ use std::fs;
 
 use std::io::Read;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use zeroize::Zeroizing;
 
@@ -119,18 +119,7 @@ fn secret_parent_path_contains_symlink(path: &Path) -> std::io::Result<bool> {
         return Ok(false);
     }
 
-    let mut current = PathBuf::new();
-    for component in parent.components() {
-        current.push(component);
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error),
-        }
-    }
-
-    Ok(false)
+    fluxheim_config::config_path::path_existing_prefix_contains_symlink(parent)
 }
 
 #[cfg(unix)]

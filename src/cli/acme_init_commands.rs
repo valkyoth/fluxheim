@@ -335,10 +335,33 @@ fn existing_prefix_contains_symlink(
     path: &Path,
     allow_missing_leaf: bool,
 ) -> Result<bool, Box<dyn Error + Send + Sync>> {
+    #[cfg(windows)]
+    {
+        use std::path::Component;
+
+        let mut components = path.components();
+        if matches!(components.next(), Some(Component::Prefix(_)))
+            && !matches!(components.next(), Some(Component::RootDir))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "drive-relative Windows paths are not allowed",
+            )
+            .into());
+        }
+    }
+
     let mut current = PathBuf::new();
     let component_count = path.components().count();
     for (index, component) in path.components().enumerate() {
         current.push(component);
+        #[cfg(windows)]
+        if matches!(
+            component,
+            std::path::Component::Prefix(_) | std::path::Component::RootDir
+        ) {
+            continue;
+        }
         match std::fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
             Ok(_) => {}

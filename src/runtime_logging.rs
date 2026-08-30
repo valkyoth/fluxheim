@@ -120,20 +120,11 @@ fn open_log_file_windows(path: &Path, append: bool) -> std::io::Result<File> {
 }
 
 fn reject_log_path_symlink_prefix(path: &Path) -> std::io::Result<()> {
-    let mut current = std::path::PathBuf::new();
-    for component in path.components() {
-        current.push(component);
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata_is_link_like(&metadata) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!("log path contains symlink component: {}", current.display()),
-                ));
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error),
-        }
+    if fluxheim_config::config_path::path_existing_prefix_contains_symlink(path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("log path contains symlink component: {}", path.display()),
+        ));
     }
     Ok(())
 }
@@ -141,20 +132,6 @@ fn reject_log_path_symlink_prefix(path: &Path) -> std::io::Result<()> {
 #[cfg(unix)]
 fn rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {
     std::io::Error::from_raw_os_error(error.raw_os_error())
-}
-
-#[cfg(unix)]
-fn metadata_is_link_like(metadata: &std::fs::Metadata) -> bool {
-    metadata.file_type().is_symlink()
-}
-
-#[cfg(windows)]
-fn metadata_is_link_like(metadata: &std::fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt as _;
-
-    metadata.file_attributes()
-        & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
-        != 0
 }
 
 pub(super) fn write_text_log_record(

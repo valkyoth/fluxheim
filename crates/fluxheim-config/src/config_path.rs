@@ -195,19 +195,24 @@ pub fn path_inspection_failed(
 }
 
 pub fn path_existing_prefix_contains_symlink(path: &Path) -> std::io::Result<bool> {
-    let mut current = PathBuf::new();
-    let mut components = path.components().peekable();
+    #[cfg(windows)]
+    {
+        let mut components = path.components();
+        if matches!(components.next(), Some(Component::Prefix(_)))
+            && !matches!(components.next(), Some(Component::RootDir))
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "drive-relative Windows paths are not allowed",
+            ));
+        }
+    }
 
-    while let Some(component) = components.next() {
+    let mut current = PathBuf::new();
+    for component in path.components() {
         current.push(component);
         #[cfg(windows)]
-        if matches!(component, Component::Prefix(_)) {
-            if !matches!(components.peek(), Some(Component::RootDir)) {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "drive-relative Windows paths are not allowed",
-                ));
-            }
+        if matches!(component, Component::Prefix(_) | Component::RootDir) {
             continue;
         }
         match std::fs::symlink_metadata(&current) {

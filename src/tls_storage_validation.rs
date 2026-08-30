@@ -1,6 +1,6 @@
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::config::{AcmeConfig, Config, StaticCertificateConfig};
 
@@ -215,32 +215,7 @@ fn validate_acme_eab_secret_file(
 }
 
 fn path_contains_symlink(path: &Path) -> io::Result<bool> {
-    let mut current = PathBuf::new();
-    for component in path.components() {
-        current.push(component);
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata_is_link_like(&metadata) => return Ok(true),
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error),
-        }
-    }
-
-    Ok(false)
-}
-
-#[cfg(unix)]
-fn metadata_is_link_like(metadata: &fs::Metadata) -> bool {
-    metadata.file_type().is_symlink()
-}
-
-#[cfg(windows)]
-fn metadata_is_link_like(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt as _;
-
-    metadata.file_attributes()
-        & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
-        != 0
+    fluxheim_config::config_path::path_existing_prefix_contains_symlink(path)
 }
 
 fn push_certificate_world_writable_parent_issue(

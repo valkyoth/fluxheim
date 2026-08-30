@@ -354,18 +354,7 @@ fn parse_proxy_upstreams_file_contents(contents: &str) -> std::io::Result<Vec<St
 }
 
 fn existing_path_contains_symlink(path: &Path) -> std::io::Result<bool> {
-    let mut current = PathBuf::new();
-    for component in path.components() {
-        current.push(component);
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error),
-        }
-    }
-
-    Ok(false)
+    crate::config_path::path_existing_prefix_contains_symlink(path)
 }
 
 fn is_visible_toml_file(path: &Path) -> bool {
