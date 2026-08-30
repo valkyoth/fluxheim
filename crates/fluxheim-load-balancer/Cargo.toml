@@ -35,6 +35,7 @@ rustls-native-certs = { version = "0.8.4", optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sanitization = { version = "2.0.3", features = ["alloc"] }
+tempfile = "3.27.0"
 tokio = { version = "1.53.1", default-features = false, features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
 tokio-openssl = { version = "0.6.5", optional = true }
 tokio-rustls = { version = "0.26.4", optional = true, default-features = false, features = ["logging", "tls12"] }

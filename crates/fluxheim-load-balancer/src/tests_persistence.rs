@@ -250,7 +250,12 @@ fn source_ip_persistence_reuses_selected_backend() {
     }
     #[cfg(feature = "privacy-mode")]
     {
-        assert!(stats.backends.iter().all(|backend| backend.address.is_none()));
+        assert!(
+            stats
+                .backends
+                .iter()
+                .all(|backend| backend.address.is_none())
+        );
         assert!(
             stats
                 .backends

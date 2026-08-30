@@ -1,7 +1,6 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::LoadBalancerRuntimeStateSnapshot;
 
@@ -62,44 +61,19 @@ fn write_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
     require_real_directory(parent)?;
     require_plain_write_destination(path)?;
 
-    let temp_path = parent.join(format!(
-        ".{}.tmp-{}-{}",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("load-balancer-state"),
-        std::process::id(),
-        unique_sequence()
-    ));
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".load-balancer-state.tmp-")
+        .tempfile_in(parent)?;
+    #[cfg(unix)]
+    temporary
+        .as_file()
+        .set_permissions(fs::Permissions::from_mode(RUNTIME_STATE_FILE_MODE))?;
+    temporary.write_all(contents)?;
+    temporary.write_all(b"\n")?;
+    temporary.as_file().sync_all()?;
 
-    let result = (|| {
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            options
-                .custom_flags(O_NOFOLLOW)
-                .mode(RUNTIME_STATE_FILE_MODE);
-        }
-        let mut file = options.open(&temp_path)?;
-        #[cfg(unix)]
-        file.set_permissions(fs::Permissions::from_mode(RUNTIME_STATE_FILE_MODE))?;
-        file.write_all(contents)?;
-        file.write_all(b"\n")?;
-        file.sync_all()?;
-        drop(file);
-
-        fs::rename(&temp_path, path)?;
-        sync_after_rename(path, parent)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temp_path);
-    }
-    result
-}
-
-fn unique_sequence() -> u64 {
-    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-    SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    let persisted = temporary.persist(path).map_err(|error| error.error)?;
+    sync_after_persist(&persisted, parent)
 }
 
 fn read_regular_file_to_string_with_limit(path: &Path, max_bytes: u64) -> io::Result<String> {
@@ -172,15 +146,15 @@ fn require_plain_write_destination(path: &Path) -> io::Result<()> {
 }
 
 #[cfg(not(windows))]
-fn sync_after_rename(_path: &Path, parent: &Path) -> io::Result<()> {
+fn sync_after_persist(_file: &File, parent: &Path) -> io::Result<()> {
     let directory = File::open(parent)?;
     directory.sync_all()
 }
 
 #[cfg(windows)]
-fn sync_after_rename(path: &Path, _parent: &Path) -> io::Result<()> {
-    // Windows denies ordinary directory opens; flush the renamed file after replacement.
-    File::open(path)?.sync_all()
+fn sync_after_persist(file: &File, _parent: &Path) -> io::Result<()> {
+    // Windows denies ordinary directory opens; flush the persisted writable handle instead.
+    file.sync_all()
 }
 
 fn path_exists_without_following_symlinks(path: &Path) -> io::Result<bool> {
