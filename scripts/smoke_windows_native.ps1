@@ -126,14 +126,14 @@ function New-WindowsSmokeUpstreamCertificate {
             [Security.Cryptography.HashAlgorithmName]::SHA256,
             [Security.Cryptography.RSASignaturePadding]::Pkcs1
         )
-        $caRequest.CertificateExtensions.Add(
+        [void]$caRequest.CertificateExtensions.Add(
             [Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new(
                 $true, $false, 0, $true
             )
         )
         $caUsage = [Security.Cryptography.X509Certificates.X509KeyUsageFlags]::KeyCertSign `
             -bor [Security.Cryptography.X509Certificates.X509KeyUsageFlags]::CrlSign
-        $caRequest.CertificateExtensions.Add(
+        [void]$caRequest.CertificateExtensions.Add(
             [Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
                 $caUsage, $true
             )
@@ -155,29 +155,29 @@ function New-WindowsSmokeUpstreamCertificate {
             [Security.Cryptography.HashAlgorithmName]::SHA256,
             [Security.Cryptography.RSASignaturePadding]::Pkcs1
         )
-        $originRequest.CertificateExtensions.Add(
+        [void]$originRequest.CertificateExtensions.Add(
             [Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new(
                 $false, $false, 0, $true
             )
         )
         $originUsage = [Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature `
             -bor [Security.Cryptography.X509Certificates.X509KeyUsageFlags]::KeyEncipherment
-        $originRequest.CertificateExtensions.Add(
+        [void]$originRequest.CertificateExtensions.Add(
             [Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
                 $originUsage, $true
             )
         )
         $serverAuthentication = [Security.Cryptography.OidCollection]::new()
         [void]$serverAuthentication.Add([Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.1'))
-        $originRequest.CertificateExtensions.Add(
+        [void]$originRequest.CertificateExtensions.Add(
             [Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new(
                 $serverAuthentication, $true
             )
         )
         $originSan =
             [Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder]::new()
-        $originSan.AddDnsName('origin.windows.test')
-        $originRequest.CertificateExtensions.Add($originSan.Build())
+        [void]$originSan.AddDnsName('origin.windows.test')
+        [void]$originRequest.CertificateExtensions.Add($originSan.Build())
 
         $serial = [byte[]]::new(16)
         [Security.Cryptography.RandomNumberGenerator]::Fill($serial)
