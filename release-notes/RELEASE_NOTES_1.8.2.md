@@ -18,6 +18,9 @@ same seven public profiles used by Linux and Apple Silicon macOS.
   a native Windows TCP FastCGI responder regression proves the supported path.
 - Produce exact-tag, architecture, checksum, test, and reproducibility evidence
   from dedicated Windows builders. Planning-only output is not releasable.
+- Run the complete workspace test suite on the normal Windows x86_64 gate and
+  deny Windows-target compiler warnings before using cloud builders for final
+  x86_64 and ARM64 release evidence.
 
 These archives remain unsigned previews. Authenticode and installer work stays
 deferred until company-backed publisher credentials are available.

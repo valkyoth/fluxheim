@@ -289,6 +289,8 @@ jobs:
     name: Windows x86_64 portable compile gate
     runs-on: windows-2025
     timeout-minutes: 90
+    env:
+      RUSTFLAGS: -Dwarnings
     defaults:
       run:
         shell: bash
@@ -318,6 +320,9 @@ jobs:
           cargo check --locked --no-default-features --features profile-load-balancer-edge,acme-client --bin fluxheim --bin fluxheim-acme
           cargo check --locked --no-default-features --features profile-web-server,php-fpm,acme-client --bin fluxheim --bin fluxheim-acme
           cargo check --locked --no-default-features --features profile-development --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
+
+      - name: Run Windows workspace tests
+        run: cargo test --workspace --locked
 
       - name: Run Windows native runtime parity smoke
         shell: pwsh

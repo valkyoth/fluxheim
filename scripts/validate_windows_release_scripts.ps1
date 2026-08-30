@@ -229,4 +229,16 @@ if ($release.Contains('checkout main') -or $release.Contains('|| git checkout'))
     throw 'Windows release runner must not fall back from the requested tag'
 }
 
+$ci = Get-Content -LiteralPath (Join-Path $root '.github/workflows/ci.yml') -Raw
+foreach ($required in @(
+    'name: Windows x86_64 portable compile gate',
+    'RUSTFLAGS: -Dwarnings',
+    'name: Run Windows workspace tests',
+    'run: cargo test --workspace --locked'
+)) {
+    if (-not $ci.Contains($required)) {
+        throw "Windows CI is missing required native test policy: $required"
+    }
+}
+
 Write-Host 'Windows release scripts: ok'
