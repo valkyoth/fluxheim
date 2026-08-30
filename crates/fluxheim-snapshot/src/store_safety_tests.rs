@@ -7,11 +7,12 @@ mod tests {
     use super::{SnapshotError, SnapshotStore};
     #[cfg(unix)]
     use super::{open_private_lock_file, write_atomically};
+    use fluxheim_common::test_support::unique_temp_path;
     #[cfg(unix)]
     use fluxheim_common::test_support::{
-        safe_child_path, unique_group_writable_child, unique_world_writable_child,
+        safe_child_path, safe_relative_path, unique_group_writable_child,
+        unique_world_writable_child,
     };
-    use fluxheim_common::test_support::{safe_relative_path, unique_temp_path};
     use fluxheim_config::Config;
 
     #[test]
@@ -260,6 +261,7 @@ mod tests {
             &self.path
         }
 
+        #[cfg(unix)]
         fn child(&self, name: &str) -> std::path::PathBuf {
             safe_relative_path(&self.path, name)
         }
