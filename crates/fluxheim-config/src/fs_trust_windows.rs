@@ -7,7 +7,7 @@ use windows_permissions::constants::{
 use windows_permissions::{LocalBox, SecurityDescriptor, Sid};
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
+    FILE_READ_ATTRIBUTES, READ_CONTROL, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
 };
 
 const MAX_PERMISSION_INSPECTION_DEPTH: usize = 256;
@@ -94,7 +94,7 @@ fn existing_path_has_insecure_write_permissions(path: &Path) -> std::io::Result<
 fn open_path_for_trust_inspection(path: &Path) -> std::io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options
-        .read(true)
+        .access_mode(READ_CONTROL | FILE_READ_ATTRIBUTES)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
         .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
     options.open(path)
@@ -246,6 +246,13 @@ mod tests {
 
         assert!(!existing_path_has_insecure_write_permissions(file.path()).unwrap());
         assert!(!opened_file_has_insecure_owner_or_write_permissions(file.as_file()).unwrap());
+    }
+
+    #[test]
+    fn canonical_executable_path_is_inspectable() {
+        let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
+
+        existing_path_has_insecure_write_permissions(&executable).unwrap();
     }
 
     #[test]
