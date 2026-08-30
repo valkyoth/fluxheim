@@ -173,6 +173,21 @@ foreach ($required in @(
     }
 }
 
+$archiveSmoke = Get-Content -LiteralPath `
+    (Join-Path $root 'scripts/smoke_windows_archive_profiles.ps1') -Raw
+foreach ($required in @(
+    "@('full', 'wasm', 'cache', 'proxy', 'load-balancer', 'php', 'config-tester')",
+    '[Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()',
+    "@('fluxheim.exe', 'fluxheim-acme.exe')",
+    "@('fluxheim-config-tester.exe')",
+    '& $binaryPath --version',
+    'all seven Windows profile archive executables: ok'
+)) {
+    if (-not $archiveSmoke.Contains($required)) {
+        throw "Windows all-profile archive smoke is missing required behavior: $required"
+    }
+}
+
 $buildScript = Get-Content -LiteralPath (Join-Path $root 'build.rs') -Raw
 foreach ($required in @(
     'CARGO_CFG_TARGET_OS',
@@ -216,10 +231,15 @@ foreach ($required in @(
     'tag -v',
     'cargo.exe test --workspace --locked',
     'smoke_windows_native.ps1',
+    'smoke_windows_archive_profiles.ps1',
     'smoke_windows_wasm_archive.ps1',
+    'Get-CimInstance -ClassName Win32_OperatingSystem',
+    'windows_os_caption=',
+    'windows_os_version=',
+    'windows_os_build=',
     'archive_count=7',
     'reproducible=true',
-    'test_scope=workspace-native-live-and-archived-wasm-smoke'
+    'test_scope=workspace-native-all-archives-and-wasm-smoke'
 )) {
     if (-not $release.Contains($required)) {
         throw "Windows release runner is missing required evidence: $required"
@@ -234,7 +254,10 @@ foreach ($required in @(
     'name: Windows x86_64 portable compile gate',
     'RUSTFLAGS: -Dwarnings',
     'name: Run Windows workspace tests',
-    'run: cargo test --workspace --locked'
+    'run: cargo test --workspace --locked',
+    'name: Build and test Windows portable archives',
+    'scripts/build_release_assets.ps1 -Version $version -Architecture x86_64',
+    'scripts/smoke_windows_archive_profiles.ps1 -Version $version -Architecture x86_64'
 )) {
     if (-not $ci.Contains($required)) {
         throw "Windows CI is missing required native test policy: $required"

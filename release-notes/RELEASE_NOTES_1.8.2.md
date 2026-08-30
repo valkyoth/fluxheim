@@ -17,7 +17,9 @@ same seven public profiles used by Linux and Apple Silicon macOS.
   rejected during Windows configuration validation and runtime construction;
   a native Windows TCP FastCGI responder regression proves the supported path.
 - Produce exact-tag, architecture, checksum, test, and reproducibility evidence
-  from dedicated Windows builders. Planning-only output is not releasable.
+  from dedicated Windows builders. Evidence records the native Windows edition
+  and build, and every executable in all seven ZIP profiles must launch and
+  report the expected version. Planning-only output is not releasable.
 - Run the complete workspace test suite on the normal Windows x86_64 gate and
   deny Windows-target compiler warnings before using cloud builders for final
   x86_64 and ARM64 release evidence. The Unix/OpenSSL FIPS support shim is

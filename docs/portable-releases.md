@@ -82,12 +82,14 @@ because the macOS portable gate does not require a container runtime.
 
 `1.8.0` did not publish Windows binaries. The active `1.8.2` line implements
 native owner/ACL trust checks for configuration and runtime paths, Windows-safe
-static and cache file handling, all seven MSVC profile builds, and a native
-static/memory-cache live smoke. These checks preserve the existing trust
-boundary instead of replacing it with permissive cross-platform fallbacks.
-Proxy, TLS, admin, load-balancer, observability, Wasm, certificate-storage,
-shutdown, and archive evidence continue to be expanded and must pass natively
-on both x86_64 and ARM64 before Windows archives are published.
+static and cache file handling, all seven MSVC profile builds, and native live
+static, downstream/upstream TLS, memory and persistent disk cache, proxy,
+load-balancer, admin, metrics, graceful-shutdown, external FastCGI, ACME
+storage, and packaged-Wasm checks. Every packaged executable must also launch
+and report the expected version. These checks preserve the existing trust
+boundary instead of replacing it with permissive cross-platform fallbacks, and
+must pass natively on both x86_64 and ARM64 before Windows archives are
+published.
 
 Live platform parity remains staged:
 

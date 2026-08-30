@@ -67,9 +67,11 @@ then independently:
    installed `allowed_signers` file;
 2. checks the native Rust host architecture;
 3. runs workspace tests and the mandatory native Windows live smoke;
-4. builds all seven profiles twice with the PowerShell archive builder;
+4. builds all seven profiles twice with the PowerShell archive builder and
+   launches every packaged executable to verify its version;
 5. requires byte-identical ZIP hashes and emits checksums plus machine-readable
-   commit, architecture, test-scope, and reproducibility evidence.
+   commit, architecture, Windows edition/build, test-scope, and reproducibility
+   evidence.
 
 The script fails when `scripts/smoke_windows_native.ps1` is absent or any
 native runtime assertion fails. This remains an intentional release block

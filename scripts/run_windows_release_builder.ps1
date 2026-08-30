@@ -84,6 +84,16 @@ try {
         throw "Rust host $host does not match release target $expectedHost"
     }
 
+    $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem
+    $osCaption = ([string]$operatingSystem.Caption).Replace("`r", ' ').Replace("`n", ' ').Trim()
+    $osVersion = ([string]$operatingSystem.Version).Trim()
+    $osBuild = ([string]$operatingSystem.BuildNumber).Trim()
+    if ([string]::IsNullOrWhiteSpace($osCaption) -or
+        [string]::IsNullOrWhiteSpace($osVersion) -or
+        [string]::IsNullOrWhiteSpace($osBuild)) {
+        throw 'native Windows operating-system identity is unavailable'
+    }
+
     & python.exe scripts/validate_portable_release_plan.py
     if ($LASTEXITCODE -ne 0) { throw 'portable release-plan validation failed' }
     & cargo.exe test --workspace --locked
@@ -125,6 +135,12 @@ try {
     $secondBuild = Join-Path $runRoot 'second'
     Build-ArchiveSet -Destination $firstBuild
     Build-ArchiveSet -Destination $secondBuild
+    $archiveSmoke = Join-Path $sourceRoot 'scripts\smoke_windows_archive_profiles.ps1'
+    if (-not (Test-Path -LiteralPath $archiveSmoke -PathType Leaf)) {
+        throw 'all-profile Windows archive smoke is required before release evidence can be produced'
+    }
+    & pwsh.exe -NoProfile -File $archiveSmoke -Version $Version -Architecture $Architecture
+    if ($LASTEXITCODE -ne 0) { throw 'all-profile Windows archive smoke failed' }
     $wasmSmoke = Join-Path $sourceRoot 'scripts\smoke_windows_wasm_archive.ps1'
     if (-not (Test-Path -LiteralPath $wasmSmoke -PathType Leaf)) {
         throw 'archived Windows Wasm smoke is required before release evidence can be produced'
@@ -175,7 +191,10 @@ try {
         "commit=$tagCommit"
         "architecture=$Architecture"
         "rust_host=$host"
-        'test_scope=workspace-native-live-and-archived-wasm-smoke'
+        "windows_os_caption=$osCaption"
+        "windows_os_version=$osVersion"
+        "windows_os_build=$osBuild"
+        'test_scope=workspace-native-all-archives-and-wasm-smoke'
         'archive_count=7'
         'reproducible=true'
     ) | Set-Content -LiteralPath (Join-Path $outputRoot "release-evidence-$targetLabel.txt") -Encoding ascii

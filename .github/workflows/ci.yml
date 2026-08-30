@@ -328,9 +328,10 @@ jobs:
         shell: pwsh
         run: scripts/smoke_windows_native.ps1
 
-      - name: Run Windows packaged Wasm policy smoke
+      - name: Build and test Windows portable archives
         shell: pwsh
         run: |
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value
-          scripts/build_release_assets.ps1 -Version $version -Architecture x86_64 -Profile wasm
+          scripts/build_release_assets.ps1 -Version $version -Architecture x86_64
+          scripts/smoke_windows_archive_profiles.ps1 -Version $version -Architecture x86_64
           scripts/smoke_windows_wasm_archive.ps1 -Version $version -Architecture x86_64

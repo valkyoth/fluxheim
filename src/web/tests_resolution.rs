@@ -2,7 +2,9 @@ use std::fs;
 use std::io;
 use std::time::UNIX_EPOCH;
 
-use fluxheim_common::test_support::{safe_child_path, unique_temp_path};
+#[cfg(unix)]
+use fluxheim_common::test_support::safe_child_path;
+use fluxheim_common::test_support::unique_temp_path;
 
 use super::{ResolveResult, StaticFileServer};
 use crate::config::WebConfig;

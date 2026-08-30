@@ -1,6 +1,8 @@
 use super::{MAX_SNAPSHOT_STORE_ENTRIES, SnapshotError, SnapshotStore};
 use crate::metadata::{MAX_SNAPSHOT_ID_BYTES, MAX_SNAPSHOT_MESSAGE_BYTES};
-use crate::store_fs::{MAX_SNAPSHOT_FILE_BYTES, SNAPSHOT_DIR_MODE, SNAPSHOT_FILE_MODE};
+use crate::store_fs::MAX_SNAPSHOT_FILE_BYTES;
+#[cfg(unix)]
+use crate::store_fs::{SNAPSHOT_DIR_MODE, SNAPSHOT_FILE_MODE};
 use crate::{
     PendingValidation, SnapshotApplyMode, SnapshotHealthSignalOutcome, SnapshotRollbackReason,
     SnapshotRuntimeState, ValidationMetrics,

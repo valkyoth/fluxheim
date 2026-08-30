@@ -1,13 +1,17 @@
 use super::{SnapshotError, SnapshotStore};
-use crate::store_fs::{
-    MAX_CURRENT_SNAPSHOT_POINTER_BYTES, open_private_lock_file, write_atomically,
-};
+use crate::store_fs::MAX_CURRENT_SNAPSHOT_POINTER_BYTES;
+#[cfg(unix)]
+use crate::store_fs::{open_private_lock_file, write_atomically};
 
 mod tests {
-    use super::{SnapshotError, SnapshotStore, open_private_lock_file, write_atomically};
-    use fluxheim_common::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
+    use super::{SnapshotError, SnapshotStore};
     #[cfg(unix)]
-    use fluxheim_common::test_support::{unique_group_writable_child, unique_world_writable_child};
+    use super::{open_private_lock_file, write_atomically};
+    #[cfg(unix)]
+    use fluxheim_common::test_support::{
+        safe_child_path, unique_group_writable_child, unique_world_writable_child,
+    };
+    use fluxheim_common::test_support::{safe_relative_path, unique_temp_path};
     use fluxheim_config::Config;
 
     #[test]

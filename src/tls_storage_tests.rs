@@ -1,10 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::config::{
-    AcmeConfig, AcmeExternalAccountBindingConfig, AcmeIssuerConfig, Config,
-    StaticCertificateConfig, TlsConfig,
-};
+use crate::config::{AcmeConfig, Config, StaticCertificateConfig, TlsConfig};
+#[cfg(unix)]
+use crate::config::{AcmeExternalAccountBindingConfig, AcmeIssuerConfig};
 use fluxheim_common::test_support::{safe_child_path, unique_temp_path};
 #[cfg(unix)]
 use fluxheim_common::test_support::{unique_group_writable_child, unique_world_writable_child};
