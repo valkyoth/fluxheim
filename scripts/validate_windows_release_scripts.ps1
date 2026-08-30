@@ -87,6 +87,8 @@ foreach ($required in @(
     'absolute_native_cache_root_skips_bare_windows_prefix',
     'native Windows filesystem-cache absolute-root regression failed',
     '.fluxheim-storage-bin-index-v1',
+    '$storageBinIndexLines.Count -gt 1',
+    'storage-bin index did not flush an entry',
     'restarted Windows Fluxheim did not serve the persisted disk-cache HIT',
     "Headers.Contains('Age')",
     'windows_console_signal_helper.ps1',

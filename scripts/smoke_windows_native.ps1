@@ -940,12 +940,19 @@ try {
 
     $storageBinManifest = Join-Path $cacheRoot '.fluxheim-storage-bin-v1'
     $storageBinIndex = Join-Path $cacheRoot '.fluxheim-storage-bin-index-v1'
+    $storageBinIndexFlushed = $false
     for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        $storageBinIndexLines = @()
+        if (Test-Path -LiteralPath $storageBinIndex -PathType Leaf) {
+            $storageBinIndexLines = @(Get-Content -LiteralPath $storageBinIndex)
+        }
         if ((Test-Path -LiteralPath $storageBinManifest -PathType Leaf) -and
             (Test-Path -LiteralPath $storageBinIndex -PathType Leaf) -and
+            $storageBinIndexLines.Count -gt 1 -and
             $null -ne (Get-ChildItem -LiteralPath (Join-Path $cacheRoot 'bins') `
                 -Filter '*.fhbin' -File -Recurse -ErrorAction SilentlyContinue |
                 Select-Object -First 1)) {
+            $storageBinIndexFlushed = $true
             break
         }
         Start-Sleep -Milliseconds 100
@@ -958,6 +965,9 @@ try {
         -Filter '*.fhbin' -File -Recurse -ErrorAction SilentlyContinue |
         Select-Object -First 1)) {
         throw 'native Windows disk cache did not persist a storage-bin file'
+    }
+    if (-not $storageBinIndexFlushed) {
+        throw 'native Windows disk cache storage-bin index did not flush an entry'
     }
 
     Stop-Process -Id $process.Id -Force
