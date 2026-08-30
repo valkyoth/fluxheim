@@ -13,7 +13,7 @@ if ($LASTEXITCODE -ne 0) {
     throw 'native Windows smoke binary build failed'
 }
 
-& cargo.exe test --locked -p fluxheim-acme --lib
+& cargo.exe test --locked -p fluxheim-acme --lib --features acme-client
 if ($LASTEXITCODE -ne 0) {
     throw 'native Windows ACME storage and lifecycle regressions failed'
 }
