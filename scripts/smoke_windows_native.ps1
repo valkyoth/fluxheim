@@ -13,6 +13,24 @@ if ($LASTEXITCODE -ne 0) {
     throw 'native Windows smoke binary build failed'
 }
 
+& cargo.exe test --locked -p fluxheim-server --lib `
+    'native_http1_cache::lease_tests::storage_bin_' -- --nocapture
+if ($LASTEXITCODE -ne 0) {
+    throw 'native Windows storage-bin lease regressions failed'
+}
+
+& cargo.exe test --locked -p fluxheim-cache --lib `
+    'storage_bin_fs::tests::absolute_storage_bin_root_skips_bare_windows_prefix' -- --nocapture
+if ($LASTEXITCODE -ne 0) {
+    throw 'native Windows storage-bin absolute-root regression failed'
+}
+
+& cargo.exe test --locked -p fluxheim-server --lib `
+    'absolute_native_cache_root_skips_bare_windows_prefix' -- --nocapture
+if ($LASTEXITCODE -ne 0) {
+    throw 'native Windows filesystem-cache absolute-root regression failed'
+}
+
 $binary = (Resolve-Path -LiteralPath (Join-Path $root 'target\debug\fluxheim.exe')).Path
 if (-not $binary.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase)) {
     throw "native Windows smoke requires a Windows executable: $binary"
@@ -236,7 +254,11 @@ $stdoutPath = Join-Path $testRoot 'fluxheim.stdout.log'
 $stderrPath = Join-Path $testRoot 'fluxheim.stderr.log'
 $restartStdoutPath = Join-Path $testRoot 'fluxheim-restart.stdout.log'
 $restartStderrPath = Join-Path $testRoot 'fluxheim-restart.stderr.log'
+$consoleHelperPath = Join-Path $root 'scripts\windows_console_signal_helper.ps1'
+$powershellPath = (Get-Process -Id $PID).Path
 $process = $null
+$gracefulHarness = $null
+$gracefulProcessId = $null
 $originOne = $null
 $originTwo = $null
 $previousAdminToken = $env:FLUXHEIM_WINDOWS_SMOKE_ADMIN_TOKEN
@@ -276,6 +298,7 @@ trusted_proxies = []
 pid_file = "$runtimeToml/fluxheim.pid"
 upgrade_sock = "$runtimeToml/fluxheim-upgrade.sock"
 certificate_reload_sock = "$runtimeToml/fluxheim-cert-reload.sock"
+graceful_shutdown_timeout_seconds = 5
 
 [admin]
 enabled = true
@@ -702,20 +725,109 @@ try {
         $restartHandler.Dispose()
     }
 
+    Stop-Process -Id $process.Id -Force
+    if (-not $process.WaitForExit(5000)) {
+        throw 'restarted Windows Fluxheim did not stop before graceful-shutdown test'
+    }
+    $process.Dispose()
+    $process = $null
+
+    $harnessStart = [Diagnostics.ProcessStartInfo]::new()
+    $harnessStart.FileName = $powershellPath
+    [void]$harnessStart.ArgumentList.Add('-NoLogo')
+    [void]$harnessStart.ArgumentList.Add('-NoProfile')
+    [void]$harnessStart.ArgumentList.Add('-NonInteractive')
+    [void]$harnessStart.ArgumentList.Add('-File')
+    [void]$harnessStart.ArgumentList.Add($consoleHelperPath)
+    [void]$harnessStart.ArgumentList.Add($binary)
+    [void]$harnessStart.ArgumentList.Add($configPath)
+    $harnessStart.UseShellExecute = $false
+    $harnessStart.CreateNoWindow = $true
+    $harnessStart.RedirectStandardInput = $true
+    $harnessStart.RedirectStandardOutput = $true
+    $harnessStart.RedirectStandardError = $true
+    $gracefulHarness = [Diagnostics.Process]::Start($harnessStart)
+    $startedTask = $gracefulHarness.StandardOutput.ReadLineAsync()
+    if (-not $startedTask.Wait(10000)) {
+        throw 'Windows graceful-shutdown harness timed out while starting Fluxheim'
+    }
+    $started = $startedTask.Result
+    if ($started -notmatch '^STARTED=([0-9]+)$') {
+        $harnessError = $gracefulHarness.StandardError.ReadToEnd()
+        throw "Windows graceful-shutdown harness did not start Fluxheim: $harnessError"
+    }
+    $gracefulProcessId = [int]$Matches[1]
+
+    $gracefulHandler = [Net.Http.HttpClientHandler]::new()
+    $gracefulClient = [Net.Http.HttpClient]::new($gracefulHandler)
+    $gracefulClient.Timeout = [TimeSpan]::FromSeconds(2)
+    try {
+        $gracefulReady = $false
+        for ($attempt = 0; $attempt -lt 100; $attempt++) {
+            if ($gracefulHarness.HasExited) {
+                throw "Windows graceful-shutdown harness exited before readiness with code $($gracefulHarness.ExitCode)"
+            }
+            try {
+                $readyResponse = Invoke-FluxheimRequest -Client $gracefulClient `
+                    -Uri ([Uri]"http://127.0.0.1:$port/") -HostHeader 'static.test'
+                try {
+                    if ([int]$readyResponse.StatusCode -eq 200) {
+                        $gracefulReady = $true
+                        break
+                    }
+                } finally {
+                    $readyResponse.Dispose()
+                }
+            } catch {
+                Start-Sleep -Milliseconds 100
+            }
+        }
+        if (-not $gracefulReady) {
+            throw 'timed out waiting for isolated Windows graceful-shutdown process'
+        }
+    } finally {
+        $gracefulClient.Dispose()
+        $gracefulHandler.Dispose()
+    }
+
+    $gracefulHarness.StandardInput.WriteLine('stop')
+    $gracefulHarness.StandardInput.Flush()
+    $gracefulHarness.StandardInput.Close()
+    if (-not $gracefulHarness.WaitForExit(20000)) {
+        throw 'Windows graceful-shutdown harness timed out'
+    }
+    $gracefulError = $gracefulHarness.StandardError.ReadToEnd()
+    if ($gracefulHarness.ExitCode -ne 0) {
+        throw "Windows CTRL_BREAK graceful shutdown failed: $gracefulError"
+    }
+    $gracefulHarness.Dispose()
+    $gracefulHarness = $null
+    $gracefulProcessId = $null
+
     $succeeded = $true
-    Write-Host 'native Windows static/TLS/memory+disk-cache/proxy/load-balancer/admin/metrics smoke: ok'
+    Write-Host 'native Windows static/TLS/memory+disk-cache/proxy/load-balancer/admin/metrics/graceful-shutdown smoke: ok'
 } catch {
     if (Test-Path -LiteralPath $stderrPath -PathType Leaf) {
-        Get-Content -LiteralPath $stderrPath | Write-Error
+        [Console]::Error.WriteLine((Get-Content -LiteralPath $stderrPath -Raw))
     }
     if (Test-Path -LiteralPath $restartStderrPath -PathType Leaf) {
-        Get-Content -LiteralPath $restartStderrPath | Write-Error
+        [Console]::Error.WriteLine((Get-Content -LiteralPath $restartStderrPath -Raw))
     }
     throw
 } finally {
     if ($null -ne $process -and -not $process.HasExited) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
         [void]$process.WaitForExit(5000)
+    }
+    if ($null -ne $gracefulHarness -and -not $gracefulHarness.HasExited) {
+        Stop-Process -Id $gracefulHarness.Id -Force -ErrorAction SilentlyContinue
+        [void]$gracefulHarness.WaitForExit(5000)
+    }
+    if ($null -ne $gracefulHarness) {
+        $gracefulHarness.Dispose()
+    }
+    if ($null -ne $gracefulProcessId) {
+        Stop-Process -Id $gracefulProcessId -Force -ErrorAction SilentlyContinue
     }
     if ($null -eq $previousAdminToken) {
         Remove-Item Env:FLUXHEIM_WINDOWS_SMOKE_ADMIN_TOKEN -ErrorAction SilentlyContinue

@@ -10,7 +10,8 @@ $scripts = @(
     'scripts/prepare_windows_release_builder.ps1',
     'scripts/run_windows_release_builder.ps1',
     'scripts/smoke_windows_native.ps1',
-    'scripts/smoke_windows_wasm_archive.ps1'
+    'scripts/smoke_windows_wasm_archive.ps1',
+    'scripts/windows_console_signal_helper.ps1'
 )
 
 foreach ($relative in $scripts) {
@@ -28,6 +29,39 @@ foreach ($relative in $scripts) {
     }
 }
 
+$consoleHelperPath = Join-Path $root 'scripts/windows_console_signal_helper.cs'
+if (-not (Test-Path -LiteralPath $consoleHelperPath -PathType Leaf)) {
+    throw 'Windows console signal helper source is missing'
+}
+$consoleHelper = Get-Content -LiteralPath $consoleHelperPath -Raw
+foreach ($required in @(
+    'public static int Run',
+    'CreateNewConsole',
+    'AttachConsole',
+    'GenerateConsoleCtrlEvent',
+    'CtrlBreakEvent',
+    'WaitForSingleObject'
+)) {
+    if (-not $consoleHelper.Contains($required)) {
+        throw "Windows console signal helper is missing required behavior: $required"
+    }
+}
+
+$consoleHarnessPath = Join-Path $root 'scripts/windows_console_signal_helper.ps1'
+$consoleHarness = Get-Content -LiteralPath $consoleHarnessPath -Raw
+foreach ($required in @(
+    'windows_console_signal_helper.cs',
+    '$result = [FluxheimWindowsConsoleSignalHelper]::Run($Binary, $Config)',
+    'exit $result'
+)) {
+    if (-not $consoleHarness.Contains($required)) {
+        throw "Windows console signal harness is missing required behavior: $required"
+    }
+}
+if ($consoleHarness.Contains('ConsoleApplication')) {
+    throw 'Windows console signal harness must remain compatible with PowerShell 7.1 and newer'
+}
+
 $smoke = Get-Content -LiteralPath (Join-Path $root 'scripts/smoke_windows_native.ps1') -Raw
 foreach ($required in @(
     '--validate-config',
@@ -38,9 +72,19 @@ foreach ($required in @(
     "expected MISS",
     "expected HIT",
     'backend = "storage-bin"',
+    'native_http1_cache::lease_tests::storage_bin_',
+    'native Windows storage-bin lease regressions failed',
+    'absolute_storage_bin_root_skips_bare_windows_prefix',
+    'native Windows storage-bin absolute-root regression failed',
+    'absolute_native_cache_root_skips_bare_windows_prefix',
+    'native Windows filesystem-cache absolute-root regression failed',
     '.fluxheim-storage-bin-index-v1',
     'restarted Windows Fluxheim did not serve the persisted disk-cache HIT',
     "Headers.Contains('Age')",
+    'windows_console_signal_helper.ps1',
+    'StandardOutput.ReadLineAsync()',
+    "StandardInput.WriteLine('stop')",
+    'Windows CTRL_BREAK graceful shutdown failed',
     'New-WindowsSmokeCertificate',
     'tls_listen',
     'https://127.0.0.1:',
@@ -54,6 +98,44 @@ foreach ($required in @(
 )) {
     if (-not $smoke.Contains($required)) {
         throw "Windows native smoke is missing required behavior: $required"
+    }
+}
+
+$runtimeShutdown = Get-Content -LiteralPath (Join-Path $root 'src/runtime_shutdown.rs') -Raw
+foreach ($required in @(
+    'tokio::signal::windows::{ctrl_break, ctrl_c}',
+    'let mut terminate = ctrl_break().ok()',
+    'signal.recv().await'
+)) {
+    if (-not $runtimeShutdown.Contains($required)) {
+        throw "Windows runtime shutdown handling is missing required behavior: $required"
+    }
+}
+
+$cacheBackend = Get-Content -LiteralPath `
+    (Join-Path $root 'crates/fluxheim-server/src/native_http1_cache_backend.rs') -Raw
+foreach ($required in @(
+    '.share_mode(0)',
+    'ERROR_SHARING_VIOLATION',
+    'native_storage_bin_already_owned_error(root)'
+)) {
+    if (-not $cacheBackend.Contains($required)) {
+        throw "Windows storage-bin lease is missing required behavior: $required"
+    }
+}
+
+foreach ($relative in @(
+    'crates/fluxheim-cache/src/storage_bin_fs_windows.rs',
+    'crates/fluxheim-server/src/native_http1_cache_disk_path_windows.rs'
+)) {
+    $cachePathBoundary = Get-Content -LiteralPath (Join-Path $root $relative) -Raw
+    foreach ($required in @(
+        'Component::Prefix(_) | Component::CurDir => continue',
+        'Component::ParentDir => return Ok(true)'
+    )) {
+        if (-not $cachePathBoundary.Contains($required)) {
+            throw "$relative is missing Windows absolute-path handling: $required"
+        }
     }
 }
 if ($smoke.Contains('target\fluxheim-windows-smoke')) {

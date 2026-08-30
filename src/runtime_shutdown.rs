@@ -41,7 +41,30 @@ pub(super) async fn wait_native_runtime_shutdown_signal() {
             } => {}
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        use tokio::signal::windows::{ctrl_break, ctrl_c};
+
+        let mut interrupt = ctrl_c().ok();
+        let mut terminate = ctrl_break().ok();
+        tokio::select! {
+            _ = async {
+                if let Some(signal) = &mut interrupt {
+                    let _ = signal.recv().await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => {}
+            _ = async {
+                if let Some(signal) = &mut terminate {
+                    let _ = signal.recv().await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => {}
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = tokio::signal::ctrl_c().await;
     }
