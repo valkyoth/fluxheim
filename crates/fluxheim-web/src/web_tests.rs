@@ -1,7 +1,9 @@
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use fluxheim_common::test_support::{safe_child_path, unique_temp_path};
+#[cfg(unix)]
+use fluxheim_common::test_support::safe_child_path;
+use fluxheim_common::test_support::unique_temp_path;
 
 use super::{
     ByteRangeParse, DirectoryEntry, DirectoryListing, SafeRelativePath, StaticCacheIdentity,
