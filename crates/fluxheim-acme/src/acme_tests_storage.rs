@@ -33,7 +33,8 @@ fn account_credentials_store_round_trips_secure_file() {
     let storage = fluxheim_common::test_support::unique_temp_path("acme-account-store");
     let credentials = test_account_credentials();
 
-    let path = store_account_credentials(&storage, "letsencrypt", &credentials).unwrap();
+    let _credentials_path =
+        store_account_credentials(&storage, "letsencrypt", &credentials).unwrap();
     let loaded = load_account_credentials(&storage, "letsencrypt")
         .unwrap()
         .unwrap();
@@ -51,7 +52,11 @@ fn account_credentials_store_round_trips_secure_file() {
         use std::os::unix::fs::PermissionsExt;
 
         assert_eq!(
-            std::fs::metadata(path.path).unwrap().permissions().mode() & 0o777,
+            std::fs::metadata(_credentials_path.path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
             0o600
         );
     }

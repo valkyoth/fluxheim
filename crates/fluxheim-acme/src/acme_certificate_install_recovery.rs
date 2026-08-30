@@ -263,9 +263,9 @@ fn validate_transaction_id(
 #[cfg(test)]
 mod tests {
     use super::super::backup::backup_existing_file;
-    use super::super::fs_ops::{
-        ensure_safe_directory, managed_certificate_ownership, open_safe_certificate_directory,
-    };
+    #[cfg(unix)]
+    use super::super::fs_ops::open_safe_certificate_directory;
+    use super::super::fs_ops::{ensure_safe_directory, managed_certificate_ownership};
     use super::*;
 
     #[test]
