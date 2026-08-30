@@ -151,6 +151,12 @@ pub(crate) fn storage_bin_path_contains_symlink(root: &Path, path: &Path) -> std
 }
 
 fn path_contains_reparse_point(path: &Path) -> std::io::Result<bool> {
+    if path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Ok(true);
+    }
     let mut current = PathBuf::new();
     for component in path.components() {
         current.push(component.as_os_str());

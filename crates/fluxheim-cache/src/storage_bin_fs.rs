@@ -107,6 +107,12 @@ pub(crate) fn storage_bin_path_file_type_no_follow(
 }
 
 pub(crate) fn storage_bin_configured_path_contains_symlink(path: &Path) -> std::io::Result<bool> {
+    if path
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Ok(true);
+    }
     let mut current = PathBuf::new();
     for component in path.components() {
         current.push(component);
