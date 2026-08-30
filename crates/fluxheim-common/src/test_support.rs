@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_TEST_PATH: AtomicU64 = AtomicU64::new(0);
@@ -24,11 +25,47 @@ pub fn unique_temp_path(label: &str) -> PathBuf {
 }
 
 pub fn test_root() -> PathBuf {
-    let root = PathBuf::from("target/fluxheim-test-tmp");
-    std::fs::create_dir_all(&root).expect("create repository-local test root");
-    root.canonicalize()
-        .expect("canonicalize repository-local test root")
+    static ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+    ROOT.get_or_init(|| {
+        #[cfg(not(windows))]
+        let root = PathBuf::from("target/fluxheim-test-tmp");
+        #[cfg(windows)]
+        let root = std::env::temp_dir().join("fluxheim-test-tmp");
+        std::fs::create_dir_all(&root).expect("create shared test root");
+        secure_windows_test_root(&root);
+        root.canonicalize().expect("canonicalize shared test root")
+    })
+    .clone()
 }
+
+#[cfg(windows)]
+fn secure_windows_test_root(root: &Path) {
+    use windows_permissions::constants::{SeObjectType, SecurityInformation};
+    use windows_permissions::{LocalBox, SecurityDescriptor};
+
+    let current = windows_permissions::utilities::current_process_sid()
+        .expect("read current Windows test process SID");
+    let descriptor: LocalBox<SecurityDescriptor> = format!(
+        "D:P(A;OICI;FA;;;{})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+        current
+    )
+    .parse()
+    .expect("build private Windows test root ACL");
+    windows_permissions::wrappers::SetNamedSecurityInfo(
+        root,
+        SeObjectType::SE_FILE_OBJECT,
+        SecurityInformation::Dacl | SecurityInformation::ProtectedDacl,
+        None,
+        None,
+        descriptor.dacl(),
+        None,
+    )
+    .expect("protect shared Windows test root ACL");
+}
+
+#[cfg(not(windows))]
+fn secure_windows_test_root(_root: &Path) {}
 
 pub fn safe_child_path(base: &Path, name: &str) -> PathBuf {
     assert_safe_label(name);

@@ -1259,6 +1259,7 @@ name = "fluxheim-common"
 version = "1.8.2"
 dependencies = [
  "thiserror 2.0.20",
+ "windows-permissions",
 ]
 
 [[package]]

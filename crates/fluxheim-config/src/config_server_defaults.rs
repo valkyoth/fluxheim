@@ -49,10 +49,9 @@ fn default_process_runtime_path(name: &str) -> PathBuf {
 
 #[cfg(any(test, feature = "test-support"))]
 fn default_process_runtime_path(name: &str) -> PathBuf {
-    let root = PathBuf::from("target/fluxheim-test-tmp");
-    let _ = std::fs::create_dir_all(&root);
-    let root = root.canonicalize().unwrap_or(root);
-    root.join("run").join(name)
+    fluxheim_common::test_support::test_root()
+        .join("run")
+        .join(name)
 }
 
 pub(crate) fn default_process_threads() -> usize {

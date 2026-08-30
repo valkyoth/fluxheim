@@ -19,7 +19,7 @@ php-fpm = []
 privacy-mode = []
 proxy = []
 stream-proxy = []
-test-support = []
+test-support = ["dep:fluxheim-common"]
 tls-openssl = []
 tls-openssl-fips = []
 tls-rustls-backend = []
@@ -31,6 +31,7 @@ wasm-proxy-abi = ["wasm", "fluxheim-wasm/proxy-abi"]
 wasm-wasi = ["wasm", "fluxheim-wasm/wasi"]
 
 [dependencies]
+fluxheim-common = { path = "../fluxheim-common", features = ["test-support"], optional = true }
 fluxheim-protocol = { path = "../fluxheim-protocol" }
 fluxheim-wasm = { path = "../fluxheim-wasm", optional = true }
 log = "0.4.34"

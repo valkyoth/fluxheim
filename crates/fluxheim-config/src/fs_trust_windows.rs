@@ -262,6 +262,15 @@ mod tests {
     }
 
     #[test]
+    fn shared_fluxheim_test_root_and_missing_descendant_are_trusted() {
+        let root = fluxheim_common::test_support::test_root();
+        let missing = root.join("missing-security-test").join("config.toml");
+
+        assert!(!existing_path_has_insecure_write_permissions(&root).unwrap());
+        assert!(!existing_path_has_insecure_write_permissions(&missing).unwrap());
+    }
+
+    #[test]
     fn canonical_executable_path_is_inspectable() {
         let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
 
