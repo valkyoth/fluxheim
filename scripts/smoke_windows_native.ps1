@@ -189,6 +189,7 @@ public sealed class FluxheimWindowsSmokeOrigin : IDisposable
             byte[] body = Encoding.ASCII.GetBytes(this.label + " path=" + target + "\n");
             string headers = "HTTP/1.1 200 OK\r\n" +
                 "Content-Type: text/plain; charset=ascii\r\n" +
+                "Cache-Control: public, max-age=120\r\n" +
                 "Content-Length: " + body.Length + "\r\n" +
                 "X-Origin: " + this.label + "\r\n" +
                 "Connection: close\r\n\r\n";
@@ -224,6 +225,7 @@ if (-not [IO.Path]::IsPathFullyQualified($temporaryRoot)) {
 }
 $testRoot = Join-Path $temporaryRoot "fluxheim-windows-smoke-$runId"
 $publicRoot = Join-Path $testRoot 'public'
+$cacheRoot = Join-Path $testRoot 'cache'
 $runtimeRoot = Join-Path $testRoot 'run'
 $snapshotRoot = Join-Path $testRoot 'snapshots'
 $tlsRoot = Join-Path $testRoot 'tls'
@@ -232,6 +234,8 @@ $privateKeyPath = Join-Path $tlsRoot 'private-key.pem'
 $configPath = Join-Path $testRoot 'fluxheim.toml'
 $stdoutPath = Join-Path $testRoot 'fluxheim.stdout.log'
 $stderrPath = Join-Path $testRoot 'fluxheim.stderr.log'
+$restartStdoutPath = Join-Path $testRoot 'fluxheim-restart.stdout.log'
+$restartStderrPath = Join-Path $testRoot 'fluxheim-restart.stderr.log'
 $process = $null
 $originOne = $null
 $originTwo = $null
@@ -239,7 +243,7 @@ $previousAdminToken = $env:FLUXHEIM_WINDOWS_SMOKE_ADMIN_TOKEN
 $succeeded = $false
 
 New-Item -ItemType Directory -Force `
-    -Path $publicRoot, $runtimeRoot, $snapshotRoot, $tlsRoot | Out-Null
+    -Path $publicRoot, $cacheRoot, $runtimeRoot, $snapshotRoot, $tlsRoot | Out-Null
 Set-Content -LiteralPath (Join-Path $publicRoot 'index.html') `
     -Value '<!doctype html><title>Fluxheim Windows smoke</title><h1>windows-static-ok</h1>' `
     -Encoding ascii
@@ -256,6 +260,7 @@ $metricsPort = Get-FreeTcpPort
 $originOnePort = Get-FreeTcpPort
 $originTwoPort = Get-FreeTcpPort
 $publicToml = ConvertTo-TomlPath $publicRoot
+$cacheToml = ConvertTo-TomlPath $cacheRoot
 $runtimeToml = ConvertTo-TomlPath $runtimeRoot
 $snapshotToml = ConvertTo-TomlPath $snapshotRoot
 $certificateToml = ConvertTo-TomlPath $certificatePath
@@ -346,6 +351,36 @@ cache_control = "public, max-age=60"
 [[vhosts]]
 name = "proxy.test"
 hosts = ["proxy.test"]
+
+[vhosts.proxy]
+upstreams = ["127.0.0.1:$originOnePort"]
+upstream_tls = false
+
+[[vhosts]]
+name = "disk-cache.test"
+hosts = ["disk-cache.test"]
+
+[vhosts.cache]
+enabled = true
+status_header = "x-cache-status"
+status_reason_header = "x-cache-reason"
+image_extensions = ["webp"]
+content_types = ["text/plain"]
+max_object_bytes = "1MiB"
+
+[vhosts.cache.memory]
+enabled = false
+
+[vhosts.cache.disk]
+enabled = true
+backend = "storage-bin"
+path = "$cacheToml"
+max_size_bytes = "8MiB"
+
+[vhosts.cache.disk.storage_bin]
+bin_size_bytes = "1MiB"
+preallocate = false
+max_open_bins = 4
 
 [vhosts.proxy]
 upstreams = ["127.0.0.1:$originOnePort"]
@@ -476,6 +511,41 @@ try {
             $second.Dispose()
         }
 
+        $diskCacheUri = [Uri]"http://127.0.0.1:$port/windows-disk-cache.webp"
+        $diskFirst = Invoke-FluxheimRequest -Client $client -Uri $diskCacheUri `
+            -HostHeader 'disk-cache.test'
+        try {
+            $diskFirstBody = $diskFirst.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            $diskFirstStatus = ($diskFirst.Headers.GetValues('x-cache-status') |
+                Select-Object -First 1)
+            if ([int]$diskFirst.StatusCode -ne 200 -or
+                -not $diskFirstBody.Contains('origin-one path=/windows-disk-cache.webp')) {
+                throw 'native Windows first disk-cache response mismatch'
+            }
+            if ($diskFirstStatus -ne 'MISS') {
+                throw "native Windows first disk-cache response was $diskFirstStatus, expected MISS"
+            }
+        } finally {
+            $diskFirst.Dispose()
+        }
+
+        $diskSecond = Invoke-FluxheimRequest -Client $client -Uri $diskCacheUri `
+            -HostHeader 'disk-cache.test'
+        try {
+            $diskSecondBody = $diskSecond.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            $diskSecondStatus = ($diskSecond.Headers.GetValues('x-cache-status') |
+                Select-Object -First 1)
+            if ([int]$diskSecond.StatusCode -ne 200 -or
+                $diskSecondBody -ne $diskFirstBody) {
+                throw 'native Windows second disk-cache response mismatch'
+            }
+            if ($diskSecondStatus -ne 'HIT') {
+                throw "native Windows second disk-cache response was $diskSecondStatus, expected HIT"
+            }
+        } finally {
+            $diskSecond.Dispose()
+        }
+
         $proxyUri = [Uri]"http://127.0.0.1:$port/windows-proxy"
         $proxyResponse = Invoke-FluxheimRequest -Client $client -Uri $proxyUri `
             -HostHeader 'proxy.test'
@@ -554,11 +624,92 @@ try {
         $handler.Dispose()
     }
 
+    $storageBinManifest = Join-Path $cacheRoot '.fluxheim-storage-bin-v1'
+    $storageBinIndex = Join-Path $cacheRoot '.fluxheim-storage-bin-index-v1'
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        if ((Test-Path -LiteralPath $storageBinManifest -PathType Leaf) -and
+            (Test-Path -LiteralPath $storageBinIndex -PathType Leaf) -and
+            $null -ne (Get-ChildItem -LiteralPath (Join-Path $cacheRoot 'bins') `
+                -Filter '*.fhbin' -File -Recurse -ErrorAction SilentlyContinue |
+                Select-Object -First 1)) {
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not (Test-Path -LiteralPath $storageBinManifest -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $storageBinIndex -PathType Leaf)) {
+        throw 'native Windows disk cache did not persist its manifest and index'
+    }
+    if ($null -eq (Get-ChildItem -LiteralPath (Join-Path $cacheRoot 'bins') `
+        -Filter '*.fhbin' -File -Recurse -ErrorAction SilentlyContinue |
+        Select-Object -First 1)) {
+        throw 'native Windows disk cache did not persist a storage-bin file'
+    }
+
+    Stop-Process -Id $process.Id -Force
+    if (-not $process.WaitForExit(5000)) {
+        throw 'native Windows Fluxheim did not stop for disk-cache restart'
+    }
+    $process = $null
+    $originOne.Dispose()
+    $originOne = $null
+
+    $process = Start-Process -FilePath $binary `
+        -ArgumentList @('--config', $configPath) `
+        -RedirectStandardOutput $restartStdoutPath `
+        -RedirectStandardError $restartStderrPath `
+        -PassThru
+
+    $restartHandler = [Net.Http.HttpClientHandler]::new()
+    $restartClient = [Net.Http.HttpClient]::new($restartHandler)
+    $restartClient.Timeout = [TimeSpan]::FromSeconds(2)
+    try {
+        $restartResponse = $null
+        for ($attempt = 0; $attempt -lt 100; $attempt++) {
+            if ($process.HasExited) {
+                throw "restarted Fluxheim exited before disk-cache readiness with code $($process.ExitCode)"
+            }
+            try {
+                $candidate = Invoke-FluxheimRequest -Client $restartClient -Uri $diskCacheUri `
+                    -HostHeader 'disk-cache.test'
+                if ([int]$candidate.StatusCode -eq 200) {
+                    $restartResponse = $candidate
+                    break
+                }
+                $candidate.Dispose()
+            } catch {
+                Start-Sleep -Milliseconds 100
+            }
+        }
+        if ($null -eq $restartResponse) {
+            throw 'timed out waiting for restarted Fluxheim disk-cache response'
+        }
+        try {
+            $restartBody = $restartResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            $restartStatus = ($restartResponse.Headers.GetValues('x-cache-status') |
+                Select-Object -First 1)
+            if ($restartStatus -ne 'HIT' -or $restartBody -ne $diskFirstBody) {
+                throw 'restarted Windows Fluxheim did not serve the persisted disk-cache HIT'
+            }
+            if (-not $restartResponse.Headers.Contains('Age')) {
+                throw 'restarted Windows disk-cache HIT omitted the Age header'
+            }
+        } finally {
+            $restartResponse.Dispose()
+        }
+    } finally {
+        $restartClient.Dispose()
+        $restartHandler.Dispose()
+    }
+
     $succeeded = $true
-    Write-Host 'native Windows static/TLS/cache/proxy/load-balancer/admin/metrics smoke: ok'
+    Write-Host 'native Windows static/TLS/memory+disk-cache/proxy/load-balancer/admin/metrics smoke: ok'
 } catch {
     if (Test-Path -LiteralPath $stderrPath -PathType Leaf) {
         Get-Content -LiteralPath $stderrPath | Write-Error
+    }
+    if (Test-Path -LiteralPath $restartStderrPath -PathType Leaf) {
+        Get-Content -LiteralPath $restartStderrPath | Write-Error
     }
     throw
 } finally {
