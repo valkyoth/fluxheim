@@ -88,7 +88,7 @@ fn write_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
         file.sync_all()?;
         drop(file);
 
-        fs::rename(&temp_path, path)?;
+        replace_atomically(&temp_path, path)?;
         sync_directory(parent)
     })();
     if result.is_err() {
@@ -171,9 +171,53 @@ fn require_plain_write_destination(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(not(windows))]
+fn replace_atomically(temp_path: &Path, path: &Path) -> io::Result<()> {
+    fs::rename(temp_path, path)
+}
+
+#[cfg(windows)]
+fn replace_atomically(temp_path: &Path, path: &Path) -> io::Result<()> {
+    use std::iter::once;
+    use std::os::windows::ffi::OsStrExt as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let temp_path_wide = temp_path
+        .as_os_str()
+        .encode_wide()
+        .chain(once(0))
+        .collect::<Vec<_>>();
+    let path_wide = path
+        .as_os_str()
+        .encode_wide()
+        .chain(once(0))
+        .collect::<Vec<_>>();
+    // SAFETY: Both buffers are live, NUL-terminated UTF-16 paths for the duration of the call.
+    let moved = unsafe {
+        MoveFileExW(
+            temp_path_wide.as_ptr(),
+            path_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
 fn sync_directory(path: &Path) -> io::Result<()> {
     let directory = File::open(path)?;
     directory.sync_all()
+}
+
+#[cfg(windows)]
+fn sync_directory(_path: &Path) -> io::Result<()> {
+    // MoveFileExW with MOVEFILE_WRITE_THROUGH supplies the Windows durability boundary.
+    Ok(())
 }
 
 fn path_exists_without_following_symlinks(path: &Path) -> io::Result<bool> {
@@ -212,6 +256,20 @@ mod tests {
         assert_eq!(
             load_runtime_state_file(&path).unwrap().as_ref(),
             Some(&snapshot)
+        );
+
+        let replacement = LoadBalancerRuntimeStateSnapshot {
+            version: 2,
+            runtime_overrides: policy::RuntimeBackendPolicySnapshot {
+                states: Vec::new(),
+                weights: Vec::new(),
+            },
+            persistence: None,
+        };
+        write_runtime_state_file(&path, &replacement).unwrap();
+        assert_eq!(
+            load_runtime_state_file(&path).unwrap().as_ref(),
+            Some(&replacement)
         );
     }
 

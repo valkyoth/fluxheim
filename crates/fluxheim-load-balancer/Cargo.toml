@@ -41,6 +41,9 @@ tokio-rustls = { version = "0.26.4", optional = true, default-features = false, 
 ureq = { version = "3.4.0", default-features = false, features = ["json", "rustls"] }
 zeroize = "1.9.0"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }
 proptest = "1.11.0"
