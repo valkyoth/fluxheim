@@ -236,24 +236,28 @@ fn source_ip_persistence_reuses_selected_backend() {
             .sum::<usize>(),
         2
     );
-    assert_eq!(
-        stats
-            .backends
-            .iter()
-            .find(|backend| backend.address.as_deref() == Some("127.0.0.1:3000"))
-            .expect("first persisted backend")
-            .persistence_entry_count,
-        1
-    );
-    assert_eq!(
-        stats
-            .backends
-            .iter()
-            .find(|backend| backend.address.as_deref() == Some("127.0.0.1:3001"))
-            .expect("second persisted backend")
-            .persistence_entry_count,
-        1
-    );
+    #[cfg(not(feature = "privacy-mode"))]
+    for address in ["127.0.0.1:3000", "127.0.0.1:3001"] {
+        assert_eq!(
+            stats
+                .backends
+                .iter()
+                .find(|backend| backend.address.as_deref() == Some(address))
+                .expect("persisted backend")
+                .persistence_entry_count,
+            1
+        );
+    }
+    #[cfg(feature = "privacy-mode")]
+    {
+        assert!(stats.backends.iter().all(|backend| backend.address.is_none()));
+        assert!(
+            stats
+                .backends
+                .iter()
+                .all(|backend| backend.persistence_entry_count == 1)
+        );
+    }
 }
 
 #[test]

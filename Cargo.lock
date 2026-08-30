@@ -1344,7 +1344,6 @@ dependencies = [
  "tokio-openssl",
  "tokio-rustls",
  "ureq",
- "windows-sys 0.61.2",
  "zeroize",
 ]
 

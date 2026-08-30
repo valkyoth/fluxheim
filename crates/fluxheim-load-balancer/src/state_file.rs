@@ -88,8 +88,8 @@ fn write_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
         file.sync_all()?;
         drop(file);
 
-        replace_atomically(&temp_path, path)?;
-        sync_directory(parent)
+        fs::rename(&temp_path, path)?;
+        sync_after_rename(path, parent)
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temp_path);
@@ -172,52 +172,15 @@ fn require_plain_write_destination(path: &Path) -> io::Result<()> {
 }
 
 #[cfg(not(windows))]
-fn replace_atomically(temp_path: &Path, path: &Path) -> io::Result<()> {
-    fs::rename(temp_path, path)
-}
-
-#[cfg(windows)]
-fn replace_atomically(temp_path: &Path, path: &Path) -> io::Result<()> {
-    use std::iter::once;
-    use std::os::windows::ffi::OsStrExt as _;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-    };
-
-    let temp_path_wide = temp_path
-        .as_os_str()
-        .encode_wide()
-        .chain(once(0))
-        .collect::<Vec<_>>();
-    let path_wide = path
-        .as_os_str()
-        .encode_wide()
-        .chain(once(0))
-        .collect::<Vec<_>>();
-    // SAFETY: Both buffers are live, NUL-terminated UTF-16 paths for the duration of the call.
-    let moved = unsafe {
-        MoveFileExW(
-            temp_path_wide.as_ptr(),
-            path_wide.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if moved == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn sync_directory(path: &Path) -> io::Result<()> {
-    let directory = File::open(path)?;
+fn sync_after_rename(_path: &Path, parent: &Path) -> io::Result<()> {
+    let directory = File::open(parent)?;
     directory.sync_all()
 }
 
 #[cfg(windows)]
-fn sync_directory(_path: &Path) -> io::Result<()> {
-    // MoveFileExW with MOVEFILE_WRITE_THROUGH supplies the Windows durability boundary.
-    Ok(())
+fn sync_after_rename(path: &Path, _parent: &Path) -> io::Result<()> {
+    // Windows denies ordinary directory opens; flush the renamed file after replacement.
+    File::open(path)?.sync_all()
 }
 
 fn path_exists_without_following_symlinks(path: &Path) -> io::Result<bool> {
