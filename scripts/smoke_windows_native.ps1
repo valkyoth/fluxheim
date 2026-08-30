@@ -207,7 +207,10 @@ function New-WindowsSmokeUpstreamCertificate {
             [DateTimeOffset]::UtcNow.AddDays(1),
             $serial
         )
-        return $issuedCertificate.CopyWithPrivateKey($originKey)
+        return [Security.Cryptography.X509Certificates.RSACertificateExtensions]::CopyWithPrivateKey(
+            $issuedCertificate,
+            $originKey
+        )
     } finally {
         if ($null -ne $issuedCertificate) {
             $issuedCertificate.Dispose()

@@ -95,6 +95,7 @@ foreach ($required in @(
     'Windows CTRL_BREAK graceful shutdown failed',
     'New-WindowsSmokeCertificate',
     'New-WindowsSmokeUpstreamCertificate',
+    '[Security.Cryptography.X509Certificates.RSACertificateExtensions]::CopyWithPrivateKey(',
     'tls_listen',
     'https://127.0.0.1:',
     'DangerousAcceptAnyServerCertificateValidator',
@@ -114,6 +115,9 @@ foreach ($required in @(
     if (-not $smoke.Contains($required)) {
         throw "Windows native smoke is missing required behavior: $required"
     }
+}
+if ($smoke.Contains('$issuedCertificate.CopyWithPrivateKey(')) {
+    throw 'Windows native smoke must invoke the RSA certificate extension explicitly'
 }
 
 $runtimeShutdown = Get-Content -LiteralPath (Join-Path $root 'src/runtime_shutdown.rs') -Raw
