@@ -224,7 +224,9 @@ impl PhpConfig {
             }
             let fpm_root_field = format!("{scope}.fpm_root");
             validate_path(fpm_root_field.clone(), Some(fpm_root))?;
-            validate_non_world_writable_parent(fpm_root_field, Some(fpm_root))?;
+            if matches!(self.fpm.mode, PhpFpmMode::Managed) {
+                validate_non_world_writable_parent(fpm_root_field, Some(fpm_root))?;
+            }
         }
 
         validate_php_index(&self.index)?;

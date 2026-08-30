@@ -162,6 +162,43 @@ fn parses_php_fpm_vhost_config() {
 }
 
 #[test]
+fn external_php_fpm_root_does_not_require_local_write_trust() {
+    let root = unique_temp_path("config-php-external-root");
+    std::fs::create_dir_all(&root).unwrap();
+    let remote_root = std::env::temp_dir().join("fluxheim-remote-php-root-that-does-not-exist");
+    let mut php = crate::PhpConfig {
+        enabled: true,
+        root: Some(root),
+        fpm_root: Some(remote_root),
+        ..crate::PhpConfig::default()
+    };
+    php.fpm.tcp = Some("127.0.0.1:9000".to_owned());
+    php.fpm.allow_private_tcp_upstreams = true;
+
+    php.validate("vhosts.php").unwrap();
+}
+
+#[test]
+fn external_php_fpm_root_rejects_parent_traversal() {
+    let root = unique_temp_path("config-php-external-traversal-root");
+    std::fs::create_dir_all(&root).unwrap();
+    let mut php = crate::PhpConfig {
+        enabled: true,
+        root: Some(root),
+        fpm_root: Some(std::env::temp_dir().join("app").join("..").join("public")),
+        ..crate::PhpConfig::default()
+    };
+    php.fpm.tcp = Some("127.0.0.1:9000".to_owned());
+    php.fpm.allow_private_tcp_upstreams = true;
+
+    assert!(matches!(
+        php.validate("vhosts.php"),
+        Err(crate::ConfigError::UnsafePath { field, .. })
+            if field == "vhosts.php.fpm_root"
+    ));
+}
+
+#[test]
 fn parses_php_fpm_tcp_upstreams() {
     let root = unique_temp_path("config-php-fpm-upstreams-root");
     std::fs::create_dir_all(&root).unwrap();
