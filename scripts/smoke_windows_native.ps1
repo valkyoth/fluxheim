@@ -30,6 +30,12 @@ if ($LASTEXITCODE -ne 0) {
     throw 'native Windows managed PHP-FPM runtime rejection regression failed'
 }
 
+& cargo.exe test --locked -p fluxheim-server --lib --features php-fpm `
+    'native_route_proxy_php_route_executes_fastcgi_responder' -- --nocapture
+if ($LASTEXITCODE -ne 0) {
+    throw 'native Windows external TCP FastCGI regression failed'
+}
+
 & cargo.exe test --locked -p fluxheim-server --lib `
     'native_http1_cache::lease_tests::storage_bin_' -- --nocapture
 if ($LASTEXITCODE -ne 0) {

@@ -78,6 +78,8 @@ foreach ($required in @(
     'native Windows managed PHP-FPM config rejection regression failed',
     'managed_php_fpm_process_start_fails_closed_without_unix_support',
     'native Windows managed PHP-FPM runtime rejection regression failed',
+    'native_route_proxy_php_route_executes_fastcgi_responder',
+    'native Windows external TCP FastCGI regression failed',
     'native_http1_cache::lease_tests::storage_bin_',
     'native Windows storage-bin lease regressions failed',
     'absolute_storage_bin_root_skips_bare_windows_prefix',
