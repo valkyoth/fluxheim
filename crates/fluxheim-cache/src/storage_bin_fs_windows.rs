@@ -153,6 +153,11 @@ fn path_contains_reparse_point(path: &Path) -> std::io::Result<bool> {
     let mut current = PathBuf::new();
     for component in path.components() {
         current.push(component.as_os_str());
+        match component {
+            Component::Prefix(_) | Component::CurDir => continue,
+            Component::ParentDir => return Ok(true),
+            Component::RootDir | Component::Normal(_) => {}
+        }
         match std::fs::symlink_metadata(&current) {
             Ok(metadata) if metadata_is_reparse_point(&metadata) => return Ok(true),
             Ok(_) => {}
@@ -305,4 +310,30 @@ fn reject_existing_reparse_point_if_present(path: &Path) -> std::io::Result<()> 
 
 fn unsafe_path_error(message: String) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::PermissionDenied, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{path_contains_reparse_point, prepare_storage_bin_data_dir};
+
+    #[test]
+    fn absolute_storage_bin_root_skips_bare_windows_prefix() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("cache");
+        let data = root.join("bins");
+        std::fs::create_dir(&root).unwrap();
+
+        let prepared = prepare_storage_bin_data_dir(&root, &data).unwrap();
+
+        assert_eq!(prepared, data.canonicalize().unwrap());
+        assert!(!path_contains_reparse_point(&prepared).unwrap());
+    }
+
+    #[test]
+    fn parent_traversal_is_treated_as_unsafe() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("cache/../outside");
+
+        assert!(path_contains_reparse_point(&path).unwrap());
+    }
 }
