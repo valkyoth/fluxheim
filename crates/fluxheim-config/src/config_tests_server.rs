@@ -216,7 +216,10 @@ fn rejects_invalid_tls_listener() {
 
 #[test]
 fn parses_https_redirect_config() {
-    let config: Config = toml::from_str(
+    let certificate_dir = secure_test_dir("config-server-https-redirect-certificate");
+    let cert_path = safe_child_path(&certificate_dir, "fullchain.pem");
+    let key_path = safe_child_path(&certificate_dir, "key.pem");
+    let config: Config = toml::from_str(&format!(
         r#"
             [server]
             listen = ["127.0.0.1:8080"]
@@ -231,10 +234,12 @@ fn parses_https_redirect_config() {
             enabled = true
 
             [[tls.certificates]]
-            cert_path = "fullchain.pem"
-            key_path = "key.pem"
+            cert_path = '{}'
+            key_path = '{}'
             "#,
-    )
+        cert_path.display(),
+        key_path.display()
+    ))
     .unwrap();
 
     config.validate().unwrap();

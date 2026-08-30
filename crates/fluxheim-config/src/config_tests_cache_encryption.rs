@@ -5,6 +5,8 @@ fn accepts_cache_disk_encryption_local_file() {
     let root = unique_temp_path("config-cache-encryption-local");
     let secrets = root.join("secrets");
     std::fs::create_dir_all(&secrets).unwrap();
+    let cache_path = safe_child_path(&root, "cache");
+    let key_file = safe_child_path(&secrets, "cache-key");
     let config: Config = toml::from_str(&format!(
         r#"
             [cache]
@@ -12,17 +14,17 @@ fn accepts_cache_disk_encryption_local_file() {
 
             [cache.disk]
             enabled = true
-            path = "{}/cache"
+            path = '{}'
 
             [cache.disk.encryption]
             enabled = true
             provider = "local"
             algorithm = "aes-256-gcm"
             key_id = "cache-v1"
-            key_file = "{}/cache-key"
+            key_file = '{}'
             "#,
-        root.display(),
-        secrets.display()
+        cache_path.display(),
+        key_file.display()
     ))
     .unwrap();
 
@@ -101,6 +103,8 @@ fn rejects_conflicting_cache_disk_encryption_secret_sources() {
     let root = unique_temp_path("config-cache-encryption-conflict");
     let secrets = root.join("secrets");
     std::fs::create_dir_all(&secrets).unwrap();
+    let cache_path = safe_child_path(&root, "cache");
+    let key_file = safe_child_path(&secrets, "cache-key");
     let config: Config = toml::from_str(&format!(
         r#"
             [cache]
@@ -108,16 +112,16 @@ fn rejects_conflicting_cache_disk_encryption_secret_sources() {
 
             [cache.disk]
             enabled = true
-            path = "{}/cache"
+            path = '{}'
 
             [cache.disk.encryption]
             enabled = true
             provider = "local"
-            key_file = "{}/cache-key"
+            key_file = '{}'
             key_credential = "fluxheim-cache-key"
             "#,
-        root.display(),
-        secrets.display()
+        cache_path.display(),
+        key_file.display()
     ))
     .unwrap();
 

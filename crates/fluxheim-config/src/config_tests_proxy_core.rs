@@ -2,7 +2,12 @@ use super::super::*;
 
 #[test]
 fn parses_proxy_upstream_pool() {
-    let config: Config = toml::from_str(
+    let tls_dir = secure_test_dir("config-proxy-upstream-tls");
+    let ca_path = safe_child_path(&tls_dir, "localhost-cert.pem");
+    let client_cert_path = safe_child_path(&tls_dir, "client-cert.pem");
+    let client_key_path = safe_child_path(&tls_dir, "client-key.pem");
+    let error_page_root = secure_test_dir("config-proxy-error-pages");
+    let config: Config = toml::from_str(&format!(
         r#"
             [proxy]
             upstreams = ["127.0.0.1:3001", "127.0.0.1:3002", "127.0.0.1:3003"]
@@ -33,9 +38,9 @@ fn parses_proxy_upstream_pool() {
             upstream_verify_cert = true
             upstream_verify_hostname = true
             upstream_alternative_cn = "fallback-origin.example.test"
-            upstream_ca_path = "tests/fixtures/tls/localhost-cert.pem"
-            upstream_client_cert_path = "tests/fixtures/tls/localhost-cert.pem"
-            upstream_client_key_path = "tests/fixtures/tls/localhost-key.pem"
+            upstream_ca_path = '{}'
+            upstream_client_cert_path = '{}'
+            upstream_client_key_path = '{}'
             upstream_proxy_protocol = "v2"
             upstream_http_version = "http1-and-http2"
             upstream_h2_max_streams = 64
@@ -58,8 +63,8 @@ fn parses_proxy_upstream_pool() {
             expected_statuses = [200, 204]
             expected_body_contains = ["ready"]
             expected_body_json = [
-                { path = "status", equals = "ready" },
-                { path = "database.connected", equals = "true" },
+                {{ path = "status", equals = "ready" }},
+                {{ path = "database.connected", equals = "true" }},
             ]
             health_weight_min_percent = 30
             reuse_connection = true
@@ -99,9 +104,13 @@ fn parses_proxy_upstream_pool() {
             path = "/502.html"
 
             [proxy.error_pages.web]
-            root = "/srv/fluxheim/errors"
+            root = '{}'
             "#,
-    )
+        ca_path.display(),
+        client_cert_path.display(),
+        client_key_path.display(),
+        error_page_root.display()
+    ))
     .unwrap();
 
     assert_eq!(
@@ -166,15 +175,15 @@ fn parses_proxy_upstream_pool() {
     );
     assert_eq!(
         config.proxy.upstream_ca_path.as_deref(),
-        Some(Path::new("tests/fixtures/tls/localhost-cert.pem"))
+        Some(ca_path.as_path())
     );
     assert_eq!(
         config.proxy.upstream_client_cert_path.as_deref(),
-        Some(Path::new("tests/fixtures/tls/localhost-cert.pem"))
+        Some(client_cert_path.as_path())
     );
     assert_eq!(
         config.proxy.upstream_client_key_path.as_deref(),
-        Some(Path::new("tests/fixtures/tls/localhost-key.pem"))
+        Some(client_key_path.as_path())
     );
     assert_eq!(
         config.proxy.upstream_proxy_protocol,

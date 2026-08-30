@@ -88,7 +88,7 @@ mod wasm;
 mod web;
 
 fn secure_test_dir(label: &str) -> PathBuf {
-    let path = unique_temp_path(label);
+    let path = portable_test_path(unique_temp_path(label));
     fs::create_dir_all(&path).unwrap();
     #[cfg(unix)]
     {
@@ -96,6 +96,17 @@ fn secure_test_dir(label: &str) -> PathBuf {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
     }
     path
+}
+
+fn portable_test_path(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        dunce::simplified(&path).to_path_buf()
+    }
+    #[cfg(not(windows))]
+    {
+        path
+    }
 }
 
 fn test_process_config_toml(label: &str) -> String {
@@ -133,7 +144,7 @@ struct TestDir {
 
 impl TestDir {
     fn new(label: &str) -> Self {
-        let path = unique_temp_path(label);
+        let path = portable_test_path(unique_temp_path(label));
         fs::create_dir_all(&path).unwrap();
         Self { path }
     }

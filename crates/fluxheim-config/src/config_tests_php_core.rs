@@ -6,6 +6,10 @@ fn parses_php_fpm_vhost_config() {
     std::fs::create_dir_all(&root).unwrap();
     let spool_dir = unique_temp_path("config-php-fpm-spool");
     std::fs::create_dir_all(&spool_dir).unwrap();
+    #[cfg(windows)]
+    let fpm_root = r"C:\app\public";
+    #[cfg(not(windows))]
+    let fpm_root = "/app/public";
     let config: Config = toml::from_str(&format!(
         r#"
             {}
@@ -20,7 +24,7 @@ fn parses_php_fpm_vhost_config() {
             runtime = "php-fpm"
             root = '{}'
             resolve_root_symlink = true
-            fpm_root = "/app/public"
+            fpm_root = '{}'
             index = "index.php"
             allowed_extensions = ["php"]
             deny_path_prefixes = ["/wp-content/uploads/", "/uploads"]
@@ -69,6 +73,7 @@ fn parses_php_fpm_vhost_config() {
             "#,
         test_process_config_toml("config-php-fpm-process"),
         root.display(),
+        fpm_root,
         spool_dir.display(),
         root.display()
     ))
@@ -83,7 +88,7 @@ fn parses_php_fpm_vhost_config() {
     assert!(php.resolve_root_symlink);
     assert_eq!(
         php.fpm_root.as_deref(),
-        Some(std::path::Path::new("/app/public"))
+        Some(std::path::Path::new(fpm_root))
     );
     assert_eq!(
         php.deny_path_prefixes,
@@ -285,7 +290,8 @@ fn parses_managed_php_fpm_config() {
 #[cfg(not(unix))]
 #[test]
 fn rejects_managed_php_fpm_without_unix_process_support() {
-    let config: Config = toml::from_str(
+    let root = secure_test_dir("config-php-managed-unsupported-root");
+    let config: Config = toml::from_str(&format!(
         r#"
             [[vhosts]]
             name = "php"
@@ -293,18 +299,24 @@ fn rejects_managed_php_fpm_without_unix_process_support() {
 
             [vhosts.php]
             enabled = true
+            root = '{}'
 
             [vhosts.php.fpm]
             mode = "managed"
         "#,
-    )
+        root.display()
+    ))
     .unwrap();
 
     assert_eq!(
         config.validate().unwrap_err(),
-        ConfigError::InvalidPhpConfig {
-            field: "php.fpm.mode",
-            reason: "managed php-fpm requires Unix sockets",
+        ConfigError::VhostSection {
+            vhost: "php".to_owned(),
+            section: "php",
+            source: Box::new(ConfigError::InvalidPhpConfig {
+                field: "php.fpm.mode",
+                reason: "managed php-fpm requires Unix sockets",
+            }),
         }
     );
 }
