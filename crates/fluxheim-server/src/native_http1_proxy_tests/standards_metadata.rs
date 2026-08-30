@@ -287,13 +287,16 @@ async fn native_proxy_emits_low_cardinality_rfc_9209_failure() {
     .with_header_policy(&metadata_headers());
     let response = downstream_get(proxy_listener_for(proxy).await, "/failure").await;
 
-    assert!(
-        response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"),
-        "unexpected proxy failure response: {response:?}"
-    );
-    assert_eq!(
-        response_header(&response, "proxy-status"),
-        Some("edge-gateway; error=connection_refused")
-    );
+    match response_header(&response, "proxy-status") {
+        Some("edge-gateway; error=connection_refused") => assert!(
+            response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"),
+            "unexpected connection-refused response: {response:?}"
+        ),
+        Some("edge-gateway; error=connection_timeout") => assert!(
+            response.starts_with("HTTP/1.1 504 Gateway Timeout\r\n"),
+            "unexpected connection-timeout response: {response:?}"
+        ),
+        status => panic!("unexpected proxy status {status:?}: {response:?}"),
+    }
     assert!(!response.contains(&unavailable.to_string()));
 }

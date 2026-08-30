@@ -141,6 +141,17 @@ mod tests {
         let process_root = fluxheim_common::test_support::unique_temp_path("reloadable-router");
         std::fs::create_dir_all(&process_root).unwrap();
         let process_root_path = std::fs::canonicalize(process_root).unwrap();
+        let pid_file = format!("{:?}", process_root_path.join("fluxheim.pid").display());
+        let upgrade_sock = format!(
+            "{:?}",
+            process_root_path.join("fluxheim-upgrade.sock").display()
+        );
+        let certificate_reload_sock = format!(
+            "{:?}",
+            process_root_path
+                .join("fluxheim-certificate-reload.sock")
+                .display()
+        );
         Config::load_snapshot_bytes(
             format!(
                 r#"
@@ -148,9 +159,9 @@ mod tests {
 default_vhost = "reload.test"
 
 [server.process]
-pid_file = "{}"
-upgrade_sock = "{}"
-certificate_reload_sock = "{}"
+pid_file = {pid_file}
+upgrade_sock = {upgrade_sock}
+certificate_reload_sock = {certificate_reload_sock}
 
 [proxy]
 upstreams = ["127.0.0.1:9"]
@@ -165,11 +176,6 @@ enabled = true
 to = "{target}"
 status = 308
 "#,
-                process_root_path.join("fluxheim.pid").display(),
-                process_root_path.join("fluxheim-upgrade.sock").display(),
-                process_root_path
-                    .join("fluxheim-certificate-reload.sock")
-                    .display(),
             )
             .as_bytes(),
         )
