@@ -66,7 +66,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | HTTPS redirects | ✅ | Optional global HTTP-to-HTTPS redirects with safe Host validation. |
 | Secure headers | ✅ | Request/response policy, opt-in hardening and cross-origin-isolation profiles, typed CSP reporting and modern browser controls, validated request-aware CORS, automatic `Vary`, bounded `Retry-After`, and opt-in RFC 9211/9209/9530 response metadata; origin `Server` headers are preserved by default and removed by the hardening profiles. |
 | PHP-FPM applications | ✅ | External php-fpm for existing pools. |
-| Managed PHP-FPM | ✅ | Fluxheim-supervised php-fpm pools for zero-admin WordPress-style deployments. |
+| Managed PHP-FPM | ✅ | Fluxheim-supervised php-fpm pools for zero-admin WordPress-style deployments on Unix; Windows supports external TCP FastCGI only. |
 
 ### Cache
 
@@ -381,6 +381,9 @@ Fluxheim `1.3.7` completed the production PHP-FPM line with managed php-fpm
 supervision as an opt-in runtime mode. The Wolfi PHP image is self-contained
 for managed PHP-FPM and includes the Wolfi `php-8.5-fpm` runtime; non-Wolfi PHP
 image variants keep the external php-fpm container config unless customized.
+Managed supervision requires Unix process and socket primitives. Windows PHP
+archives support operator-managed external FastCGI pools over TCP and reject
+`mode = "managed"` during configuration validation.
 Pure-Rust PHP/phprs support is not planned; managed php-fpm is the supported
 zero-admin PHP path.
 

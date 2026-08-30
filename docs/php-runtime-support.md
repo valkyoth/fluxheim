@@ -103,6 +103,10 @@ allow_private_tcp_upstreams = true
 Managed php-fpm mode keeps the runtime selection in
 `[vhosts.php.fpm]` instead of adding a new compile-time PHP runtime:
 
+Managed mode requires Unix process groups and Unix sockets. On Windows, use
+the default external mode with `tcp` or `tcp_upstreams`; Windows validation
+rejects `mode = "managed"` before startup.
+
 ```toml
 [vhosts.php.fpm]
 mode = "managed" # "external" remains the default

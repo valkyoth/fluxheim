@@ -99,7 +99,8 @@ cargo build --no-default-features --features profile-web-server,php-fpm,acme-cli
 Fluxheim `1.3.7` adds managed php-fpm process supervision as a runtime config
 mode inside this same `php-fpm` feature, not as a separate Cargo feature. It
 still uses the FastCGI bridge; only php-fpm process lifecycle changes from
-operator-managed to Fluxheim-supervised.
+operator-managed to Fluxheim-supervised. Managed supervision is Unix-only;
+Windows builds support external TCP FastCGI and reject `mode = "managed"`.
 
 Fluxheim no longer reserves a pure-Rust PHP/phprs runtime for `1.3.8`. Managed
 php-fpm is the supported zero-admin PHP direction.

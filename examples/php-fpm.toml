@@ -115,8 +115,9 @@ tcp = "php-fpm:9000"
 # retry_invalid_response = false
 # retry_statuses = [500, 502, 503, 504]
 #
-# Or let Fluxheim start a private php-fpm pool while still using the same
-# FastCGI/php-fpm request path. Do not set tcp, tcp_upstreams, or socket when
+# Or, on Unix, let Fluxheim start a private php-fpm pool while still using the
+# same FastCGI/php-fpm request path. Windows supports external TCP FastCGI only
+# and rejects managed mode. Do not set tcp, tcp_upstreams, or socket when using
 # mode = "managed".
 # mode = "managed"
 # php_fpm_binary = "/usr/sbin/php-fpm"

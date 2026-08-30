@@ -12,6 +12,9 @@ same seven public profiles used by Linux and Apple Silicon macOS.
   certificate-storage assumptions with reviewed Windows-native behavior.
 - Add native live static, proxy, TLS, cache, admin, load-balancer,
   observability, and packaged-Wasm tests before publishing Windows artifacts.
+- Keep the Windows `php` profile on the shared FastCGI request path with
+  external TCP pools. Managed PHP-FPM supervision remains Unix-only and is
+  rejected during Windows configuration validation and runtime construction.
 - Produce exact-tag, architecture, checksum, test, and reproducibility evidence
   from dedicated Windows builders. Planning-only output is not releasable.
 
