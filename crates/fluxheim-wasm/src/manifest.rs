@@ -411,10 +411,21 @@ mod tests {
     use std::fs;
     use std::time::Duration;
 
+    fn absolute_plugin_path() -> PathBuf {
+        let path = std::env::temp_dir()
+            .join("fluxheim-wasm-manifest")
+            .join("security_headers.wasm");
+        assert!(
+            path.is_absolute(),
+            "test temporary directory must be absolute"
+        );
+        path
+    }
+
     fn valid_manifest() -> WasmPluginManifest {
         WasmPluginManifest {
             name: "security-headers".to_owned(),
-            path: PathBuf::from("/srv/fluxheim/plugins/security_headers.wasm"),
+            path: absolute_plugin_path(),
             expected_sha256: None,
             abi: WasmPluginAbi::FluxheimPolicyV1,
             host_call_namespace: WasmHostCallNamespace::FluxheimPolicyV1,
@@ -463,7 +474,11 @@ mod tests {
     #[test]
     fn rejects_dot_segment_plugin_path() {
         let mut manifest = valid_manifest();
-        manifest.path = PathBuf::from("/srv/fluxheim/plugins/../plugin.wasm");
+        manifest.path = absolute_plugin_path()
+            .parent()
+            .unwrap()
+            .join("..")
+            .join("plugin.wasm");
 
         let error = validate_plugin_manifest(manifest, false).unwrap_err();
 
