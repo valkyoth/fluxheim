@@ -20,6 +20,10 @@ same seven public profiles used by Linux and Apple Silicon macOS.
   external TCP pools. Managed PHP-FPM supervision remains Unix-only and is
   rejected during Windows configuration validation and runtime construction;
   a native Windows TCP FastCGI responder regression proves the supported path.
+- Cross-check all seven public profiles for `aarch64-pc-windows-msvc` on the
+  normal Windows CI host so target-specific compile failures surface before a
+  native ARM64 release-builder run. This check does not execute ARM64 code and
+  is not accepted as release evidence.
 
 ## Remaining Release Blocks
 

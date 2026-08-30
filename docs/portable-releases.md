@@ -93,8 +93,11 @@ published.
 
 The normal native x86_64 CI gate now passes that complete matrix, including
 crash-restart storage-bin recovery and execution of all seven generated ZIP
-profiles. Native ARM64 execution and exact-tag, two-build reproducibility
-evidence from both dedicated cloud builders remain mandatory release blocks.
+profiles. It also cross-checks all seven profiles for
+`aarch64-pc-windows-msvc` to catch target-specific compile failures early.
+That cross-check does not execute ARM64 code and is not release evidence.
+Native ARM64 execution and exact-tag, two-build reproducibility evidence from
+both dedicated cloud builders remain mandatory release blocks.
 
 Live platform parity remains staged:
 

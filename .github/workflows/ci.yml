@@ -324,6 +324,17 @@ jobs:
           cargo check --locked --no-default-features --features profile-web-server,php-fpm,acme-client --bin fluxheim --bin fluxheim-acme
           cargo check --locked --no-default-features --features profile-development --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
 
+      - name: Cross-check Windows ARM64 portable profiles
+        run: |
+          rustup target add aarch64-pc-windows-msvc
+          cargo check --locked --target aarch64-pc-windows-msvc --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp --bin fluxheim --bin fluxheim-acme
+          cargo check --locked --target aarch64-pc-windows-msvc --no-default-features --features profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp --bin fluxheim --bin fluxheim-acme
+          cargo check --locked --target aarch64-pc-windows-msvc --no-default-features --features profile-cache-edge,acme-client --bin fluxheim --bin fluxheim-acme
+          cargo check --locked --target aarch64-pc-windows-msvc --no-default-features --features profile-proxy-edge,acme-client --bin fluxheim --bin fluxheim-acme
+          cargo check --locked --target aarch64-pc-windows-msvc --no-default-features --features profile-load-balancer-edge,acme-client --bin fluxheim --bin fluxheim-acme
+          cargo check --locked --target aarch64-pc-windows-msvc --no-default-features --features profile-web-server,php-fpm,acme-client --bin fluxheim --bin fluxheim-acme
+          cargo check --locked --target aarch64-pc-windows-msvc --no-default-features --features profile-development --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
+
       - name: Run Windows native runtime parity smoke
         shell: pwsh
         run: scripts/smoke_windows_native.ps1
