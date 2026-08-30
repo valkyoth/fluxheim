@@ -393,7 +393,14 @@ pub(crate) fn sync_directory(path: &Path) -> Result<(), SnapshotError> {
         sync_directory_unix(path)
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        // Windows FlushFileBuffers requires a writable file handle and does not
+        // provide the Unix directory-fsync contract through std::fs::File.
+        require_real_directory(path)
+    }
+
+    #[cfg(not(any(unix, windows)))]
     {
         let directory = File::open(path).map_err(SnapshotError::Io)?;
         directory.sync_all().map_err(SnapshotError::Io)
