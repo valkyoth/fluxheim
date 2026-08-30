@@ -96,6 +96,8 @@ foreach ($required in @(
     'New-WindowsSmokeCertificate',
     'New-WindowsSmokeUpstreamCertificate',
     '[Security.Cryptography.X509Certificates.RSACertificateExtensions]::CopyWithPrivateKey(',
+    '[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet',
+    '[Array]::Clear($pkcs12, 0, $pkcs12.Length)',
     'public string LastError',
     'Interlocked.Exchange(ref this.lastError, diagnostic.ToString())',
     'origin_error=$upstreamTlsOriginError',

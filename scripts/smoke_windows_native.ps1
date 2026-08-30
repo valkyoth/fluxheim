@@ -137,6 +137,8 @@ function New-WindowsSmokeUpstreamCertificate {
     $originKey = [Security.Cryptography.RSA]::Create(2048)
     $caCertificate = $null
     $issuedCertificate = $null
+    $certificateWithKey = $null
+    $pkcs12 = $null
     try {
         $caRequest = [Security.Cryptography.X509Certificates.CertificateRequest]::new(
             'CN=Fluxheim Windows upstream smoke CA',
@@ -207,11 +209,35 @@ function New-WindowsSmokeUpstreamCertificate {
             [DateTimeOffset]::UtcNow.AddDays(1),
             $serial
         )
-        return [Security.Cryptography.X509Certificates.RSACertificateExtensions]::CopyWithPrivateKey(
+        $certificateWithKey =
+            [Security.Cryptography.X509Certificates.RSACertificateExtensions]::CopyWithPrivateKey(
             $issuedCertificate,
             $originKey
         )
+        if (-not $certificateWithKey.HasPrivateKey) {
+            throw 'Windows upstream smoke certificate has no private key'
+        }
+        $pkcs12 = $certificateWithKey.Export(
+            [Security.Cryptography.X509Certificates.X509ContentType]::Pkcs12,
+            [string]::Empty
+        )
+        $detachedCertificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            $pkcs12,
+            [string]::Empty,
+            [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+        )
+        if (-not $detachedCertificate.HasPrivateKey) {
+            $detachedCertificate.Dispose()
+            throw 'Windows upstream smoke certificate import lost its private key'
+        }
+        return $detachedCertificate
     } finally {
+        if ($null -ne $pkcs12) {
+            [Array]::Clear($pkcs12, 0, $pkcs12.Length)
+        }
+        if ($null -ne $certificateWithKey) {
+            $certificateWithKey.Dispose()
+        }
         if ($null -ne $issuedCertificate) {
             $issuedCertificate.Dispose()
         }
