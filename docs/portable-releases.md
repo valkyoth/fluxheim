@@ -91,6 +91,11 @@ boundary instead of replacing it with permissive cross-platform fallbacks, and
 must pass natively on both x86_64 and ARM64 before Windows archives are
 published.
 
+The normal native x86_64 CI gate now passes that complete matrix, including
+crash-restart storage-bin recovery and execution of all seven generated ZIP
+profiles. Native ARM64 execution and exact-tag, two-build reproducibility
+evidence from both dedicated cloud builders remain mandatory release blocks.
+
 Live platform parity remains staged:
 
 - `1.8.1` completes the defined unsigned native macOS runtime and archive

@@ -15,12 +15,21 @@ behavior when the change improves security or project direction.
   hosts, with one validated seven-profile archive contract for both targets.
 - Add PowerShell-native Windows archive tooling and fail-closed release-builder
   preparation for dedicated Azure or operator-managed build hosts.
+- Add a native Windows x86_64 CI gate covering the complete workspace, all
+  seven public profiles, live static and proxy traffic, downstream and verified
+  upstream TLS, memory and persistent storage-bin cache, load balancing, admin,
+  metrics, external TCP FastCGI, ACME storage, crash recovery, CTRL_BREAK
+  shutdown, every packaged executable, and the packaged Wasm examples.
 
 ### Changed
 
 - Require Windows release evidence to identify the exact signed tag commit,
   native host architecture, test scope, archive checksums, and reproducible
   build hashes before the Linux release aggregator accepts it.
+- Use Windows-native owner and ACL validation, reparse-point rejection,
+  exclusive storage leases, atomic file replacement, portable path handling,
+  and Schannel-compatible ephemeral test credentials instead of weakening the
+  existing filesystem and TLS trust boundaries.
 
 ## 1.8.1 - 2026-08-28
 
