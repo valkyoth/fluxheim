@@ -174,10 +174,6 @@ impl NativeSafeDiskCachePath {
         Ok(file)
     }
 
-    pub(super) fn create_new_file(&self) -> std::io::Result<std::fs::File> {
-        self.open(false, true, false, true)
-    }
-
     pub(super) fn open_existing_file(&self) -> std::io::Result<std::fs::File> {
         self.open(true, false, false, false)
     }
