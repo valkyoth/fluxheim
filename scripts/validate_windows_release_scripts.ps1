@@ -96,7 +96,7 @@ foreach ($required in @(
     'New-WindowsSmokeCertificate',
     'New-WindowsSmokeUpstreamCertificate',
     '[Security.Cryptography.X509Certificates.RSACertificateExtensions]::CopyWithPrivateKey(',
-    '[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet',
+    '[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::UserKeySet',
     '[Array]::Clear($pkcs12, 0, $pkcs12.Length)',
     'public string LastError',
     'Interlocked.Exchange(ref this.lastError, diagnostic.ToString())',
@@ -126,6 +126,9 @@ foreach ($required in @(
 }
 if ($smoke.Contains('$issuedCertificate.CopyWithPrivateKey(')) {
     throw 'Windows native smoke must invoke the RSA certificate extension explicitly'
+}
+if ($smoke.Contains('X509KeyStorageFlags]::PersistKeySet')) {
+    throw 'Windows native smoke must not persist generated TLS private keys'
 }
 
 $runtimeShutdown = Get-Content -LiteralPath (Join-Path $root 'src/runtime_shutdown.rs') -Raw

@@ -224,7 +224,7 @@ function New-WindowsSmokeUpstreamCertificate {
         $detachedCertificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
             $pkcs12,
             [string]::Empty,
-            [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+            [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::UserKeySet
         )
         if (-not $detachedCertificate.HasPrivateKey) {
             $detachedCertificate.Dispose()
