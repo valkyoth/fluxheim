@@ -8,6 +8,7 @@ use fluxheim_cache::{
     StorageBinObjectLocation, prepare_storage_bin_layout,
 };
 use fluxheim_config::{CacheConfig, CacheDiskBackend};
+#[cfg(not(windows))]
 use fs2::FileExt as _;
 
 use super::native_http1_cache_disk_path::prepare_native_disk_cache_root;
@@ -144,17 +145,24 @@ pub(super) fn acquire_native_storage_bin_lease(
     root: &std::path::Path,
 ) -> std::io::Result<NativeStorageBinLease> {
     let file = open_native_storage_bin_lease_file(root)?;
-    file.try_lock_exclusive().map_err(|error| {
-        if error.kind() == std::io::ErrorKind::WouldBlock {
-            std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                format!("storage-bin root is already owned: {}", root.display()),
-            )
-        } else {
-            error
-        }
-    })?;
+    #[cfg(not(windows))]
+    {
+        file.try_lock_exclusive().map_err(|error| {
+            if error.kind() == std::io::ErrorKind::WouldBlock {
+                native_storage_bin_already_owned_error(root)
+            } else {
+                error
+            }
+        })?;
+    }
     Ok(NativeStorageBinLease { _file: file })
+}
+
+fn native_storage_bin_already_owned_error(root: &std::path::Path) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        format!("storage-bin root is already owned: {}", root.display()),
+    )
 }
 
 #[cfg(unix)]
@@ -186,20 +194,58 @@ fn native_storage_bin_rustix_error(error: rustix::io::Errno) -> std::io::Error {
     std::io::Error::from_raw_os_error(error.raw_os_error())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn open_native_storage_bin_lease_file(root: &std::path::Path) -> std::io::Result<std::fs::File> {
+    use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, SECURITY_IDENTIFICATION,
+        SECURITY_SQOS_PRESENT,
+    };
+
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+
     let path = root.join(".fluxheim-storage-bin.lock");
-    if std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+    if std::fs::symlink_metadata(&path)
+        .is_ok_and(|metadata| metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+    {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
-            "storage-bin lease file must not be a symlink",
+            "storage-bin lease file must not be a reparse point",
         ));
     }
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .share_mode(0)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION)
+        .open(&path)
+        .map_err(|error| {
+            if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION) {
+                native_storage_bin_already_owned_error(root)
+            } else {
+                error
+            }
+        })?;
+    let metadata = file.metadata()?;
+    if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 || !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "storage-bin lease path must be a real file",
+        ));
+    }
+    Ok(file)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn open_native_storage_bin_lease_file(root: &std::path::Path) -> std::io::Result<std::fs::File> {
     std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
-        .open(path)
+        .open(root.join(".fluxheim-storage-bin.lock"))
 }
 
 pub(crate) fn prepare_native_storage_bin_root_for_lease(
