@@ -448,6 +448,26 @@ mod tests {
     }
 
     #[test]
+    fn current_verified_snapshot_rehydrates_the_complete_config() {
+        let dir = TestDir::new("snapshot-current-verified");
+        let store = SnapshotStore::new(dir.path());
+        assert!(store.current_verified_snapshot().unwrap().is_none());
+        let config = Config {
+            proxy: ProxyConfig {
+                upstream: Some("127.0.0.1:4000".to_owned()),
+                ..ProxyConfig::default()
+            },
+            ..Config::default()
+        };
+        let snapshot = store.snapshot_config(&config, Some("verified")).unwrap();
+
+        let verified = store.current_verified_snapshot().unwrap().unwrap();
+
+        assert_eq!(verified.snapshot.id, snapshot.id);
+        assert_eq!(verified.config, config);
+    }
+
+    #[test]
     fn rollback_without_target_selects_previous_snapshot() {
         let dir = TestDir::new("snapshot-rollback");
         let store = SnapshotStore::new(dir.path());

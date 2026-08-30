@@ -273,6 +273,17 @@ impl SnapshotStore {
         self.load_snapshot(&id).map(Some)
     }
 
+    pub fn current_verified_snapshot(
+        &self,
+    ) -> Result<Option<VerifiedConfigSnapshot>, SnapshotError> {
+        self.with_store_lock(|| {
+            let Some(id) = self.current_id_unlocked()? else {
+                return Ok(None);
+            };
+            self.verified_config_snapshot_unlocked(&id).map(Some)
+        })
+    }
+
     pub fn snapshot(&self, id: &str) -> Result<ConfigSnapshot, SnapshotError> {
         self.validate_root()?;
         self.load_snapshot(id)
@@ -305,7 +316,14 @@ impl SnapshotStore {
             }
             None => self.previous_snapshot_id()?,
         };
-        let (snapshot, raw_config) = self.load_snapshot_config_bytes(&id)?;
+        self.verified_config_snapshot_unlocked(&id)
+    }
+
+    fn verified_config_snapshot_unlocked(
+        &self,
+        id: &str,
+    ) -> Result<VerifiedConfigSnapshot, SnapshotError> {
+        let (snapshot, raw_config) = self.load_snapshot_config_bytes(id)?;
         let config = Config::load_snapshot_bytes(&raw_config).map_err(SnapshotError::Config)?;
         Ok(VerifiedConfigSnapshot { snapshot, config })
     }

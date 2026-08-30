@@ -83,8 +83,8 @@ impl AdminApp {
     }
 
     pub(super) fn reload_response(&self) -> AdminResponse {
-        let snapshot = match self.store.current_snapshot() {
-            Ok(Some(snapshot)) => snapshot,
+        let verified = match self.store.current_verified_snapshot() {
+            Ok(Some(verified)) => verified,
             Ok(None) => {
                 return error_response(
                     StatusCode::BAD_REQUEST,
@@ -93,15 +93,12 @@ impl AdminApp {
             }
             Err(error) => return error_response(StatusCode::BAD_REQUEST, &error.to_string()),
         };
-
-        let new_config = match Config::load(Some(&snapshot.config_path)) {
-            Ok(config) => config,
-            Err(error) => return error_response(StatusCode::BAD_REQUEST, &error.to_string()),
-        };
-        let impact = match self.apply_snapshot(&snapshot, new_config, SnapshotApplyMode::Reload) {
-            Ok(impact) => impact,
-            Err(response) => return response,
-        };
+        let snapshot = verified.snapshot;
+        let impact =
+            match self.apply_snapshot(&snapshot, verified.config, SnapshotApplyMode::Reload) {
+                Ok(impact) => impact,
+                Err(response) => return response,
+            };
 
         json_response_value(
             StatusCode::OK,
