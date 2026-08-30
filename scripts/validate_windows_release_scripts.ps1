@@ -96,6 +96,8 @@ foreach ($required in @(
     'upstream_verify_cert = true',
     'upstream_verify_hostname = true',
     'verified-upstream-tls path=/windows-upstream-tls',
+    'upstream-tls-invalid.test',
+    'upstream TLS hostname mismatch did not fail closed',
     'FluxheimWindowsSmokeOrigin',
     'origin-one path=/windows-proxy',
     'load-balancer.test',

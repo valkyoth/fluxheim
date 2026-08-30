@@ -434,6 +434,7 @@ pid_file = "$runtimeToml/fluxheim.pid"
 upgrade_sock = "$runtimeToml/fluxheim-upgrade.sock"
 certificate_reload_sock = "$runtimeToml/fluxheim-cert-reload.sock"
 graceful_shutdown_timeout_seconds = 5
+max_retries = 1
 
 [admin]
 enabled = true
@@ -566,6 +567,19 @@ hosts = ["upstream-tls.test"]
 upstreams = ["127.0.0.1:$originTlsPort"]
 upstream_tls = true
 upstream_sni = "origin.windows.test"
+upstream_verify_cert = true
+upstream_verify_hostname = true
+upstream_ca_path = "$upstreamCaToml"
+upstream_http_version = "http1"
+
+[[vhosts]]
+name = "upstream-tls-invalid.test"
+hosts = ["upstream-tls-invalid.test"]
+
+[vhosts.proxy]
+upstreams = ["127.0.0.1:$originTlsPort"]
+upstream_tls = true
+upstream_sni = "wrong-origin.windows.test"
 upstream_verify_cert = true
 upstream_verify_hostname = true
 upstream_ca_path = "$upstreamCaToml"
@@ -776,6 +790,19 @@ try {
             }
         } finally {
             $upstreamTlsResponse.Dispose()
+        }
+
+        $invalidUpstreamTlsResponse = Invoke-FluxheimRequest -Client $client `
+            -Uri $upstreamTlsUri -HostHeader 'upstream-tls-invalid.test'
+        try {
+            $invalidUpstreamTlsBody =
+                $invalidUpstreamTlsResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            if ([int]$invalidUpstreamTlsResponse.StatusCode -ne 502 -or
+                $invalidUpstreamTlsBody.Contains('verified-upstream-tls')) {
+                throw 'native Windows upstream TLS hostname mismatch did not fail closed'
+            }
+        } finally {
+            $invalidUpstreamTlsResponse.Dispose()
         }
 
         $adminHealthUri = [Uri]"http://127.0.0.1:$adminPort/_fluxheim/health"
