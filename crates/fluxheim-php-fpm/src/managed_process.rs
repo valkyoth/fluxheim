@@ -118,6 +118,22 @@ pub fn managed_php_fpm_from_config(
     }
 }
 
+#[cfg(all(test, not(unix)))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn managed_php_fpm_process_start_fails_closed_without_unix_support() {
+        let mut config = PhpConfig::default();
+        config.fpm.mode = PhpFpmMode::Managed;
+
+        let error = managed_php_fpm_from_config("test", "test", &mut config).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert_eq!(error.to_string(), "managed php-fpm requires Unix sockets");
+    }
+}
+
 #[cfg(unix)]
 impl ManagedPhpFpmProcess {
     fn socket_path(&self) -> &Path {

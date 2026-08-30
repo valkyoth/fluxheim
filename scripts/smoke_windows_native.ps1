@@ -18,6 +18,18 @@ if ($LASTEXITCODE -ne 0) {
     throw 'native Windows ACME storage and lifecycle regressions failed'
 }
 
+& cargo.exe test --locked -p fluxheim-config --lib `
+    'rejects_managed_php_fpm_without_unix_process_support' -- --nocapture
+if ($LASTEXITCODE -ne 0) {
+    throw 'native Windows managed PHP-FPM config rejection regression failed'
+}
+
+& cargo.exe test --locked -p fluxheim-php-fpm --lib `
+    'managed_php_fpm_process_start_fails_closed_without_unix_support' -- --nocapture
+if ($LASTEXITCODE -ne 0) {
+    throw 'native Windows managed PHP-FPM runtime rejection regression failed'
+}
+
 & cargo.exe test --locked -p fluxheim-server --lib `
     'native_http1_cache::lease_tests::storage_bin_' -- --nocapture
 if ($LASTEXITCODE -ne 0) {

@@ -281,3 +281,30 @@ fn parses_managed_php_fpm_config() {
     assert!(php.fpm.tcp.is_none());
     assert!(php.fpm.tcp_upstreams.is_empty());
 }
+
+#[cfg(not(unix))]
+#[test]
+fn rejects_managed_php_fpm_without_unix_process_support() {
+    let config: Config = toml::from_str(
+        r#"
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+
+            [vhosts.php.fpm]
+            mode = "managed"
+        "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate().unwrap_err(),
+        ConfigError::InvalidPhpConfig {
+            field: "php.fpm.mode",
+            reason: "managed php-fpm requires Unix sockets",
+        }
+    );
+}
