@@ -72,6 +72,8 @@ foreach ($required in @(
     "expected MISS",
     "expected HIT",
     'backend = "storage-bin"',
+    'cargo.exe test --locked -p fluxheim-acme --lib',
+    'native Windows ACME storage and lifecycle regressions failed',
     'native_http1_cache::lease_tests::storage_bin_',
     'native Windows storage-bin lease regressions failed',
     'absolute_storage_bin_root_skips_bare_windows_prefix',

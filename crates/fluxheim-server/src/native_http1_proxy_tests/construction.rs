@@ -251,24 +251,30 @@ fn native_proxy_config_applies_downstream_read_timeout() {
 
 #[test]
 fn native_proxy_config_applies_portable_socket_options() {
-    let mut proxy = fluxheim_config::ProxyConfig {
-        upstream: Some("127.0.0.1:3000".to_owned()),
-        upstream_tcp_recv_buffer_bytes: Some(fluxheim_config::ByteSize::from_bytes(65_536)),
-        upstream_dscp: Some(10),
-        upstream_tcp_keepalive_idle_secs: Some(30),
-        upstream_tcp_keepalive_interval_secs: Some(10),
-        upstream_tcp_keepalive_count: Some(3),
-        ..Default::default()
-    };
     #[cfg(any(
         target_os = "android",
         target_os = "fuchsia",
         target_os = "linux",
         target_os = "cygwin",
     ))]
-    {
-        proxy.upstream_tcp_user_timeout_ms = Some(15000);
-    }
+    let upstream_tcp_user_timeout_ms = Some(15000);
+    #[cfg(not(any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "cygwin",
+    )))]
+    let upstream_tcp_user_timeout_ms = None;
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        upstream_tcp_recv_buffer_bytes: Some(fluxheim_config::ByteSize::from_bytes(65_536)),
+        upstream_dscp: Some(10),
+        upstream_tcp_keepalive_idle_secs: Some(30),
+        upstream_tcp_keepalive_interval_secs: Some(10),
+        upstream_tcp_keepalive_count: Some(3),
+        upstream_tcp_user_timeout_ms,
+        ..Default::default()
+    };
 
     let native = NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default())
         .unwrap()
@@ -317,24 +323,30 @@ async fn native_proxy_socket_options_connect_to_upstream() {
             .unwrap();
     })
     .await;
-    let mut proxy = fluxheim_config::ProxyConfig {
-        upstream: Some(upstream.to_string()),
-        upstream_tcp_recv_buffer_bytes: Some(fluxheim_config::ByteSize::from_bytes(65_536)),
-        upstream_dscp: Some(10),
-        upstream_tcp_keepalive_idle_secs: Some(30),
-        upstream_tcp_keepalive_interval_secs: Some(10),
-        upstream_tcp_keepalive_count: Some(3),
-        ..Default::default()
-    };
     #[cfg(any(
         target_os = "android",
         target_os = "fuchsia",
         target_os = "linux",
         target_os = "cygwin",
     ))]
-    {
-        proxy.upstream_tcp_user_timeout_ms = Some(15000);
-    }
+    let upstream_tcp_user_timeout_ms = Some(15000);
+    #[cfg(not(any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "cygwin",
+    )))]
+    let upstream_tcp_user_timeout_ms = None;
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some(upstream.to_string()),
+        upstream_tcp_recv_buffer_bytes: Some(fluxheim_config::ByteSize::from_bytes(65_536)),
+        upstream_dscp: Some(10),
+        upstream_tcp_keepalive_idle_secs: Some(30),
+        upstream_tcp_keepalive_interval_secs: Some(10),
+        upstream_tcp_keepalive_count: Some(3),
+        upstream_tcp_user_timeout_ms,
+        ..Default::default()
+    };
     let native = NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default())
         .unwrap()
         .expect("native proxy");

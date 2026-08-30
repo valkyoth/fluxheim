@@ -390,16 +390,20 @@ fn static_reason(status: u16) -> &'static str {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::time::{Duration, Instant, SystemTime};
+    use std::time::{Duration, Instant};
 
+    #[cfg(unix)]
     use tempfile::TempDir;
 
-    use super::{native_static_cache_expires_at, open_static_body_file};
+    use super::native_static_cache_expires_at;
+    #[cfg(unix)]
+    use super::open_static_body_file;
     use crate::NativeHttp1Response;
     use crate::native_http1_cache::{
         NativeMemoryCacheEntry, NativeMemoryCacheState, native_cache_entry_weight,
         prune_native_memory_cache,
     };
+    #[cfg(unix)]
     use crate::native_http1_static_web::NativeStaticFile;
 
     #[test]
@@ -476,6 +480,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn open_static_body_file_rejects_symlink_swapped_after_resolution() {
+        use std::time::SystemTime;
+
         let root = TempDir::new().unwrap();
         let asset = root.path().join("asset.txt");
         let outside = root.path().join("outside.txt");

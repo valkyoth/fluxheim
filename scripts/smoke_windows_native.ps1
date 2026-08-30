@@ -13,6 +13,11 @@ if ($LASTEXITCODE -ne 0) {
     throw 'native Windows smoke binary build failed'
 }
 
+& cargo.exe test --locked -p fluxheim-acme --lib
+if ($LASTEXITCODE -ne 0) {
+    throw 'native Windows ACME storage and lifecycle regressions failed'
+}
+
 & cargo.exe test --locked -p fluxheim-server --lib `
     'native_http1_cache::lease_tests::storage_bin_' -- --nocapture
 if ($LASTEXITCODE -ne 0) {
