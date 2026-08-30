@@ -84,7 +84,7 @@ fn parses_filesystem_disk_cache_backend() {
             [cache.disk]
             enabled = true
             backend = "filesystem"
-            path = "{}"
+            path = '{}'
             "#,
         root.display()
     ))
@@ -108,7 +108,7 @@ fn accepts_storage_bin_backend() {
             [cache.disk]
             enabled = true
             backend = "storage-bin"
-            path = "{}"
+            path = '{}'
             "#,
         root.display()
     ))
@@ -133,7 +133,7 @@ fn parses_reserved_storage_bin_backend_options() {
             [cache.disk]
             enabled = true
             backend = "storage-bin"
-            path = "{}"
+            path = '{}'
             max_size_bytes = "2GiB"
 
             [cache.disk.storage_bin]
@@ -170,7 +170,7 @@ fn rejects_storage_bin_smaller_than_cache_object_limit() {
             [cache.disk]
             enabled = true
             backend = "storage-bin"
-            path = "{}"
+            path = '{}'
             max_size_bytes = "2GiB"
 
             [cache.disk.storage_bin]
@@ -200,7 +200,7 @@ fn rejects_zero_storage_bin_max_open_bins() {
             [cache.disk]
             enabled = true
             backend = "storage-bin"
-            path = "{}"
+            path = '{}'
             max_size_bytes = "2GiB"
 
             [cache.disk.storage_bin]

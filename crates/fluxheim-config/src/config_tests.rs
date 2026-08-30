@@ -103,14 +103,28 @@ fn test_process_config_toml(label: &str) -> String {
     format!(
         r#"
             [server.process]
-            pid_file = "{}"
-            upgrade_sock = "{}"
-            certificate_reload_sock = "{}"
+            pid_file = '{}'
+            upgrade_sock = '{}'
+            certificate_reload_sock = '{}'
             "#,
         safe_child_path(&root, "fluxheim.pid").display(),
         safe_child_path(&root, "fluxheim-upgrade.sock").display(),
         safe_child_path(&root, "fluxheim-cert-reload.sock").display()
     )
+}
+
+fn valid_exec_health_check_config() -> Config {
+    let command = std::env::current_exe().unwrap().display().to_string();
+    let mut config: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "exec"
+            "#,
+    )
+    .unwrap();
+    config.proxy.load_balance.health_check.exec_command = Some(command.clone());
+    config.proxy.load_balance.health_check.exec_allowed_commands = vec![command];
+    config
 }
 
 struct TestDir {

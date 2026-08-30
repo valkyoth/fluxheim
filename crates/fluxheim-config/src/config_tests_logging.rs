@@ -46,7 +46,7 @@ fn parses_file_logging_config() {
         r#"
             [logging.file]
             enabled = true
-            path = "{}"
+            path = '{}'
             append = false
             "#,
         log_path.display()
@@ -112,7 +112,7 @@ fn rejects_file_logging_under_world_writable_parent() {
     let config: Config = toml::from_str(&format!(
         r#"
             [logging.file]
-            path = "{}"
+            path = '{}'
             "#,
         path.display()
     ))

@@ -18,7 +18,7 @@ fn rejects_too_many_php_stderr_failure_patterns() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             stderr_failure_patterns = [{}]
 
             [vhosts.php.fpm]
@@ -50,7 +50,7 @@ fn rejects_invalid_php_hidden_response_header() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             hide_response_headers = ["bad header"]
 
             [vhosts.php.fpm]
@@ -80,7 +80,7 @@ fn rejects_duplicate_php_hidden_response_header() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             hide_response_headers = ["x-powered-by", "X-Powered-By"]
 
             [vhosts.php.fpm]
@@ -115,7 +115,7 @@ fn rejects_too_many_php_hidden_response_headers() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             hide_response_headers = [{}]
 
             [vhosts.php.fpm]
@@ -147,7 +147,7 @@ fn rejects_invalid_php_intercept_error_status() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             intercept_error_statuses = [302]
 
             [vhosts.php.fpm]
@@ -177,7 +177,7 @@ fn rejects_duplicate_php_intercept_error_status() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             intercept_error_statuses = [500, 500]
 
             [vhosts.php.fpm]
@@ -211,7 +211,7 @@ fn rejects_too_many_php_intercept_error_statuses() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             intercept_error_statuses = [{}]
 
             [vhosts.php.fpm]
@@ -243,21 +243,21 @@ fn rejects_duplicate_php_error_page_status() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [[vhosts.php.error_pages]]
             status = 502
             path = "/502.html"
 
             [vhosts.php.error_pages.web]
-            root = "{}"
+            root = '{}'
 
             [[vhosts.php.error_pages]]
             status = 502
             path = "/fallback.html"
 
             [vhosts.php.error_pages.web]
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
@@ -287,7 +287,7 @@ fn rejects_too_many_php_error_pages() {
             path = "/{}.html"
 
             [vhosts.php.error_pages.web]
-            root = "{}"
+            root = '{}'
                     "#,
                 400 + index,
                 400 + index,
@@ -306,7 +306,7 @@ fn rejects_too_many_php_error_pages() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             {}
 

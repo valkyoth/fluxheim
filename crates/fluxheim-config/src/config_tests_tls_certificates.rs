@@ -73,23 +73,23 @@ fn rejects_too_many_tls_certificates() {
 
 #[test]
 fn accepts_tls_client_auth_required_with_ca_bundle() {
-    let config: Config = toml::from_str(
+    let ca_path = safe_child_path(
+        &secure_test_dir("config-tls-client-auth-ca"),
+        "client-ca.pem",
+    );
+    let config: Config = toml::from_str(&format!(
         r#"
             [tls.client_auth]
             mode = "required"
-            ca_path = "tests/fixtures/tls/localhost-cert.pem"
+            ca_path = '{}'
             "#,
-    )
+        ca_path.display()
+    ))
     .unwrap();
 
     config.validate().unwrap();
     assert_eq!(config.tls.client_auth.mode, TlsClientAuthMode::Required);
-    assert_eq!(
-        config.tls.client_auth.ca_path.as_deref(),
-        Some(std::path::Path::new(
-            "tests/fixtures/tls/localhost-cert.pem"
-        ))
-    );
+    assert_eq!(config.tls.client_auth.ca_path, Some(ca_path));
 }
 
 #[test]
@@ -156,7 +156,11 @@ fn rejects_tls_client_auth_crl_while_client_auth_is_off() {
 
 #[test]
 fn compliance_mode_requires_crl_for_required_client_auth() {
-    let config: Config = toml::from_str(
+    let ca_path = safe_child_path(
+        &secure_test_dir("config-tls-compliance-client-auth-ca"),
+        "client-ca.pem",
+    );
+    let config: Config = toml::from_str(&format!(
         r#"
             [tls]
             curve_preferences = ["CurveP256", "CurveP384"]
@@ -167,9 +171,10 @@ fn compliance_mode_requires_crl_for_required_client_auth() {
 
             [tls.client_auth]
             mode = "required"
-            ca_path = "tests/fixtures/tls/localhost-cert.pem"
+            ca_path = '{}'
         "#,
-    )
+        ca_path.display()
+    ))
     .unwrap();
 
     assert_eq!(
@@ -232,7 +237,7 @@ fn rejects_too_many_vhost_acme_domains() {
         r#"
             [tls.acme]
             enabled = true
-            storage = "{}"
+            storage = '{}'
             contact_email = "admin@example.test"
             default_issuer = "letsencrypt"
 
@@ -349,8 +354,8 @@ fn rejects_tls_certificate_paths_under_world_writable_parent() {
             enabled = true
 
             [[tls.certificates]]
-            cert_path = "{}"
-            key_path = "{}"
+            cert_path = '{}'
+            key_path = '{}'
             "#,
         cert_path.display(),
         key_path.display()
@@ -374,8 +379,8 @@ fn rejects_tls_certificate_paths_under_group_writable_parent() {
             enabled = true
 
             [[tls.certificates]]
-            cert_path = "{}"
-            key_path = "{}"
+            cert_path = '{}'
+            key_path = '{}'
             "#,
         cert_path.display(),
         key_path.display()

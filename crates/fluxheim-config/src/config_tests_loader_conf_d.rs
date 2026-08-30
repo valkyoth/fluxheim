@@ -92,7 +92,7 @@ fn conf_d_proxy_nested_fragments_merge_without_replacing_security_policy() {
             hash_header = "x-session"
             max_iterations = 16
             all_down_status = 503
-            runtime_state_file = "{}"
+            runtime_state_file = '{}'
 
             [proxy.load_balance.health_check]
             enabled = true
@@ -301,7 +301,7 @@ fn conf_d_admin_fragment_extends_without_replacing_main_auth_policy() {
                 enabled = true
                 listen = "127.0.0.1:19090"
                 token_env = "FLUXHEIM_ADMIN_TOKEN"
-                snapshot_store = "{}"
+                snapshot_store = '{}'
 
                 [admin.health]
                 response = "minimal"

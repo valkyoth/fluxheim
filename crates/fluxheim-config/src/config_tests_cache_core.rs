@@ -2,7 +2,8 @@ use super::super::*;
 
 #[test]
 fn parses_cache_config() {
-    let config: Config = toml::from_str(
+    let disk_path = secure_test_dir("config-cache-core-disk");
+    let config: Config = toml::from_str(&format!(
         r#"
             [cache]
             preset = "wordpress"
@@ -13,16 +14,16 @@ fn parses_cache_config() {
             hide_response_headers = ["set-cookie"]
             tag_headers = ["Surrogate-Key", "X-App-Cache-Tags"]
             no_store_response_headers = ["x-fluxheim-no-store"]
-            no_store_response_header_values = { x-app-cache = "private" }
+            no_store_response_header_values = {{ x-app-cache = "private" }}
             bypass_path_prefixes = ["/private/"]
             bypass_path_exact = ["/login"]
             bypass_request_headers = ["cookie", "authorization"]
-            bypass_request_header_values = { x-preview-mode = "1" }
+            bypass_request_header_values = {{ x-preview-mode = "1" }}
             bypass_cookie_names = ["sessionid", "wordpress_logged_in"]
             bypass_cookie_name_prefixes = ["wordpress_sec_"]
-            bypass_cookie_values = { preview = "1" }
+            bypass_cookie_values = {{ preview = "1" }}
             bypass_query_params = ["preview", "token"]
-            bypass_query_values = { mode = "private" }
+            bypass_query_values = {{ mode = "private" }}
             bypass_query = false
             allow_client_cache_refresh = true
             vary_request_headers = ["accept-encoding", "accept-language"]
@@ -31,7 +32,7 @@ fn parses_cache_config() {
             key_parts = ["method", "host", "path"]
             min_uses = 2
             pass_uncacheable_after = 3
-            status_ttls = { "200" = 3600, "404" = 60 }
+            status_ttls = {{ "200" = 3600, "404" = 60 }}
             default_status_ttl_secs = 15
             stale_while_revalidate_secs = 30
             stale_if_error_secs = 120
@@ -59,7 +60,7 @@ fn parses_cache_config() {
 
             [cache.disk]
             enabled = true
-            path = "/var/cache/fluxheim"
+            path = '{}'
             max_size_bytes = "10GiB"
 
             [cache.lock]
@@ -71,7 +72,8 @@ fn parses_cache_config() {
             enabled = true
             capacity = 8192
             "#,
-    )
+        disk_path.display()
+    ))
     .unwrap();
 
     assert!(config.cache.enabled);
@@ -225,10 +227,7 @@ fn parses_cache_config() {
         config.cache.memory.max_size_bytes,
         ByteSize::from_bytes(1024 * 1024 * 1024)
     );
-    assert_eq!(
-        config.cache.disk.path,
-        Some(PathBuf::from("/var/cache/fluxheim"))
-    );
+    assert_eq!(config.cache.disk.path, Some(disk_path));
     assert_eq!(
         config.cache.disk.max_size_bytes,
         ByteSize::from_bytes(10 * 1024 * 1024 * 1024)

@@ -14,7 +14,7 @@ fn rejects_php_fpm_keepalive_without_idle_capacity() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
@@ -45,7 +45,7 @@ fn rejects_php_param_that_overrides_script_filename() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.params]
             SCRIPT_FILENAME = "/tmp/other.php"
@@ -82,7 +82,7 @@ fn rejects_php_fpm_ini_control_params() {
 
                 [vhosts.php]
                 enabled = true
-                root = "{}"
+                root = '{}'
 
                 [vhosts.php.params]
                 {protected_name} = "memory_limit=256M"
@@ -116,7 +116,7 @@ fn rejects_invalid_php_max_in_flight() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             max_in_flight = 0
 
             [vhosts.php.fpm]
@@ -146,7 +146,7 @@ fn rejects_php_param_control_character_value() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.params]
             APP_ENV = "production\u000a"
@@ -182,7 +182,7 @@ fn rejects_too_many_php_params() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.params]
             {}
@@ -216,7 +216,7 @@ fn rejects_php_extension_with_leading_dot() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             allowed_extensions = [".php"]
 
             [vhosts.php.fpm]
@@ -249,7 +249,7 @@ fn rejects_duplicate_php_allowed_extension() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             allowed_extensions = ["php", "PHP"]
 
             [vhosts.php.fpm]
@@ -284,7 +284,7 @@ fn rejects_too_many_php_allowed_extensions() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             allowed_extensions = [{}]
 
             [vhosts.php.fpm]
@@ -316,7 +316,7 @@ fn rejects_invalid_php_deny_path_prefix() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             deny_path_prefixes = ["uploads/../secret"]
 
             [vhosts.php.fpm]
@@ -346,7 +346,7 @@ fn rejects_duplicate_php_deny_path_prefix() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             deny_path_prefixes = ["/uploads", "/uploads"]
 
             [vhosts.php.fpm]
@@ -380,7 +380,7 @@ fn rejects_too_many_php_deny_path_prefixes() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             deny_path_prefixes = [{}]
 
             [vhosts.php.fpm]

@@ -52,10 +52,10 @@ fn parses_server_process_settings() {
         r#"
             [server.process]
             daemon = false
-            error_log = "{}"
-            pid_file = "{}"
-            upgrade_sock = "{}"
-            certificate_reload_sock = "{}"
+            error_log = '{}'
+            pid_file = '{}'
+            upgrade_sock = '{}'
+            certificate_reload_sock = '{}'
             threads = 4
             listener_tasks_per_fd = 2
             work_stealing = false
@@ -228,7 +228,7 @@ fn rejects_invalid_server_process_settings() {
         let config: Config = toml::from_str(&format!(
             r#"
                 [server.process]
-                pid_file = "{}"
+                pid_file = '{}'
                 "#,
             pid_file.display()
         ))

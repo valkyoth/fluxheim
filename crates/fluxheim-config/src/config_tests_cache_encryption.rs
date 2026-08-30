@@ -47,7 +47,7 @@ fn accepts_cache_disk_encryption_local_credential() {
 
             [cache.disk]
             enabled = true
-            path = "{}"
+            path = '{}'
 
             [cache.disk.encryption]
             enabled = true
@@ -74,7 +74,7 @@ fn rejects_enabled_cache_disk_encryption_without_secret_source() {
 
             [cache.disk]
             enabled = true
-            path = "{}"
+            path = '{}'
 
             [cache.disk.encryption]
             enabled = true
@@ -144,7 +144,7 @@ fn rejects_unimplemented_local_cache_disk_encryption_algorithm() {
 
             [cache.disk]
             enabled = true
-            path = "{}"
+            path = '{}'
 
             [cache.disk.encryption]
             enabled = true
@@ -179,7 +179,7 @@ fn accepts_cache_disk_encryption_openbao_transit_provider() {
 
             [cache.disk]
             enabled = true
-            path = "{}"
+            path = '{}'
 
             [cache.disk.encryption]
             enabled = true
@@ -216,7 +216,7 @@ fn rejects_plain_http_openbao_non_loopback_address() {
 
             [cache.disk]
             enabled = true
-            path = "{}"
+            path = '{}'
 
             [cache.disk.encryption]
             enabled = true
@@ -255,7 +255,7 @@ fn rejects_plain_http_openbao_malformed_ipv6_loopback_authority() {
 
             [cache.disk]
             enabled = true
-            path = "{}"
+            path = '{}'
 
             [cache.disk.encryption]
             enabled = true
@@ -291,7 +291,7 @@ fn rejects_disk_cache_under_world_writable_parent() {
         r#"
             [cache.disk]
             enabled = true
-            path = "{}"
+            path = '{}'
             "#,
         path.display()
     ))

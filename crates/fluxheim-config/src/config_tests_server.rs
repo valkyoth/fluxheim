@@ -334,6 +334,7 @@ fn rejects_tls_listener_without_static_certificate() {
 
 #[test]
 fn accepts_tls_listener_with_static_certificate() {
+    let certificate_dir = secure_test_dir("config-server-static-certificate");
     let config = Config {
         server: ServerConfig {
             tls_listen: vec!["127.0.0.1:8443".to_owned()],
@@ -342,8 +343,8 @@ fn accepts_tls_listener_with_static_certificate() {
         tls: TlsConfig {
             enabled: true,
             certificates: vec![StaticCertificateConfig {
-                cert_path: PathBuf::from("fullchain.pem"),
-                key_path: PathBuf::from("key.pem"),
+                cert_path: safe_child_path(&certificate_dir, "fullchain.pem"),
+                key_path: safe_child_path(&certificate_dir, "key.pem"),
             }],
             ..TlsConfig::default()
         },
@@ -355,9 +356,10 @@ fn accepts_tls_listener_with_static_certificate() {
 
 #[test]
 fn accepts_tls_listener_with_default_vhost_static_certificate() {
+    let certificate_dir = secure_test_dir("config-server-vhost-static-certificate");
     let certificate = StaticCertificateConfig {
-        cert_path: PathBuf::from("fullchain.pem"),
-        key_path: PathBuf::from("key.pem"),
+        cert_path: safe_child_path(&certificate_dir, "fullchain.pem"),
+        key_path: safe_child_path(&certificate_dir, "key.pem"),
     };
     let config = Config {
         server: ServerConfig {

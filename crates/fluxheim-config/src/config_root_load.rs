@@ -55,7 +55,7 @@ impl Config {
     fn load_file(path: &Path) -> Result<Self, ConfigLoadError> {
         let mut fragment = ConfigFragment::load(path)?;
         let include_conf_d = fragment.include_conf_d;
-        let parent = path.parent();
+        let parent = path.parent().map(relative_resolution_base);
         if let Some(parent) = parent {
             fragment.resolve_relative_paths(parent);
         }
@@ -75,7 +75,7 @@ impl Config {
         for file in files {
             let mut fragment = ConfigFragment::load(&file)?;
             if let Some(parent) = file.parent() {
-                fragment.resolve_relative_paths(parent);
+                fragment.resolve_relative_paths(relative_resolution_base(parent));
             }
             config.merge(fragment)?;
         }
@@ -99,7 +99,7 @@ impl Config {
         for file in files {
             let mut fragment = ConfigFragment::load(&file)?;
             if let Some(parent) = file.parent() {
-                fragment.resolve_relative_paths(parent);
+                fragment.resolve_relative_paths(relative_resolution_base(parent));
             }
             self.merge(fragment)?;
         }
@@ -179,5 +179,16 @@ impl Config {
         }
         self.vhosts.extend(fragment.vhosts);
         Ok(())
+    }
+}
+
+fn relative_resolution_base(path: &Path) -> &Path {
+    #[cfg(windows)]
+    {
+        dunce::simplified(path)
+    }
+    #[cfg(not(windows))]
+    {
+        path
     }
 }

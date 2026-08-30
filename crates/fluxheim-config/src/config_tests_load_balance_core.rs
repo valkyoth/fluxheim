@@ -43,7 +43,7 @@ fn validates_load_balance_runtime_state_file_path() {
         let config: Config = toml::from_str(&format!(
             r#"
                 [proxy.load_balance]
-                runtime_state_file = "{}"
+                runtime_state_file = '{}'
                 "#,
             path.display()
         ))
@@ -321,7 +321,7 @@ fn rejects_static_ring_selection_for_dynamic_upstream_discovery() {
     let file_config: Config = toml::from_str(&format!(
         r#"
             [proxy]
-            upstreams_file = "{}"
+            upstreams_file = '{}'
 
             [proxy.load_balance]
             selection = "nginx-consistent-uri-hash"

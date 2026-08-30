@@ -16,7 +16,7 @@ fn rejects_incomplete_php_request_body_spool_config() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             request_body_spool_threshold_bytes = "1MiB"
 
             [vhosts.php.fpm]
@@ -40,8 +40,8 @@ fn rejects_incomplete_php_request_body_spool_config() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
-            request_body_spool_dir = "{}"
+            root = '{}'
+            request_body_spool_dir = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
@@ -75,10 +75,10 @@ fn rejects_php_request_body_spool_threshold_at_or_above_body_limit() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             max_request_body_bytes = "8MiB"
             request_body_spool_threshold_bytes = "8MiB"
-            request_body_spool_dir = "{}"
+            request_body_spool_dir = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
@@ -117,9 +117,9 @@ fn rejects_php_request_body_spool_path_that_is_not_directory() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             request_body_spool_threshold_bytes = "1MiB"
-            request_body_spool_dir = "{}"
+            request_body_spool_dir = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
@@ -156,9 +156,9 @@ fn rejects_php_request_body_spool_dir_with_insecure_permissions() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             request_body_spool_threshold_bytes = "1MiB"
-            request_body_spool_dir = "{}"
+            request_body_spool_dir = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
@@ -188,7 +188,7 @@ fn rejects_zero_php_response_limit() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             max_response_bytes = 0
 
             [vhosts.php.fpm]
@@ -218,7 +218,7 @@ fn rejects_excessive_php_response_limit() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             max_response_bytes = "65MiB"
 
             [vhosts.php.fpm]
@@ -249,7 +249,7 @@ fn rejects_zero_php_response_header_limit() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             max_response_header_bytes = 0
 
             [vhosts.php.fpm]
@@ -279,7 +279,7 @@ fn rejects_excessive_php_response_header_limit() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             max_response_header_bytes = "2MiB"
 
             [vhosts.php.fpm]
@@ -309,7 +309,7 @@ fn rejects_zero_php_stderr_limit() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             stderr_max_bytes = 0
 
             [vhosts.php.fpm]
@@ -339,7 +339,7 @@ fn rejects_invalid_php_stderr_failure_pattern() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             stderr_failure_patterns = ["PHP\nFatal"]
 
             [vhosts.php.fpm]

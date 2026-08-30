@@ -14,7 +14,7 @@ fn parses_proxy_upstreams_file() {
     let config: Config = toml::from_str(&format!(
         r#"
             [proxy]
-            upstreams_file = "{}"
+            upstreams_file = '{}'
             upstreams_file_refresh_secs = 2
             "#,
         upstreams_file.display()
@@ -58,7 +58,7 @@ fn parses_proxy_upstreams_http_discovery() {
             [proxy]
             upstreams_http_url = "https://discovery.example.test/v1/upstreams"
             upstreams_http_refresh_secs = 2
-            upstreams_http_bearer_token_file = "{}"
+            upstreams_http_bearer_token_file = '{}'
             upstreams_http_allow_private_backends = true
             "#,
         token_file.display()
@@ -155,7 +155,7 @@ fn rejects_invalid_proxy_upstreams_file_contents() {
     let config: Config = toml::from_str(&format!(
         r#"
             [proxy]
-            upstreams_file = "{}"
+            upstreams_file = '{}'
             "#,
         upstreams_file.display()
     ))

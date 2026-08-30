@@ -8,7 +8,7 @@ fn rejects_acme_paths_under_world_writable_parent() {
         r#"
             [tls.acme]
             enabled = true
-            storage = "{}"
+            storage = '{}'
             contact_email = "admin@example.test"
             default_issuer = "actalis"
 
@@ -52,7 +52,7 @@ fn rejects_acme_eab_secret_paths_under_world_writable_parent() {
         r#"
             [tls.acme]
             enabled = true
-            storage = "{}"
+            storage = '{}'
             contact_email = "admin@example.test"
             default_issuer = "actalis"
 
@@ -61,7 +61,7 @@ fn rejects_acme_eab_secret_paths_under_world_writable_parent() {
             directory_url = "https://acme-api.actalis.com/acme/directory"
 
             [tls.acme.issuers.eab]
-            key_id_file = "{}"
+            key_id_file = '{}'
             hmac_key_env = "FLUXHEIM_ACTALIS_EAB_HMAC_KEY"
             "#,
         storage.display(),
@@ -83,7 +83,7 @@ fn accepts_acme_eab_credential_sources() {
         r#"
             [tls.acme]
             enabled = true
-            storage = "{}"
+            storage = '{}'
             contact_email = "admin@example.test"
             default_issuer = "actalis"
 
@@ -115,7 +115,7 @@ fn rejects_unsafe_acme_eab_credential_source() {
         r#"
             [tls.acme]
             enabled = true
-            storage = "{}"
+            storage = '{}'
             contact_email = "admin@example.test"
             default_issuer = "actalis"
 
@@ -268,7 +268,7 @@ fn accepts_vhost_acme_inheriting_exact_hosts() {
         r#"
             [tls.acme]
             enabled = true
-            storage = "{}"
+            storage = '{}'
             contact_email = "admin@example.test"
 
             [[vhosts]]
@@ -296,7 +296,7 @@ fn accepts_tls_alias_vhost_covered_by_managed_acme_san() {
         r#"
             [tls.acme]
             enabled = true
-            storage = "{}"
+            storage = '{}'
             contact_email = "admin@example.test"
 
             [[vhosts]]
@@ -335,7 +335,7 @@ fn rejects_duplicate_vhost_acme_domains() {
         r#"
             [tls.acme]
             enabled = true
-            storage = "{}"
+            storage = '{}'
             contact_email = "admin@example.test"
 
             [[vhosts]]

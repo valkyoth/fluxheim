@@ -9,7 +9,7 @@ fn parses_admin_config_with_self_healing() {
             enabled = true
             listen = "127.0.0.1:9090"
             token_env = "FLUXHEIM_ADMIN_TOKEN"
-            snapshot_store = "{}"
+            snapshot_store = '{}'
 
             [admin.transport]
             mode = "local_only"
@@ -78,7 +78,7 @@ fn parses_admin_read_only_ops_socket() {
             enabled = true
             listen = "127.0.0.1:9090"
             token_env = "FLUXHEIM_ADMIN_TOKEN"
-            snapshot_store = "{}"
+            snapshot_store = '{}'
 
             [admin.ops_socket]
             enabled = true
@@ -108,7 +108,7 @@ fn rejects_world_accessible_admin_ops_socket() {
             enabled = true
             listen = "127.0.0.1:9090"
             token_env = "FLUXHEIM_ADMIN_TOKEN"
-            snapshot_store = "{}"
+            snapshot_store = '{}'
 
             [admin.ops_socket]
             enabled = true

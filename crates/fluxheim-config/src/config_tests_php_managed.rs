@@ -20,12 +20,12 @@ fn rejects_symlinked_managed_php_fpm_binary() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             mode = "managed"
-            php_fpm_binary = "{}"
-            socket_dir = "{}"
+            php_fpm_binary = '{}'
+            socket_dir = '{}'
             "#,
         test_process_config_toml("config-php-fpm-managed-binary-process"),
         root.display(),
@@ -54,12 +54,12 @@ fn rejects_managed_php_fpm_dynamic_without_spare_bounds() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             mode = "managed"
             php_fpm_binary = "/usr/bin/env"
-            socket_dir = "{}"
+            socket_dir = '{}'
             process_manager = "dynamic"
             "#,
         test_process_config_toml("config-php-fpm-managed-dynamic-process"),
@@ -87,12 +87,12 @@ fn rejects_managed_php_fpm_dynamic_inverted_spare_bounds() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             mode = "managed"
             php_fpm_binary = "/usr/bin/env"
-            socket_dir = "{}"
+            socket_dir = '{}'
             workers = 4
             process_manager = "dynamic"
             min_spare_servers = 3
@@ -124,12 +124,12 @@ fn rejects_managed_php_fpm_with_external_endpoint() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             mode = "managed"
             php_fpm_binary = "/usr/bin/env"
-            socket_dir = "{}"
+            socket_dir = '{}'
             tcp = "127.0.0.1:9000"
             allow_private_tcp_upstreams = true
             "#,
@@ -159,12 +159,12 @@ fn rejects_managed_php_fpm_user_without_group() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             mode = "managed"
             php_fpm_binary = "/usr/bin/env"
-            socket_dir = "{}"
+            socket_dir = '{}'
             user = "fluxheim"
             "#,
         test_process_config_toml("config-php-fpm-managed-user-process"),
@@ -193,12 +193,12 @@ fn rejects_managed_php_fpm_listen_owner_without_group() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             mode = "managed"
             php_fpm_binary = "/usr/bin/env"
-            socket_dir = "{}"
+            socket_dir = '{}'
             listen_owner = "fluxheim"
             "#,
         test_process_config_toml("config-php-fpm-managed-listen-owner-process"),
@@ -227,12 +227,12 @@ fn rejects_managed_php_fpm_unsafe_listen_mode() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             mode = "managed"
             php_fpm_binary = "/usr/bin/env"
-            socket_dir = "{}"
+            socket_dir = '{}'
             listen_mode = "0666"
             "#,
         test_process_config_toml("config-php-fpm-managed-listen-mode-process"),
@@ -259,7 +259,7 @@ fn rejects_external_php_fpm_with_managed_fields() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"

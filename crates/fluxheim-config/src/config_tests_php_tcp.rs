@@ -18,7 +18,7 @@ fn rejects_too_many_php_fpm_tcp_upstreams() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp_upstreams = [{}]
@@ -48,7 +48,7 @@ fn rejects_duplicate_php_fpm_tcp_upstreams() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp_upstreams = ["php-fpm-a:9000", "PHP-FPM-A:9000"]
@@ -77,7 +77,7 @@ fn rejects_private_php_fpm_tcp_ip_without_explicit_opt_in() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp = "10.0.0.5:9000"
@@ -106,7 +106,7 @@ fn rejects_loopback_php_fpm_tcp_ip_without_explicit_opt_in() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
@@ -135,7 +135,7 @@ fn accepts_private_php_fpm_tcp_ip_with_explicit_opt_in() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp = "10.0.0.5:9000"
@@ -163,7 +163,7 @@ fn rejects_unsafe_php_fpm_tcp_ip_even_with_private_opt_in() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp = "0.0.0.0:9000"
@@ -193,7 +193,7 @@ fn rejects_mixed_php_fpm_endpoint_modes() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"

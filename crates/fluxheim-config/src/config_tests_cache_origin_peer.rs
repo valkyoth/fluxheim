@@ -192,7 +192,11 @@ fn rejects_unsafe_cache_peer_fill_peers() {
         })
     );
 
-    let config: Config = toml::from_str(
+    let shared_secret_file = safe_child_path(
+        &secure_test_dir("cache-peer-duplicate-name-secret"),
+        "shared-secret",
+    );
+    let config: Config = toml::from_str(&format!(
         r#"
             [cache]
             enabled = true
@@ -203,7 +207,7 @@ fn rejects_unsafe_cache_peer_fill_peers() {
             [cache.peer_fill]
             enabled = true
             allow_insecure_http = true
-            shared_secret_file = "/run/secrets/fluxheim-peer-fill"
+            shared_secret_file = '{}'
 
             [[cache.peer_fill.peers]]
             name = "node-a"
@@ -213,7 +217,8 @@ fn rejects_unsafe_cache_peer_fill_peers() {
             name = "node-a"
             base_url = "https://node-b.example.internal:8443"
             "#,
-    )
+        shared_secret_file.display()
+    ))
     .unwrap();
 
     assert_eq!(

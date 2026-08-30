@@ -329,17 +329,20 @@ fn parses_proxy_upstream_pool() {
         Some("example.Health")
     );
 
-    let exec_config: Config = toml::from_str(
-        r#"
-            [proxy.load_balance.health_check]
-            protocol = "exec"
-            exec_command = "/usr/local/libexec/fluxheim-health"
-            exec_args = ["--probe"]
-            exec_allowed_commands = ["/usr/local/libexec/fluxheim-health"]
-            exec_timeout_secs = 2
-            "#,
-    )
-    .unwrap();
+    let mut exec_config = valid_exec_health_check_config();
+    let exec_command = exec_config
+        .proxy
+        .load_balance
+        .health_check
+        .exec_command
+        .clone()
+        .unwrap();
+    exec_config.proxy.load_balance.health_check.exec_args = vec!["--probe".to_owned()];
+    exec_config
+        .proxy
+        .load_balance
+        .health_check
+        .exec_timeout_secs = Some(2);
     exec_config.validate().unwrap();
     assert_eq!(
         exec_config.proxy.load_balance.health_check.protocol,
@@ -352,7 +355,7 @@ fn parses_proxy_upstream_pool() {
             .health_check
             .exec_command
             .as_deref(),
-        Some("/usr/local/libexec/fluxheim-health")
+        Some(exec_command.as_str())
     );
     let redis_config: Config = toml::from_str(
         r#"

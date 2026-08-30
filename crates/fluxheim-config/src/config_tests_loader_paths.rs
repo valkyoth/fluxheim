@@ -28,7 +28,7 @@ fn conf_d_tls_acme_fragment_preserves_main_tls_settings() {
             r#"
                 [tls.acme]
                 enabled = true
-                storage = "{}"
+                storage = '{}'
                 contact_email = "admin@example.test"
                 default_issuer = "letsencrypt"
                 challenge = "http-01"
@@ -53,7 +53,7 @@ fn conf_d_tls_acme_fragment_preserves_main_tls_settings() {
                 domains = ["example.test"]
 
                 [vhosts.web]
-                root = "{}"
+                root = '{}'
                 "#,
             dir.child("site").display()
         ),

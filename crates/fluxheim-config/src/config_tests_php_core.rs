@@ -18,7 +18,7 @@ fn parses_php_fpm_vhost_config() {
             preset = "wordpress"
             enabled = true
             runtime = "php-fpm"
-            root = "{}"
+            root = '{}'
             resolve_root_symlink = true
             fpm_root = "/app/public"
             index = "index.php"
@@ -38,7 +38,7 @@ fn parses_php_fpm_vhost_config() {
             max_in_flight = 6
             max_request_body_bytes = "16MiB"
             request_body_spool_threshold_bytes = "1MiB"
-            request_body_spool_dir = "{}"
+            request_body_spool_dir = '{}'
             max_response_bytes = "8MiB"
             max_response_header_bytes = "32KiB"
             path_info = "split"
@@ -48,7 +48,7 @@ fn parses_php_fpm_vhost_config() {
             path = "/502.html"
 
             [vhosts.php.error_pages.web]
-            root = "{}"
+            root = '{}'
             index_files = ["index.html"]
 
             [vhosts.php.params]
@@ -170,7 +170,7 @@ fn parses_php_fpm_tcp_upstreams() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp_upstreams = ["127.0.0.1:9000", "127.0.0.1:9001"]
@@ -205,12 +205,12 @@ fn parses_managed_php_fpm_config() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             mode = "managed"
             php_fpm_binary = "/usr/bin/env"
-            socket_dir = "{}"
+            socket_dir = '{}'
             workers = 4
             max_requests_per_worker = 250
             process_manager = "dynamic"
@@ -227,8 +227,8 @@ fn parses_managed_php_fpm_config() {
             request_slowlog_timeout_secs = 5
             request_slowlog_trace_depth = 16
             decorate_workers_output = false
-            session_save_path = "{}"
-            upload_tmp_dir = "{}"
+            session_save_path = '{}'
+            upload_tmp_dir = '{}'
             user = "fluxheim"
             group = "fluxheim"
             "#,

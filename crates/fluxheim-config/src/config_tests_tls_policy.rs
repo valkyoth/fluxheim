@@ -11,7 +11,7 @@ fn parses_tls_acme_config_with_actalis_eab() {
 
             [tls.acme]
             enabled = true
-            storage = "{}"
+            storage = '{}'
             contact_email = "admin@example.test"
             default_issuer = "actalis"
             challenge = "http-01"
@@ -60,6 +60,9 @@ fn parses_tls_acme_config_with_actalis_eab() {
 #[test]
 fn accepts_tls_alpn_acme_with_rustls_tls_listener() {
     let storage = secure_test_dir("config-tls-alpn-acme");
+    let certificate_dir = secure_test_dir("config-tls-alpn-certificate");
+    let cert_path = safe_child_path(&certificate_dir, "localhost-cert.pem");
+    let key_path = safe_child_path(&certificate_dir, "localhost-key.pem");
     let config: Config = toml::from_str(&format!(
         r#"
             [server]
@@ -70,15 +73,17 @@ fn accepts_tls_alpn_acme_with_rustls_tls_listener() {
             backend = "rustls"
 
             [[tls.certificates]]
-            cert_path = "tests/fixtures/tls/localhost-cert.pem"
-            key_path = "tests/fixtures/tls/localhost-key.pem"
+            cert_path = '{}'
+            key_path = '{}'
 
             [tls.acme]
             enabled = true
-            storage = "{}"
+            storage = '{}'
             contact_email = "admin@example.test"
             challenge = "tls-alpn-01"
             "#,
+        cert_path.display(),
+        key_path.display(),
         storage.display()
     ))
     .unwrap();
@@ -101,7 +106,7 @@ fn rejects_tls_alpn_acme_without_tls_listener() {
 
             [tls.acme]
             enabled = true
-            storage = "{}"
+            storage = '{}'
             contact_email = "admin@example.test"
             challenge = "tls-alpn-01"
             "#,

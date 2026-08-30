@@ -23,7 +23,7 @@ fn fips_required_accepts_provider_backed_admin_auth() {
             [admin]
             enabled = true
             token_env = "FLUXHEIM_ADMIN_TOKEN"
-            snapshot_store = "{}"
+            snapshot_store = '{}'
 
             [tls]
             backend = "{backend}"
@@ -57,7 +57,7 @@ fn fips_required_rejects_managed_acme_internal_crypto() {
 
             [tls.acme]
             enabled = true
-            storage = "{}"
+            storage = '{}'
             contact_email = "admin@example.test"
             "#,
         storage.display()
@@ -94,7 +94,7 @@ fn fips_required_can_require_disk_cache_encryption() {
 
             [cache.disk]
             enabled = true
-            path = "{}"
+            path = '{}'
             "#,
         root.display()
     ))
@@ -129,7 +129,7 @@ fn fips_required_rejects_local_cache_encryption() {
 
             [cache.disk]
             enabled = true
-            path = "{}"
+            path = '{}'
 
             [cache.disk.encryption]
             enabled = true
@@ -169,7 +169,7 @@ fn fips_required_allows_openbao_transit_cache_encryption_boundary() {
 
             [cache.disk]
             enabled = true
-            path = "{}"
+            path = '{}'
 
             [cache.disk.encryption]
             enabled = true
@@ -208,7 +208,7 @@ fn fips_required_rejects_remote_openbao_transit_cache_encryption_boundary() {
 
             [cache.disk]
             enabled = true
-            path = "{}"
+            path = '{}'
 
             [cache.disk.encryption]
             enabled = true

@@ -14,7 +14,7 @@ fn rejects_php_fpm_with_socket_and_tcp() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             socket = "/run/php/php-fpm.sock"
@@ -47,7 +47,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
@@ -71,7 +71,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
@@ -95,7 +95,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
             server_port = 0
 
             [vhosts.php.fpm]
@@ -119,7 +119,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.params]
             HTTP_AUTHORIZATION = "Bearer fixed"
@@ -145,7 +145,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
@@ -173,7 +173,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
@@ -199,7 +199,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
@@ -223,7 +223,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
@@ -251,7 +251,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
@@ -277,7 +277,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php]
             enabled = true
-            root = "{}"
+            root = '{}'
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
