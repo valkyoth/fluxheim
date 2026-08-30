@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Component, Path};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct PhpScriptName {
@@ -9,24 +9,57 @@ pub struct PhpScriptName {
 
 pub fn php_fpm_script_filename(root: &Path, fpm_root: &Path, local_path: &Path) -> Option<String> {
     let relative = local_path.strip_prefix(root).ok()?;
-    fpm_root.join(relative).to_str().map(str::to_owned)
+    php_fpm_join_wire_path(
+        fpm_root,
+        relative.components().map(|component| match component {
+            Component::Normal(segment) => segment.to_str(),
+            _ => None,
+        }),
+        false,
+    )
 }
 
 pub fn php_fpm_path_translated(fpm_root: &Path, path_info: &str) -> Option<String> {
-    let mut translated = fpm_root.to_path_buf();
-    for segment in path_info.trim_start_matches('/').split('/') {
+    php_fpm_join_wire_path(
+        fpm_root,
+        path_info.trim_start_matches('/').split('/').map(Some),
+        true,
+    )
+}
+
+fn php_fpm_join_wire_path<'a>(
+    fpm_root: &Path,
+    segments: impl IntoIterator<Item = Option<&'a str>>,
+    reject_hidden_segments: bool,
+) -> Option<String> {
+    let root = fpm_root.to_str()?;
+    if root.is_empty() || root.chars().any(char::is_control) {
+        return None;
+    }
+    let separator = if root.contains('\\') && !root.contains('/') {
+        '\\'
+    } else {
+        '/'
+    };
+    let mut translated = root.to_owned();
+    for segment in segments {
+        let segment = segment?;
         if segment.is_empty()
             || segment == "."
             || segment == ".."
-            || segment.starts_with('.')
+            || (reject_hidden_segments && segment.starts_with('.'))
+            || segment.contains('/')
             || segment.contains('\\')
             || segment.chars().any(char::is_control)
         {
             return None;
         }
-        translated.push(segment);
+        if !translated.ends_with(['/', '\\']) {
+            translated.push(separator);
+        }
+        translated.push_str(segment);
     }
-    translated.to_str().map(str::to_owned)
+    Some(translated)
 }
 
 pub fn php_script_name_for_request(
