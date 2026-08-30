@@ -276,6 +276,8 @@ function Invoke-FluxheimRequest {
 
 Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
 using System.Net;
 using System.Net.Security;
@@ -351,6 +353,12 @@ public sealed class FluxheimWindowsSmokeOrigin : IDisposable
                         diagnostic.Append(" (0x");
                         diagnostic.Append(current.HResult.ToString("X8"));
                         diagnostic.Append(')');
+                        Win32Exception win32 = current as Win32Exception;
+                        if (win32 != null)
+                        {
+                            diagnostic.Append(" native=0x");
+                            diagnostic.Append(win32.NativeErrorCode.ToString("X8"));
+                        }
                     }
                     Interlocked.Exchange(ref this.lastError, diagnostic.ToString());
                 }
@@ -368,11 +376,19 @@ public sealed class FluxheimWindowsSmokeOrigin : IDisposable
             if (this.certificate != null)
             {
                 tlsStream = new SslStream(networkStream, false);
-                await tlsStream.AuthenticateAsServerAsync(
-                    this.certificate,
-                    false,
-                    SslProtocols.Tls12 | SslProtocols.Tls13,
-                    false).ConfigureAwait(false);
+                SslServerAuthenticationOptions options = new SslServerAuthenticationOptions
+                {
+                    ServerCertificate = this.certificate,
+                    ClientCertificateRequired = false,
+                    EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
+                    CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
+                    ApplicationProtocols = new List<SslApplicationProtocol>
+                    {
+                        SslApplicationProtocol.Http11,
+                    },
+                };
+                await tlsStream.AuthenticateAsServerAsync(options, CancellationToken.None)
+                    .ConfigureAwait(false);
                 stream = tlsStream;
             }
 
