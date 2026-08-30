@@ -267,6 +267,12 @@ public sealed class FluxheimWindowsSmokeOrigin : IDisposable
     private readonly X509Certificate2 certificate;
     private readonly CancellationTokenSource cancellation = new CancellationTokenSource();
     private Task acceptLoop;
+    private string lastError;
+
+    public string LastError
+    {
+        get { return Volatile.Read(ref this.lastError); }
+    }
 
     public FluxheimWindowsSmokeOrigin(int port, string label)
         : this(port, label, null)
@@ -300,7 +306,29 @@ public sealed class FluxheimWindowsSmokeOrigin : IDisposable
                 return;
             }
 
-            _ = Task.Run(() => this.ServeAsync(client));
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await this.ServeAsync(client).ConfigureAwait(false);
+                }
+                catch (Exception error)
+                {
+                    StringBuilder diagnostic = new StringBuilder();
+                    for (Exception current = error; current != null; current = current.InnerException)
+                    {
+                        if (diagnostic.Length != 0)
+                        {
+                            diagnostic.Append(" -> ");
+                        }
+                        diagnostic.Append(current.GetType().FullName);
+                        diagnostic.Append(" (0x");
+                        diagnostic.Append(current.HResult.ToString("X8"));
+                        diagnostic.Append(')');
+                    }
+                    Interlocked.Exchange(ref this.lastError, diagnostic.ToString());
+                }
+            });
         }
     }
 
@@ -807,7 +835,10 @@ try {
                 -not $upstreamTlsBody.Contains(
                     'verified-upstream-tls path=/windows-upstream-tls'
                 )) {
-                throw 'native Windows verified upstream TLS response mismatch'
+                $upstreamTlsStatus = [int]$upstreamTlsResponse.StatusCode
+                $upstreamTlsBodyLength = [Text.Encoding]::UTF8.GetByteCount($upstreamTlsBody)
+                $upstreamTlsOriginError = $originTls.LastError
+                throw "native Windows verified upstream TLS response mismatch: status=$upstreamTlsStatus body_bytes=$upstreamTlsBodyLength origin_error=$upstreamTlsOriginError"
             }
         } finally {
             $upstreamTlsResponse.Dispose()
