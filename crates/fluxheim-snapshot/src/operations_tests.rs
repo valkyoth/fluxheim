@@ -263,6 +263,7 @@ fn generation_high_water_survives_pruning_latest_snapshot() {
     assert_eq!(replacement.metadata.generation, 4);
 }
 
+#[cfg(unix)]
 #[test]
 fn invalid_snapshot_filename_is_escaped_in_reports() {
     let dir = TestDir::new("snapshot-safe-label");
@@ -286,6 +287,26 @@ fn invalid_snapshot_filename_is_escaped_in_reports() {
             .iter()
             .all(|issue| { !issue.contains('\n') && !issue.contains('\u{1b}') })
     );
+}
+
+#[test]
+fn invalid_unicode_snapshot_filename_is_escaped_in_reports() {
+    let dir = TestDir::new("snapshot-safe-unicode-label");
+    let store = SnapshotStore::new(dir.path());
+    store.snapshot_config(&Config::default(), None).unwrap();
+    let invalid_name = store.root().join("configs").join("forged-☃.toml");
+    std::fs::write(&invalid_name, b"").unwrap();
+    set_private_test_file(&invalid_name);
+
+    let entries = store.list_entries().unwrap();
+    let invalid = entries
+        .iter()
+        .find(|entry| entry.id.contains("forged"))
+        .unwrap();
+    assert!(!invalid.id.contains('☃'));
+    assert!(invalid.id.contains(r"\u{2603}"));
+    let doctor = store.doctor().unwrap();
+    assert!(doctor.issues.iter().all(|issue| !issue.contains('☃')));
 }
 
 #[test]
