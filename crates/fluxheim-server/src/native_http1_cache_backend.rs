@@ -122,9 +122,16 @@ impl NativeDiskCacheBackend {
                 Ok((root, Self::Filesystem))
             }
             CacheDiskBackend::StorageBin => {
-                let root = prepare_native_storage_bin_root_for_lease(config)?;
-                let lease = acquire_native_storage_bin_lease(&root)?;
-                let layout = prepare_native_storage_bin_layout_locked(config, &root)?;
+                let root = prepare_native_storage_bin_root_for_lease(config).map_err(|error| {
+                    native_storage_bin_backend_error("prepare storage-bin root", error)
+                })?;
+                let lease = acquire_native_storage_bin_lease(&root).map_err(|error| {
+                    native_storage_bin_backend_error("acquire storage-bin lease", error)
+                })?;
+                let layout =
+                    prepare_native_storage_bin_layout_locked(config, &root).map_err(|error| {
+                        native_storage_bin_backend_error("prepare storage-bin layout", error)
+                    })?;
                 let free_map = StorageBinFreeMap::new(&layout);
                 let files = StorageBinFileSet::new(layout.clone());
                 Ok((
@@ -139,6 +146,10 @@ impl NativeDiskCacheBackend {
             }
         }
     }
+}
+
+fn native_storage_bin_backend_error(context: &str, error: std::io::Error) -> std::io::Error {
+    std::io::Error::new(error.kind(), format!("{context}: {error}"))
 }
 
 pub(super) fn acquire_native_storage_bin_lease(

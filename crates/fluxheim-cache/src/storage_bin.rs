@@ -108,7 +108,8 @@ impl StorageBinFileSet {
 pub fn prepare_storage_bin_layout(
     layout: &StorageBinLayoutPlan,
 ) -> std::io::Result<StorageBinManifest> {
-    let root = prepare_storage_bin_root(&layout.root)?;
+    let root = prepare_storage_bin_root(&layout.root)
+        .map_err(|error| storage_bin_io_context("prepare root", error))?;
     let canonical_layout = StorageBinLayoutPlan {
         root: root.clone(),
         manifest_path: root.join(STORAGE_BIN_MANIFEST_FILENAME),
@@ -119,15 +120,19 @@ pub fn prepare_storage_bin_layout(
         max_open_bins: layout.max_open_bins,
     };
 
-    prepare_storage_bin_data_dir(&root, &canonical_layout.data_dir)?;
-    match read_storage_bin_manifest(&root, &canonical_layout.manifest_path)? {
+    prepare_storage_bin_data_dir(&root, &canonical_layout.data_dir)
+        .map_err(|error| storage_bin_io_context("prepare data directory", error))?;
+    match read_storage_bin_manifest(&root, &canonical_layout.manifest_path)
+        .map_err(|error| storage_bin_io_context("read manifest", error))?
+    {
         Some(manifest) => {
             manifest.ensure_matches_layout(&canonical_layout)?;
             Ok(manifest)
         }
         None => {
             let manifest = StorageBinManifest::from_layout(&canonical_layout);
-            write_storage_bin_manifest(&root, &canonical_layout.manifest_path, &manifest)?;
+            write_storage_bin_manifest(&root, &canonical_layout.manifest_path, &manifest)
+                .map_err(|error| storage_bin_io_context("write manifest", error))?;
             Ok(manifest)
         }
     }
@@ -233,15 +238,24 @@ fn write_storage_bin_manifest(
     let path = StorageBinSafePath::from_path(path.to_path_buf());
     let temp_path = StorageBinSafePath::from_path(temp_path);
     let write_result = (|| {
-        let mut file = temp_path.create_new_file()?;
-        file.write_all(manifest.encode().as_bytes())?;
-        file.sync_all()?;
+        let mut file = temp_path
+            .create_new_file()
+            .map_err(|error| storage_bin_io_context("create temporary manifest", error))?;
+        file.write_all(manifest.encode().as_bytes())
+            .map_err(|error| storage_bin_io_context("write temporary manifest", error))?;
+        file.sync_all()
+            .map_err(|error| storage_bin_io_context("flush temporary manifest", error))?;
         path.rename_from(&temp_path)
+            .map_err(|error| storage_bin_io_context("replace manifest", error))
     })();
     if write_result.is_err() {
         let _ = temp_path.remove_file();
     }
     write_result
+}
+
+fn storage_bin_io_context(context: &str, error: std::io::Error) -> std::io::Error {
+    std::io::Error::new(error.kind(), format!("{context}: {error}"))
 }
 
 fn write_storage_bin_range(
