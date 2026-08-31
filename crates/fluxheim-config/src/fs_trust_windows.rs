@@ -61,7 +61,11 @@ pub fn create_confidential_file(path: &Path) -> std::io::Result<std::fs::File> {
         ));
     }
     let mut options = std::fs::OpenOptions::new();
+    // Rust validates create_new against the portable write flag before it
+    // applies the Windows access_mode override.
     options
+        .read(true)
+        .write(true)
         .access_mode(GENERIC_READ | GENERIC_WRITE | DELETE_ACCESS | READ_CONTROL | WRITE_DAC)
         .create_new(true)
         .share_mode(0)

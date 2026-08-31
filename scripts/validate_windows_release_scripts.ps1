@@ -295,6 +295,8 @@ foreach ($required in @(
     'FILE_ATTRIBUTE_TEMPORARY',
     'FILE_FLAG_OPEN_REPARSE_POINT',
     'WRITE_DAC',
+    '.read(true)',
+    '.write(true)',
     '.share_mode(0)',
     'harden_confidential_file',
     'opened_file_has_insecure_confidential_permissions'
