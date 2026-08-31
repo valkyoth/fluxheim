@@ -125,21 +125,10 @@ fn canonical_upstream_tls_file_path(path: &Path) -> Result<std::path::PathBuf, N
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
     use super::*;
 
-    static NATIVE_HTTP1_TLS_TEST_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
     fn unique_temp_dir(label: &str) -> std::path::PathBuf {
-        let sequence = NATIVE_HTTP1_TLS_TEST_DIR_COUNTER.fetch_add(1, Ordering::AcqRel);
-        let base = std::path::PathBuf::from("target/fluxheim-native-http1-tls-tests");
-        std::fs::create_dir_all(&base).unwrap();
-        let path = base.join(format!(
-            "fluxheim-{label}-{}-{sequence}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&path);
+        let path = fluxheim_common::test_support::unique_temp_path(label);
         std::fs::create_dir_all(&path).unwrap();
         path
     }
