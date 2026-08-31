@@ -293,8 +293,11 @@ $phpSpool = Get-Content -LiteralPath `
 foreach ($required in @(
     'FILE_FLAG_DELETE_ON_CLOSE',
     'FILE_ATTRIBUTE_TEMPORARY',
-    'FILE_SHARE_DELETE',
-    'harden_confidential_file'
+    'FILE_FLAG_OPEN_REPARSE_POINT',
+    'WRITE_DAC',
+    '.share_mode(0)',
+    'harden_confidential_file',
+    'opened_file_has_insecure_confidential_permissions'
 )) {
     if (-not $phpSpool.Contains($required)) {
         throw "Windows PHP request spool is missing required behavior: $required"
