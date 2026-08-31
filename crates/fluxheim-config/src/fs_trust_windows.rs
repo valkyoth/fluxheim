@@ -128,7 +128,9 @@ fn open_existing_regular_file(
     options
         .access_mode(access)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        // Permit opening a directory handle so the handle-based type check
+        // below can reject it consistently without a path-only pre-check.
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
         .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
     let file = options.open(path)?;
     verify_opened_regular_file(path, &file, Some(expected), "file")?;
@@ -155,7 +157,7 @@ fn verify_opened_regular_file(
     if metadata_is_reparse_point(&metadata) || !metadata.is_file() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
-            format!("{label} path is a reparse point or is not a regular file"),
+            format!("{label} path must be a regular file and not a reparse point"),
         ));
     }
     if let Some(expected) = expected
