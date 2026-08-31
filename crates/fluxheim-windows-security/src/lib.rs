@@ -12,8 +12,8 @@ use std::path::{Component, Path, PathBuf};
 use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Wdk::Storage::FileSystem::{
     FILE_CREATE, FILE_DIRECTORY_FILE, FILE_LINK_INFORMATION, FILE_NON_DIRECTORY_FILE, FILE_OPEN,
-    FILE_OPEN_IF, FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT, FileLinkInformation,
-    NtCreateFile, NtSetInformationFile,
+    FILE_OPEN_IF, FILE_OPEN_REPARSE_POINT, FILE_RENAME_INFORMATION, FILE_SYNCHRONOUS_IO_NONALERT,
+    FileLinkInformation, FileRenameInformation, NtCreateFile, NtSetInformationFile,
 };
 use windows_sys::Win32::Foundation::{
     GENERIC_READ, GENERIC_WRITE, HANDLE, OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE,
@@ -22,10 +22,9 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::{
     CreateDirectoryW, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO,
-    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_RENAME_INFO, FILE_SHARE_DELETE,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfo, FileRenameInfo, READ_CONTROL,
-    SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, SYNCHRONIZE, SetFileInformationByHandle,
-    WRITE_DAC,
+    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, FileDispositionInfo, READ_CONTROL, SECURITY_IDENTIFICATION,
+    SECURITY_SQOS_PRESENT, SYNCHRONIZE, SetFileInformationByHandle, WRITE_DAC,
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
@@ -137,7 +136,7 @@ pub fn rename_regular_file(source: &Path, destination: &Path) -> io::Result<()> 
     )?;
     let (destination_parent, destination_name) = open_absolute_parent(destination)?;
     let wide = validated_name_wide(&destination_name)?;
-    let header_size = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+    let header_size = std::mem::offset_of!(FILE_RENAME_INFORMATION, FileName);
     let name_bytes = wide
         .len()
         .checked_mul(std::mem::size_of::<u16>())
@@ -146,28 +145,32 @@ pub fn rename_regular_file(source: &Path, destination: &Path) -> io::Result<()> 
         .checked_add(name_bytes)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "rename target is too long"))?;
     let mut buffer = aligned_native_buffer(buffer_size)?;
-    let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
+    let mut status_block = IO_STATUS_BLOCK::default();
     // SAFETY: `buffer` is sized for the fixed header plus the complete UTF-16
     // name. All writes stay within that allocation, and both handles remain
-    // live through `SetFileInformationByHandle`.
-    unsafe {
+    // live through `NtSetInformationFile`.
+    let status = unsafe {
         (*info).Anonymous.ReplaceIfExists = true;
         (*info).RootDirectory = destination_parent.as_raw_handle() as HANDLE;
         (*info).FileNameLength = u32::try_from(name_bytes).map_err(|_| {
             io::Error::new(io::ErrorKind::InvalidInput, "rename target is too long")
         })?;
         std::ptr::copy_nonoverlapping(wide.as_ptr(), (*info).FileName.as_mut_ptr(), wide.len());
-        if SetFileInformationByHandle(
+        NtSetInformationFile(
             source.as_raw_handle() as HANDLE,
-            FileRenameInfo,
+            &mut status_block,
             info.cast(),
             u32::try_from(buffer_size).map_err(|_| {
                 io::Error::new(io::ErrorKind::InvalidInput, "rename target is too long")
             })?,
-        ) == 0
-        {
-            return Err(io::Error::last_os_error());
-        }
+            FileRenameInformation,
+        )
+    };
+    if status < 0 {
+        // SAFETY: this converts the NTSTATUS returned by the preceding call.
+        let error = unsafe { RtlNtStatusToDosError(status) };
+        return Err(io::Error::from_raw_os_error(error as i32));
     }
     Ok(())
 }

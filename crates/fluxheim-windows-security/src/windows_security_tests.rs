@@ -28,8 +28,13 @@ fn absolute_create_rename_open_and_remove_stay_handle_relative() {
     use std::io::Write as _;
 
     let root = tempfile::tempdir().unwrap();
-    let source = root.path().join("source.bin");
-    let destination = root.path().join("destination.bin");
+    let root = root.path().canonicalize().unwrap();
+    assert!(
+        root.as_os_str().to_string_lossy().starts_with(r"\\?\"),
+        "Windows canonical paths must exercise verbatim path handling"
+    );
+    let source = root.join("source.bin");
+    let destination = root.join("destination.bin");
     let mut created = create_new_regular_file(&source, true).unwrap();
     created.write_all(b"state").unwrap();
     drop(created);
