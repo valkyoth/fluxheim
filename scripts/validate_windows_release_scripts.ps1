@@ -98,7 +98,7 @@ foreach ($required in @(
     'New-WindowsSmokeCertificate',
     'New-WindowsSmokeUpstreamCertificate',
     '[Security.Cryptography.X509Certificates.RSACertificateExtensions]::CopyWithPrivateKey(',
-    '[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet',
+    '[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::UserKeySet',
     '[Array]::Clear($pkcs12, 0, $pkcs12.Length)',
     'public string LastError',
     'Interlocked.Exchange(ref this.lastError, diagnostic.ToString())',
@@ -143,8 +143,8 @@ if ($smoke.Contains('$issuedCertificate.CopyWithPrivateKey(')) {
 if ($smoke.Contains('X509KeyStorageFlags]::PersistKeySet')) {
     throw 'Windows native smoke must not persist generated TLS private keys'
 }
-if ($smoke.Contains('X509KeyStorageFlags]::UserKeySet')) {
-    throw 'Windows native smoke must not place generated TLS private keys in the user key store'
+if ($smoke.Contains('X509KeyStorageFlags]::EphemeralKeySet')) {
+    throw 'Windows native smoke must not use ephemeral TLS keys that Schannel cannot authenticate'
 }
 
 $windowsTrust = @(

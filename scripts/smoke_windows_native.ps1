@@ -221,10 +221,12 @@ function New-WindowsSmokeUpstreamCertificate {
             [Security.Cryptography.X509Certificates.X509ContentType]::Pkcs12,
             [string]::Empty
         )
+        # Schannel cannot authenticate SslStream servers with ephemeral keys.
+        # Omitting PersistKeySet lets disposal remove this generated test key.
         $detachedCertificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
             $pkcs12,
             [string]::Empty,
-            [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+            [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::UserKeySet
         )
         if (-not $detachedCertificate.HasPrivateKey) {
             $detachedCertificate.Dispose()
