@@ -69,13 +69,25 @@ fn php_request_body_spool_replays_and_cleans_up_file() {
         file.flush().await.expect("flush spool");
     });
 
-    assert_eq!(
-        std::fs::read_dir(&spool_dir)
-            .expect("read spool dir")
-            .count(),
-        0,
+    let spool_paths = std::fs::read_dir(&spool_dir)
+        .expect("read spool dir")
+        .map(|entry| entry.expect("spool entry").path())
+        .collect::<Vec<_>>();
+    #[cfg(not(windows))]
+    assert!(
+        spool_paths.is_empty(),
         "spool file must be unlinked immediately"
     );
+    #[cfg(windows)]
+    {
+        assert_eq!(
+            spool_paths.len(),
+            1,
+            "delete-on-close spool must retain only its live directory entry"
+        );
+        std::fs::File::open(&spool_paths[0])
+            .expect_err("exclusive Windows spool handle must prevent reopening");
+    }
     let body = runtime
         .block_on(PhpRequestBody::spooled(file, "spooled-body".len()))
         .expect("retain anonymous spool file");
@@ -101,6 +113,13 @@ fn php_request_body_spool_replays_and_cleans_up_file() {
     assert_eq!(retry, b"spooled-body");
     drop(retry_reader);
     drop(body);
+    assert_eq!(
+        std::fs::read_dir(&spool_dir)
+            .expect("read spool dir after close")
+            .count(),
+        0,
+        "spool file must be removed when its final handle closes"
+    );
     std::fs::remove_dir(&spool_dir).expect("remove spool dir");
 }
 
