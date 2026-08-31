@@ -99,13 +99,11 @@ mod tests {
         let real_parent = dir.path().join("real-parent");
         let junction = dir.path().join("junction");
         std::fs::create_dir(&real_parent).unwrap();
-        let command = format!(
-            "mklink /J \"{}\" \"{}\"",
-            junction.display(),
-            real_parent.display()
-        );
+        set_private_test_directory(&real_parent);
         let status = std::process::Command::new("cmd.exe")
-            .args(["/D", "/C", &command])
+            .args(["/D", "/C", "mklink", "/J"])
+            .arg(dunce::simplified(&junction))
+            .arg(dunce::simplified(&real_parent))
             .stdout(std::process::Stdio::null())
             .status()
             .unwrap();
@@ -321,7 +319,9 @@ mod tests {
             use std::os::unix::fs::PermissionsExt as _;
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        fluxheim_config::fs_trust::harden_private_directory(path).unwrap();
+        #[cfg(not(any(unix, windows)))]
         let _ = path;
     }
 

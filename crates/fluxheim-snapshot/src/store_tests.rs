@@ -399,9 +399,8 @@ mod tests {
     fn snapshot_config_rejects_full_snapshot_store_before_writing() {
         let dir = TestDir::new("snapshot-capacity-before-write");
         let store = SnapshotStore::new(dir.path());
+        store.with_store_lock(|| Ok(())).unwrap();
         let configs = dir.child("configs");
-        std::fs::create_dir(&configs).unwrap();
-        set_private_test_directory(&configs);
         for index in 0..super::MAX_SNAPSHOT_STORE_ENTRIES {
             std::fs::write(safe_child_path(&configs, &format!("s{index:04}.toml")), b"").unwrap();
         }
@@ -411,7 +410,8 @@ mod tests {
             .unwrap_err();
 
         assert!(
-            matches!(error, SnapshotError::Io(error) if error.kind() == std::io::ErrorKind::StorageFull)
+            matches!(error, SnapshotError::Io(ref error) if error.kind() == std::io::ErrorKind::StorageFull),
+            "unexpected full-store error: {error:?}"
         );
         let created_configs = std::fs::read_dir(&configs)
             .unwrap()
@@ -574,7 +574,9 @@ mod tests {
             use std::os::unix::fs::PermissionsExt as _;
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        fluxheim_config::fs_trust::harden_private_directory(path).unwrap();
+        #[cfg(not(any(unix, windows)))]
         let _ = path;
     }
 

@@ -49,9 +49,9 @@ impl crate::SnapshotCryptoProvider for TestCryptoProvider {
 #[test]
 fn concurrent_snapshot_creation_cannot_exceed_capacity() {
     let dir = TestDir::new("snapshot-concurrent-capacity");
+    let store = Arc::new(SnapshotStore::new(dir.path()));
+    store.with_store_lock(|| Ok(())).unwrap();
     let configs = dir.child("configs");
-    std::fs::create_dir(&configs).unwrap();
-    set_private_test_directory(&configs);
     for index in 0..MAX_SNAPSHOT_STORE_ENTRIES - 1 {
         std::fs::write(
             safe_child_path(&configs, &format!("legacy-{index:04}.toml")),
@@ -59,7 +59,6 @@ fn concurrent_snapshot_creation_cannot_exceed_capacity() {
         )
         .unwrap();
     }
-    let store = Arc::new(SnapshotStore::new(dir.path()));
     let barrier = Arc::new(Barrier::new(3));
     let handles = (0..2)
         .map(|_| {
@@ -77,8 +76,16 @@ fn concurrent_snapshot_creation_cannot_exceed_capacity() {
         .map(|handle| handle.join().unwrap())
         .collect::<Vec<_>>();
 
-    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
-    assert_eq!(results.iter().filter(|result| result.is_err()).count(), 1);
+    assert_eq!(
+        results.iter().filter(|result| result.is_ok()).count(),
+        1,
+        "unexpected concurrent snapshot results: {results:?}"
+    );
+    assert_eq!(
+        results.iter().filter(|result| result.is_err()).count(),
+        1,
+        "unexpected concurrent snapshot results: {results:?}"
+    );
     assert_eq!(
         store.list_entries().unwrap().len(),
         MAX_SNAPSHOT_STORE_ENTRIES
@@ -548,7 +555,9 @@ fn set_private_test_directory(path: &std::path::Path) {
         use std::os::unix::fs::PermissionsExt as _;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    fluxheim_config::fs_trust::harden_private_directory(path).unwrap();
+    #[cfg(not(any(unix, windows)))]
     let _ = path;
 }
 

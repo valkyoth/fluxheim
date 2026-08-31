@@ -1464,6 +1464,7 @@ dependencies = [
 name = "fluxheim-snapshot"
 version = "1.8.2"
 dependencies = [
+ "dunce",
  "fluxheim-common",
  "fluxheim-config",
  "ring",

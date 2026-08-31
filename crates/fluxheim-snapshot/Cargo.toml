@@ -18,3 +18,6 @@ toml = "1.1.4"
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }
 fluxheim-config = { path = "../fluxheim-config", features = ["test-support"] }
 ring = "0.17.14"
+
+[target.'cfg(windows)'.dev-dependencies]
+dunce = "1.0.5"
