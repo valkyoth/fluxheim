@@ -23,8 +23,9 @@ use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::{
     CreateDirectoryW, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO,
     FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_RENAME_INFO, FILE_SHARE_DELETE,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfo, FileRenameInfo,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfo, FileRenameInfo, READ_CONTROL,
     SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, SYNCHRONIZE, SetFileInformationByHandle,
+    WRITE_DAC,
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
@@ -72,6 +73,35 @@ pub fn create_new_regular_file(path: &Path, read: bool) -> io::Result<File> {
 
 pub fn open_or_create_regular_file(path: &Path) -> io::Result<File> {
     open_absolute_regular_file_with_access(path, GENERIC_READ | GENERIC_WRITE, FILE_OPEN_IF)
+}
+
+/// Opens an existing directory for ACL inspection and replacement without
+/// following a reparse point in any path component.
+pub fn open_existing_directory_for_acl_update(path: &Path) -> io::Result<File> {
+    let (root, relative) = absolute_root_and_relative(path)?;
+    let components = validated_relative_components(&relative)?;
+    let mut directory = open_root_directory(&root)?;
+
+    for (index, component) in components.iter().enumerate() {
+        let final_component = index + 1 == components.len();
+        directory = open_relative_component(
+            &directory,
+            component,
+            false,
+            READ_CONTROL
+                | FILE_READ_ATTRIBUTES
+                | SYNCHRONIZE
+                | if final_component {
+                    WRITE_DAC
+                } else {
+                    FILE_LIST_DIRECTORY
+                },
+            FILE_OPEN,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        )?;
+    }
+
+    Ok(directory)
 }
 
 pub fn create_private_directory(path: &Path) -> io::Result<()> {

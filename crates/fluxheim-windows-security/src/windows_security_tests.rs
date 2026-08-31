@@ -80,6 +80,20 @@ fn private_directory_is_created_with_a_protected_acl() {
 }
 
 #[test]
+fn acl_update_opener_retains_parent_handles_and_requires_a_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let nested = root.path().join("nested");
+    let file = root.path().join("file.txt");
+    std::fs::create_dir(&nested).unwrap();
+    std::fs::write(&file, b"not-a-directory").unwrap();
+
+    let opened = open_existing_directory_for_acl_update(&nested)
+        .expect("directory ACL-update open should succeed");
+    assert!(opened.metadata().unwrap().is_dir());
+    assert!(open_existing_directory_for_acl_update(&file).is_err());
+}
+
+#[test]
 fn rejects_directory_junction_component() {
     let root = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();

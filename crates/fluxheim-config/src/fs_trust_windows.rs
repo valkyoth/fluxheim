@@ -356,12 +356,8 @@ fn open_path_for_trust_inspection(path: &Path) -> std::io::Result<std::fs::File>
 }
 
 fn open_path_for_acl_update(path: &Path) -> std::io::Result<std::fs::File> {
-    let mut options = std::fs::OpenOptions::new();
-    options
-        .access_mode(READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
-    options.open(path)
+    let absolute = absolute_path(path)?;
+    fluxheim_windows_security::open_existing_directory_for_acl_update(&absolute)
 }
 
 fn open_path_for_directory_sync(path: &Path) -> std::io::Result<std::fs::File> {
