@@ -225,7 +225,6 @@ fn rustls_client_cert_verifier(
 #[cfg(test)]
 mod tests {
     use std::io::Write as _;
-    use std::path::PathBuf;
 
     use fluxheim_config::{
         Config, StaticCertificateConfig, TlsAlpnPolicy, TlsClientAuthConfig, TlsConfig,
@@ -238,9 +237,10 @@ mod tests {
     #[test]
     fn native_server_config_builds_with_sni_resolver_and_alpn()
     -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let fixture = crate::test_certificates::static_certificate_file_fixture()?;
         let certificate = StaticCertificateConfig {
-            cert_path: PathBuf::from("../../tests/fixtures/tls/localhost-cert.pem"),
-            key_path: PathBuf::from("../../tests/fixtures/tls/localhost-key.pem"),
+            cert_path: fixture.cert_path,
+            key_path: fixture.key_path,
         };
         let config = Config {
             tls: TlsConfig {

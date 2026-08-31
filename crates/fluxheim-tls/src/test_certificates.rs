@@ -4,6 +4,42 @@ use rcgen::{
     RevokedCertParams, SerialNumber, date_time_ymd,
 };
 
+#[cfg(feature = "tls-rustls-backend")]
+pub(crate) struct StaticCertificateFileFixture {
+    _directory: tempfile::TempDir,
+    pub cert_path: std::path::PathBuf,
+    pub key_path: std::path::PathBuf,
+}
+
+#[cfg(feature = "tls-rustls-backend")]
+pub(crate) fn static_certificate_file_fixture() -> std::io::Result<StaticCertificateFileFixture> {
+    let directory = tempfile::tempdir()?;
+    let cert_path = directory.path().join("localhost-cert.pem");
+    let key_path = directory.path().join("localhost-key.pem");
+    write_private_test_file(
+        &cert_path,
+        include_bytes!("../../../tests/fixtures/tls/localhost-cert.pem"),
+    )?;
+    write_private_test_file(
+        &key_path,
+        include_bytes!("../../../tests/fixtures/tls/localhost-key.pem"),
+    )?;
+    Ok(StaticCertificateFileFixture {
+        _directory: directory,
+        cert_path,
+        key_path,
+    })
+}
+
+#[cfg(feature = "tls-rustls-backend")]
+fn write_private_test_file(path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
+    #[cfg(windows)]
+    let mut file = fluxheim_config::fs_trust::create_confidential_file(path)?;
+    #[cfg(not(windows))]
+    let mut file = std::fs::File::create(path)?;
+    std::io::Write::write_all(&mut file, contents)
+}
+
 pub(crate) struct RevokedClientCertificateFixture {
     pub ca_pem: String,
     #[cfg(feature = "tls-rustls-backend")]

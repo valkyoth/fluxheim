@@ -7,9 +7,10 @@ use super::*;
 
 #[test]
 fn resolver_can_reload_certificate_files() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let fixture = crate::test_certificates::static_certificate_file_fixture()?;
     let certificate = StaticCertificateConfig {
-        cert_path: PathBuf::from("../../tests/fixtures/tls/localhost-cert.pem"),
-        key_path: PathBuf::from("../../tests/fixtures/tls/localhost-key.pem"),
+        cert_path: fixture.cert_path,
+        key_path: fixture.key_path,
     };
     let config = Config {
         tls: TlsConfig {
@@ -76,9 +77,10 @@ fn malformed_private_key_base64_error_is_redacted() {
 #[test]
 fn tls_alpn_challenge_store_normalizes_sni_and_resolves_from_memory()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let fixture = crate::test_certificates::static_certificate_file_fixture()?;
     let certificate = Arc::new(load_rustls_certified_key_from_paths(
-        Path::new("../../tests/fixtures/tls/localhost-cert.pem"),
-        Path::new("../../tests/fixtures/tls/localhost-key.pem"),
+        &fixture.cert_path,
+        &fixture.key_path,
     )?);
     let store = RustlsTlsAlpnCertificateStore::new();
     store.replace([("EXAMPLE.COM.".to_owned(), certificate.clone())])?;
@@ -92,9 +94,10 @@ fn tls_alpn_challenge_store_normalizes_sni_and_resolves_from_memory()
 #[test]
 fn tls_alpn_challenge_store_rejects_duplicate_normalized_sni()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let fixture = crate::test_certificates::static_certificate_file_fixture()?;
     let certificate = Arc::new(load_rustls_certified_key_from_paths(
-        Path::new("../../tests/fixtures/tls/localhost-cert.pem"),
-        Path::new("../../tests/fixtures/tls/localhost-key.pem"),
+        &fixture.cert_path,
+        &fixture.key_path,
     )?);
     let store = RustlsTlsAlpnCertificateStore::new();
     let error = store
@@ -114,9 +117,10 @@ fn tls_alpn_challenge_store_rejects_duplicate_normalized_sni()
 #[test]
 fn tls_alpn_challenge_store_bounds_published_entries()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let fixture = crate::test_certificates::static_certificate_file_fixture()?;
     let certificate = Arc::new(load_rustls_certified_key_from_paths(
-        Path::new("../../tests/fixtures/tls/localhost-cert.pem"),
-        Path::new("../../tests/fixtures/tls/localhost-key.pem"),
+        &fixture.cert_path,
+        &fixture.key_path,
     )?);
     let certificates = (0..=MAX_TLS_ALPN_CHALLENGE_CERTIFICATES)
         .map(|index| (format!("host-{index}.example"), certificate.clone()));
