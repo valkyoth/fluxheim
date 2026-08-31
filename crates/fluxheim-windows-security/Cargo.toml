@@ -19,4 +19,5 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 
 [target.'cfg(windows)'.dev-dependencies]
+dunce = "1.0.5"
 tempfile = "3.27.0"

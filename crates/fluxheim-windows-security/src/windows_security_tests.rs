@@ -45,6 +45,7 @@ fn absolute_create_rename_open_and_remove_stay_handle_relative() {
     let mut contents = Vec::new();
     opened.read_to_end(&mut contents).unwrap();
     assert_eq!(contents, b"state");
+    drop(opened);
 
     remove_regular_file(&destination).unwrap();
     assert!(!destination.exists());
@@ -104,13 +105,10 @@ fn rejects_directory_junction_component() {
     let outside = tempfile::tempdir().unwrap();
     std::fs::write(outside.path().join("secret.txt"), b"outside").unwrap();
     let junction = root.path().join("junction");
-    let command = format!(
-        "mklink /J \"{}\" \"{}\"",
-        junction.display(),
-        outside.path().display()
-    );
     let status = std::process::Command::new("cmd.exe")
-        .args(["/D", "/C", &command])
+        .args(["/D", "/C", "mklink", "/J"])
+        .arg(dunce::simplified(&junction))
+        .arg(dunce::simplified(outside.path()))
         .stdout(std::process::Stdio::null())
         .status()
         .unwrap();

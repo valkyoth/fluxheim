@@ -1538,6 +1538,7 @@ dependencies = [
 name = "fluxheim-windows-security"
 version = "1.8.2"
 dependencies = [
+ "dunce",
  "tempfile",
  "windows-permissions",
  "windows-sys 0.61.2",
