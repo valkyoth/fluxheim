@@ -202,6 +202,7 @@ foreach ($required in @(
     'RootDirectory: parent.as_raw_handle() as HANDLE',
     'OBJ_DONT_REPARSE',
     'FILE_OPEN_REPARSE_POINT',
+    'FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE',
     'create_private_directory',
     'create_hard_link_regular_file',
     'rename_regular_file',
@@ -268,7 +269,6 @@ foreach ($relative in @(
     foreach ($required in @(
         'Component::Prefix(_) | Component::CurDir => continue',
         'Component::ParentDir => return Ok(true)',
-        'FILE_SHARE_DELETE',
         'existing_path_or_parent_has_insecure_write_permissions'
     )) {
         if (-not $cachePathBoundary.Contains($required)) {
