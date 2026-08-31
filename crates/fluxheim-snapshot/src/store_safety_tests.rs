@@ -1,12 +1,16 @@
 use super::{SnapshotError, SnapshotStore};
 use crate::store_fs::MAX_CURRENT_SNAPSHOT_POINTER_BYTES;
+#[cfg(any(unix, windows))]
+use crate::store_fs::open_private_lock_file;
 #[cfg(unix)]
-use crate::store_fs::{open_private_lock_file, write_atomically};
+use crate::store_fs::write_atomically;
 
 mod tests {
-    use super::{SnapshotError, SnapshotStore};
+    #[cfg(any(unix, windows))]
+    use super::open_private_lock_file;
     #[cfg(unix)]
-    use super::{open_private_lock_file, write_atomically};
+    use super::write_atomically;
+    use super::{SnapshotError, SnapshotStore};
     use fluxheim_common::test_support::unique_temp_path;
     #[cfg(unix)]
     use fluxheim_common::test_support::{
@@ -81,6 +85,35 @@ mod tests {
         std::os::unix::fs::symlink(&real_parent, &linked_parent).unwrap();
 
         let error = open_private_lock_file(&linked_parent.join(".snapshot.lock")).unwrap_err();
+        assert!(matches!(
+            error,
+            SnapshotError::UnsafeSnapshotPath { .. } | SnapshotError::Io(_)
+        ));
+        assert!(!real_parent.join(".snapshot.lock").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn private_lock_open_rejects_junctioned_parent_component() {
+        let dir = TestDir::new("snapshot-lock-parent-junction");
+        let real_parent = dir.path().join("real-parent");
+        let junction = dir.path().join("junction");
+        std::fs::create_dir(&real_parent).unwrap();
+        let command = format!(
+            "mklink /J \"{}\" \"{}\"",
+            junction.display(),
+            real_parent.display()
+        );
+        let status = std::process::Command::new("cmd.exe")
+            .args(["/D", "/C", &command])
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "failed to create test directory junction");
+
+        let error = open_private_lock_file(&junction.join(".snapshot.lock")).unwrap_err();
+        std::fs::remove_dir(&junction).unwrap();
+
         assert!(matches!(
             error,
             SnapshotError::UnsafeSnapshotPath { .. } | SnapshotError::Io(_)

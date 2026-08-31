@@ -250,7 +250,12 @@ async fn create_php_request_body_spool_dir(spool_dir: &Path) -> io::Result<()> {
     create_php_request_body_spool_dir_sync(spool_dir)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+async fn create_php_request_body_spool_dir(spool_dir: &Path) -> io::Result<()> {
+    fluxheim_config::fs_trust::create_private_directory_all(spool_dir)
+}
+
+#[cfg(all(not(unix), not(windows)))]
 async fn create_php_request_body_spool_dir(spool_dir: &Path) -> io::Result<()> {
     tokio::fs::create_dir_all(spool_dir).await
 }
@@ -312,26 +317,36 @@ async fn create_php_request_body_spool_file_by_path(
 ) -> io::Result<tokio::fs::File> {
     use std::os::windows::fs::OpenOptionsExt as _;
 
+    use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_TEMPORARY, FILE_FLAG_DELETE_ON_CLOSE, FILE_FLAG_OPEN_REPARSE_POINT,
-        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        READ_CONTROL, WRITE_DAC,
     };
+
+    const DELETE_ACCESS: u32 = 0x0001_0000;
 
     let mut last_error = None;
     for _ in 0..16 {
         let path = php_request_body_spool_path(spool_dir)?;
         let mut options = std::fs::OpenOptions::new();
         options
-            .read(true)
-            .write(true)
+            .access_mode(GENERIC_READ | GENERIC_WRITE | DELETE_ACCESS | READ_CONTROL | WRITE_DAC)
             .create_new(true)
-            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .share_mode(0)
             .custom_flags(
                 FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE | FILE_FLAG_OPEN_REPARSE_POINT,
             );
         match options.open(&path) {
             Ok(mut file) => {
                 fluxheim_config::fs_trust::harden_confidential_file(&mut file)?;
+                if fluxheim_config::fs_trust::opened_file_has_insecure_confidential_permissions(
+                    &file,
+                )? {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "PHP spool file retained an untrusted ACL after hardening",
+                    ));
+                }
                 return Ok(tokio::fs::File::from_std(file));
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {

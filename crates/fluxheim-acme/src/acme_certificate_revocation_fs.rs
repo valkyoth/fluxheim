@@ -89,6 +89,9 @@ pub(super) fn read_bounded_regular_file(
     directory_fd: Option<&CertificateDirectoryFd>,
     max_bytes: usize,
 ) -> Result<Vec<u8>, AcmeCertificateInstallError> {
+    #[cfg(windows)]
+    let _ = (directory, directory_fd);
+
     #[cfg(unix)]
     let mut file = {
         let directory_fd = directory_fd.ok_or_else(|| AcmeCertificateInstallError::UnsafePath {
@@ -108,7 +111,15 @@ pub(super) fn read_bounded_regular_file(
         })?;
         fs::File::from(fd)
     };
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    let mut file =
+        fluxheim_windows_security::open_existing_regular_file(path, false).map_err(|error| {
+            AcmeCertificateInstallError::Io {
+                path: path.to_path_buf(),
+                error,
+            }
+        })?;
+    #[cfg(all(not(unix), not(windows)))]
     let mut file = {
         ensure_existing_regular_file(directory, path, directory_fd)?;
         fs::OpenOptions::new()

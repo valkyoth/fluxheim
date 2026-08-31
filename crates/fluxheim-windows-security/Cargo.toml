@@ -8,6 +8,7 @@ publish = false
 description = "Audited Windows filesystem capability helpers for Fluxheim."
 
 [target.'cfg(windows)'.dependencies]
+windows-permissions = "0.2.4"
 windows-sys = { version = "0.61.2", features = [
     "Wdk_Foundation",
     "Wdk_Storage_FileSystem",

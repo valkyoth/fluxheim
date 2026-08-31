@@ -102,8 +102,11 @@ fn open_log_file_windows(path: &Path, append: bool) -> std::io::Result<File> {
             .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
         options.open(path)
     };
-    let (mut file, created) = match open(true) {
-        Ok(file) => (file, true),
+    let (file, created) = match fluxheim_config::fs_trust::create_confidential_file(path) {
+        Ok(file) => {
+            drop(file);
+            (open(false)?, true)
+        }
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (open(false)?, false),
         Err(error) => return Err(error),
     };
@@ -122,9 +125,8 @@ fn open_log_file_windows(path: &Path, append: bool) -> std::io::Result<File> {
             "log path changed during secure open",
         ));
     }
-    if created {
-        fluxheim_config::fs_trust::harden_confidential_file(&mut file)?;
-    } else if fluxheim_config::fs_trust::opened_file_has_insecure_owner_or_write_permissions(&file)?
+    if !created
+        && fluxheim_config::fs_trust::opened_file_has_insecure_owner_or_write_permissions(&file)?
     {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,

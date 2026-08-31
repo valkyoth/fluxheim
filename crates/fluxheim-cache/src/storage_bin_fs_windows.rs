@@ -1,10 +1,7 @@
-use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+use std::os::windows::fs::MetadataExt as _;
 use std::path::{Component, Path, PathBuf};
 
-use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
-};
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
 #[derive(Clone, Copy)]
 pub(crate) struct StorageBinFileType {
@@ -250,30 +247,30 @@ impl StorageBinSafePath {
 
     fn open(&self, read: bool, write: bool, create_new: bool) -> std::io::Result<std::fs::File> {
         self.validate_parent()?;
-        if !create_new {
-            reject_existing_reparse_point(&self.path)?;
-        }
-        let mut options = std::fs::OpenOptions::new();
-        options
-            .read(read)
-            .write(write)
-            .create_new(create_new)
-            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-            .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
-        let file = options.open(&self.path)?;
+        let file = match (read, write, create_new) {
+            (false, true, true) => {
+                fluxheim_windows_security::create_new_regular_file(&self.path, false)?
+            }
+            (true, true, true) => {
+                fluxheim_windows_security::create_new_regular_file(&self.path, true)?
+            }
+            (true, false, false) => {
+                fluxheim_windows_security::open_existing_regular_file(&self.path, false)?
+            }
+            (true, true, false) => {
+                fluxheim_windows_security::open_existing_regular_file(&self.path, true)?
+            }
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "unsupported storage-bin file open mode",
+                ));
+            }
+        };
         let metadata = file.metadata()?;
         if metadata_is_reparse_point(&metadata) || !metadata.is_file() {
             return Err(unsafe_path_error(format!(
                 "storage-bin path is not a real file: {}",
-                self.path.display()
-            )));
-        }
-        if same_file::Handle::from_path(&self.path)?
-            != same_file::Handle::from_file(file.try_clone()?)?
-        {
-            return Err(unsafe_path_error(format!(
-                "storage-bin path changed during secure open: {}",
                 self.path.display()
             )));
         }
@@ -299,15 +296,13 @@ impl StorageBinSafePath {
     pub(crate) fn rename_from(&self, source: &StorageBinSafePath) -> std::io::Result<()> {
         self.validate_parent()?;
         source.validate_parent()?;
-        reject_existing_reparse_point(&source.path)?;
         reject_existing_reparse_point_if_present(&self.path)?;
-        std::fs::rename(&source.path, &self.path)
+        fluxheim_windows_security::rename_regular_file(&source.path, &self.path)
     }
 
     pub(crate) fn remove_file(&self) -> std::io::Result<()> {
         self.validate_parent()?;
-        reject_existing_reparse_point(&self.path)?;
-        std::fs::remove_file(&self.path)
+        fluxheim_windows_security::remove_regular_file(&self.path)
     }
 
     pub(crate) fn sync_parent_directory(&self) -> std::io::Result<()> {

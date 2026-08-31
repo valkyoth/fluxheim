@@ -34,7 +34,7 @@ fn open_admitted_file(path: &Path, maximum: u64, confidential: bool) -> io::Resu
     let file = if confidential {
         fluxheim_config::fs_trust::open_confidential_file(path)?
     } else {
-        File::open(path)?
+        fluxheim_config::fs_trust::open_regular_file(path)?
     };
     #[cfg(not(windows))]
     let file = {

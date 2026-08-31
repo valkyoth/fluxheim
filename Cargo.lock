@@ -1216,6 +1216,7 @@ dependencies = [
  "bytes",
  "fluxheim-common",
  "fluxheim-config",
+ "fluxheim-windows-security",
  "futures",
  "getrandom 0.4.3",
  "http",
@@ -1246,10 +1247,10 @@ dependencies = [
  "async-trait",
  "bytes",
  "fluxheim-config",
+ "fluxheim-windows-security",
  "getrandom 0.4.3",
  "http",
  "rustix",
- "same-file",
  "tempfile",
  "tokio",
  "windows-sys 0.61.2",
@@ -1283,6 +1284,7 @@ dependencies = [
  "fluxheim-common",
  "fluxheim-protocol",
  "fluxheim-wasm",
+ "fluxheim-windows-security",
  "log",
  "proptest",
  "regex",
@@ -1444,7 +1446,6 @@ dependencies = [
  "rustix",
  "rustls",
  "rustls-native-certs",
- "same-file",
  "sanitization",
  "serde_json",
  "sha2 0.11.0",
@@ -1537,6 +1538,7 @@ name = "fluxheim-windows-security"
 version = "1.8.2"
 dependencies = [
  "tempfile",
+ "windows-permissions",
  "windows-sys 0.61.2",
 ]
 

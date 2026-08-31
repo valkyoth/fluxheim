@@ -1,32 +1,21 @@
 use std::os::windows::fs::OpenOptionsExt as _;
 use std::path::{Component, Path, PathBuf};
 
-use windows_permissions::constants::{
-    AccessRights, AceFlags, AceType, SeObjectType, SecurityInformation,
-};
-use windows_permissions::{LocalBox, SecurityDescriptor, Sid};
-use windows_sys::Win32::Foundation::GENERIC_WRITE;
+use windows_permissions::constants::{SeObjectType, SecurityInformation};
+use windows_permissions::{LocalBox, SecurityDescriptor};
+use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_READ_ATTRIBUTES, READ_CONTROL, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
+    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, READ_CONTROL,
+    SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, WRITE_DAC,
 };
 
 const MAX_PERMISSION_INSPECTION_DEPTH: usize = 256;
-const TRUSTED_INSTALLER_SID: &str =
-    "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
+const DELETE_ACCESS: u32 = 0x0001_0000;
 
-#[derive(Clone, Copy)]
-enum InspectedPathRole {
-    ExistingObject,
-    CreationParent,
-    Ancestor,
-}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum TrustPolicy {
-    IntegrityOnly,
-    ConfidentialSecret,
-}
+#[path = "fs_trust_windows_acl.rs"]
+mod acl;
+use acl::{InspectedPathRole, TrustPolicy, security_descriptor_is_insecure};
 
 pub fn existing_parent_has_insecure_write_permissions(path: &Path) -> std::io::Result<bool> {
     let parent = path
@@ -55,7 +44,17 @@ pub fn opened_file_has_insecure_confidential_permissions(
 }
 
 pub fn open_confidential_file(path: &Path) -> std::io::Result<std::fs::File> {
-    if existing_parent_has_insecure_write_permissions(path)? {
+    open_existing_regular_file(path, false, TrustPolicy::ConfidentialSecret)
+}
+
+pub fn open_regular_file(path: &Path) -> std::io::Result<std::fs::File> {
+    open_existing_regular_file(path, false, TrustPolicy::IntegrityOnly)
+}
+
+pub fn create_confidential_file(path: &Path) -> std::io::Result<std::fs::File> {
+    // Inspect the missing child path so INHERIT_ONLY ACEs on its creation
+    // parent are evaluated as permissions that would apply to the new file.
+    if existing_path_has_insecure_write_permissions(path)? {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
             "confidential file has an untrusted parent ACL",
@@ -63,30 +62,110 @@ pub fn open_confidential_file(path: &Path) -> std::io::Result<std::fs::File> {
     }
     let mut options = std::fs::OpenOptions::new();
     options
-        .read(true)
+        .access_mode(GENERIC_READ | GENERIC_WRITE | DELETE_ACCESS | READ_CONTROL | WRITE_DAC)
+        .create_new(true)
+        .share_mode(0)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
+    let mut file = options.open(path)?;
+    if let Err(error) = verify_opened_regular_file(path, &file, None, "confidential") {
+        let _ = fluxheim_windows_security::remove_open_regular_file(&file);
+        return Err(error);
+    }
+    if let Err(error) = harden_object(&mut file) {
+        let _ = fluxheim_windows_security::remove_open_regular_file(&file);
+        return Err(error);
+    }
+    match opened_file_has_insecure_confidential_permissions(&file) {
+        Ok(false) => {}
+        Ok(true) => {
+            let _ = fluxheim_windows_security::remove_open_regular_file(&file);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "new confidential file retained an untrusted ACL after hardening",
+            ));
+        }
+        Err(error) => {
+            let _ = fluxheim_windows_security::remove_open_regular_file(&file);
+            return Err(error);
+        }
+    }
+    Ok(file)
+}
+
+pub fn open_or_create_confidential_file(path: &Path) -> std::io::Result<std::fs::File> {
+    match create_confidential_file(path) {
+        Ok(file) => {
+            drop(file);
+            open_existing_regular_file(path, true, TrustPolicy::ConfidentialSecret)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            open_existing_regular_file(path, true, TrustPolicy::ConfidentialSecret)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn open_existing_regular_file(
+    path: &Path,
+    write: bool,
+    policy: TrustPolicy,
+) -> std::io::Result<std::fs::File> {
+    let expected = same_file::Handle::from_path(path)?;
+    if existing_parent_has_insecure_write_permissions(path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "file has an untrusted parent ACL",
+        ));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    let access =
+        GENERIC_READ | READ_CONTROL | FILE_READ_ATTRIBUTES | if write { GENERIC_WRITE } else { 0 };
+    options
+        .access_mode(access)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
         .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
     let file = options.open(path)?;
+    verify_opened_regular_file(path, &file, Some(expected), "file")?;
+    if opened_file_has_insecure_permissions(&file, policy)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            if policy == TrustPolicy::ConfidentialSecret {
+                "confidential file has an untrusted ACL"
+            } else {
+                "file has an untrusted ACL"
+            },
+        ));
+    }
+    Ok(file)
+}
+
+fn verify_opened_regular_file(
+    path: &Path,
+    file: &std::fs::File,
+    expected: Option<same_file::Handle>,
+    label: &str,
+) -> std::io::Result<()> {
     let metadata = file.metadata()?;
     if metadata_is_reparse_point(&metadata) || !metadata.is_file() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
-            "confidential path is a reparse point or is not a regular file",
+            format!("{label} path is a reparse point or is not a regular file"),
         ));
     }
-    if same_file::Handle::from_path(path)? != same_file::Handle::from_file(file.try_clone()?)? {
+    if let Some(expected) = expected
+        && expected != same_file::Handle::from_file(file.try_clone()?)?
+    {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
-            "confidential path changed during secure open",
+            format!(
+                "{label} path changed during secure open: {}",
+                path.display()
+            ),
         ));
     }
-    if opened_file_has_insecure_confidential_permissions(&file)? {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "confidential file has an untrusted ACL",
-        ));
-    }
-    Ok(file)
+    Ok(())
 }
 
 fn opened_file_has_insecure_permissions(
@@ -117,7 +196,60 @@ pub fn harden_private_directory(path: &Path) -> std::io::Result<()> {
     harden_object(&mut directory)
 }
 
+pub fn create_private_directory_all(path: &Path) -> std::io::Result<()> {
+    if existing_path_has_insecure_write_permissions(path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "private directory has an untrusted creation parent ACL",
+        ));
+    }
+    let absolute = absolute_path(path)?;
+    let mut current = PathBuf::new();
+    for component in absolute.components() {
+        current.push(component.as_os_str());
+        if matches!(component, Component::Prefix(_) | Component::RootDir) {
+            continue;
+        }
+        match open_path_for_trust_inspection(&current) {
+            Ok(directory) => {
+                let metadata = directory.metadata()?;
+                if metadata_is_reparse_point(&metadata) || !metadata.is_dir() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "private directory component is a reparse point or not a directory",
+                    ));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match fluxheim_windows_security::create_private_directory(&current) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                        let directory = open_path_for_trust_inspection(&current)?;
+                        let metadata = directory.metadata()?;
+                        if metadata_is_reparse_point(&metadata) || !metadata.is_dir() {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::PermissionDenied,
+                                "private directory creation raced with an unsafe object",
+                            ));
+                        }
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    harden_private_directory(&absolute)
+}
+
 pub fn sync_directory(path: &Path) -> std::io::Result<()> {
+    let expected = same_file::Handle::from_path(path)?;
+    if existing_path_has_insecure_write_permissions(path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "directory sync target has an untrusted ACL",
+        ));
+    }
     let directory = open_path_for_directory_sync(path)?;
     let metadata = directory.metadata()?;
     if metadata_is_reparse_point(&metadata) || !metadata.is_dir() {
@@ -126,8 +258,7 @@ pub fn sync_directory(path: &Path) -> std::io::Result<()> {
             "directory sync target is a reparse point or is not a directory",
         ));
     }
-    if same_file::Handle::from_path(path)? != same_file::Handle::from_file(directory.try_clone()?)?
-    {
+    if expected != same_file::Handle::from_file(directory.try_clone()?)? {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
             "directory sync target changed during secure open",
@@ -219,8 +350,6 @@ fn open_path_for_trust_inspection(path: &Path) -> std::io::Result<std::fs::File>
 }
 
 fn open_path_for_acl_update(path: &Path) -> std::io::Result<std::fs::File> {
-    use windows_sys::Win32::Storage::FileSystem::WRITE_DAC;
-
     let mut options = std::fs::OpenOptions::new();
     options
         .access_mode(READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES)
@@ -270,97 +399,6 @@ fn absolute_path(path: &Path) -> std::io::Result<PathBuf> {
         }
     }
     Ok(normalized)
-}
-
-fn security_descriptor_is_insecure(
-    descriptor: &SecurityDescriptor,
-    role: InspectedPathRole,
-    policy: TrustPolicy,
-) -> std::io::Result<bool> {
-    let trusted_sids = trusted_sids()?;
-    let Some(owner) = descriptor.owner() else {
-        return Ok(true);
-    };
-    if !sid_is_trusted(owner, &trusted_sids) {
-        return Ok(true);
-    }
-    let Some(dacl) = descriptor.dacl() else {
-        return Ok(true);
-    };
-    let dangerous_rights = dangerous_rights(role, policy);
-    for index in 0..dacl.len() {
-        let Some(ace) = dacl.get_ace(index) else {
-            return Ok(true);
-        };
-        if ace.flags().contains(AceFlags::InheritOnly) || !ace_is_allow(ace.ace_type()) {
-            continue;
-        }
-        if !ace.mask().intersects(dangerous_rights) {
-            continue;
-        }
-        let Some(sid) = ace.sid() else {
-            return Ok(true);
-        };
-        if !sid_is_trusted(sid, &trusted_sids) {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-fn dangerous_rights(role: InspectedPathRole, policy: TrustPolicy) -> AccessRights {
-    let takeover = AccessRights::GenericAll
-        | AccessRights::Delete
-        | AccessRights::WriteDac
-        | AccessRights::WriteOwner
-        | AccessRights::Bit6;
-    let writes = match role {
-        InspectedPathRole::Ancestor => takeover | AccessRights::Bit6,
-        InspectedPathRole::ExistingObject | InspectedPathRole::CreationParent => {
-            takeover
-                | AccessRights::GenericWrite
-                | AccessRights::Bit1
-                | AccessRights::Bit2
-                | AccessRights::Bit4
-                | AccessRights::Bit8
-        }
-    };
-    if policy == TrustPolicy::ConfidentialSecret {
-        writes
-            | AccessRights::GenericRead
-            | AccessRights::FileGenericRead
-            | AccessRights::Bit0
-            | AccessRights::Bit3
-    } else {
-        writes
-    }
-}
-
-fn ace_is_allow(ace_type: AceType) -> bool {
-    matches!(
-        ace_type,
-        AceType::ACCESS_ALLOWED_ACE_TYPE
-            | AceType::ACCESS_ALLOWED_CALLBACK_ACE_TYPE
-            | AceType::ACCESS_ALLOWED_CALLBACK_OBJECT_ACE_TYPE
-            | AceType::ACCESS_ALLOWED_OBJECT_ACE_TYPE
-    )
-}
-
-fn trusted_sids() -> std::io::Result<Vec<LocalBox<Sid>>> {
-    Ok(vec![
-        windows_permissions::utilities::current_process_sid()?,
-        parse_sid("S-1-5-18")?,
-        parse_sid("S-1-5-32-544")?,
-        parse_sid(TRUSTED_INSTALLER_SID)?,
-    ])
-}
-
-fn parse_sid(value: &str) -> std::io::Result<LocalBox<Sid>> {
-    value.parse()
-}
-
-fn sid_is_trusted(sid: &Sid, trusted_sids: &[LocalBox<Sid>]) -> bool {
-    trusted_sids.iter().any(|trusted| sid == trusted.as_ref())
 }
 
 fn metadata_is_reparse_point(metadata: &std::fs::Metadata) -> bool {

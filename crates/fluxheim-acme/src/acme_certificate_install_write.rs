@@ -55,27 +55,30 @@ pub(crate) fn write_new_file(
         return Ok(());
     }
 
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(mode);
-        options.custom_flags(UNIX_O_NOFOLLOW);
-    }
-    let mut file = options
-        .open(path)
-        .map_err(|error| AcmeCertificateInstallError::Io {
-            path: path.to_path_buf(),
-            error,
-        })?;
     #[cfg(windows)]
-    fluxheim_config::fs_trust::harden_confidential_file(&mut file).map_err(|error| {
+    let mut file = fluxheim_config::fs_trust::create_confidential_file(path).map_err(|error| {
         AcmeCertificateInstallError::Io {
             path: path.to_path_buf(),
             error,
         }
     })?;
+    #[cfg(not(windows))]
+    let mut file = {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(mode);
+            options.custom_flags(UNIX_O_NOFOLLOW);
+        }
+        options
+            .open(path)
+            .map_err(|error| AcmeCertificateInstallError::Io {
+                path: path.to_path_buf(),
+                error,
+            })?
+    };
     apply_owner_to_file(&file, path, owner)?;
     file.write_all(contents)
         .and_then(|()| file.sync_all())

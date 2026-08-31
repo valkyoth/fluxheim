@@ -1,11 +1,8 @@
 use std::io::Read as _;
-use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+use std::os::windows::fs::MetadataExt as _;
 use std::path::{Component, Path, PathBuf};
 
-use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
-};
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
 const NATIVE_DISK_CACHE_READ_OVERHEAD_BYTES: u64 = 1024 * 1024;
 
@@ -166,26 +163,26 @@ impl NativeSafeDiskCachePath {
         create_new: bool,
     ) -> std::io::Result<std::fs::File> {
         self.validate_parent()?;
-        if !create_new {
-            reject_existing_reparse_point_if_present(&self.path)?;
-        }
-        let mut options = std::fs::OpenOptions::new();
-        options
-            .read(read)
-            .write(write)
-            .create(create)
-            .create_new(create_new)
-            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-            .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
-        let file = options.open(&self.path)?;
+        let file = match (read, write, create, create_new) {
+            (true, false, false, false) => {
+                fluxheim_windows_security::open_existing_regular_file(&self.path, false)?
+            }
+            (true, true, true, false) => {
+                fluxheim_windows_security::open_or_create_regular_file(&self.path)?
+            }
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "unsupported native cache file open mode",
+                ));
+            }
+        };
         let metadata = file.metadata()?;
         if metadata_is_reparse_point(&metadata) || !metadata.is_file() {
             return Err(unsafe_path_error(
                 "native disk cache path is not a real file",
             ));
         }
-        ensure_opened_path_unchanged(&self.path, &file)?;
         Ok(file)
     }
 
@@ -217,9 +214,8 @@ impl NativeSafeDiskCachePath {
     pub(super) fn rename_from(&self, source: &Self) -> std::io::Result<()> {
         self.validate_parent()?;
         source.validate_parent()?;
-        reject_existing_reparse_point(&source.path)?;
         reject_existing_reparse_point_if_present(&self.path)?;
-        std::fs::rename(&source.path, &self.path)
+        fluxheim_windows_security::rename_regular_file(&source.path, &self.path)
     }
 
     pub(super) fn persist_tempfile(
@@ -227,24 +223,27 @@ impl NativeSafeDiskCachePath {
         temporary: tempfile::NamedTempFile,
     ) -> std::io::Result<()> {
         self.validate_parent()?;
-        reject_existing_reparse_point_if_present(&self.path)?;
-        let file = temporary.persist(&self.path).map_err(|error| error.error)?;
-        file.sync_all()
+        let (file, temporary_path) = temporary.keep().map_err(|error| error.error)?;
+        file.sync_all()?;
+        drop(file);
+        if let Err(error) =
+            fluxheim_windows_security::rename_regular_file(&temporary_path, &self.path)
+        {
+            let _ = fluxheim_windows_security::remove_regular_file(&temporary_path);
+            return Err(error);
+        }
+        self.sync_parent_dir()
     }
 
     pub(super) fn sync_parent_dir(&self) -> std::io::Result<()> {
+        let parent = self.parent()?;
         self.validate_parent()?;
-        match self.open(true, true, false, false) {
-            Ok(file) => file.sync_all(),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error),
-        }
+        fluxheim_config::fs_trust::sync_directory(parent)
     }
 
     pub(super) fn remove_file(&self) -> std::io::Result<()> {
         self.validate_parent()?;
-        reject_existing_reparse_point(&self.path)?;
-        std::fs::remove_file(&self.path)
+        fluxheim_windows_security::remove_regular_file(&self.path)
     }
 }
 
@@ -302,18 +301,6 @@ fn reject_existing_reparse_point_if_present(path: &Path) -> std::io::Result<()> 
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
-    }
-}
-
-fn ensure_opened_path_unchanged(path: &Path, file: &std::fs::File) -> std::io::Result<()> {
-    let path_handle = same_file::Handle::from_path(path)?;
-    let opened_handle = same_file::Handle::from_file(file.try_clone()?)?;
-    if path_handle == opened_handle {
-        Ok(())
-    } else {
-        Err(unsafe_path_error(
-            "native disk cache path changed during secure open",
-        ))
     }
 }
 

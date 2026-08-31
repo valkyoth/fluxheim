@@ -147,8 +147,12 @@ if ($smoke.Contains('X509KeyStorageFlags]::UserKeySet')) {
     throw 'Windows native smoke must not place generated TLS private keys in the user key store'
 }
 
-$windowsTrust = Get-Content -LiteralPath `
-    (Join-Path $root 'crates/fluxheim-config/src/fs_trust_windows.rs') -Raw
+$windowsTrust = @(
+    Get-Content -LiteralPath `
+        (Join-Path $root 'crates/fluxheim-config/src/fs_trust_windows.rs') -Raw
+    Get-Content -LiteralPath `
+        (Join-Path $root 'crates/fluxheim-config/src/fs_trust_windows_acl.rs') -Raw
+) -join "`n"
 foreach ($required in @(
     'TrustPolicy::ConfidentialSecret',
     'AccessRights::GenericRead',
@@ -156,6 +160,12 @@ foreach ($required in @(
     'AccessRights::Bit6',
     'FILE_FLAG_OPEN_REPARSE_POINT',
     'opened_file_has_insecure_confidential_permissions',
+    'create_confidential_file',
+    'open_or_create_confidential_file',
+    'create_private_directory_all',
+    'AceFlags::ObjectInherit | AceFlags::ContainerInherit',
+    'WRITE_DAC',
+    '.share_mode(0)',
     'harden_confidential_file',
     'GENERIC_WRITE | READ_CONTROL | FILE_READ_ATTRIBUTES',
     'SecurityInformation::ProtectedDacl'
@@ -170,6 +180,9 @@ $windowsTrustTests = Get-Content -LiteralPath `
 foreach ($required in @(
     'everyone_read_access_is_only_rejected_for_confidential_files',
     'confidential_hardening_removes_inherited_everyone_access',
+    'confidential_creation_is_exclusive_until_the_protected_acl_is_installed',
+    'inherit_only_everyone_write_access_blocks_child_creation',
+    'private_directory_tree_uses_protected_acl_creation',
     'everyone_delete_child_access_on_directory_is_rejected',
     'real_directory_flush_succeeds'
 )) {
@@ -178,17 +191,42 @@ foreach ($required in @(
     }
 }
 
-$windowsCapability = Get-Content -LiteralPath `
-    (Join-Path $root 'crates/fluxheim-windows-security/src/lib.rs') -Raw
+$windowsCapability = @(
+    Get-Content -LiteralPath `
+        (Join-Path $root 'crates/fluxheim-windows-security/src/lib.rs') -Raw
+    Get-Content -LiteralPath `
+        (Join-Path $root 'crates/fluxheim-windows-security/src/windows_security_tests.rs') -Raw
+) -join "`n"
 foreach ($required in @(
     'NtCreateFile',
     'RootDirectory: parent.as_raw_handle() as HANDLE',
     'OBJ_DONT_REPARSE',
     'FILE_OPEN_REPARSE_POINT',
+    'create_private_directory',
+    'create_hard_link_regular_file',
+    'rename_regular_file',
+    'remove_regular_file',
+    'absolute_create_rename_open_and_remove_stay_handle_relative',
     'rejects_directory_junction_component'
 )) {
     if (-not $windowsCapability.Contains($required)) {
         throw "Windows handle-relative filesystem boundary is missing required behavior: $required"
+    }
+}
+
+foreach ($relative in @(
+    'crates/fluxheim-cache/src/storage_bin_fs_windows.rs',
+    'crates/fluxheim-server/src/native_http1_cache_disk_path_windows.rs'
+)) {
+    $cachePath = Get-Content -LiteralPath (Join-Path $root $relative) -Raw
+    foreach ($required in @(
+        'fluxheim_windows_security::open_existing_regular_file',
+        'fluxheim_windows_security::rename_regular_file',
+        'fluxheim_windows_security::remove_regular_file'
+    )) {
+        if (-not $cachePath.Contains($required)) {
+            throw "Windows cache path boundary is missing handle-relative operation: $relative $required"
+        }
     }
 }
 
@@ -333,6 +371,22 @@ foreach ($required in @(
 )) {
     if (-not $preparation.Contains($required)) {
         throw "Windows preparation script is missing required hardening: $required"
+    }
+}
+$globalPasswordAuthentication = $preparation.IndexOf('PasswordAuthentication no')
+$firstMatch = [regex]::Match($preparation, '(?m)^\s*Match\s+')
+if ($globalPasswordAuthentication -lt 0 -or
+    ($firstMatch.Success -and $globalPasswordAuthentication -gt $firstMatch.Index)) {
+    throw 'Windows preparation must disable password authentication before the first Match block'
+}
+foreach ($required in @(
+    'sshd.exe" -T -C',
+    'passwordauthentication no',
+    'kbdinteractiveauthentication no',
+    'authenticationmethods publickey'
+)) {
+    if (-not $preparation.Contains($required)) {
+        throw "Windows preparation script is missing effective sshd validation: $required"
     }
 }
 foreach ($required in @(

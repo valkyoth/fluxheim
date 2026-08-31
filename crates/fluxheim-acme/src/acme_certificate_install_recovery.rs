@@ -236,14 +236,20 @@ fn read_journal(
 }
 
 fn open_journal_no_follow(path: &Path) -> io::Result<fs::File> {
-    let mut options = fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(target_os = "linux")]
+    #[cfg(windows)]
+    return fluxheim_windows_security::open_existing_regular_file(path, false);
+
+    #[cfg(not(windows))]
     {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.custom_flags(super::super::UNIX_O_NOFOLLOW);
+        let mut options = fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.custom_flags(super::super::UNIX_O_NOFOLLOW);
+        }
+        options.open(path)
     }
-    options.open(path)
 }
 
 fn validate_transaction_id(

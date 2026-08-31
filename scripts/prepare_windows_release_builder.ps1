@@ -112,6 +112,17 @@ if ($PSCmdlet.ShouldProcess($sshdConfig, 'Restrict release-builder SSH authentic
     Set-Content -LiteralPath $sshdConfig -Value ($config.TrimEnd() + "`r`n" + $block) -Encoding ascii
     & "$env:WINDIR\System32\OpenSSH\sshd.exe" -t
     if ($LASTEXITCODE -ne 0) { throw 'OpenSSH configuration validation failed' }
+    $effectiveSshd = (& "$env:WINDIR\System32\OpenSSH\sshd.exe" -T -C "user=$BuildUser,host=localhost,addr=127.0.0.1") -join "`n"
+    if ($LASTEXITCODE -ne 0) { throw 'OpenSSH effective configuration validation failed' }
+    foreach ($required in @(
+        'passwordauthentication no',
+        'kbdinteractiveauthentication no',
+        'authenticationmethods publickey'
+    )) {
+        if ($effectiveSshd -notmatch "(?m)^$([regex]::Escape($required))$") {
+            throw "OpenSSH effective configuration does not enforce: $required"
+        }
+    }
 }
 
 if ($PSCmdlet.ShouldProcess('Fluxheim-Release-SSH-In-TCP', 'Restrict SSH firewall ingress')) {

@@ -267,6 +267,9 @@ fn create_parent_directory(path: &Path) -> Result<(), Box<dyn Error + Send + Syn
 #[cfg(feature = "acme-client")]
 fn create_secure_directory(path: &Path, mode: u32) -> Result<(), Box<dyn Error + Send + Sync>> {
     validate_acme_init_directory_path("directory", path)?;
+    #[cfg(windows)]
+    fluxheim_config::fs_trust::create_private_directory_all(path)?;
+    #[cfg(not(windows))]
     std::fs::create_dir_all(path)?;
     set_mode(path, mode)?;
     Ok(())
@@ -293,6 +296,9 @@ fn write_file_checked(
     force: bool,
     mode: u32,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    #[cfg(not(unix))]
+    let _ = mode;
+
     validate_acme_init_output_path("output file", path)?;
     if path.exists() && !force {
         return Err(format!("refusing to overwrite existing file: {}", path.display()).into());
@@ -317,38 +323,22 @@ fn write_file_checked(
     #[cfg(not(unix))]
     {
         #[cfg(windows)]
-        use std::os::windows::fs::OpenOptionsExt as _;
-
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true);
-        if force {
-            options.create(true);
+        let mut file = if force {
+            fluxheim_config::fs_trust::open_or_create_confidential_file(path)?
         } else {
-            options.create_new(true);
-        }
-        #[cfg(windows)]
-        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
-        let mut file = options.open(path)?;
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::MetadataExt as _;
-
-            let metadata = file.metadata()?;
-            if !metadata.is_file()
-                || metadata.file_attributes()
-                    & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
-                    != 0
-                || same_file::Handle::from_path(path)?
-                    != same_file::Handle::from_file(file.try_clone()?)?
-            {
-                return Err(format!(
-                    "output file changed during secure open or is a reparse point: {}",
-                    path.display()
-                )
-                .into());
+            fluxheim_config::fs_trust::create_confidential_file(path)?
+        };
+        #[cfg(not(windows))]
+        let mut file = {
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true);
+            if force {
+                options.create(true);
+            } else {
+                options.create_new(true);
             }
-            fluxheim_config::fs_trust::harden_confidential_file(&mut file)?;
-        }
+            options.open(path)?
+        };
         if force {
             file.set_len(0)?;
         }
@@ -433,11 +423,13 @@ fn set_mode(path: &Path, _mode: u32) -> io::Result<()> {
         if metadata.is_dir() {
             return fluxheim_config::fs_trust::harden_private_directory(path);
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(windows))]
-    let _ = path;
-    Ok(())
+    {
+        let _ = path;
+        Ok(())
+    }
 }
 
 #[cfg(all(feature = "acme-client", windows))]

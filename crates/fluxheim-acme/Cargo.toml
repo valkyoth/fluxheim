@@ -48,6 +48,7 @@ tokio = { version = "1.53.1", default-features = false, features = ["rt", "time"
 x509-parser = { version = "0.18.1", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
+fluxheim-windows-security = { path = "../fluxheim-windows-security" }
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]

@@ -61,19 +61,22 @@ pub(super) fn write_account_credentials_file(
     path: &Path,
     contents: &[u8],
 ) -> Result<(), AcmeAccountStoreError> {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(path)
-        .map_err(|error| account_store_io_error(path, error))?;
     #[cfg(windows)]
-    fluxheim_config::fs_trust::harden_confidential_file(&mut file)
+    let mut file = fluxheim_config::fs_trust::create_confidential_file(path)
         .map_err(|error| account_store_io_error(path, error))?;
+    #[cfg(not(windows))]
+    let mut file = {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        options
+            .open(path)
+            .map_err(|error| account_store_io_error(path, error))?
+    };
     file.write_all(contents)
         .map_err(|error| account_store_io_error(path, error))?;
     file.sync_all()

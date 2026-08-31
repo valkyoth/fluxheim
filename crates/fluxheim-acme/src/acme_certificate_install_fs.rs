@@ -208,7 +208,11 @@ pub(super) fn ensure_safe_directory(
                 message: "existing certificate directory has an untrusted ACL".to_owned(),
             });
         }
-        fs::create_dir_all(directory).map_err(|error| AcmeCertificateInstallError::Io {
+        #[cfg(windows)]
+        let create_result = fluxheim_config::fs_trust::create_private_directory_all(directory);
+        #[cfg(not(windows))]
+        let create_result = fs::create_dir_all(directory);
+        create_result.map_err(|error| AcmeCertificateInstallError::Io {
             path: directory.to_path_buf(),
             error,
         })?;
@@ -394,7 +398,11 @@ pub(super) fn rename_certificate_file(
     #[cfg(not(unix))]
     {
         let _ = (directory, directory_fd);
-        fs::rename(source, destination).map_err(|error| AcmeCertificateInstallError::Io {
+        #[cfg(windows)]
+        let result = fluxheim_windows_security::rename_regular_file(source, destination);
+        #[cfg(not(windows))]
+        let result = fs::rename(source, destination);
+        result.map_err(|error| AcmeCertificateInstallError::Io {
             path: destination.to_path_buf(),
             error,
         })

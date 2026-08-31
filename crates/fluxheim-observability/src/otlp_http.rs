@@ -194,7 +194,9 @@ fn load_ca_certificates(path: &Path) -> io::Result<Vec<ureq::tls::Certificate<'s
 
 #[cfg(test)]
 mod tests {
-    use super::{OtlpHttpEndpoint, load_ca_certificates};
+    use super::OtlpHttpEndpoint;
+    #[cfg(unix)]
+    use super::load_ca_certificates;
 
     #[test]
     fn parses_prometheus_otlp_endpoint() {

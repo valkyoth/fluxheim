@@ -1,4 +1,5 @@
 #[cfg(not(unix))]
+#[cfg(not(windows))]
 use std::fs::OpenOptions;
 use std::fs::{self, File};
 #[cfg(not(unix))]
@@ -76,12 +77,15 @@ fn write_atomically_with_mode(
 
         let mut cleanup = TempPathGuard::new(temp_path.clone());
         {
-            let mut options = OpenOptions::new();
-            options.write(true).create_new(true);
-            let mut file = options.open(&temp_path).map_err(SnapshotError::Io)?;
             #[cfg(windows)]
-            fluxheim_config::fs_trust::harden_confidential_file(&mut file)
+            let mut file = fluxheim_config::fs_trust::create_confidential_file(&temp_path)
                 .map_err(SnapshotError::Io)?;
+            #[cfg(not(windows))]
+            let mut file = {
+                let mut options = OpenOptions::new();
+                options.write(true).create_new(true);
+                options.open(&temp_path).map_err(SnapshotError::Io)?
+            };
             #[cfg(unix)]
             fs::set_permissions(&temp_path, fs::Permissions::from_mode(SNAPSHOT_FILE_MODE))
                 .map_err(SnapshotError::Io)?;
@@ -124,8 +128,12 @@ pub(crate) fn open_private_lock_file(path: &Path) -> Result<File, SnapshotError>
     #[cfg(unix)]
     let file = open_private_lock_file_in_directory(parent, path)?;
 
-    #[cfg(not(unix))]
-    let mut file = {
+    #[cfg(windows)]
+    let file = fluxheim_config::fs_trust::open_or_create_confidential_file(path)
+        .map_err(SnapshotError::Io)?;
+
+    #[cfg(all(not(unix), not(windows)))]
+    let file = {
         require_plain_write_destination(path)?;
         if path_exists_without_following_symlinks(path)? {
             require_private_regular_file(path)?;
@@ -135,8 +143,6 @@ pub(crate) fn open_private_lock_file(path: &Path) -> Result<File, SnapshotError>
         options.read(true).write(true).create(true);
         options.open(path).map_err(SnapshotError::Io)?
     };
-    #[cfg(windows)]
-    fluxheim_config::fs_trust::harden_confidential_file(&mut file).map_err(SnapshotError::Io)?;
     let metadata = file.metadata().map_err(SnapshotError::Io)?;
     if !metadata.is_file() {
         return Err(SnapshotError::UnsafeSnapshotPath {
@@ -267,6 +273,13 @@ pub(crate) fn ensure_real_directory(path: &Path) -> Result<(), SnapshotError> {
         None => {}
     }
 
+    #[cfg(windows)]
+    let created = match fluxheim_config::fs_trust::create_private_directory_all(path) {
+        Ok(()) => true,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => false,
+        Err(error) => return Err(SnapshotError::Io(error)),
+    };
+    #[cfg(not(windows))]
     let created = match create_private_directory(path) {
         Ok(()) => true,
         Err(SnapshotError::Io(error)) if error.kind() == io::ErrorKind::AlreadyExists => false,
@@ -292,7 +305,7 @@ pub(crate) fn create_private_directory(path: &Path) -> Result<(), SnapshotError>
     create_private_directory_in_parent(path)
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(windows)))]
 pub(crate) fn create_private_directory(path: &Path) -> Result<(), SnapshotError> {
     fs::create_dir(path).map_err(SnapshotError::Io)
 }

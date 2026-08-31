@@ -1,5 +1,6 @@
 use super::{
-    existing_path_has_insecure_write_permissions, harden_confidential_file,
+    create_confidential_file, create_private_directory_all,
+    existing_path_has_insecure_write_permissions,
     opened_file_has_insecure_confidential_permissions,
     opened_file_has_insecure_owner_or_write_permissions, sync_directory,
 };
@@ -80,12 +81,48 @@ fn everyone_read_access_is_only_rejected_for_confidential_files() {
 
 #[test]
 fn confidential_hardening_removes_inherited_everyone_access() {
-    let file = tempfile::NamedTempFile::new().unwrap();
-    install_everyone_acl(file.path(), "FR");
-    let mut opened = file.reopen().unwrap();
-    assert!(opened_file_has_insecure_confidential_permissions(&opened).unwrap());
-    harden_confidential_file(&mut opened).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("secret.key");
+    let opened = create_confidential_file(&path).unwrap();
     assert!(!opened_file_has_insecure_confidential_permissions(&opened).unwrap());
+}
+
+#[test]
+fn confidential_creation_is_exclusive_until_the_protected_acl_is_installed() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("secret.key");
+    let created = create_confidential_file(&path).unwrap();
+
+    let error = std::fs::File::open(&path).unwrap_err();
+    assert_eq!(error.raw_os_error(), Some(32));
+
+    drop(created);
+    super::open_confidential_file(&path).unwrap();
+}
+
+#[test]
+fn inherit_only_everyone_write_access_blocks_child_creation() {
+    let directory = tempfile::tempdir().unwrap();
+    let current = windows_permissions::utilities::current_process_sid().unwrap();
+    let descriptor: LocalBox<SecurityDescriptor> =
+        format!("D:P(A;;FA;;;{current})(A;;FA;;;SY)(A;;FA;;;BA)(A;OIIO;FW;;;WD)")
+            .parse()
+            .unwrap();
+    windows_permissions::wrappers::SetNamedSecurityInfo(
+        directory.path(),
+        SeObjectType::SE_FILE_OBJECT,
+        SecurityInformation::Dacl,
+        None,
+        None,
+        descriptor.dacl(),
+        None,
+    )
+    .unwrap();
+
+    let child = directory.path().join("secret.key");
+    assert!(existing_path_has_insecure_write_permissions(&child).unwrap());
+    let error = create_confidential_file(&child).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
 }
 
 #[test]
@@ -101,4 +138,15 @@ fn real_directory_flush_succeeds() {
     let directory = tempfile::tempdir().unwrap();
 
     sync_directory(directory.path()).unwrap();
+}
+
+#[test]
+fn private_directory_tree_uses_protected_acl_creation() {
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("one").join("two");
+
+    create_private_directory_all(&directory).unwrap();
+
+    assert!(directory.is_dir());
+    assert!(!existing_path_has_insecure_write_permissions(&directory).unwrap());
 }

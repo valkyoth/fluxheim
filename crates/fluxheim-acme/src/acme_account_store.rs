@@ -395,6 +395,10 @@ pub(crate) fn ensure_safe_account_directory(directory: &Path) -> Result<(), Acme
                 message: "existing account directory has an untrusted ACL".to_owned(),
             });
         }
+        #[cfg(windows)]
+        fluxheim_config::fs_trust::create_private_directory_all(directory)
+            .map_err(|error| account_store_io_error(directory, error))?;
+        #[cfg(not(windows))]
         fs::create_dir_all(directory).map_err(|error| account_store_io_error(directory, error))?;
         reject_existing_symlink_in_account_path(directory)?;
         let metadata = fs::symlink_metadata(directory)

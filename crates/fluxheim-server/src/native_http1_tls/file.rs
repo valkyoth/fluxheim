@@ -60,7 +60,7 @@ fn read_upstream_tls_input(path: &Path, confidential: bool) -> Result<Vec<u8>, N
         fluxheim_config::fs_trust::open_confidential_file(&safe_path)
             .map_err(NativeHttp1Error::Io)?
     } else {
-        std::fs::File::open(&safe_path).map_err(NativeHttp1Error::Io)?
+        fluxheim_config::fs_trust::open_regular_file(&safe_path).map_err(NativeHttp1Error::Io)?
     };
     #[cfg(not(windows))]
     let file = {

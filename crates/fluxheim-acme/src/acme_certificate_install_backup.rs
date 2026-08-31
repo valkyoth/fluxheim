@@ -1,7 +1,9 @@
 use super::super::*;
+use super::fs_ops::CertificateDirectoryFd;
 #[cfg(unix)]
 use super::fs_ops::certificate_file_name_in_directory;
-use super::fs_ops::{CertificateDirectoryFd, certificate_metadata_is_link};
+#[cfg(not(windows))]
+use super::fs_ops::certificate_metadata_is_link;
 
 pub(super) fn backup_existing_file(
     directory: &Path,
@@ -51,6 +53,28 @@ pub(super) fn backup_existing_file(
         }
     }
 
+    #[cfg(windows)]
+    {
+        match fluxheim_windows_security::open_existing_regular_file(path, false) {
+            Ok(file) => drop(file),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => {
+                return Err(AcmeCertificateInstallError::Io {
+                    path: path.to_path_buf(),
+                    error,
+                });
+            }
+        }
+        fluxheim_windows_security::create_hard_link_regular_file(path, backup).map_err(
+            |error| AcmeCertificateInstallError::Io {
+                path: backup.to_path_buf(),
+                error,
+            },
+        )?;
+        Ok(true)
+    }
+
+    #[cfg(not(windows))]
     match fs::symlink_metadata(path) {
         Ok(metadata) if certificate_metadata_is_link(&metadata) || !metadata.is_file() => {
             Err(AcmeCertificateInstallError::UnsafePath {
@@ -74,6 +98,7 @@ pub(super) fn backup_existing_file(
     }
 }
 
+#[cfg(not(windows))]
 fn ensure_backup_slot_is_empty(
     directory: &Path,
     path: &Path,
@@ -97,6 +122,23 @@ fn ensure_backup_slot_is_empty(
         };
     }
 
+    #[cfg(windows)]
+    return match fluxheim_windows_security::open_existing_regular_file(path, false) {
+        Ok(file) => {
+            drop(file);
+            Err(AcmeCertificateInstallError::UnsafePath {
+                path: path.to_path_buf(),
+                message: "backup path already exists".to_owned(),
+            })
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(AcmeCertificateInstallError::Io {
+            path: path.to_path_buf(),
+            error,
+        }),
+    };
+
+    #[cfg(not(windows))]
     match fs::symlink_metadata(path) {
         Ok(_) => Err(AcmeCertificateInstallError::UnsafePath {
             path: path.to_path_buf(),
@@ -130,6 +172,17 @@ pub(super) fn cleanup_backup(
         };
     }
 
+    #[cfg(windows)]
+    return match fluxheim_windows_security::remove_regular_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(AcmeCertificateInstallError::Io {
+            path: path.to_path_buf(),
+            error,
+        }),
+    };
+
+    #[cfg(not(windows))]
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -171,6 +224,14 @@ pub(super) fn restore_backup(
         };
     }
 
+    #[cfg(windows)]
+    return match fluxheim_windows_security::rename_regular_file(backup, destination) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    };
+
+    #[cfg(not(windows))]
     match fs::symlink_metadata(backup) {
         Ok(metadata) if certificate_metadata_is_link(&metadata) || !metadata.is_file() => Err(
             io::Error::new(io::ErrorKind::InvalidData, "backup is not a regular file"),

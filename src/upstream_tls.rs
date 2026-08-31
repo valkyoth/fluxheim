@@ -67,7 +67,7 @@ fn read_upstream_tls_input(path: &std::path::Path, confidential: bool) -> io::Re
     let file = if confidential {
         fluxheim_config::fs_trust::open_confidential_file(path)?
     } else {
-        std::fs::File::open(path)?
+        fluxheim_config::fs_trust::open_regular_file(path)?
     };
     #[cfg(not(windows))]
     let file = {
