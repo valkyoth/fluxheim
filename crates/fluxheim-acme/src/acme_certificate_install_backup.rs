@@ -65,13 +65,20 @@ pub(super) fn backup_existing_file(
                 });
             }
         }
-        fluxheim_windows_security::create_hard_link_regular_file(path, backup).map_err(
-            |error| AcmeCertificateInstallError::Io {
+        ensure_backup_slot_is_empty(directory, backup, None)?;
+        match fluxheim_windows_security::create_hard_link_regular_file(path, backup) {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                Err(AcmeCertificateInstallError::UnsafePath {
+                    path: backup.to_path_buf(),
+                    message: "backup path already exists".to_owned(),
+                })
+            }
+            Err(error) => Err(AcmeCertificateInstallError::Io {
                 path: backup.to_path_buf(),
                 error,
-            },
-        )?;
-        Ok(true)
+            }),
+        }
     }
 
     #[cfg(not(windows))]
@@ -98,7 +105,6 @@ pub(super) fn backup_existing_file(
     }
 }
 
-#[cfg(not(windows))]
 fn ensure_backup_slot_is_empty(
     directory: &Path,
     path: &Path,
