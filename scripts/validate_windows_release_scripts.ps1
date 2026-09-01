@@ -158,16 +158,12 @@ foreach ($required in @(
     'AccessRights::GenericRead',
     'AccessRights::FileGenericRead',
     'AccessRights::Bit6',
-    'FILE_FLAG_OPEN_REPARSE_POINT',
     'opened_file_has_insecure_confidential_permissions',
     'create_confidential_file',
     'open_or_create_confidential_file',
     'create_private_directory_all',
     'AceFlags::ObjectInherit | AceFlags::ContainerInherit',
-    'WRITE_DAC',
-    '.share_mode(0)',
     'harden_confidential_file',
-    'GENERIC_WRITE | READ_CONTROL | FILE_READ_ATTRIBUTES',
     'SecurityInformation::ProtectedDacl'
 )) {
     if (-not $windowsTrust.Contains($required)) {
@@ -182,6 +178,7 @@ foreach ($required in @(
     'confidential_hardening_removes_inherited_everyone_access',
     'confidential_creation_is_exclusive_until_the_protected_acl_is_installed',
     'inherit_only_everyone_write_access_blocks_child_creation',
+    'rejected_integrity_creation_removes_the_new_child',
     'private_directory_tree_uses_protected_acl_creation',
     'everyone_delete_child_access_on_directory_is_rejected',
     'real_directory_flush_succeeds'
@@ -195,6 +192,10 @@ $windowsCapability = @(
     Get-Content -LiteralPath `
         (Join-Path $root 'crates/fluxheim-windows-security/src/lib.rs') -Raw
     Get-Content -LiteralPath `
+        (Join-Path $root 'crates/fluxheim-windows-security/src/file_mutation.rs') -Raw
+    Get-Content -LiteralPath `
+        (Join-Path $root 'crates/fluxheim-windows-security/src/path_handles.rs') -Raw
+    Get-Content -LiteralPath `
         (Join-Path $root 'crates/fluxheim-windows-security/src/windows_security_tests.rs') -Raw
 ) -join "`n"
 foreach ($required in @(
@@ -203,6 +204,9 @@ foreach ($required in @(
     'OBJ_DONT_REPARSE',
     'FILE_OPEN_REPARSE_POINT',
     'FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE',
+    'create_new_exclusive_regular_file_with_ancestors',
+    'GENERIC_READ | GENERIC_WRITE | DELETE_ACCESS | READ_CONTROL | WRITE_DAC',
+    'newly_created_regular_file_handle_supports_rejection_cleanup',
     'create_private_directory',
     'create_hard_link_regular_file',
     'rename_regular_file',
