@@ -9,7 +9,7 @@ use super::{
     native_proxy_encrypted_storage_bin_cache_config, native_proxy_memory_cache_config,
     native_proxy_storage_bin_cache_config, native_proxy_tiered_cache_config, proxy_for,
     response_header, route_proxy_listener, route_proxy_listener_with_shutdown,
-    upstream_cacheable_once,
+    upstream_cacheable_once, write_native_proxy_cache_secret,
 };
 
 #[tokio::test]
@@ -79,18 +79,25 @@ async fn native_route_proxy_caches_proxy_response_on_disk() {
 async fn native_route_proxy_caches_proxy_response_on_encrypted_disk() {
     let root = tempfile::tempdir().unwrap();
     let key_file = root.path().join("cache.key");
-    std::fs::write(
+    write_native_proxy_cache_secret(
         &key_file,
-        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\n",
-    )
-    .unwrap();
+        b"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\n",
+    );
     let cache_root = root.path().join("objects");
     let legacy_object = cache_root.join("ab/legacy.fhc");
+    #[cfg(windows)]
+    fluxheim_config::fs_trust::create_private_directory_all(legacy_object.parent().unwrap())
+        .unwrap();
+    #[cfg(not(windows))]
     std::fs::create_dir_all(legacy_object.parent().unwrap()).unwrap();
     std::fs::write(&legacy_object, b"FLUXHEIM-CACHE-ENC-v1\nlegacy metadata").unwrap();
     let upstream = upstream_cacheable_once("encrypted-disk-origin").await;
     let cache = native_proxy_encrypted_disk_cache_config(cache_root.clone(), key_file);
     let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    assert!(
+        first_proxy.cache.is_some(),
+        "encrypted disk cache failed to initialize"
+    );
     let first_listener =
         route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(first_proxy))).await;
 
@@ -177,11 +184,10 @@ async fn native_route_proxy_caches_proxy_response_on_storage_bin_disk() {
 async fn native_route_proxy_caches_proxy_response_on_encrypted_storage_bin_disk() {
     let root = tempfile::tempdir().unwrap();
     let key_file = root.path().join("cache.key");
-    std::fs::write(
+    write_native_proxy_cache_secret(
         &key_file,
-        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\n",
-    )
-    .unwrap();
+        b"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\n",
+    );
     let cache_root = root.path().join("objects");
     let upstream = upstream_cacheable_once("encrypted-storage-bin-origin").await;
     let cache = native_proxy_encrypted_storage_bin_cache_config(cache_root.clone(), key_file);
@@ -230,7 +236,7 @@ async fn native_route_proxy_caches_proxy_response_on_encrypted_storage_bin_disk(
 async fn native_route_proxy_caches_proxy_response_on_openbao_storage_bin_disk() {
     let root = tempfile::tempdir().unwrap();
     let token_file = root.path().join("openbao.token");
-    std::fs::write(&token_file, "test-token\n").unwrap();
+    write_native_proxy_cache_secret(&token_file, b"test-token\n");
     let openbao = native_openbao_transit_mock();
     let cache_root = root.path().join("objects");
     let upstream = upstream_cacheable_once("openbao-storage-bin-origin").await;

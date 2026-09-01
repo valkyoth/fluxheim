@@ -923,6 +923,17 @@ mod tests {
             use std::fmt::Write as _;
             let _ = write!(encoded, "{byte:02x}");
         }
+        #[cfg(windows)]
+        {
+            use std::io::Write as _;
+
+            let mut file =
+                fluxheim_config::fs_trust::open_or_create_confidential_file(path).unwrap();
+            file.set_len(0).unwrap();
+            file.write_all(encoded.as_bytes()).unwrap();
+            file.sync_all().unwrap();
+        }
+        #[cfg(not(windows))]
         std::fs::write(path, encoded).unwrap();
     }
 

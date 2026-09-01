@@ -1,5 +1,19 @@
 use crate::{NativeHttp1Proxy, NativeHttp1Request, NativeHttp1Upstream};
 
+pub(super) fn write_native_proxy_cache_secret(path: &std::path::Path, contents: &[u8]) {
+    #[cfg(windows)]
+    {
+        use std::io::Write as _;
+
+        let mut file = fluxheim_config::fs_trust::open_or_create_confidential_file(path).unwrap();
+        file.set_len(0).unwrap();
+        file.write_all(contents).unwrap();
+        file.sync_all().unwrap();
+    }
+    #[cfg(not(windows))]
+    std::fs::write(path, contents).unwrap();
+}
+
 pub(super) fn proxy_for(upstream: std::net::SocketAddr) -> NativeHttp1Proxy {
     NativeHttp1Proxy::new(NativeHttp1Upstream::new(upstream.to_string()))
 }
