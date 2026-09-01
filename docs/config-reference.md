@@ -1560,8 +1560,14 @@ and refreshed every `upstreams_file_refresh_secs` seconds, with a default of
 5 seconds and a bounded range of 1 through 300 seconds. The first file format is
 deliberately small: one `host:port` or `ip:port` authority per line, blank lines
 and full-line `#` comments ignored, 2 through 64 unique entries required.
-Fluxheim reads the file with the same symlink and parent-permission hardening
-used for other operator-controlled files. In this release, file-refreshed pools
+Fluxheim reopens the file through the secure filesystem-trust boundary on every
+refresh, rejects symlinks/reparse points and writable path components, and
+validates the opened file's owner and permissions or Windows ACL. On Unix, keep
+the file owned by root or the Fluxheim service account and remove group/other
+write permission; on Windows, updates must be written by the Fluxheim service
+identity, `SYSTEM`, or an administrator and the resulting file ACL must not
+grant write or takeover rights to other identities. In
+this release, file-refreshed pools
 cannot be combined with `upstream_weights`, `upstream_priority_groups`,
 `upstream_localities`, `preferred_upstream_localities`,
 `upstream_max_in_flight`, `upstream_aliases`, `upstream_tags`, `backup_upstreams`,
@@ -1593,9 +1599,10 @@ body is bounded to 64 KiB and must be JSON in either of these forms:
 `{"upstreams":["10.0.0.10:8080","10.0.0.11:8080"]}`. The parsed upstream list
 must contain 2 through 64 unique `host:port` or `ip:port` authorities. The
 optional `upstreams_http_bearer_token_file` adds a `Bearer` token to the request;
-the token file is validated with the same safe-path and parent-permission checks
-used for other operator-controlled secret files, must not be empty, and must not
-contain whitespace after trimming surrounding whitespace. Fluxheim sends
+the token file is securely reopened and revalidated on every refresh, must have
+confidential permissions (`0600` on Unix or an equivalent protected Windows
+ACL), must not be empty, and must not contain whitespace after trimming
+surrounding whitespace. Fluxheim sends
 `Accept: application/json` and `Cache-Control: no-store`, and rejects non-JSON
 `Content-Type` values when the discovery endpoint includes that header; missing
 `Content-Type` is accepted so small internal sidecars can stay simple.
@@ -2077,7 +2084,9 @@ because persistence retains client-derived identifiers.
 `proxy.load_balance.runtime_state_file` enables local restart persistence for
 runtime member-state overrides, runtime weight overrides, and bounded local
 persistence-table entries. The state file is JSON, versioned, size-limited,
-written atomically with a private file mode, and read with symlink checks.
+written atomically with a private file mode, and reopened through the secure
+filesystem-trust boundary with owner, ACL/permission, ancestor, and symlink or
+reparse-point checks.
 Corrupt, oversized, incompatible, or stale state is ignored and rebuilt instead
 of poisoning the pool. The file is local to one Fluxheim process and does not
 share managed-cookie signing keys across nodes.

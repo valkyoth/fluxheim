@@ -314,6 +314,7 @@ foreach ($required in @(
         throw "Windows PHP request spool is missing required behavior: $required"
     }
 }
+
 if ($smoke.Contains('target\fluxheim-windows-smoke')) {
     throw 'Windows native smoke must not place trusted runtime inputs below the inherited checkout ACL'
 }
@@ -380,6 +381,7 @@ foreach ($required in @(
     'PasswordAuthentication no',
     'AuthenticationMethods publickey',
     'AllowUsers $buildUserSsh',
+    'AuthorizedKeysFile __PROGRAMDATA__/ssh/fluxheim-release/authorized_keys',
     'AllowedSourceCidr',
     'TagAllowedSignersFile',
     'icacls.exe',
@@ -418,11 +420,20 @@ if ($renderedPasswordPolicy -lt 0 -or
     -not $renderedFirstMatch.Success -or
     $renderedPasswordPolicy -gt $renderedFirstMatch.Index -or
     -not $renderedSshdConfig.Contains('AllowUsers fluxheim-build') -or
+    -not $renderedSshdConfig.Contains(
+        'AuthorizedKeysFile __PROGRAMDATA__/ssh/fluxheim-release/authorized_keys') -or
     $renderedSshdConfig.Contains('KbdInteractiveAuthentication')) {
     throw 'rendered Windows sshd policy is not global, account-scoped, and Windows-compatible'
 }
 foreach ($required in @(
+    "`$sshTrustRoot = Join-Path `$env:ProgramData 'ssh\fluxheim-release'",
+    '$sshTrustRoot /inheritance:r',
     '$trustedDirectory /inheritance:r',
+    '$WorkspaceRoot /inheritance:r',
+    '$BuildUser`:RX',
+    '$runsDirectory',
+    '$outputDirectory',
+    '$BuildUser`:(OI)(CI)M',
     '$allowedSigners /inheritance:r',
     '$BuildUser`:R',
     'Administrators:F'
@@ -431,12 +442,22 @@ foreach ($required in @(
         throw "Windows preparation trust anchor is missing required ACL policy: $required"
     }
 }
+if ($preparation.Contains('$BuildUser`:(OI)(CI)F') -or
+    $preparation.Contains('$WorkspaceRoot /inheritance:r /grant:r "$BuildUser`:(OI)(CI)M"')) {
+    throw 'Windows preparation must not grant the build account control of SSH trust or workspace children'
+}
 
 $release = Get-Content -LiteralPath (Join-Path $root 'scripts/run_windows_release_builder.ps1') -Raw
 $tagPolicy = Get-Content -LiteralPath `
     (Join-Path $root 'scripts/windows_release_tag_policy.ps1') -Raw
 $releaseContract = $release + "`n" + $tagPolicy
 foreach ($required in @(
+    'Assert-FluxheimReleaseBuilderTrustAnchorsReadOnly',
+    'FileFlagOpenReparsePoint',
+    '$fileAddSubdirectory',
+    '$fileDeleteChild',
+    'replace allowed_signers',
+    'replace authorized_keys',
     'git.exe cat-file tag',
     'BEGIN SSH SIGNATURE',
     'END SSH SIGNATURE',

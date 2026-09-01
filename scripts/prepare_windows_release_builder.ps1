@@ -63,33 +63,50 @@ if ($capability.State -ne 'Installed') {
     }
 }
 
-$profile = Get-CimInstance Win32_UserProfile | Where-Object SID -eq $localUser.SID.Value
-if ($null -eq $profile -or [string]::IsNullOrWhiteSpace($profile.LocalPath)) {
-    throw "sign in once as $BuildUser so Windows creates its user profile"
-}
-$sshDirectory = Join-Path $profile.LocalPath '.ssh'
-$authorizedKeys = Join-Path $sshDirectory 'authorized_keys'
+$sshTrustRoot = Join-Path $env:ProgramData 'ssh\fluxheim-release'
+$authorizedKeys = Join-Path $sshTrustRoot 'authorized_keys'
 
-if ($PSCmdlet.ShouldProcess($sshDirectory, 'Install release-builder SSH key')) {
-    New-Item -ItemType Directory -Force -Path $sshDirectory | Out-Null
+if ($PSCmdlet.ShouldProcess($sshTrustRoot, 'Install administrator-controlled release-builder SSH key')) {
+    New-Item -ItemType Directory -Force -Path $sshTrustRoot | Out-Null
+    & icacls.exe $sshTrustRoot /inheritance:r /grant:r `
+        "$BuildUser`:(OI)(CI)RX" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'failed to secure release-builder SSH trust directory' }
+    if (Test-Path -LiteralPath $authorizedKeys -PathType Leaf) {
+        & icacls.exe $authorizedKeys /inheritance:r /grant:r `
+            "$BuildUser`:R" 'SYSTEM:F' 'Administrators:F' | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'failed to secure existing authorized_keys' }
+    }
     Set-Content -LiteralPath $authorizedKeys -Value $authorizedKey -Encoding ascii -NoNewline
-    & icacls.exe $sshDirectory /inheritance:r /grant:r "$BuildUser`:(OI)(CI)F" 'SYSTEM:(OI)(CI)F' | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'failed to secure release-builder .ssh directory' }
-    & icacls.exe $authorizedKeys /inheritance:r /grant:r "$BuildUser`:F" 'SYSTEM:F' | Out-Null
+    & icacls.exe $authorizedKeys /inheritance:r /grant:r `
+        "$BuildUser`:R" 'SYSTEM:F' 'Administrators:F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'failed to secure authorized_keys' }
 }
 
 $trustedDirectory = Join-Path $WorkspaceRoot 'trusted'
+$runsDirectory = Join-Path $WorkspaceRoot 'runs'
+$outputDirectory = Join-Path $WorkspaceRoot 'output'
 $allowedSigners = Join-Path $trustedDirectory 'allowed_signers'
 if ($PSCmdlet.ShouldProcess($WorkspaceRoot, 'Create private release workspace')) {
-    New-Item -ItemType Directory -Force -Path $WorkspaceRoot, $trustedDirectory | Out-Null
-    Copy-Item -LiteralPath $TagAllowedSignersFile -Destination $allowedSigners -Force
-    & icacls.exe $WorkspaceRoot /inheritance:r /grant:r "$BuildUser`:(OI)(CI)M" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
+    New-Item -ItemType Directory -Force -Path $WorkspaceRoot | Out-Null
+    & icacls.exe $WorkspaceRoot /inheritance:r /grant:r `
+        "$BuildUser`:RX" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'failed to secure release workspace' }
+    New-Item -ItemType Directory -Force -Path `
+        $trustedDirectory, $runsDirectory, $outputDirectory | Out-Null
     & icacls.exe $trustedDirectory /inheritance:r /grant:r "$BuildUser`:(OI)(CI)RX" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'failed to secure trusted release directory' }
+    if (Test-Path -LiteralPath $allowedSigners -PathType Leaf) {
+        & icacls.exe $allowedSigners /inheritance:r /grant:r "$BuildUser`:R" 'SYSTEM:F' 'Administrators:F' | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'failed to secure existing trusted tag signer policy' }
+    }
+    Copy-Item -LiteralPath $TagAllowedSignersFile -Destination $allowedSigners -Force
     & icacls.exe $allowedSigners /inheritance:r /grant:r "$BuildUser`:R" 'SYSTEM:F' 'Administrators:F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'failed to secure trusted tag signer policy' }
+    foreach ($mutableDirectory in $runsDirectory, $outputDirectory) {
+        & icacls.exe $mutableDirectory /inheritance:r /grant:r `
+            "$BuildUser`:(OI)(CI)M" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "failed to secure mutable release directory: $mutableDirectory" }
+    }
 }
 
 $sshdConfig = Join-Path $env:ProgramData 'ssh\sshd_config'
@@ -104,7 +121,8 @@ if ($PSCmdlet.ShouldProcess($sshdConfig, 'Restrict release-builder SSH authentic
     foreach ($required in @(
         'passwordauthentication no',
         'authenticationmethods publickey',
-        "allowusers $BuildUser"
+        "allowusers $BuildUser",
+        'authorizedkeysfile __PROGRAMDATA__/ssh/fluxheim-release/authorized_keys'
     )) {
         if ($effectiveSshd -notmatch "(?m)^$([regex]::Escape($required))$") {
             throw "OpenSSH effective configuration does not enforce: $required"

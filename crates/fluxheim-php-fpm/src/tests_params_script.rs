@@ -238,6 +238,43 @@ fn php_script_name_parser_rejects_unsafe_segments_and_controls() {
 }
 
 #[test]
+fn php_paths_reject_windows_namespace_aliases_after_decoding() {
+    let allowed = vec!["php".to_owned()];
+    for request_path in [
+        "/index.php:payload.php",
+        "/index.php%3Apayload.php",
+        "/index.php/aux.txt",
+        "/index.php/COM1.log",
+        "/index.php/LPT%C2%B9.log",
+        "/index.php/file.%20",
+        "/index.php/file%2E",
+    ] {
+        assert!(
+            php_script_name_for_request(
+                request_path,
+                "index.php",
+                PhpPathInfoMode::Split,
+                &allowed,
+            )
+            .is_none(),
+            "unsafe Windows PHP namespace path was accepted: {request_path}"
+        );
+    }
+
+    for path_info in [
+        "/uploads/file.txt:payload",
+        "/uploads/NUL.txt",
+        "/uploads/worker.php.",
+        "/uploads/worker.php ",
+    ] {
+        assert!(
+            php_fpm_path_translated(Path::new("container/root"), path_info).is_none(),
+            "unsafe FPM wire path was accepted: {path_info}"
+        );
+    }
+}
+
+#[test]
 fn php_script_name_parser_respects_path_info_and_deny_prefixes() {
     let allowed = vec!["php".to_owned()];
 
@@ -298,6 +335,17 @@ fn php_static_file_script_names_are_rooted_and_hidden_safe() {
     assert!(
         php_static_file_script_name(root, Path::new("/srv/other/index.php"), &allowed).is_none()
     );
+    for path in [
+        "/srv/www/index.php:payload.php",
+        "/srv/www/CON.php",
+        "/srv/www/index.php.",
+        "/srv/www/index.php ",
+    ] {
+        assert!(
+            php_static_file_script_name(root, Path::new(path), &allowed).is_none(),
+            "unsafe static PHP path was accepted: {path}"
+        );
+    }
 }
 
 #[test]

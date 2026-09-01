@@ -1,6 +1,3 @@
-use std::fs;
-#[cfg(not(windows))]
-use std::fs::OpenOptions;
 use std::io;
 use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -12,43 +9,10 @@ use sanitization::SecretString;
 use serde::Deserialize;
 use zeroize::Zeroizing;
 
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
-
 use fluxheim_common::{FluxError, FluxResult};
 
 const MAX_HTTP_DISCOVERY_RESPONSE_BYTES: u64 = 64 * 1024;
 const MAX_HTTP_DISCOVERY_BEARER_TOKEN_BYTES: u64 = 4096;
-
-#[cfg(any(target_os = "linux", target_os = "android"))]
-const O_NOFOLLOW: i32 = 0o400000;
-
-#[cfg(any(
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-))]
-const O_NOFOLLOW: i32 = 0x0100;
-
-#[cfg(all(
-    unix,
-    not(any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly"
-    ))
-))]
-compile_error!(
-    "O_NOFOLLOW is unknown on this Unix platform; audit symlink-safe load-balancer discovery token loading before building Fluxheim"
-);
 
 pub(super) async fn fetch_proxy_upstreams_http_for_discovery(
     url: String,
@@ -137,24 +101,7 @@ pub(super) fn fetch_proxy_upstreams_http(
 }
 
 fn read_http_discovery_bearer_token(path: &Path) -> io::Result<SecretString> {
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "HTTP discovery bearer token file must be a regular file",
-        ));
-    }
-
-    #[cfg(windows)]
     let file = fluxheim_config::fs_trust::open_confidential_file(path)?;
-    #[cfg(not(windows))]
-    let file = {
-        let mut options = OpenOptions::new();
-        options.read(true);
-        #[cfg(unix)]
-        options.custom_flags(O_NOFOLLOW);
-        options.open(path)?
-    };
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(io::Error::new(

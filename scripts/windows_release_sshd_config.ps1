@@ -24,6 +24,7 @@ PasswordAuthentication no
 PubkeyAuthentication yes
 AuthenticationMethods publickey
 AllowUsers $buildUserSsh
+AuthorizedKeysFile __PROGRAMDATA__/ssh/fluxheim-release/authorized_keys
 $endMarker
 "@
 

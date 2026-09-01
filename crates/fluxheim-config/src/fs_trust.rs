@@ -136,6 +136,55 @@ pub fn opened_file_has_insecure_owner_or_write_permissions(
 }
 
 #[cfg(unix)]
+pub fn open_regular_file(path: &Path) -> std::io::Result<std::fs::File> {
+    open_trusted_regular_file(path, false)
+}
+
+#[cfg(unix)]
+pub fn open_confidential_file(path: &Path) -> std::io::Result<std::fs::File> {
+    open_trusted_regular_file(path, true)
+}
+
+#[cfg(unix)]
+fn open_trusted_regular_file(path: &Path, confidential: bool) -> std::io::Result<std::fs::File> {
+    if existing_path_or_parent_has_insecure_write_permissions(path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "file has an untrusted owner, symlink, or writable path component",
+        ));
+    }
+    let descriptor = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    let file = std::fs::File::from(descriptor);
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "trusted file path is not a regular file",
+        ));
+    }
+    let insecure = if confidential {
+        opened_file_has_insecure_confidential_permissions(&file)?
+    } else {
+        opened_file_has_insecure_owner_or_write_permissions(&file)?
+    };
+    if insecure {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            if confidential {
+                "confidential file has untrusted permissions"
+            } else {
+                "file has untrusted owner or write permissions"
+            },
+        ));
+    }
+    Ok(file)
+}
+
+#[cfg(unix)]
 pub fn opened_file_has_insecure_confidential_permissions(
     file: &std::fs::File,
 ) -> std::io::Result<bool> {
@@ -154,6 +203,16 @@ pub fn opened_file_has_insecure_confidential_permissions(
 pub fn opened_file_has_insecure_owner_or_write_permissions(
     _file: &std::fs::File,
 ) -> std::io::Result<bool> {
+    Err(unsupported_filesystem_trust_error())
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn open_regular_file(_path: &Path) -> std::io::Result<std::fs::File> {
+    Err(unsupported_filesystem_trust_error())
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn open_confidential_file(_path: &Path) -> std::io::Result<std::fs::File> {
     Err(unsupported_filesystem_trust_error())
 }
 
@@ -186,7 +245,7 @@ fn check_inspection_depth(inspected_depth: &mut usize) -> std::io::Result<()> {
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::existing_path_has_insecure_write_permissions;
+    use super::{existing_path_has_insecure_write_permissions, open_regular_file};
     use fluxheim_common::test_support::unique_temp_path;
     use std::os::unix::fs::{PermissionsExt, symlink};
     use std::path::PathBuf;
@@ -222,6 +281,26 @@ mod tests {
 
         let error = existing_path_has_insecure_write_permissions(&current).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn trusted_regular_file_open_rejects_writable_leaf_and_symlink() {
+        let root = unique_temp_path("fs-trust-secure-open");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let file = root.join("upstreams.txt");
+        std::fs::write(&file, "127.0.0.1:3000\n").unwrap();
+        assert!(open_regular_file(&file).is_ok());
+
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o666)).unwrap();
+        let error = open_regular_file(&file).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let link = root.join("upstreams-link.txt");
+        symlink(&file, &link).unwrap();
+        let error = open_regular_file(&link).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
     }
 }
 

@@ -27,6 +27,88 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'windows_release_tag_policy.ps1')
 
+function Assert-FluxheimReleaseBuilderTrustAnchorsReadOnly {
+    param([Parameter(Mandatory = $true)][string]$Root)
+
+    if ($null -eq ('FluxheimReleaseAclProbe' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+public static class FluxheimReleaseAclProbe {
+    private const uint OpenExisting = 3;
+    private const uint FileFlagBackupSemantics = 0x02000000;
+    private const uint FileFlagOpenReparsePoint = 0x00200000;
+    private const uint FileShareAll = 0x00000007;
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFileW(
+        string name, uint access, uint share, IntPtr securityAttributes,
+        uint creation, uint flags, IntPtr template);
+
+    public static int Probe(string path, uint access, bool directory) {
+        uint flags = FileFlagOpenReparsePoint;
+        if (directory) flags |= FileFlagBackupSemantics;
+        using (SafeFileHandle handle = CreateFileW(
+            path, access, FileShareAll, IntPtr.Zero, OpenExisting, flags, IntPtr.Zero)) {
+            return handle.IsInvalid ? Marshal.GetLastWin32Error() : 0;
+        }
+    }
+}
+'@
+    }
+
+    $accessDenied = 5
+    $deleteAccess = 0x00010000
+    $genericWrite = 0x40000000
+    $fileAddSubdirectory = 0x00000004
+    $fileDeleteChild = 0x00000040
+    $trusted = Join-Path $Root 'trusted'
+    $allowedSignersPath = Join-Path $trusted 'allowed_signers'
+    $authorizedKeysPath = Join-Path $env:ProgramData 'ssh\fluxheim-release\authorized_keys'
+
+    $probes = @(
+        [pscustomobject]@{
+            Path = $Root
+            Access = $fileAddSubdirectory
+            Directory = $true
+            Operation = 'create a second trusted directory'
+        },
+        [pscustomobject]@{
+            Path = $Root
+            Access = $fileDeleteChild
+            Directory = $true
+            Operation = 'replace a trusted directory through its parent'
+        },
+        [pscustomobject]@{
+            Path = $trusted
+            Access = $deleteAccess
+            Directory = $true
+            Operation = 'rename the trusted directory'
+        },
+        [pscustomobject]@{
+            Path = $allowedSignersPath
+            Access = ($genericWrite -bor $deleteAccess)
+            Directory = $false
+            Operation = 'replace allowed_signers'
+        },
+        [pscustomobject]@{
+            Path = $authorizedKeysPath
+            Access = ($genericWrite -bor $deleteAccess)
+            Directory = $false
+            Operation = 'replace authorized_keys'
+        }
+    )
+    foreach ($probe in $probes) {
+        $errorCode = [FluxheimReleaseAclProbe]::Probe(
+            $probe.Path, [uint32]$probe.Access, [bool]$probe.Directory)
+        if ($errorCode -ne $accessDenied) {
+            throw "release build account can $($probe.Operation) (Win32 error $errorCode)"
+        }
+    }
+}
+
 $expectedArchitecture = if ($Architecture -eq 'x86_64') { 'X64' } else { 'Arm64' }
 $actualArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
 if ($actualArchitecture -ne $expectedArchitecture) {
@@ -39,6 +121,7 @@ $allowedSigners = Join-Path $WorkspaceRoot 'trusted\allowed_signers'
 if (-not (Test-Path -LiteralPath $allowedSigners -PathType Leaf)) {
     throw "trusted tag allowed-signers file is missing: $allowedSigners"
 }
+Assert-FluxheimReleaseBuilderTrustAnchorsReadOnly -Root $WorkspaceRoot
 
 $requiredCommands = 'git.exe', 'rustup.exe', 'rustc.exe', 'cargo.exe', 'python.exe'
 foreach ($command in $requiredCommands) {

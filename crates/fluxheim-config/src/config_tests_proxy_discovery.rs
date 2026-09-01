@@ -164,3 +164,56 @@ fn rejects_invalid_proxy_upstreams_file_contents() {
     let error = config.validate().unwrap_err().to_string();
     assert!(error.contains("proxy.upstreams_file"), "{error}");
 }
+
+#[cfg(all(feature = "load-balancer", unix))]
+#[test]
+fn proxy_upstreams_file_refresh_rejects_writable_leaf_and_symlink() {
+    use std::os::unix::fs::{PermissionsExt as _, symlink};
+
+    let root = secure_test_dir("config-proxy-upstreams-secure-refresh");
+    let upstreams_file = root.join("upstreams.txt");
+    fs::write(&upstreams_file, "127.0.0.1:3001\n").unwrap();
+    assert_eq!(
+        crate::read_proxy_upstreams_file(&upstreams_file).unwrap(),
+        ["127.0.0.1:3001"]
+    );
+
+    fs::set_permissions(&upstreams_file, fs::Permissions::from_mode(0o666)).unwrap();
+    let error = crate::read_proxy_upstreams_file(&upstreams_file).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+
+    fs::set_permissions(&upstreams_file, fs::Permissions::from_mode(0o600)).unwrap();
+    let link = root.join("upstreams-link.txt");
+    symlink(&upstreams_file, &link).unwrap();
+    let error = crate::read_proxy_upstreams_file(&link).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+}
+
+#[cfg(all(feature = "load-balancer", windows))]
+#[test]
+fn proxy_upstreams_file_refresh_rejects_untrusted_windows_acl() {
+    use windows_permissions::constants::{SeObjectType, SecurityInformation};
+    use windows_permissions::{LocalBox, SecurityDescriptor};
+
+    let root = secure_test_dir("config-proxy-upstreams-windows-acl");
+    let upstreams_file = root.join("upstreams.txt");
+    fs::write(&upstreams_file, "127.0.0.1:3001\n").unwrap();
+    let current = windows_permissions::utilities::current_process_sid().unwrap();
+    let descriptor: LocalBox<SecurityDescriptor> =
+        format!("D:P(A;;FA;;;{current})(A;;FA;;;SY)(A;;FA;;;BA)(A;;FW;;;WD)")
+            .parse()
+            .unwrap();
+    windows_permissions::wrappers::SetNamedSecurityInfo(
+        &upstreams_file,
+        SeObjectType::SE_FILE_OBJECT,
+        SecurityInformation::Dacl,
+        None,
+        None,
+        descriptor.dacl(),
+        None,
+    )
+    .unwrap();
+
+    let error = crate::read_proxy_upstreams_file(&upstreams_file).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+}

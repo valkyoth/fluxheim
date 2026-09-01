@@ -1,7 +1,8 @@
 use super::{
     create_confidential_file, create_private_directory_all, create_regular_file,
     existing_path_has_insecure_write_permissions, existing_path_is_non_regular_file,
-    open_regular_file_for_update, opened_file_has_insecure_confidential_permissions,
+    open_regular_file, open_regular_file_for_update,
+    opened_file_has_insecure_confidential_permissions,
     opened_file_has_insecure_owner_or_write_permissions, sync_directory,
 };
 use windows_permissions::constants::{SeObjectType, SecurityInformation};
@@ -79,6 +80,8 @@ fn everyone_write_access_is_rejected() {
     let file = tempfile::NamedTempFile::new().unwrap();
     install_everyone_acl(file.path(), "FW");
     assert!(opened_file_has_insecure_owner_or_write_permissions(&file.reopen().unwrap()).unwrap());
+    let error = open_regular_file(file.path()).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
 }
 
 #[test]

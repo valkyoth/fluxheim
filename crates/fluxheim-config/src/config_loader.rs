@@ -275,20 +275,7 @@ pub fn read_regular_config_file_to_string(path: &Path) -> Result<String, ConfigL
 pub fn read_proxy_upstreams_file(path: &Path) -> std::io::Result<Vec<String>> {
     const MAX_PROXY_UPSTREAMS_FILE_BYTES: u64 = 64 * 1024;
 
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "proxy upstreams file must be a regular file",
-        ));
-    }
-
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    options.custom_flags(O_NOFOLLOW);
-
-    let file = options.open(path)?;
+    let file = crate::fs_trust::open_regular_file(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(std::io::Error::new(

@@ -192,7 +192,18 @@ fn fetches_http_discovery_with_json_accept_and_bearer_token() {
     let root = unique_temp_path("lb-http-discovery-token");
     std::fs::create_dir_all(&root).unwrap();
     let token_path = safe_child_path(&root, "token.txt");
+    #[cfg(windows)]
+    {
+        let mut token = fluxheim_config::fs_trust::create_confidential_file(&token_path).unwrap();
+        token.write_all(b"secret-token\n").unwrap();
+    }
+    #[cfg(not(windows))]
     std::fs::write(&token_path, "secret-token\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&token_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
 
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();

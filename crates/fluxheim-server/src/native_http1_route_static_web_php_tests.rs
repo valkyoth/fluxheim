@@ -89,3 +89,29 @@ fn native_static_web_php_resolver_rejects_denied_prefix() {
 
     root.close().unwrap();
 }
+
+#[test]
+fn native_static_web_php_resolver_rejects_windows_namespace_aliases() {
+    let root = TempDir::new().unwrap();
+    fs::write(root.path().join("index.php"), b"<?php echo 'ok';").unwrap();
+    let web = native_static_web(root.path());
+
+    for request_path in [
+        "/index.php:payload.php",
+        "/index.php%3Apayload.php",
+        "/index.php/COM1.txt",
+        "/index.php/file%2E",
+        "/index.php/file%20",
+    ] {
+        let resolution = web
+            .resolve_php_script(&php_config(), request_path, false)
+            .unwrap();
+        assert_eq!(
+            resolution,
+            NativePhpScriptResolve::Forbidden,
+            "unsafe PHP namespace request was not rejected: {request_path}"
+        );
+    }
+
+    root.close().unwrap();
+}

@@ -25,10 +25,14 @@ Azure may require a Windows 11 ARM64 image rather than Windows Server for the
 ARM builder. Evidence must name the actual tested OS; it must not be presented
 as Windows Server ARM support.
 
+For high-assurance releases, provision both builders from a measured disposable
+image for each release and destroy them after collecting evidence. Reusing a
+long-lived builder is operationally supported, but it is not equivalent to
+rebuilding the host trust boundary for every release.
+
 ## One-Time Preparation
 
-Sign in once as the dedicated build account so Windows creates its profile.
-Then open an elevated Windows PowerShell session and run:
+Open an elevated Windows PowerShell session and run:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
@@ -46,10 +50,12 @@ release host's real public `/32` or a narrowly scoped IPv6 prefix. The script:
 - verifies architecture and rejects an administrator build account;
 - installs and enables Windows OpenSSH Server;
 - prepends a global public-key-only policy, permits SSH login only for the
-  dedicated build account with `AllowUsers`, and keeps that policy outside any
-  vendor `Match` block;
-- applies restrictive ACLs to `authorized_keys`, trusted tag signers, and
-  `C:\FluxheimBuild`;
+  dedicated build account with `AllowUsers`, points `AuthorizedKeysFile` at
+  administrator-owned `C:\ProgramData\ssh\fluxheim-release\authorized_keys`,
+  and keeps that policy outside any vendor `Match` block;
+- grants the build identity read-only access to its SSH key and trusted tag
+  signers, read/execute traversal on `C:\FluxheimBuild`, and Modify only below
+  the precreated `runs` and `output` directories;
 - narrows the Windows firewall rule to the supplied source CIDR;
 - validates `sshd_config` before restart and prints host-key fingerprints;
 - reports missing build tools without downloading floating installers.
@@ -68,11 +74,14 @@ then independently:
 1. fetches only the requested annotated tag, rejects OpenPGP, X.509, mixed, or
    duplicate signature armor, and verifies its sole SSH signature against the
    installed `allowed_signers` file at full trust;
-2. checks the native Rust host architecture;
-3. runs workspace tests and the mandatory native Windows live smoke;
-4. builds all seven profiles twice with the PowerShell archive builder and
+2. proves that the build account cannot replace its SSH authorization, rename
+   the trusted signer directory, replace `allowed_signers`, or create a second
+   trusted directory;
+3. checks the native Rust host architecture;
+4. runs workspace tests and the mandatory native Windows live smoke;
+5. builds all seven profiles twice with the PowerShell archive builder and
    launches every packaged executable to verify its version;
-5. requires byte-identical ZIP hashes and emits checksums plus machine-readable
+6. requires byte-identical ZIP hashes and emits checksums plus machine-readable
    commit, architecture, Windows edition/build, test-scope, and reproducibility
    evidence.
 

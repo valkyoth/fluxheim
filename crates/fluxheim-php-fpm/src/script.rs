@@ -44,14 +44,7 @@ fn php_fpm_join_wire_path<'a>(
     let mut translated = root.to_owned();
     for segment in segments {
         let segment = segment?;
-        if segment.is_empty()
-            || segment == "."
-            || segment == ".."
-            || (reject_hidden_segments && segment.starts_with('.'))
-            || segment.contains('/')
-            || segment.contains('\\')
-            || segment.chars().any(char::is_control)
-        {
+        if !valid_php_segment(segment, reject_hidden_segments) {
             return None;
         }
         if !translated.ends_with(['/', '\\']) {
@@ -75,12 +68,16 @@ pub fn php_script_name_for_request(
         return None;
     }
 
+    if !valid_php_segment(index, true) {
+        return None;
+    }
+
     let mut segments = Vec::new();
     for segment in decoded.split('/') {
         if segment.is_empty() || segment == "." {
             continue;
         }
-        if segment == ".." || segment.contains('\\') || segment.starts_with('.') {
+        if !valid_php_segment(segment, true) {
             return None;
         }
         segments.push(segment.to_owned());
@@ -150,7 +147,7 @@ pub fn php_static_file_script_name(
             return None;
         };
         let segment = segment.to_str()?;
-        if segment.is_empty() || segment == "." || segment == ".." || segment.starts_with('.') {
+        if !valid_php_segment(segment, true) {
             return None;
         }
         script_name.push('/');
@@ -170,4 +167,31 @@ pub fn php_segment_has_allowed_extension(segment: &str, allowed_extensions: &[St
             .iter()
             .any(|allowed| extension.eq_ignore_ascii_case(allowed))
     })
+}
+
+pub fn valid_php_segment(segment: &str, reject_hidden: bool) -> bool {
+    !segment.is_empty()
+        && segment != "."
+        && segment != ".."
+        && !(reject_hidden && segment.starts_with('.'))
+        && !segment.ends_with(['.', ' '])
+        && !segment
+            .chars()
+            .any(|character| matches!(character, '/' | '\\' | ':') || character.is_control())
+        && !windows_reserved_php_segment(segment)
+}
+
+fn windows_reserved_php_segment(segment: &str) -> bool {
+    let stem = segment.split('.').next().unwrap_or_default();
+    let upper = stem.to_ascii_uppercase();
+    matches!(
+        upper.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || upper
+        .strip_prefix("COM")
+        .or_else(|| upper.strip_prefix("LPT"))
+        .is_some_and(|suffix| {
+            (suffix.len() == 1 && matches!(suffix.as_bytes()[0], b'1'..=b'9'))
+                || matches!(suffix, "\u{00b9}" | "\u{00b2}" | "\u{00b3}")
+        })
 }

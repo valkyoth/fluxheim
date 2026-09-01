@@ -1,24 +1,11 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::Path;
 
 use super::LoadBalancerRuntimeStateSnapshot;
 
 #[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-
-#[cfg(any(target_os = "linux", target_os = "android"))]
-const O_NOFOLLOW: i32 = 0o400000;
-
-#[cfg(any(
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-))]
-const O_NOFOLLOW: i32 = 0x0100;
+use std::os::unix::fs::PermissionsExt;
 
 const MAX_RUNTIME_STATE_FILE_BYTES: u64 = 16 * 1024 * 1024;
 #[cfg(unix)]
@@ -99,26 +86,7 @@ fn read_regular_file_to_string_with_limit(path: &Path, max_bytes: u64) -> io::Re
 }
 
 fn open_regular_file(path: &Path) -> io::Result<File> {
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "load balancer runtime state path is not a regular file",
-        ));
-    }
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    options.custom_flags(O_NOFOLLOW);
-    let file = options.open(path)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "load balancer runtime state path is not a regular file",
-        ));
-    }
-    Ok(file)
+    fluxheim_config::fs_trust::open_regular_file(path)
 }
 
 fn require_real_directory(path: &Path) -> io::Result<()> {

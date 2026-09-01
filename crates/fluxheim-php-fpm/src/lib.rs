@@ -56,7 +56,7 @@ pub use self::response_stream::{collect_php_fpm_response_stream, push_php_fpm_st
 pub use self::script::{
     PhpScriptName, php_fpm_path_translated, php_fpm_script_filename, php_script_name_denied,
     php_script_name_for_request, php_segment_has_allowed_extension,
-    php_should_redirect_directory_index, php_static_file_script_name,
+    php_should_redirect_directory_index, php_static_file_script_name, valid_php_segment,
 };
 
 pub const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
