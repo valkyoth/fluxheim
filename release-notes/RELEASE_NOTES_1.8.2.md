@@ -46,6 +46,10 @@ same seven public profiles used by Linux and Apple Silicon macOS.
   or duplicate tag signature formats before allowed-signers verification.
 - Flush the load-balancer state file and containing directory after atomic
   replacement on Windows.
+- Roll back newly created Windows files after a retained-parent ACL rejection
+  through delete-capable handles, and surface any rollback failure explicitly.
+- Bind the Windows filesystem-security audit to the complete reviewed
+  first-party source boundary as well as the pinned ACL dependency checksum.
 
 ## Remaining Release Blocks
 

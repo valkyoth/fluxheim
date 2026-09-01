@@ -1,6 +1,6 @@
 # Windows Filesystem Security Audit
 
-Audit date: 2026-08-30
+Audit date: 2026-09-01
 
 This record covers the Windows filesystem security boundary used by Fluxheim
 1.8.2. It is a scoped source audit, not a claim that every public API in the
@@ -49,9 +49,34 @@ account. Any change to that value requires a fresh ACL-policy review.
 ## Fluxheim Windows capability helper
 
 `crates/fluxheim-windows-security` is the only first-party crate permitted to
-use unsafe Rust for handle-relative Windows path traversal. Its unsafe calls
-are limited to `NtCreateFile`, NTSTATUS conversion, and transfer of a successful
-owned handle into `std::fs::File`.
+use unsafe Rust for handle-relative Windows path traversal and mutation. The
+reviewed source digest is
+`de216c1b695ed735b2bae3ac196e85f639cac228a1beb423d045aa1f96b3eb9a`.
+It covers, in this order, each UTF-8 path, a NUL delimiter, the complete file,
+and another NUL delimiter for:
+
+- `crates/fluxheim-windows-security/src/lib.rs`;
+- `crates/fluxheim-windows-security/src/file_mutation.rs`; and
+- `crates/fluxheim-windows-security/src/path_handles.rs`.
+
+First-party unsafe operations and their reviewed invariants are:
+
+- `NtCreateFile` receives live, aligned `OBJECT_ATTRIBUTES`, `UNICODE_STRING`,
+  and status storage; every relative open is rooted in a live parent handle,
+  disables reparse traversal, and requests an explicit object type;
+- successful native handles are transferred exactly once into
+  `std::fs::File`, while failed calls never construct an owning Rust handle;
+- `RtlNtStatusToDosError` is called only with the status returned by the
+  immediately preceding native operation;
+- `NtSetInformationFile` receives live source and destination-directory
+  handles plus bounded, aligned rename or hard-link structures whose UTF-16
+  payload lengths are checked before allocation and raw writes;
+- `SetFileInformationByHandle` receives a live file handle opened with delete
+  access and an exact `FILE_DISPOSITION_INFO` value;
+- `CreateDirectoryW` receives a NUL-terminated path and a live protected
+  security descriptor through a correctly sized `SECURITY_ATTRIBUTES`; and
+- raw writes into variable-length rename and link structures stay within the
+  checked allocation and use the Windows-declared field layout.
 
 The helper validates relative components, rejects alternate data stream and
 separator syntax, retains each parent handle, and combines
@@ -63,5 +88,15 @@ The configuration trust checker consumes the retained handle chain directly:
 it evaluates the target, creation parent, and ancestors without reopening
 their names between inspection and use.
 
+The reviewed public surface comprises regular-file open/create/update,
+handle-relative traversal, retained path inspection, exclusive confidential
+creation, directory ACL-update and synchronization opens, private-directory
+creation, regular-file rename/hard-link/removal, handle-based removal, and the
+`RetainedPathHandles` target/ancestor accessors. New ordinary-file creation
+handles include delete access because callers may reject and remove a file
+after evaluating its retained parent ACLs.
+
 Any expansion of this crate's unsafe API or any `windows-permissions` lockfile
-change requires a new dated review and updated checksum evidence.
+change requires a new dated review and updated checksum evidence. The normal
+validator hashes the complete first-party boundary, so any source change also
+requires an explicit review-date and digest update.

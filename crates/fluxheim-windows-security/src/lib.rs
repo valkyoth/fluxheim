@@ -89,7 +89,9 @@ pub fn create_new_regular_file_with_ancestors(
     path: &Path,
     read: bool,
 ) -> io::Result<RetainedPathHandles> {
-    let access = GENERIC_WRITE | if read { GENERIC_READ } else { 0 };
+    // The caller may reject the creation after inspecting the retained parent
+    // handles. DELETE access makes that fail-closed rollback reliable.
+    let access = GENERIC_WRITE | DELETE_ACCESS | if read { GENERIC_READ } else { 0 };
     open_absolute_regular_path(
         path,
         access,

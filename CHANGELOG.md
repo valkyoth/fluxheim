@@ -54,6 +54,10 @@ behavior when the change improves security or project direction.
   any vendor `Match` block.
 - Flush load-balancer state directory metadata after Windows atomic replacement
   so crash recovery does not depend on a later NTFS metadata writeback.
+- Give newly created Windows files delete-capable handles and make fail-closed
+  ACL rejection report rollback failures instead of leaving silent artifacts.
+- Pin the complete first-party Windows filesystem-security source boundary to a
+  renewed audit digest covering every unsafe operation and public capability.
 
 ## 1.8.1 - 2026-08-28
 

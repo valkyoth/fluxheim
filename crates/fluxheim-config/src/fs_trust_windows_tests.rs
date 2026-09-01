@@ -124,6 +124,18 @@ fn integrity_file_create_and_update_use_the_retained_trusted_path() {
 }
 
 #[test]
+fn rejected_integrity_creation_removes_the_new_child() {
+    let directory = tempfile::tempdir().unwrap();
+    install_everyone_acl(directory.path(), "FW");
+    let child = directory.path().join("rejected-state.json");
+
+    let error = create_regular_file(&child, false).unwrap_err();
+
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    assert!(!child.exists(), "rejected child was left on disk");
+}
+
+#[test]
 fn inherit_only_everyone_write_access_blocks_child_creation() {
     let directory = tempfile::tempdir().unwrap();
     let current = windows_permissions::utilities::current_process_sid().unwrap();

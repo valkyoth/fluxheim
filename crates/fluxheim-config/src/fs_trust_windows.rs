@@ -57,16 +57,15 @@ pub fn create_regular_file(path: &Path, read: bool) -> std::io::Result<std::fs::
         TrustPolicy::IntegrityOnly,
     ) {
         Ok(insecure) => insecure,
-        Err(error) => {
-            remove_retained_target(&opened);
-            return Err(error);
-        }
+        Err(error) => return Err(reject_created_file(&opened, error)),
     };
     if insecure_parent {
-        remove_retained_target(&opened);
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "new file has an untrusted parent ACL",
+        return Err(reject_created_file(
+            &opened,
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "new file has an untrusted parent ACL",
+            ),
         ));
     }
     opened.into_target()
@@ -93,35 +92,35 @@ pub fn create_confidential_file(path: &Path) -> std::io::Result<std::fs::File> {
         TrustPolicy::IntegrityOnly,
     ) {
         Ok(insecure) => insecure,
-        Err(error) => {
-            remove_retained_target(&opened);
-            return Err(error);
-        }
+        Err(error) => return Err(reject_created_file(&opened, error)),
     };
     if insecure_parent {
-        remove_retained_target(&opened);
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "confidential file has an untrusted parent ACL",
+        return Err(reject_created_file(
+            &opened,
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "confidential file has an untrusted parent ACL",
+            ),
         ));
     }
-    if let Err(error) = harden_object(opened.target_mut()?) {
-        remove_retained_target(&opened);
-        return Err(error);
+    if let Err(error) = opened.target_mut().and_then(harden_object) {
+        return Err(reject_created_file(&opened, error));
     }
-    match opened_file_has_insecure_confidential_permissions(opened.target()?) {
+    match opened
+        .target()
+        .and_then(opened_file_has_insecure_confidential_permissions)
+    {
         Ok(false) => {}
         Ok(true) => {
-            remove_retained_target(&opened);
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "new confidential file retained an untrusted ACL after hardening",
+            return Err(reject_created_file(
+                &opened,
+                std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "new confidential file retained an untrusted ACL after hardening",
+                ),
             ));
         }
-        Err(error) => {
-            remove_retained_target(&opened);
-            return Err(error);
-        }
+        Err(error) => return Err(reject_created_file(&opened, error)),
     }
     opened.into_target()
 }
@@ -333,9 +332,19 @@ fn inspection_error(operation: &'static str, error: std::io::Error) -> std::io::
     std::io::Error::new(error.kind(), format!("{operation}: {error}"))
 }
 
-fn remove_retained_target(opened: &fluxheim_windows_security::RetainedPathHandles) {
-    if let Ok(file) = opened.target() {
-        let _ = fluxheim_windows_security::remove_open_regular_file(file);
+fn reject_created_file(
+    opened: &fluxheim_windows_security::RetainedPathHandles,
+    rejection: std::io::Error,
+) -> std::io::Error {
+    match opened
+        .target()
+        .and_then(fluxheim_windows_security::remove_open_regular_file)
+    {
+        Ok(()) => rejection,
+        Err(cleanup) => std::io::Error::new(
+            rejection.kind(),
+            format!("{rejection}; rejected file cleanup failed: {cleanup}"),
+        ),
     }
 }
 

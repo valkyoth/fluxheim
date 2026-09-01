@@ -87,6 +87,18 @@ fn absolute_create_rename_open_and_remove_stay_handle_relative() {
 }
 
 #[test]
+fn newly_created_regular_file_handle_supports_rejection_cleanup() {
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().canonicalize().unwrap().join("rejected.bin");
+    let opened = create_new_regular_file_with_ancestors(&target, false).unwrap();
+
+    remove_open_regular_file(opened.target().unwrap()).unwrap();
+    drop(opened);
+
+    assert!(!target.exists(), "rejected creation was not removed");
+}
+
+#[test]
 fn hard_link_is_created_from_the_retained_source_handle() {
     let root = tempfile::tempdir().unwrap();
     let source = root.path().join("source.bin");
