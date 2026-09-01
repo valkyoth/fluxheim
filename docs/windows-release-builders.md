@@ -78,7 +78,9 @@ then independently:
    installed `allowed_signers` file at full trust;
 2. proves that the build account cannot replace its SSH authorization, rename
    the trusted signer directory, replace `allowed_signers`, change trust-anchor
-   ACLs or ownership, or create a second trusted directory;
+   content, ACLs, or ownership, or create a second trusted directory; content
+   overwrite and append rights are checked independently, and every trust-path
+   ancestor must be free of junctions and other reparse points;
 3. checks the native Rust host architecture;
 4. runs workspace tests and the mandatory native Windows live smoke;
 5. builds all seven profiles twice with the PowerShell archive builder and

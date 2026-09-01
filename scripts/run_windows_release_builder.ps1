@@ -40,12 +40,17 @@ public static class FluxheimReleaseAclProbe {
     private const uint OpenExisting = 3;
     private const uint FileFlagBackupSemantics = 0x02000000;
     private const uint FileFlagOpenReparsePoint = 0x00200000;
+    private const uint FileAttributeReparsePoint = 0x00000400;
+    private const uint InvalidFileAttributes = 0xFFFFFFFF;
     private const uint FileShareAll = 0x00000007;
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern SafeFileHandle CreateFileW(
         string name, uint access, uint share, IntPtr securityAttributes,
         uint creation, uint flags, IntPtr template);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFileAttributesW(string path);
 
     public static int Probe(string path, uint access, bool directory) {
         uint flags = FileFlagOpenReparsePoint;
@@ -55,12 +60,22 @@ public static class FluxheimReleaseAclProbe {
             return handle.IsInvalid ? Marshal.GetLastWin32Error() : 0;
         }
     }
+
+    public static bool IsReparsePoint(string path) {
+        uint attributes = GetFileAttributesW(path);
+        if (attributes == InvalidFileAttributes) {
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        }
+        return (attributes & FileAttributeReparsePoint) != 0;
+    }
 }
 '@
     }
 
     $accessDenied = 5
     $deleteAccess = 0x00010000
+    $fileWriteData = 0x00000002
+    $fileAppendData = 0x00000004
     $writeDac = 0x00040000
     $writeOwner = 0x00080000
     $genericWrite = 0x40000000
@@ -71,12 +86,31 @@ public static class FluxheimReleaseAclProbe {
     $sshTrustRoot = Join-Path $env:ProgramData 'ssh\fluxheim-release'
     $authorizedKeysPath = Join-Path $sshTrustRoot 'authorized_keys'
 
+    foreach ($trustPath in @(
+        $Root, $trusted, $allowedSignersPath, $sshTrustRoot, $authorizedKeysPath
+    )) {
+        $current = [System.IO.Path]::GetFullPath($trustPath)
+        while ($null -ne $current) {
+            if ([FluxheimReleaseAclProbe]::IsReparsePoint($current)) {
+                throw "release trust path must not contain a reparse point: $current"
+            }
+            $parent = [System.IO.Directory]::GetParent($current)
+            $current = if ($null -eq $parent) { $null } else { $parent.FullName }
+        }
+    }
+
     $probes = @(
         [pscustomobject]@{
             Path = $Root
             Access = $fileAddSubdirectory
             Directory = $true
             Operation = 'create a second trusted directory'
+        },
+        [pscustomobject]@{
+            Path = $Root
+            Access = $deleteAccess
+            Directory = $true
+            Operation = 'delete the release workspace'
         },
         [pscustomobject]@{
             Path = $Root
@@ -116,6 +150,18 @@ public static class FluxheimReleaseAclProbe {
         },
         [pscustomobject]@{
             Path = $allowedSignersPath
+            Access = $fileWriteData
+            Directory = $false
+            Operation = 'overwrite allowed_signers content'
+        },
+        [pscustomobject]@{
+            Path = $allowedSignersPath
+            Access = $fileAppendData
+            Directory = $false
+            Operation = 'append allowed_signers content'
+        },
+        [pscustomobject]@{
+            Path = $allowedSignersPath
             Access = $genericWrite
             Directory = $false
             Operation = 'write allowed_signers'
@@ -146,6 +192,18 @@ public static class FluxheimReleaseAclProbe {
         },
         [pscustomobject]@{
             Path = $authorizedKeysPath
+            Access = $fileWriteData
+            Directory = $false
+            Operation = 'overwrite authorized_keys content'
+        },
+        [pscustomobject]@{
+            Path = $authorizedKeysPath
+            Access = $fileAppendData
+            Directory = $false
+            Operation = 'append authorized_keys content'
+        },
+        [pscustomobject]@{
+            Path = $authorizedKeysPath
             Access = $genericWrite
             Directory = $false
             Operation = 'write authorized_keys'
@@ -173,6 +231,12 @@ public static class FluxheimReleaseAclProbe {
             Access = $fileDeleteChild
             Directory = $true
             Operation = 'replace authorized_keys through its parent'
+        },
+        [pscustomobject]@{
+            Path = $sshTrustRoot
+            Access = $deleteAccess
+            Directory = $true
+            Operation = 'delete the SSH trust directory'
         },
         [pscustomobject]@{
             Path = $sshTrustRoot
