@@ -159,6 +159,8 @@ foreach ($required in @(
     'AccessRights::FileGenericRead',
     'AccessRights::Bit6',
     'opened_file_has_insecure_confidential_permissions',
+    'fluxheim_windows_security::open_existing_regular_file_with_ancestors',
+    'fluxheim_windows_security::create_new_regular_file_with_ancestors',
     'create_confidential_file',
     'open_or_create_confidential_file',
     'create_private_directory_all',
@@ -225,7 +227,8 @@ foreach ($relative in @(
 )) {
     $cachePath = Get-Content -LiteralPath (Join-Path $root $relative) -Raw
     foreach ($required in @(
-        'fluxheim_windows_security::open_existing_regular_file',
+        'fluxheim_config::fs_trust::open_regular_file',
+        'fluxheim_config::fs_trust::create_regular_file',
         'fluxheim_windows_security::rename_regular_file',
         'fluxheim_windows_security::remove_regular_file'
     )) {
