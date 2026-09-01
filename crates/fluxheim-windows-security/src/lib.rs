@@ -11,22 +11,34 @@ use std::path::{Component, Path, PathBuf};
 
 use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Wdk::Storage::FileSystem::{
-    FILE_CREATE, FILE_DIRECTORY_FILE, FILE_LINK_INFORMATION, FILE_NON_DIRECTORY_FILE, FILE_OPEN,
-    FILE_OPEN_IF, FILE_OPEN_REPARSE_POINT, FILE_RENAME_INFORMATION, FILE_SYNCHRONOUS_IO_NONALERT,
-    FileLinkInformation, FileRenameInformation, NtCreateFile, NtSetInformationFile,
+    FILE_CREATE, FILE_DIRECTORY_FILE, FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_IF,
+    FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT, NtCreateFile,
 };
 use windows_sys::Win32::Foundation::{
     GENERIC_READ, GENERIC_WRITE, HANDLE, OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE,
     RtlNtStatusToDosError, UNICODE_STRING,
 };
-use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateDirectoryW, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO,
-    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, FileDispositionInfo, READ_CONTROL, SECURITY_IDENTIFICATION,
-    SECURITY_SQOS_PRESENT, SYNCHRONIZE, SetFileInformationByHandle, WRITE_DAC,
+    FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
+    FILE_READ_DATA, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, READ_CONTROL,
+    SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, SYNCHRONIZE, WRITE_DAC,
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
+
+mod file_mutation;
+mod path_handles;
+pub use file_mutation::{
+    create_hard_link_regular_file, create_private_directory, remove_open_regular_file,
+    remove_regular_file, rename_regular_file,
+};
+pub use path_handles::RetainedPathHandles;
+
+#[derive(Clone, Copy)]
+enum RequiredPathType {
+    Any,
+    Directory,
+    RegularFile,
+}
 
 /// Opens a regular file beneath `root` without following a reparse point in
 /// any relative path component. Every directory handle remains live until its
@@ -40,7 +52,11 @@ pub fn open_regular_file_beneath(root: &Path, relative: &Path) -> io::Result<Fil
         let opened = open_relative_component(
             &directory,
             component,
-            final_component,
+            if final_component {
+                RequiredPathType::RegularFile
+            } else {
+                RequiredPathType::Directory
+            },
             if final_component {
                 FILE_READ_ATTRIBUTES | FILE_READ_DATA | SYNCHRONIZE
             } else {
@@ -62,189 +78,73 @@ pub fn open_regular_file_beneath(root: &Path, relative: &Path) -> io::Result<Fil
 }
 
 pub fn open_existing_regular_file(path: &Path, write: bool) -> io::Result<File> {
-    open_absolute_regular_file(path, write, FILE_OPEN)
+    open_existing_regular_file_with_ancestors(path, write)?.into_target()
 }
 
 pub fn create_new_regular_file(path: &Path, read: bool) -> io::Result<File> {
+    create_new_regular_file_with_ancestors(path, read)?.into_target()
+}
+
+pub fn create_new_regular_file_with_ancestors(
+    path: &Path,
+    read: bool,
+) -> io::Result<RetainedPathHandles> {
     let access = GENERIC_WRITE | if read { GENERIC_READ } else { 0 };
-    open_absolute_regular_file_with_access(path, access, FILE_CREATE)
+    open_absolute_regular_path(
+        path,
+        access,
+        FILE_CREATE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+    )
 }
 
 pub fn open_or_create_regular_file(path: &Path) -> io::Result<File> {
     open_absolute_regular_file_with_access(path, GENERIC_READ | GENERIC_WRITE, FILE_OPEN_IF)
 }
 
+pub fn inspect_absolute_path(path: &Path) -> io::Result<RetainedPathHandles> {
+    open_absolute_path(
+        path,
+        RequiredPathType::Any,
+        READ_CONTROL | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_OPEN,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        true,
+    )
+}
+
+pub fn open_existing_regular_file_with_ancestors(
+    path: &Path,
+    write: bool,
+) -> io::Result<RetainedPathHandles> {
+    let access = GENERIC_READ | READ_CONTROL | if write { GENERIC_WRITE } else { 0 };
+    open_absolute_regular_path(
+        path,
+        access,
+        FILE_OPEN,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+    )
+}
+
+pub fn create_new_exclusive_regular_file_with_ancestors(
+    path: &Path,
+) -> io::Result<RetainedPathHandles> {
+    open_absolute_regular_path(
+        path,
+        GENERIC_READ | GENERIC_WRITE | DELETE_ACCESS | READ_CONTROL | WRITE_DAC,
+        FILE_CREATE,
+        0,
+    )
+}
+
 /// Opens an existing directory for ACL inspection and replacement without
 /// following a reparse point in any path component.
 pub fn open_existing_directory_for_acl_update(path: &Path) -> io::Result<File> {
-    let (root, relative) = absolute_root_and_relative(path)?;
-    let components = validated_relative_components(&relative)?;
-    let mut directory = open_root_directory(&root)?;
-
-    for (index, component) in components.iter().enumerate() {
-        let final_component = index + 1 == components.len();
-        directory = open_relative_component(
-            &directory,
-            component,
-            false,
-            READ_CONTROL
-                | FILE_READ_ATTRIBUTES
-                | SYNCHRONIZE
-                | if final_component {
-                    WRITE_DAC
-                } else {
-                    FILE_LIST_DIRECTORY
-                },
-            FILE_OPEN,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        )?;
-    }
-
-    Ok(directory)
+    open_existing_directory_with_ancestors(path, READ_CONTROL | WRITE_DAC)?.into_target()
 }
 
-pub fn create_private_directory(path: &Path) -> io::Result<()> {
-    let current = windows_permissions::utilities::current_process_sid()?;
-    let descriptor: windows_permissions::LocalBox<windows_permissions::SecurityDescriptor> =
-        format!("D:P(A;;FA;;;{current})(A;;FA;;;SY)(A;;FA;;;BA)").parse()?;
-    let mut wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
-    if wide.is_empty() || wide.contains(&0) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "private directory path is empty or contains NUL",
-        ));
-    }
-    wide.push(0);
-    let attributes = SECURITY_ATTRIBUTES {
-        nLength: u32::try_from(std::mem::size_of::<SECURITY_ATTRIBUTES>()).unwrap_or(u32::MAX),
-        lpSecurityDescriptor: descriptor.as_ptr().cast(),
-        bInheritHandle: 0,
-    };
-    // SAFETY: the path is NUL-terminated, and both the self-relative security
-    // descriptor and its attributes remain live for the duration of the call.
-    if unsafe { CreateDirectoryW(wide.as_ptr(), &raw const attributes) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
-}
-
-pub fn rename_regular_file(source: &Path, destination: &Path) -> io::Result<()> {
-    let source = open_absolute_regular_file_with_access(
-        source,
-        DELETE_ACCESS | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        FILE_OPEN,
-    )?;
-    let (destination_parent, destination_name) = open_absolute_parent(destination)?;
-    let wide = validated_name_wide(&destination_name)?;
-    let header_size = std::mem::offset_of!(FILE_RENAME_INFORMATION, FileName);
-    let name_bytes = wide
-        .len()
-        .checked_mul(std::mem::size_of::<u16>())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "rename target is too long"))?;
-    let buffer_size = header_size
-        .checked_add(name_bytes)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "rename target is too long"))?;
-    let mut buffer = aligned_native_buffer(buffer_size)?;
-    let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
-    let mut status_block = IO_STATUS_BLOCK::default();
-    // SAFETY: `buffer` is sized for the fixed header plus the complete UTF-16
-    // name. All writes stay within that allocation, and both handles remain
-    // live through `NtSetInformationFile`.
-    let status = unsafe {
-        (*info).Anonymous.ReplaceIfExists = true;
-        (*info).RootDirectory = destination_parent.as_raw_handle() as HANDLE;
-        (*info).FileNameLength = u32::try_from(name_bytes).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidInput, "rename target is too long")
-        })?;
-        std::ptr::copy_nonoverlapping(wide.as_ptr(), (*info).FileName.as_mut_ptr(), wide.len());
-        NtSetInformationFile(
-            source.as_raw_handle() as HANDLE,
-            &mut status_block,
-            info.cast(),
-            u32::try_from(buffer_size).map_err(|_| {
-                io::Error::new(io::ErrorKind::InvalidInput, "rename target is too long")
-            })?,
-            FileRenameInformation,
-        )
-    };
-    if status < 0 {
-        // SAFETY: this converts the NTSTATUS returned by the preceding call.
-        let error = unsafe { RtlNtStatusToDosError(status) };
-        return Err(io::Error::from_raw_os_error(error as i32));
-    }
-    Ok(())
-}
-
-pub fn create_hard_link_regular_file(source: &Path, destination: &Path) -> io::Result<()> {
-    let source = open_absolute_regular_file_with_access(
-        source,
-        DELETE_ACCESS | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        FILE_OPEN,
-    )?;
-    let (destination_parent, destination_name) = open_absolute_parent(destination)?;
-    let wide = validated_name_wide(&destination_name)?;
-    let header_size = std::mem::offset_of!(FILE_LINK_INFORMATION, FileName);
-    let name_bytes = wide
-        .len()
-        .checked_mul(std::mem::size_of::<u16>())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "link target is too long"))?;
-    let buffer_size = header_size
-        .checked_add(name_bytes)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "link target is too long"))?;
-    let mut buffer = aligned_native_buffer(buffer_size)?;
-    let info = buffer.as_mut_ptr().cast::<FILE_LINK_INFORMATION>();
-    let mut status_block = IO_STATUS_BLOCK::default();
-    // SAFETY: `buffer` contains the complete variable-length link structure,
-    // and both the source and destination-directory handles remain live.
-    let status = unsafe {
-        (*info).Anonymous.ReplaceIfExists = false;
-        (*info).RootDirectory = destination_parent.as_raw_handle() as HANDLE;
-        (*info).FileNameLength = u32::try_from(name_bytes)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "link target is too long"))?;
-        std::ptr::copy_nonoverlapping(wide.as_ptr(), (*info).FileName.as_mut_ptr(), wide.len());
-        NtSetInformationFile(
-            source.as_raw_handle() as HANDLE,
-            &mut status_block,
-            info.cast(),
-            u32::try_from(buffer_size).map_err(|_| {
-                io::Error::new(io::ErrorKind::InvalidInput, "link target is too long")
-            })?,
-            FileLinkInformation,
-        )
-    };
-    if status < 0 {
-        // SAFETY: this converts the NTSTATUS returned by the preceding call.
-        let error = unsafe { RtlNtStatusToDosError(status) };
-        return Err(io::Error::from_raw_os_error(error as i32));
-    }
-    Ok(())
-}
-
-pub fn remove_regular_file(path: &Path) -> io::Result<()> {
-    let file = open_absolute_regular_file_with_access(
-        path,
-        DELETE_ACCESS | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        FILE_OPEN,
-    )?;
-    remove_open_regular_file(&file)
-}
-
-pub fn remove_open_regular_file(file: &File) -> io::Result<()> {
-    let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
-    // SAFETY: `disposition` is the exact structure required by
-    // `FileDispositionInfo`, and `file` remains live for the call.
-    let result = unsafe {
-        SetFileInformationByHandle(
-            file.as_raw_handle() as HANDLE,
-            FileDispositionInfo,
-            (&raw const disposition).cast(),
-            u32::try_from(std::mem::size_of::<FILE_DISPOSITION_INFO>()).unwrap_or(u32::MAX),
-        )
-    };
-    if result == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
+pub fn open_existing_directory_for_sync(path: &Path) -> io::Result<RetainedPathHandles> {
+    open_existing_directory_with_ancestors(path, GENERIC_WRITE | READ_CONTROL)
 }
 
 const DELETE_ACCESS: u32 = 0x0001_0000;
@@ -258,25 +158,117 @@ fn aligned_native_buffer(byte_len: usize) -> io::Result<Vec<usize>> {
     Ok(vec![0; word_count])
 }
 
-fn open_absolute_regular_file(path: &Path, write: bool, disposition: u32) -> io::Result<File> {
-    let access = GENERIC_READ | if write { GENERIC_WRITE } else { 0 };
-    open_absolute_regular_file_with_access(path, access, disposition)
-}
-
 fn open_absolute_regular_file_with_access(
     path: &Path,
     access: u32,
     disposition: u32,
 ) -> io::Result<File> {
-    let (parent, name) = open_absolute_parent(path)?;
-    open_relative_component(
-        &parent,
-        &name,
-        true,
+    open_absolute_regular_path(
+        path,
         access | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
         disposition,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
     )
+    .and_then(RetainedPathHandles::into_target)
+}
+
+fn open_absolute_regular_path(
+    path: &Path,
+    access: u32,
+    disposition: u32,
+    share_mode: u32,
+) -> io::Result<RetainedPathHandles> {
+    let _ = absolute_root_and_relative(path)?;
+    open_absolute_path(
+        path,
+        RequiredPathType::RegularFile,
+        access | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        disposition,
+        share_mode,
+        false,
+    )
+}
+
+fn open_existing_directory_with_ancestors(
+    path: &Path,
+    target_access: u32,
+) -> io::Result<RetainedPathHandles> {
+    open_absolute_path(
+        path,
+        RequiredPathType::Directory,
+        target_access | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_OPEN,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        false,
+    )
+}
+
+fn open_absolute_path(
+    path: &Path,
+    target_type: RequiredPathType,
+    target_access: u32,
+    target_disposition: u32,
+    target_share_mode: u32,
+    allow_missing: bool,
+) -> io::Result<RetainedPathHandles> {
+    let (root, relative) = absolute_root_and_optional_relative(path)?;
+    let mut handles = vec![open_root_directory(&root)?];
+    if relative.as_os_str().is_empty() {
+        return Ok(RetainedPathHandles {
+            handles,
+            target_exists: true,
+        });
+    }
+    let components = validated_relative_components(&relative)?;
+    if components.len() > 256 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "secure Windows path exceeds component limit",
+        ));
+    }
+    for (index, component) in components.iter().enumerate() {
+        let final_component = index + 1 == components.len();
+        let result = open_relative_component(
+            handles
+                .last()
+                .ok_or_else(|| io::Error::other("retained path lost its parent handle"))?,
+            component,
+            if final_component {
+                target_type
+            } else {
+                RequiredPathType::Directory
+            },
+            if final_component {
+                target_access
+            } else {
+                READ_CONTROL | FILE_READ_ATTRIBUTES | FILE_LIST_DIRECTORY | SYNCHRONIZE
+            },
+            if final_component {
+                target_disposition
+            } else {
+                FILE_OPEN
+            },
+            if final_component {
+                target_share_mode
+            } else {
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+            },
+        );
+        match result {
+            Ok(handle) => handles.push(handle),
+            Err(error) if allow_missing && error.kind() == io::ErrorKind::NotFound => {
+                return Ok(RetainedPathHandles {
+                    handles,
+                    target_exists: false,
+                });
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(RetainedPathHandles {
+        handles,
+        target_exists: true,
+    })
 }
 
 fn open_absolute_parent(path: &Path) -> io::Result<(File, std::ffi::OsString)> {
@@ -291,7 +283,7 @@ fn open_absolute_parent(path: &Path) -> io::Result<(File, std::ffi::OsString)> {
         directory = open_relative_component(
             &directory,
             component,
-            false,
+            RequiredPathType::Directory,
             FILE_READ_ATTRIBUTES | FILE_LIST_DIRECTORY | SYNCHRONIZE,
             FILE_OPEN,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -301,6 +293,17 @@ fn open_absolute_parent(path: &Path) -> io::Result<(File, std::ffi::OsString)> {
 }
 
 fn absolute_root_and_relative(path: &Path) -> io::Result<(PathBuf, PathBuf)> {
+    let (root, relative) = absolute_root_and_optional_relative(path)?;
+    if relative.as_os_str().is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "secure Windows path has no rooted file name",
+        ));
+    }
+    Ok((root, relative))
+}
+
+fn absolute_root_and_optional_relative(path: &Path) -> io::Result<(PathBuf, PathBuf)> {
     if !path.is_absolute() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -322,10 +325,10 @@ fn absolute_root_and_relative(path: &Path) -> io::Result<(PathBuf, PathBuf)> {
             }
         }
     }
-    if root.as_os_str().is_empty() || relative.as_os_str().is_empty() {
+    if root.as_os_str().is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "secure Windows path has no rooted file name",
+            "secure Windows path has no root",
         ));
     }
     Ok((root, relative))
@@ -407,7 +410,7 @@ fn open_root_directory(root: &Path) -> io::Result<File> {
 fn open_relative_component(
     parent: &File,
     name: &OsStr,
-    regular_file: bool,
+    required_type: RequiredPathType,
     desired_access: u32,
     disposition: u32,
     share_mode: u32,
@@ -435,10 +438,10 @@ fn open_relative_component(
     let mut handle: HANDLE = std::ptr::null_mut();
     let create_options = FILE_OPEN_REPARSE_POINT
         | FILE_SYNCHRONOUS_IO_NONALERT
-        | if regular_file {
-            FILE_NON_DIRECTORY_FILE
-        } else {
-            FILE_DIRECTORY_FILE
+        | match required_type {
+            RequiredPathType::Any => 0,
+            RequiredPathType::Directory => FILE_DIRECTORY_FILE,
+            RequiredPathType::RegularFile => FILE_NON_DIRECTORY_FILE,
         };
 
     // SAFETY: all pointers reference live, correctly initialized values for
@@ -476,8 +479,8 @@ fn open_relative_component(
     let file = unsafe { File::from_raw_handle(handle) };
     let metadata = file.metadata()?;
     if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-        || (regular_file && !metadata.is_file())
-        || (!regular_file && !metadata.is_dir())
+        || matches!(required_type, RequiredPathType::RegularFile) && !metadata.is_file()
+        || matches!(required_type, RequiredPathType::Directory) && !metadata.is_dir()
     {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,

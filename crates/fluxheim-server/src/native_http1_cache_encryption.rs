@@ -716,72 +716,52 @@ fn write_native_cache_state_atomically(
     bytes: &[u8],
     temporary_prefix: &str,
 ) -> std::io::Result<()> {
-    #[cfg(windows)]
-    {
-        let parent = path.parent().ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "native cache encryption state has no parent",
-            )
+    let destination = NativeSafeDiskCachePath::from_path(path.to_path_buf());
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "native cache encryption nonce counter has no parent",
+        )
+    })?;
+    let mut last_collision = None;
+    for _ in 0..4 {
+        let mut random = [0_u8; 12];
+        getrandom::fill(&mut random).map_err(|error| {
+            std::io::Error::other(format!("cache nonce counter temp random: {error}"))
         })?;
-        let mut temporary = tempfile::Builder::new()
-            .prefix(temporary_prefix)
-            .suffix(".tmp")
-            .tempfile_in(parent)?;
-        temporary.write_all(bytes)?;
-        temporary.as_file().sync_all()?;
-        NativeSafeDiskCachePath::from_path(path.to_path_buf()).persist_tempfile(temporary)
-    }
-
-    #[cfg(not(windows))]
-    {
-        let destination = NativeSafeDiskCachePath::from_path(path.to_path_buf());
-        let parent = path.parent().ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "native cache encryption nonce counter has no parent",
-            )
-        })?;
-        let mut last_collision = None;
-        for _ in 0..4 {
-            let mut random = [0_u8; 12];
-            getrandom::fill(&mut random).map_err(|error| {
-                std::io::Error::other(format!("cache nonce counter temp random: {error}"))
-            })?;
-            let mut suffix = String::with_capacity(random.len() * 2);
-            for byte in random {
-                use std::fmt::Write as _;
-                let _ = write!(suffix, "{byte:02x}");
+        let mut suffix = String::with_capacity(random.len() * 2);
+        for byte in random {
+            use std::fmt::Write as _;
+            let _ = write!(suffix, "{byte:02x}");
+        }
+        let temporary = NativeSafeDiskCachePath::from_path(
+            parent.join(format!("{temporary_prefix}-{suffix}.tmp")),
+        );
+        let result = (|| {
+            let mut file = temporary.create_new_file()?;
+            file.write_all(bytes)?;
+            file.sync_all()?;
+            destination.rename_from(&temporary)?;
+            destination.sync_parent_dir()
+        })();
+        match result {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let _ = temporary.remove_file();
+                last_collision = Some(error);
             }
-            let temporary = NativeSafeDiskCachePath::from_path(
-                parent.join(format!("{temporary_prefix}-{suffix}.tmp")),
-            );
-            let result = (|| {
-                let mut file = temporary.create_new_file()?;
-                file.write_all(bytes)?;
-                file.sync_all()?;
-                destination.rename_from(&temporary)?;
-                destination.sync_parent_dir()
-            })();
-            match result {
-                Ok(()) => return Ok(()),
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let _ = temporary.remove_file();
-                    last_collision = Some(error);
-                }
-                Err(error) => {
-                    let _ = temporary.remove_file();
-                    return Err(error);
-                }
+            Err(error) => {
+                let _ = temporary.remove_file();
+                return Err(error);
             }
         }
-        Err(last_collision.unwrap_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                "native cache encryption nonce counter temp collision",
-            )
-        }))
     }
+    Err(last_collision.unwrap_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "native cache encryption nonce counter temp collision",
+        )
+    }))
 }
 
 #[cfg(not(feature = "openbao-cache-encryption"))]

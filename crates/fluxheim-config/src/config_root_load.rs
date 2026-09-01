@@ -183,12 +183,5 @@ impl Config {
 }
 
 fn relative_resolution_base(path: &Path) -> &Path {
-    #[cfg(windows)]
-    {
-        dunce::simplified(path)
-    }
-    #[cfg(not(windows))]
-    {
-        path
-    }
+    crate::fs_trust::platform_io_path(path)
 }

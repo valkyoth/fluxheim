@@ -53,68 +53,45 @@ pub(crate) fn prepare_storage_bin_data_dir(
             canonical.display()
         )));
     }
+    for trusted_path in [&canonical_root, &canonical] {
+        if fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(
+            trusted_path,
+        )? {
+            return Err(unsafe_path_error(format!(
+                "storage-bin directory has an untrusted writable ACL: {}",
+                trusted_path.display()
+            )));
+        }
+    }
     Ok(canonical)
 }
 
 pub(crate) fn create_storage_bin_dir_all(path: &Path) -> std::io::Result<()> {
-    let mut current = PathBuf::new();
-    for component in path.components() {
-        current.push(component.as_os_str());
-        if matches!(
-            component,
-            Component::Prefix(_) | Component::RootDir | Component::CurDir
-        ) {
-            continue;
-        }
-        if matches!(component, Component::ParentDir) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!(
-                    "storage-bin directory path must not contain parent traversal: {}",
-                    path.display()
-                ),
-            ));
-        }
-
-        match storage_bin_path_file_type_no_follow(&current)? {
-            Some(file_type) if file_type.is_symlink() || !file_type.is_dir() => {
-                return Err(unsafe_path_error(format!(
-                    "storage-bin directory path is not a real directory: {}",
-                    current.display()
-                )));
-            }
-            Some(_) => {}
-            None => match std::fs::create_dir(&current) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let Some(file_type) = storage_bin_path_file_type_no_follow(&current)? else {
-                        return Err(error);
-                    };
-                    if file_type.is_symlink() || !file_type.is_dir() {
-                        return Err(unsafe_path_error(format!(
-                            "storage-bin directory path is not a real directory: {}",
-                            current.display()
-                        )));
-                    }
-                }
-                Err(error) => return Err(error),
-            },
-        }
-    }
-    Ok(())
+    fluxheim_config::fs_trust::create_private_directory_all(path)
 }
 
 pub(crate) fn storage_bin_path_file_type_no_follow(
     path: &Path,
 ) -> std::io::Result<Option<StorageBinFileType>> {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) => Ok(Some(StorageBinFileType {
-            directory: metadata.is_dir(),
-            reparse_point: metadata_is_reparse_point(&metadata),
-        })),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
+    let absolute = absolute_path(path)?;
+    let inspected = match fluxheim_windows_security::inspect_absolute_path(&absolute) {
+        Ok(inspected) => inspected,
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            return Ok(Some(StorageBinFileType {
+                directory: false,
+                reparse_point: true,
+            }));
+        }
+        Err(error) => return Err(error),
+    };
+    if !inspected.target_exists() {
+        return Ok(None);
     }
+    let metadata = inspected.target()?.metadata()?;
+    Ok(Some(StorageBinFileType {
+        directory: metadata.is_dir(),
+        reparse_point: metadata_is_reparse_point(&metadata),
+    }))
 }
 
 pub(crate) fn storage_bin_configured_path_contains_symlink(path: &Path) -> std::io::Result<bool> {
@@ -125,26 +102,12 @@ pub(crate) fn storage_bin_path_contains_symlink(root: &Path, path: &Path) -> std
     let Ok(relative) = path.strip_prefix(root) else {
         return Ok(true);
     };
-    let mut current = root.to_path_buf();
-    for (index, component) in relative.components().enumerate() {
-        let Component::Normal(name) = component else {
+    for component in relative.components() {
+        if !matches!(component, Component::Normal(_)) {
             return Ok(true);
-        };
-        current.push(name);
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata_is_reparse_point(&metadata) => return Ok(true),
-            Ok(metadata) if index + 1 < relative.components().count() && !metadata.is_dir() => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::NotADirectory,
-                    "storage-bin path component is not a directory",
-                ));
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error),
         }
     }
-    Ok(false)
+    path_contains_reparse_point(path)
 }
 
 fn path_contains_reparse_point(path: &Path) -> std::io::Result<bool> {
@@ -154,22 +117,36 @@ fn path_contains_reparse_point(path: &Path) -> std::io::Result<bool> {
     {
         return Ok(true);
     }
-    let mut current = PathBuf::new();
-    for component in path.components() {
-        current.push(component.as_os_str());
+    let absolute = absolute_path(path)?;
+    match fluxheim_windows_security::inspect_absolute_path(&absolute) {
+        Ok(_) => Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Ok(true),
+        Err(error) => Err(error),
+    }
+}
+
+fn absolute_path(path: &Path) -> std::io::Result<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
         match component {
-            Component::Prefix(_) | Component::CurDir => continue,
-            Component::ParentDir => return Ok(true),
-            Component::RootDir | Component::Normal(_) => {}
-        }
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata_is_reparse_point(&metadata) => return Ok(true),
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error),
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "storage-bin path must not contain parent traversal",
+                ));
+            }
         }
     }
-    Ok(false)
+    Ok(normalized)
 }
 
 fn metadata_is_reparse_point(metadata: &std::fs::Metadata) -> bool {
@@ -235,7 +212,8 @@ impl StorageBinSafePath {
                 parent.display()
             )));
         }
-        let metadata = std::fs::symlink_metadata(parent)?;
+        let inspected = fluxheim_windows_security::inspect_absolute_path(&absolute_path(parent)?)?;
+        let metadata = inspected.target()?.metadata()?;
         if metadata_is_reparse_point(&metadata) || !metadata.is_dir() {
             return Err(unsafe_path_error(format!(
                 "storage-bin parent is not a real directory: {}",
@@ -249,16 +227,12 @@ impl StorageBinSafePath {
         self.validate_parent()?;
         let file = match (read, write, create_new) {
             (false, true, true) => {
-                fluxheim_windows_security::create_new_regular_file(&self.path, false)?
+                fluxheim_config::fs_trust::create_regular_file(&self.path, false)?
             }
-            (true, true, true) => {
-                fluxheim_windows_security::create_new_regular_file(&self.path, true)?
-            }
-            (true, false, false) => {
-                fluxheim_windows_security::open_existing_regular_file(&self.path, false)?
-            }
+            (true, true, true) => fluxheim_config::fs_trust::create_regular_file(&self.path, true)?,
+            (true, false, false) => fluxheim_config::fs_trust::open_regular_file(&self.path)?,
             (true, true, false) => {
-                fluxheim_windows_security::open_existing_regular_file(&self.path, true)?
+                fluxheim_config::fs_trust::open_regular_file_for_update(&self.path)?
             }
             _ => {
                 return Err(std::io::Error::new(
@@ -313,16 +287,21 @@ impl StorageBinSafePath {
 }
 
 fn reject_existing_reparse_point(path: &Path) -> std::io::Result<()> {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata_is_reparse_point(&metadata) || !metadata.is_file() => {
-            Err(unsafe_path_error(format!(
-                "storage-bin path is not a real file: {}",
-                path.display()
-            )))
-        }
-        Ok(_) => Ok(()),
-        Err(error) => Err(error),
+    let inspected = fluxheim_windows_security::inspect_absolute_path(&absolute_path(path)?)?;
+    if !inspected.target_exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "storage-bin path does not exist",
+        ));
     }
+    let metadata = inspected.target()?.metadata()?;
+    if metadata_is_reparse_point(&metadata) || !metadata.is_file() {
+        return Err(unsafe_path_error(format!(
+            "storage-bin path is not a real file: {}",
+            path.display()
+        )));
+    }
+    Ok(())
 }
 
 fn reject_existing_reparse_point_if_present(path: &Path) -> std::io::Result<()> {
@@ -339,7 +318,10 @@ fn unsafe_path_error(message: String) -> std::io::Error {
 
 #[cfg(test)]
 mod tests {
-    use super::{path_contains_reparse_point, prepare_storage_bin_data_dir};
+    use super::{
+        path_contains_reparse_point, prepare_storage_bin_data_dir,
+        storage_bin_path_contains_symlink,
+    };
 
     #[test]
     fn absolute_storage_bin_root_skips_bare_windows_prefix() {
@@ -373,5 +355,25 @@ mod tests {
         let path = temporary.path().join("cache/../outside");
 
         assert!(path_contains_reparse_point(&path).unwrap());
+    }
+
+    #[test]
+    fn storage_bin_path_rejects_directory_junction_components() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let junction = root.path().join("junction");
+        let status = std::process::Command::new("cmd.exe")
+            .args(["/D", "/C", "mklink", "/J"])
+            .arg(dunce::simplified(&junction))
+            .arg(dunce::simplified(outside.path()))
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "failed to create test directory junction");
+
+        let rejected = storage_bin_path_contains_symlink(root.path(), &junction).unwrap();
+        std::fs::remove_dir(&junction).unwrap();
+
+        assert!(rejected);
     }
 }

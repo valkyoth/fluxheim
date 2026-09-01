@@ -267,8 +267,8 @@ foreach ($relative in @(
 )) {
     $cachePathBoundary = Get-Content -LiteralPath (Join-Path $root $relative) -Raw
     foreach ($required in @(
-        'Component::Prefix(_) | Component::CurDir => continue',
-        'Component::ParentDir => return Ok(true)',
+        'inspect_absolute_path',
+        'Component::ParentDir',
         'existing_path_or_parent_has_insecure_write_permissions'
     )) {
         if (-not $cachePathBoundary.Contains($required)) {
@@ -364,35 +364,53 @@ foreach ($required in @(
 }
 
 $preparation = Get-Content -LiteralPath (Join-Path $root 'scripts/prepare_windows_release_builder.ps1') -Raw
+$sshdPolicyHelper = Get-Content -LiteralPath `
+    (Join-Path $root 'scripts/windows_release_sshd_config.ps1') -Raw
+$preparationContract = $preparation + "`n" + $sshdPolicyHelper
 foreach ($required in @(
     'PasswordAuthentication no',
-    'KbdInteractiveAuthentication no',
     'AuthenticationMethods publickey',
+    'AllowUsers $buildUserSsh',
     'AllowedSourceCidr',
     'TagAllowedSignersFile',
     'icacls.exe',
     'sshd.exe',
     'Get-NetFirewallRule'
 )) {
-    if (-not $preparation.Contains($required)) {
+    if (-not $preparationContract.Contains($required)) {
         throw "Windows preparation script is missing required hardening: $required"
     }
 }
-$globalPasswordAuthentication = $preparation.IndexOf('PasswordAuthentication no')
-$firstMatch = [regex]::Match($preparation, '(?m)^\s*Match\s+')
-if ($globalPasswordAuthentication -lt 0 -or
-    ($firstMatch.Success -and $globalPasswordAuthentication -gt $firstMatch.Index)) {
-    throw 'Windows preparation must disable password authentication before the first Match block'
+if (-not $preparation.Contains('Set-FluxheimReleaseBuilderSshdPolicy')) {
+    throw 'Windows preparation must render its SSH policy through the tested configuration helper'
 }
 foreach ($required in @(
     'sshd.exe" -T -C',
     'passwordauthentication no',
-    'kbdinteractiveauthentication no',
-    'authenticationmethods publickey'
+    'authenticationmethods publickey',
+    'allowusers $BuildUser'
 )) {
-    if (-not $preparation.Contains($required)) {
+    if (-not $preparationContract.Contains($required)) {
         throw "Windows preparation script is missing effective sshd validation: $required"
     }
+}
+
+. (Join-Path $root 'scripts/windows_release_sshd_config.ps1')
+$representativeSshdConfig = @"
+PasswordAuthentication yes
+Match Group administrators
+    AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys
+"@
+$renderedSshdConfig = Set-FluxheimReleaseBuilderSshdPolicy `
+    -Config $representativeSshdConfig -BuildUser 'Fluxheim-Build'
+$renderedFirstMatch = [regex]::Match($renderedSshdConfig, '(?im)^\s*Match\s+')
+$renderedPasswordPolicy = $renderedSshdConfig.IndexOf('PasswordAuthentication no')
+if ($renderedPasswordPolicy -lt 0 -or
+    -not $renderedFirstMatch.Success -or
+    $renderedPasswordPolicy -gt $renderedFirstMatch.Index -or
+    -not $renderedSshdConfig.Contains('AllowUsers fluxheim-build') -or
+    $renderedSshdConfig.Contains('KbdInteractiveAuthentication')) {
+    throw 'rendered Windows sshd policy is not global, account-scoped, and Windows-compatible'
 }
 foreach ($required in @(
     '$trustedDirectory /inheritance:r',
@@ -406,8 +424,16 @@ foreach ($required in @(
 }
 
 $release = Get-Content -LiteralPath (Join-Path $root 'scripts/run_windows_release_builder.ps1') -Raw
+$tagPolicy = Get-Content -LiteralPath `
+    (Join-Path $root 'scripts/windows_release_tag_policy.ps1') -Raw
+$releaseContract = $release + "`n" + $tagPolicy
 foreach ($required in @(
-    'tag -v',
+    'git.exe cat-file tag',
+    'BEGIN SSH SIGNATURE',
+    'END SSH SIGNATURE',
+    "gpg.format=ssh",
+    'gpg.minTrustLevel=fully',
+    'verify-tag',
     'cargo.exe test --workspace --locked',
     'smoke_windows_native.ps1',
     'smoke_windows_archive_profiles.ps1',
@@ -420,12 +446,40 @@ foreach ($required in @(
     'reproducible=true',
     'test_scope=workspace-native-all-archives-and-wasm-smoke'
 )) {
-    if (-not $release.Contains($required)) {
+    if (-not $releaseContract.Contains($required)) {
         throw "Windows release runner is missing required evidence: $required"
     }
 }
 if ($release.Contains('checkout main') -or $release.Contains('|| git checkout')) {
     throw 'Windows release runner must not fall back from the requested tag'
+}
+. (Join-Path $root 'scripts/windows_release_tag_policy.ps1')
+$sshTagFixture = "object`n-----BEGIN SSH SIGNATURE-----`nbody`n-----END SSH SIGNATURE-----"
+$pgpTagFixture = "object`n-----BEGIN PGP SIGNATURE-----`nbody`n-----END PGP SIGNATURE-----"
+$x509TagFixture = "object`n-----BEGIN SIGNED MESSAGE-----`nbody`n-----END SIGNED MESSAGE-----"
+$duplicateSshTagFixture = $sshTagFixture + "`n" + $sshTagFixture
+if (-not (Test-FluxheimSshSignedTagObject -TagObject $sshTagFixture) -or
+    (Test-FluxheimSshSignedTagObject -TagObject $pgpTagFixture) -or
+    (Test-FluxheimSshSignedTagObject -TagObject $x509TagFixture) -or
+    (Test-FluxheimSshSignedTagObject -TagObject $duplicateSshTagFixture)) {
+    throw 'Windows release tag policy did not enforce exactly one SSH signature'
+}
+
+$consoleHelper = Get-Content -LiteralPath `
+    (Join-Path $root 'scripts/windows_console_signal_helper.cs') -Raw
+foreach ($required in @(
+    "IndexOf('\0')",
+    'WaitForSingleObject(child.Process, 0) != WaitTimeout',
+    'Fluxheim exited before console signal attachment',
+    'AttachConsole(child.ProcessId)'
+)) {
+    if (-not $consoleHelper.Contains($required)) {
+        throw "Windows console signal helper is missing required race hardening: $required"
+    }
+}
+if ($consoleHelper.IndexOf('WaitForSingleObject(child.Process, 0) != WaitTimeout') -gt
+    $consoleHelper.IndexOf('AttachConsole(child.ProcessId)')) {
+    throw 'Windows console signal helper must recheck the child immediately before AttachConsole'
 }
 
 $ci = Get-Content -LiteralPath (Join-Path $root '.github/workflows/ci.yml') -Raw

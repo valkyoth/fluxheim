@@ -38,6 +38,14 @@ same seven public profiles used by Linux and Apple Silicon macOS.
   `windows-permissions` dependency checksum and isolate first-party unsafe
   Windows path traversal in the narrowly scoped
   `fluxheim-windows-security` crate.
+- Evaluate Windows trust policy against retained target and ancestor handles,
+  and create cache object and encryption-state temporary files relative to a
+  validated parent before writing bytes.
+- Make dedicated builder SSH provisioning global and account-scoped even when
+  the vendor configuration ends in a `Match` block, and reject non-SSH, mixed,
+  or duplicate tag signature formats before allowed-signers verification.
+- Flush the load-balancer state file and containing directory after atomic
+  replacement on Windows.
 
 ## Remaining Release Blocks
 

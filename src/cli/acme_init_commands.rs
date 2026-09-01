@@ -290,6 +290,9 @@ fn write_secret_file(
 }
 
 #[cfg(feature = "acme-client")]
+/// Validates the destination trust boundary before every create or force-open.
+/// The Windows force path reopens through the ACL-checking handle API, so an
+/// overwrite does not rely only on the earlier path-existence observation.
 fn write_file_checked(
     path: &Path,
     contents: &str,

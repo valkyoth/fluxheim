@@ -68,7 +68,11 @@ fn dangerous_rights(role: InspectedPathRole, policy: TrustPolicy) -> AccessRight
         | AccessRights::WriteOwner
         | AccessRights::Bit6;
     let writes = match role {
-        InspectedPathRole::Ancestor => takeover | AccessRights::Bit6,
+        // Add-file/add-subdirectory rights only create direct children. They
+        // cannot replace a descendant reached through retained handles. The
+        // nearest existing directory for a missing target is classified as
+        // CreationParent below and does include those rights.
+        InspectedPathRole::Ancestor => takeover,
         InspectedPathRole::ExistingObject | InspectedPathRole::CreationParent => {
             takeover
                 | AccessRights::GenericWrite
@@ -114,4 +118,45 @@ fn parse_sid(value: &str) -> std::io::Result<LocalBox<Sid>> {
 
 fn sid_is_trusted(sid: &Sid, trusted_sids: &[LocalBox<Sid>]) -> bool {
     trusted_sids.iter().any(|trusted| sid == trusted.as_ref())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn descriptor_with_everyone_right(right: &str) -> LocalBox<SecurityDescriptor> {
+        let current = windows_permissions::utilities::current_process_sid().unwrap();
+        format!("D:P(A;;FA;;;{current})(A;;FA;;;SY)(A;;FA;;;BA)(A;;{right};;;WD)")
+            .parse()
+            .unwrap()
+    }
+
+    #[test]
+    fn child_creation_right_is_only_dangerous_on_the_creation_parent() {
+        assert!(
+            dangerous_rights(
+                InspectedPathRole::CreationParent,
+                TrustPolicy::IntegrityOnly
+            )
+            .intersects(AccessRights::Bit1 | AccessRights::Bit2)
+        );
+        assert!(
+            !dangerous_rights(InspectedPathRole::Ancestor, TrustPolicy::IntegrityOnly)
+                .intersects(AccessRights::Bit1 | AccessRights::Bit2)
+        );
+    }
+
+    #[test]
+    fn delete_child_right_is_dangerous_on_every_ancestor() {
+        let descriptor = descriptor_with_everyone_right("0x00000040");
+
+        assert!(
+            security_descriptor_is_insecure(
+                &descriptor,
+                InspectedPathRole::Ancestor,
+                TrustPolicy::IntegrityOnly,
+            )
+            .unwrap()
+        );
+    }
 }

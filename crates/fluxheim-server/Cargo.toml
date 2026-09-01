@@ -91,3 +91,6 @@ proptest = "1.11.0"
 rcgen = { version = "0.14.9", default-features = false, features = ["pem", "ring"] }
 tempfile = "3.27.0"
 wat = "1.258.0"
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-permissions = "0.2.4"

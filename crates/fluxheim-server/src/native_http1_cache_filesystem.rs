@@ -163,58 +163,38 @@ impl NativeDiskCache {
     }
 
     fn write_object_atomically(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-        #[cfg(windows)]
-        {
-            let parent = path.parent().ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "native disk cache object path has no parent",
-                )
-            })?;
-            let mut temporary = tempfile::Builder::new()
-                .prefix(".fluxheim-cache-object-")
-                .suffix(".tmp")
-                .tempfile_in(parent)?;
-            temporary.write_all(bytes)?;
-            temporary.as_file().sync_all()?;
-            NativeSafeDiskCachePath::from_path(path.to_path_buf()).persist_tempfile(temporary)
-        }
-
-        #[cfg(not(windows))]
-        {
-            let mut last_error = None;
-            for _ in 0..4 {
-                let tmp_path = self.temp_path_for(path)?;
-                let tmp_safe = NativeSafeDiskCachePath::from_path(tmp_path);
-                let destination = NativeSafeDiskCachePath::from_path(path.to_path_buf());
-                let write_result = (|| {
-                    let mut file = tmp_safe.create_new_file()?;
-                    file.write_all(bytes)?;
-                    file.sync_all()?;
-                    destination.rename_from(&tmp_safe)
-                })();
-                match write_result {
-                    Ok(()) => return Ok(()),
-                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                        let _ = tmp_safe.remove_file();
-                        last_error = Some(error);
-                    }
-                    Err(error) => {
-                        let _ = tmp_safe.remove_file();
-                        return Err(error);
-                    }
+        let mut last_error = None;
+        for _ in 0..4 {
+            let tmp_path = self.temp_path_for(path)?;
+            let tmp_safe = NativeSafeDiskCachePath::from_path(tmp_path);
+            let destination = NativeSafeDiskCachePath::from_path(path.to_path_buf());
+            let write_result = (|| {
+                let mut file = tmp_safe.create_new_file()?;
+                file.write_all(bytes)?;
+                file.sync_all()?;
+                destination.rename_from(&tmp_safe)?;
+                destination.sync_parent_dir()
+            })();
+            match write_result {
+                Ok(()) => return Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let _ = tmp_safe.remove_file();
+                    last_error = Some(error);
+                }
+                Err(error) => {
+                    let _ = tmp_safe.remove_file();
+                    return Err(error);
                 }
             }
-            Err(last_error.unwrap_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::AlreadyExists,
-                    "native disk cache temporary path collision",
-                )
-            }))
         }
+        Err(last_error.unwrap_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "native disk cache temporary path collision",
+            )
+        }))
     }
 
-    #[cfg(not(windows))]
     fn temp_path_for(&self, path: &Path) -> std::io::Result<PathBuf> {
         let parent = path.parent().ok_or_else(|| {
             std::io::Error::new(

@@ -142,3 +142,8 @@ Before enabling embedded metadata by default, validate:
 - SBOM files improve traceability, but they do not prevent a malicious build.
 - FIPS or ISO/IEC 19790 TLS mode constrains cryptographic providers and TLS
   configuration. It does not validate unrelated dependency behavior.
+- Windows ACL descriptor parsing currently uses the narrowly audited
+  `windows-permissions` 0.2.x API graph recorded in the Windows filesystem
+  security audit. Before signed Windows distribution becomes a release
+  requirement, evaluate replacing that dependency with direct `windows-sys`
+  descriptor parsing so the security boundary uses one Windows API binding.

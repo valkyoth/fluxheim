@@ -714,6 +714,7 @@ try {
     $originTwo.Start()
     $originTls.Start()
 
+    # Test-only credential for an isolated loopback listener; never reuse it in deployment.
     $env:FLUXHEIM_WINDOWS_SMOKE_ADMIN_TOKEN = 'windows-admin-smoke-token'
     & $binary --config $configPath --validate-config
     if ($LASTEXITCODE -ne 0) {

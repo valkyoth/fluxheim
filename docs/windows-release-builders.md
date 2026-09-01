@@ -45,7 +45,9 @@ release host's real public `/32` or a narrowly scoped IPv6 prefix. The script:
 
 - verifies architecture and rejects an administrator build account;
 - installs and enables Windows OpenSSH Server;
-- allows only public-key authentication for the build account;
+- prepends a global public-key-only policy, permits SSH login only for the
+  dedicated build account with `AllowUsers`, and keeps that policy outside any
+  vendor `Match` block;
 - applies restrictive ACLs to `authorized_keys`, trusted tag signers, and
   `C:\FluxheimBuild`;
 - narrows the Windows firewall rule to the supplied source CIDR;
@@ -63,8 +65,9 @@ The Linux `release_helper.sh` can upload and invoke
 verified tag commit and downloads the resulting evidence. The Windows script
 then independently:
 
-1. fetches only the requested tag and verifies its SSH signature against the
-   installed `allowed_signers` file;
+1. fetches only the requested annotated tag, rejects OpenPGP, X.509, mixed, or
+   duplicate signature armor, and verifies its sole SSH signature against the
+   installed `allowed_signers` file at full trust;
 2. checks the native Rust host architecture;
 3. runs workspace tests and the mandatory native Windows live smoke;
 4. builds all seven profiles twice with the PowerShell archive builder and

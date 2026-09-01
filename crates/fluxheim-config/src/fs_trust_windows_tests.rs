@@ -1,6 +1,6 @@
 use super::{
-    create_confidential_file, create_private_directory_all,
-    existing_path_has_insecure_write_permissions,
+    create_confidential_file, create_private_directory_all, create_regular_file,
+    existing_path_has_insecure_write_permissions, open_regular_file_for_update,
     opened_file_has_insecure_confidential_permissions,
     opened_file_has_insecure_owner_or_write_permissions, sync_directory,
 };
@@ -98,6 +98,29 @@ fn confidential_creation_is_exclusive_until_the_protected_acl_is_installed() {
 
     drop(created);
     super::open_confidential_file(&path).unwrap();
+}
+
+#[test]
+fn integrity_file_create_and_update_use_the_retained_trusted_path() {
+    use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("state.json");
+    let mut created = create_regular_file(&path, true).unwrap();
+    created.write_all(b"state").unwrap();
+    drop(created);
+
+    let mut opened = open_regular_file_for_update(&path).unwrap();
+    opened.seek(SeekFrom::End(0)).unwrap();
+    opened.write_all(b"-updated").unwrap();
+    drop(opened);
+
+    let mut contents = String::new();
+    std::fs::File::open(path)
+        .unwrap()
+        .read_to_string(&mut contents)
+        .unwrap();
+    assert_eq!(contents, "state-updated");
 }
 
 #[test]

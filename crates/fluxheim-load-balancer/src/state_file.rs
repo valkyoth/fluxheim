@@ -152,9 +152,9 @@ fn sync_after_persist(_file: &File, parent: &Path) -> io::Result<()> {
 }
 
 #[cfg(windows)]
-fn sync_after_persist(file: &File, _parent: &Path) -> io::Result<()> {
-    // Windows denies ordinary directory opens; flush the persisted writable handle instead.
-    file.sync_all()
+fn sync_after_persist(file: &File, parent: &Path) -> io::Result<()> {
+    file.sync_all()?;
+    fluxheim_config::fs_trust::sync_directory(parent)
 }
 
 fn path_exists_without_following_symlinks(path: &Path) -> io::Result<bool> {

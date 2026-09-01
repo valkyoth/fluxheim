@@ -9,11 +9,23 @@ const MAX_PERMISSION_INSPECTION_DEPTH: usize = 256;
 mod windows;
 #[cfg(windows)]
 pub use windows::{
-    create_confidential_file, create_private_directory_all, harden_confidential_file,
-    harden_private_directory, open_confidential_file, open_or_create_confidential_file,
-    open_regular_file, opened_file_has_insecure_confidential_permissions,
+    create_confidential_file, create_private_directory_all, create_regular_file,
+    harden_confidential_file, harden_private_directory, open_confidential_file,
+    open_or_create_confidential_file, open_or_create_regular_file, open_regular_file,
+    open_regular_file_for_update, opened_file_has_insecure_confidential_permissions,
     opened_file_has_insecure_owner_or_write_permissions, sync_directory,
 };
+
+pub(crate) fn platform_io_path(path: &std::path::Path) -> &std::path::Path {
+    #[cfg(windows)]
+    {
+        dunce::simplified(path)
+    }
+    #[cfg(not(windows))]
+    {
+        path
+    }
+}
 #[cfg(windows)]
 pub use windows::{
     existing_parent_has_insecure_write_permissions,

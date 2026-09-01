@@ -26,6 +26,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'windows_release_sshd_config.ps1')
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -92,32 +93,18 @@ if ($PSCmdlet.ShouldProcess($WorkspaceRoot, 'Create private release workspace'))
 }
 
 $sshdConfig = Join-Path $env:ProgramData 'ssh\sshd_config'
-$beginMarker = '# BEGIN FLUXHEIM RELEASE BUILDER'
-$endMarker = '# END FLUXHEIM RELEASE BUILDER'
 $config = Get-Content -LiteralPath $sshdConfig -Raw
-$escapedBegin = [regex]::Escape($beginMarker)
-$escapedEnd = [regex]::Escape($endMarker)
-$config = [regex]::Replace($config, "(?ms)^$escapedBegin.*?^$escapedEnd\r?\n?", '')
-$block = @"
-$beginMarker
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-Match User $BuildUser
-    PubkeyAuthentication yes
-    PasswordAuthentication no
-    AuthenticationMethods publickey
-$endMarker
-"@
+$config = Set-FluxheimReleaseBuilderSshdPolicy -Config $config -BuildUser $BuildUser
 if ($PSCmdlet.ShouldProcess($sshdConfig, 'Restrict release-builder SSH authentication')) {
-    Set-Content -LiteralPath $sshdConfig -Value ($config.TrimEnd() + "`r`n" + $block) -Encoding ascii
+    Set-Content -LiteralPath $sshdConfig -Value $config -Encoding ascii
     & "$env:WINDIR\System32\OpenSSH\sshd.exe" -t
     if ($LASTEXITCODE -ne 0) { throw 'OpenSSH configuration validation failed' }
     $effectiveSshd = (& "$env:WINDIR\System32\OpenSSH\sshd.exe" -T -C "user=$BuildUser,host=localhost,addr=127.0.0.1") -join "`n"
     if ($LASTEXITCODE -ne 0) { throw 'OpenSSH effective configuration validation failed' }
     foreach ($required in @(
         'passwordauthentication no',
-        'kbdinteractiveauthentication no',
-        'authenticationmethods publickey'
+        'authenticationmethods publickey',
+        "allowusers $BuildUser"
     )) {
         if ($effectiveSshd -notmatch "(?m)^$([regex]::Escape($required))$") {
             throw "OpenSSH effective configuration does not enforce: $required"

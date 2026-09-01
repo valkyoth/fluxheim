@@ -1,17 +1,8 @@
-use std::os::windows::fs::OpenOptionsExt as _;
 use std::path::{Component, Path, PathBuf};
 
 use windows_permissions::constants::{SeObjectType, SecurityInformation};
 use windows_permissions::{LocalBox, SecurityDescriptor};
-use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
-use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, READ_CONTROL,
-    SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, WRITE_DAC,
-};
-
-const MAX_PERMISSION_INSPECTION_DEPTH: usize = 256;
-const DELETE_ACCESS: u32 = 0x0001_0000;
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
 #[path = "fs_trust_windows_acl.rs"]
 mod acl;
@@ -51,50 +42,88 @@ pub fn open_regular_file(path: &Path) -> std::io::Result<std::fs::File> {
     open_existing_regular_file(path, false, TrustPolicy::IntegrityOnly)
 }
 
+pub fn open_regular_file_for_update(path: &Path) -> std::io::Result<std::fs::File> {
+    open_existing_regular_file(path, true, TrustPolicy::IntegrityOnly)
+}
+
+pub fn create_regular_file(path: &Path, read: bool) -> std::io::Result<std::fs::File> {
+    let absolute = absolute_path(path)?;
+    let opened =
+        fluxheim_windows_security::create_new_regular_file_with_ancestors(&absolute, read)?;
+    let ancestor_count = opened.handles().len().saturating_sub(1);
+    let insecure_parent = match retained_handles_have_insecure_permissions(
+        &opened.handles()[..ancestor_count],
+        InspectedPathRole::CreationParent,
+        TrustPolicy::IntegrityOnly,
+    ) {
+        Ok(insecure) => insecure,
+        Err(error) => {
+            remove_retained_target(&opened);
+            return Err(error);
+        }
+    };
+    if insecure_parent {
+        remove_retained_target(&opened);
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "new file has an untrusted parent ACL",
+        ));
+    }
+    opened.into_target()
+}
+
+pub fn open_or_create_regular_file(path: &Path) -> std::io::Result<std::fs::File> {
+    match create_regular_file(path, true) {
+        Ok(file) => Ok(file),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            open_regular_file_for_update(path)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 pub fn create_confidential_file(path: &Path) -> std::io::Result<std::fs::File> {
-    // Inspect the missing child path so INHERIT_ONLY ACEs on its creation
-    // parent are evaluated as permissions that would apply to the new file.
-    if existing_path_has_insecure_write_permissions(path)? {
+    let absolute = absolute_path(path)?;
+    let mut opened =
+        fluxheim_windows_security::create_new_exclusive_regular_file_with_ancestors(&absolute)?;
+    let ancestor_count = opened.handles().len().saturating_sub(1);
+    let insecure_parent = match retained_handles_have_insecure_permissions(
+        &opened.handles()[..ancestor_count],
+        InspectedPathRole::CreationParent,
+        TrustPolicy::IntegrityOnly,
+    ) {
+        Ok(insecure) => insecure,
+        Err(error) => {
+            remove_retained_target(&opened);
+            return Err(error);
+        }
+    };
+    if insecure_parent {
+        remove_retained_target(&opened);
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
             "confidential file has an untrusted parent ACL",
         ));
     }
-    let mut options = std::fs::OpenOptions::new();
-    // Rust validates create_new against the portable write flag before it
-    // applies the Windows access_mode override.
-    options
-        .read(true)
-        .write(true)
-        .access_mode(GENERIC_READ | GENERIC_WRITE | DELETE_ACCESS | READ_CONTROL | WRITE_DAC)
-        .create_new(true)
-        .share_mode(0)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
-    let mut file = options.open(path)?;
-    if let Err(error) = verify_opened_regular_file(path, &file, None, "confidential") {
-        let _ = fluxheim_windows_security::remove_open_regular_file(&file);
+    if let Err(error) = harden_object(opened.target_mut()?) {
+        remove_retained_target(&opened);
         return Err(error);
     }
-    if let Err(error) = harden_object(&mut file) {
-        let _ = fluxheim_windows_security::remove_open_regular_file(&file);
-        return Err(error);
-    }
-    match opened_file_has_insecure_confidential_permissions(&file) {
+    match opened_file_has_insecure_confidential_permissions(opened.target()?) {
         Ok(false) => {}
         Ok(true) => {
-            let _ = fluxheim_windows_security::remove_open_regular_file(&file);
+            remove_retained_target(&opened);
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
                 "new confidential file retained an untrusted ACL after hardening",
             ));
         }
         Err(error) => {
-            let _ = fluxheim_windows_security::remove_open_regular_file(&file);
+            remove_retained_target(&opened);
             return Err(error);
         }
     }
-    Ok(file)
+    opened.into_target()
 }
 
 pub fn open_or_create_confidential_file(path: &Path) -> std::io::Result<std::fs::File> {
@@ -115,63 +144,24 @@ fn open_existing_regular_file(
     write: bool,
     policy: TrustPolicy,
 ) -> std::io::Result<std::fs::File> {
-    let expected = same_file::Handle::from_path(path)?;
-    if existing_parent_has_insecure_write_permissions(path)? {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "file has an untrusted parent ACL",
-        ));
-    }
-    let mut options = std::fs::OpenOptions::new();
-    let access =
-        GENERIC_READ | READ_CONTROL | FILE_READ_ATTRIBUTES | if write { GENERIC_WRITE } else { 0 };
-    options
-        .access_mode(access)
-        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-        // Permit opening a directory handle so the handle-based type check
-        // below can reject it consistently without a path-only pre-check.
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
-    let file = options.open(path)?;
-    verify_opened_regular_file(path, &file, Some(expected), "file")?;
-    if opened_file_has_insecure_permissions(&file, policy)? {
+    let absolute = absolute_path(path)?;
+    let opened =
+        fluxheim_windows_security::open_existing_regular_file_with_ancestors(&absolute, write)?;
+    if retained_handles_have_insecure_permissions(
+        opened.handles(),
+        InspectedPathRole::ExistingObject,
+        policy,
+    )? {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
             if policy == TrustPolicy::ConfidentialSecret {
-                "confidential file has an untrusted ACL"
+                "confidential file has an untrusted owner, ACL, or parent ACL"
             } else {
-                "file has an untrusted ACL"
+                "file has an untrusted owner, ACL, or parent ACL"
             },
         ));
     }
-    Ok(file)
-}
-
-fn verify_opened_regular_file(
-    path: &Path,
-    file: &std::fs::File,
-    expected: Option<same_file::Handle>,
-    label: &str,
-) -> std::io::Result<()> {
-    let metadata = file.metadata()?;
-    if metadata_is_reparse_point(&metadata) || !metadata.is_file() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            format!("{label} path must be a regular file and not a reparse point"),
-        ));
-    }
-    if let Some(expected) = expected
-        && expected != same_file::Handle::from_file(file.try_clone()?)?
-    {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            format!(
-                "{label} path changed during secure open: {}",
-                path.display()
-            ),
-        ));
-    }
-    Ok(())
+    opened.into_target()
 }
 
 fn opened_file_has_insecure_permissions(
@@ -216,58 +206,62 @@ pub fn create_private_directory_all(path: &Path) -> std::io::Result<()> {
         if matches!(component, Component::Prefix(_) | Component::RootDir) {
             continue;
         }
-        match open_path_for_trust_inspection(&current) {
-            Ok(directory) => {
-                let metadata = directory.metadata()?;
-                if metadata_is_reparse_point(&metadata) || !metadata.is_dir() {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::PermissionDenied,
-                        "private directory component is a reparse point or not a directory",
-                    ));
-                }
+        let inspected = fluxheim_windows_security::inspect_absolute_path(&current)?;
+        if inspected.target_exists() {
+            let directory = inspected.into_target()?;
+            let metadata = directory.metadata()?;
+            if metadata_is_reparse_point(&metadata) || !metadata.is_dir() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "private directory component is a reparse point or not a directory",
+                ));
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                match fluxheim_windows_security::create_private_directory(&current) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                        let directory = open_path_for_trust_inspection(&current)?;
-                        let metadata = directory.metadata()?;
-                        if metadata_is_reparse_point(&metadata) || !metadata.is_dir() {
-                            return Err(std::io::Error::new(
-                                std::io::ErrorKind::PermissionDenied,
-                                "private directory creation raced with an unsafe object",
-                            ));
-                        }
+        } else {
+            match fluxheim_windows_security::create_private_directory(&current) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let raced = fluxheim_windows_security::inspect_absolute_path(&current)?;
+                    if !raced.target_exists() {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            "private directory creation raced with a missing object",
+                        ));
                     }
-                    Err(error) => return Err(error),
+                    let directory = raced.into_target()?;
+                    let metadata = directory.metadata()?;
+                    if metadata_is_reparse_point(&metadata) || !metadata.is_dir() {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::PermissionDenied,
+                            "private directory creation raced with an unsafe object",
+                        ));
+                    }
                 }
+                Err(error) => return Err(error),
             }
-            Err(error) => return Err(error),
         }
     }
     harden_private_directory(&absolute)
 }
 
 pub fn sync_directory(path: &Path) -> std::io::Result<()> {
-    let expected = same_file::Handle::from_path(path)?;
-    if existing_path_has_insecure_write_permissions(path)? {
+    let absolute = absolute_path(path)?;
+    let opened = fluxheim_windows_security::open_existing_directory_for_sync(&absolute)?;
+    if retained_handles_have_insecure_permissions(
+        opened.handles(),
+        InspectedPathRole::ExistingObject,
+        TrustPolicy::IntegrityOnly,
+    )? {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
             "directory sync target has an untrusted ACL",
         ));
     }
-    let directory = open_path_for_directory_sync(path)?;
+    let directory = opened.into_target()?;
     let metadata = directory.metadata()?;
     if metadata_is_reparse_point(&metadata) || !metadata.is_dir() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
             "directory sync target is a reparse point or is not a directory",
-        ));
-    }
-    if expected != same_file::Handle::from_file(directory.try_clone()?)? {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "directory sync target changed during secure open",
         ));
     }
     directory.sync_all()
@@ -289,84 +283,65 @@ fn harden_object<H: std::os::windows::io::AsRawHandle>(handle: &mut H) -> std::i
 }
 
 fn existing_path_has_insecure_write_permissions(path: &Path) -> std::io::Result<bool> {
-    let mut current = absolute_path(path)
+    let absolute = absolute_path(path)
         .map_err(|error| inspection_error("normalize ACL inspection path", error))?;
-    let mut inspected_depth = 0usize;
-    let mut missing_component = false;
-
-    let mut opened = loop {
-        check_inspection_depth(&mut inspected_depth)?;
-        match open_path_for_trust_inspection(&current) {
-            Ok(file) => break file,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                missing_component = true;
-                if !current.pop() {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        "path has no existing ancestor",
-                    ));
-                }
-            }
-            Err(error) => {
-                return Err(inspection_error("open existing ACL inspection path", error));
-            }
-        }
-    };
-
-    let mut role = if missing_component {
-        InspectedPathRole::CreationParent
-    } else {
+    let opened = fluxheim_windows_security::inspect_absolute_path(&absolute)
+        .map_err(|error| inspection_error("open ACL inspection path", error))?;
+    let role = if opened.target_exists() {
         InspectedPathRole::ExistingObject
+    } else {
+        InspectedPathRole::CreationParent
     };
-    loop {
-        check_inspection_depth(&mut inspected_depth)?;
+    retained_handles_have_insecure_permissions(opened.handles(), role, TrustPolicy::IntegrityOnly)
+}
+
+fn retained_handles_have_insecure_permissions(
+    handles: &[std::fs::File],
+    first_role: InspectedPathRole,
+    policy: TrustPolicy,
+) -> std::io::Result<bool> {
+    if handles.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "path has no existing ancestor",
+        ));
+    }
+    for (index, opened) in handles.iter().rev().enumerate() {
         let metadata = opened
             .metadata()
             .map_err(|error| inspection_error("read ACL inspection metadata", error))?;
         if metadata_is_reparse_point(&metadata) {
             return Ok(true);
         }
-        let descriptor = file_security_descriptor(&opened)
+        let descriptor = file_security_descriptor(opened)
             .map_err(|error| inspection_error("read ACL security descriptor", error))?;
-        if security_descriptor_is_insecure(&descriptor, role, TrustPolicy::IntegrityOnly)
+        let role = if index == 0 {
+            first_role
+        } else {
+            InspectedPathRole::Ancestor
+        };
+        if security_descriptor_is_insecure(&descriptor, role, policy)
             .map_err(|error| inspection_error("evaluate ACL security descriptor", error))?
         {
             return Ok(true);
         }
-        role = InspectedPathRole::Ancestor;
-        if !current.pop() {
-            return Ok(false);
-        }
-        opened = open_path_for_trust_inspection(&current)
-            .map_err(|error| inspection_error("open ACL ancestor path", error))?;
     }
+    Ok(false)
 }
 
 fn inspection_error(operation: &'static str, error: std::io::Error) -> std::io::Error {
     std::io::Error::new(error.kind(), format!("{operation}: {error}"))
 }
 
-fn open_path_for_trust_inspection(path: &Path) -> std::io::Result<std::fs::File> {
-    let mut options = std::fs::OpenOptions::new();
-    options
-        .access_mode(READ_CONTROL | FILE_READ_ATTRIBUTES)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
-    options.open(path)
+fn remove_retained_target(opened: &fluxheim_windows_security::RetainedPathHandles) {
+    if let Ok(file) = opened.target() {
+        let _ = fluxheim_windows_security::remove_open_regular_file(file);
+    }
 }
 
 fn open_path_for_acl_update(path: &Path) -> std::io::Result<std::fs::File> {
     let absolute = absolute_path(path)?;
     fluxheim_windows_security::open_existing_directory_for_acl_update(&absolute)
-}
-
-fn open_path_for_directory_sync(path: &Path) -> std::io::Result<std::fs::File> {
-    let mut options = std::fs::OpenOptions::new();
-    options
-        .access_mode(GENERIC_WRITE | READ_CONTROL | FILE_READ_ATTRIBUTES)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
-    options.open(path)
 }
 
 fn file_security_descriptor(file: &std::fs::File) -> std::io::Result<LocalBox<SecurityDescriptor>> {
@@ -407,17 +382,6 @@ fn metadata_is_reparse_point(metadata: &std::fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt as _;
 
     metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-fn check_inspection_depth(inspected_depth: &mut usize) -> std::io::Result<()> {
-    *inspected_depth = inspected_depth.saturating_add(1);
-    if *inspected_depth > MAX_PERMISSION_INSPECTION_DEPTH {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "path exceeds maximum depth for permission inspection",
-        ));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

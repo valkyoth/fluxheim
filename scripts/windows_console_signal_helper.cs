@@ -87,6 +87,11 @@ public static class FluxheimWindowsConsoleSignalHelper
 
     public static int Run(string binaryArgument, string configArgument)
     {
+        if (binaryArgument.IndexOf('\0') >= 0 || configArgument.IndexOf('\0') >= 0)
+        {
+            Console.Error.WriteLine("test paths must not contain NUL characters");
+            return 2;
+        }
         string binary = Path.GetFullPath(binaryArgument);
         string config = Path.GetFullPath(configArgument);
         if (!File.Exists(binary) || !File.Exists(config))
@@ -131,6 +136,11 @@ public static class FluxheimWindowsConsoleSignalHelper
             }
 
             FreeConsole();
+            if (WaitForSingleObject(child.Process, 0) != WaitTimeout)
+            {
+                throw new InvalidOperationException(
+                    "Fluxheim exited before console signal attachment");
+            }
             if (!AttachConsole(child.ProcessId))
             {
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "AttachConsole failed");

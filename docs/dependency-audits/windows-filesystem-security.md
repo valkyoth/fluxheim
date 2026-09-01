@@ -40,6 +40,12 @@ production. Name-based `SetNamedSecurityInfo` is confined to Windows tests.
 APIs outside this call graph are not approved by this review and must not be
 introduced without extending this record.
 
+The trusted owner set includes the fixed Windows Modules Installer
+(`TrustedInstaller`) service SID
+`S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464`. This is a
+well-known service identity defined by Windows, not a deployment-specific
+account. Any change to that value requires a fresh ACL-policy review.
+
 ## Fluxheim Windows capability helper
 
 `crates/fluxheim-windows-security` is the only first-party crate permitted to
@@ -52,6 +58,10 @@ separator syntax, retains each parent handle, and combines
 `OBJ_DONT_REPARSE`, `FILE_OPEN_REPARSE_POINT`, and explicit directory/file type
 requirements. Returned handles are checked again for reparse attributes and
 object type before exposure to safe crates.
+
+The configuration trust checker consumes the retained handle chain directly:
+it evaluates the target, creation parent, and ancestors without reopening
+their names between inspection and use.
 
 Any expansion of this crate's unsafe API or any `windows-permissions` lockfile
 change requires a new dated review and updated checksum evidence.

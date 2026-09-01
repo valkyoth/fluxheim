@@ -24,6 +24,41 @@ fn opens_nested_regular_file_relative_to_retained_directories() {
 }
 
 #[test]
+fn absolute_inspection_retains_each_opened_component_handle() {
+    let root = tempfile::tempdir().unwrap();
+    let nested = root.path().join("nested");
+    let target = nested.join("asset.txt");
+    std::fs::create_dir(&nested).unwrap();
+    std::fs::write(&target, b"asset").unwrap();
+
+    let absolute = target.canonicalize().unwrap();
+    let inspected = inspect_absolute_path(&absolute).unwrap();
+
+    assert!(inspected.target_exists());
+    assert!(inspected.handles().len() >= 3);
+    assert!(inspected.target().unwrap().metadata().unwrap().is_file());
+}
+
+#[test]
+fn absolute_inspection_stops_at_the_retained_parent_of_a_missing_path() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path().canonicalize().unwrap();
+    let inspected = inspect_absolute_path(&root.join("missing").join("asset.txt")).unwrap();
+
+    assert!(!inspected.target_exists());
+    assert!(inspected.target().is_err());
+    assert!(
+        inspected
+            .handles()
+            .last()
+            .unwrap()
+            .metadata()
+            .unwrap()
+            .is_dir()
+    );
+}
+
+#[test]
 fn absolute_create_rename_open_and_remove_stay_handle_relative() {
     use std::io::Write as _;
 
@@ -115,7 +150,12 @@ fn rejects_directory_junction_component() {
     assert!(status.success(), "failed to create test directory junction");
 
     let result = open_regular_file_beneath(root.path(), Path::new("junction/secret.txt"));
+    let absolute_result = inspect_absolute_path(&junction.join("secret.txt"));
     std::fs::remove_dir(&junction).unwrap();
 
     assert!(result.is_err(), "directory junction traversal was accepted");
+    assert!(
+        absolute_result.is_err(),
+        "absolute inspection accepted a directory junction"
+    );
 }

@@ -46,6 +46,14 @@ behavior when the change improves security or project direction.
 - Record and automatically pin the scoped source audit for the Windows ACL
   dependency and isolate first-party unsafe Windows filesystem calls in one
   reviewed crate.
+- Retain and inspect the exact Windows path-component handles used for trusted
+  file opens, and create cache object and encryption-state temporary files
+  handle-relative only after their parent ACL has passed validation.
+- Require the Windows release builder to accept only one fully trusted SSH tag
+  signature and prepend a global, account-scoped public-key SSH policy before
+  any vendor `Match` block.
+- Flush load-balancer state directory metadata after Windows atomic replacement
+  so crash recovery does not depend on a later NTFS metadata writeback.
 
 ## 1.8.1 - 2026-08-28
 

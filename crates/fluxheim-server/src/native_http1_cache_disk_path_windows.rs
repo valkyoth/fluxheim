@@ -18,49 +18,19 @@ pub(super) fn prepare_native_disk_cache_root(root: &Path) -> std::io::Result<Pat
             "native disk cache root must not cross reparse points",
         ));
     }
-    root.canonicalize()
+    let canonical = root.canonicalize()?;
+    if fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(
+        &canonical,
+    )? {
+        return Err(unsafe_path_error(
+            "native disk cache root has an untrusted writable ACL",
+        ));
+    }
+    Ok(canonical)
 }
 
 pub(super) fn create_native_cache_dir_all(path: &Path) -> std::io::Result<()> {
-    let mut current = PathBuf::new();
-    for component in path.components() {
-        current.push(component.as_os_str());
-        if matches!(
-            component,
-            Component::Prefix(_) | Component::RootDir | Component::CurDir
-        ) {
-            continue;
-        }
-        if matches!(component, Component::ParentDir) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "native disk cache directory must not contain parent traversal",
-            ));
-        }
-        match path_metadata_no_follow(&current)? {
-            Some(metadata) if metadata_is_reparse_point(&metadata) || !metadata.is_dir() => {
-                return Err(unsafe_path_error(
-                    "native disk cache path component is not a real directory",
-                ));
-            }
-            Some(_) => {}
-            None => match std::fs::create_dir(&current) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let Some(metadata) = path_metadata_no_follow(&current)? else {
-                        return Err(error);
-                    };
-                    if metadata_is_reparse_point(&metadata) || !metadata.is_dir() {
-                        return Err(unsafe_path_error(
-                            "native disk cache path component is not a real directory",
-                        ));
-                    }
-                }
-                Err(error) => return Err(error),
-            },
-        }
-    }
-    Ok(())
+    fluxheim_config::fs_trust::create_private_directory_all(path)
 }
 
 fn native_configured_cache_path_contains_symlink(path: &Path) -> std::io::Result<bool> {
@@ -74,19 +44,12 @@ pub(super) fn native_cache_path_contains_symlink(
     let Ok(relative) = path.strip_prefix(root) else {
         return Ok(true);
     };
-    let mut current = root.to_path_buf();
     for component in relative.components() {
-        let Component::Normal(name) = component else {
+        if !matches!(component, Component::Normal(_)) {
             return Ok(true);
-        };
-        current.push(name);
-        match path_metadata_no_follow(&current)? {
-            Some(metadata) if metadata_is_reparse_point(&metadata) => return Ok(true),
-            Some(_) => {}
-            None => return Ok(false),
         }
     }
-    Ok(false)
+    path_contains_reparse_point(path)
 }
 
 pub(super) fn native_disk_cache_read_limit(max_object_bytes: fluxheim_config::ByteSize) -> u64 {
@@ -146,7 +109,8 @@ impl NativeSafeDiskCachePath {
                 "native disk cache parent contains a reparse point",
             ));
         }
-        let metadata = std::fs::symlink_metadata(parent)?;
+        let inspected = fluxheim_windows_security::inspect_absolute_path(&absolute_path(parent)?)?;
+        let metadata = inspected.target()?.metadata()?;
         if metadata_is_reparse_point(&metadata) || !metadata.is_dir() {
             return Err(unsafe_path_error(
                 "native disk cache parent is not a real directory",
@@ -165,10 +129,10 @@ impl NativeSafeDiskCachePath {
         self.validate_parent()?;
         let file = match (read, write, create, create_new) {
             (true, false, false, false) => {
-                fluxheim_windows_security::open_existing_regular_file(&self.path, false)?
+                fluxheim_config::fs_trust::open_regular_file(&self.path)?
             }
             (true, true, true, false) => {
-                fluxheim_windows_security::open_or_create_regular_file(&self.path)?
+                fluxheim_config::fs_trust::open_or_create_regular_file(&self.path)?
             }
             _ => {
                 return Err(std::io::Error::new(
@@ -188,6 +152,18 @@ impl NativeSafeDiskCachePath {
 
     pub(super) fn open_existing_file(&self) -> std::io::Result<std::fs::File> {
         self.open(true, false, false, false)
+    }
+
+    pub(super) fn create_new_file(&self) -> std::io::Result<std::fs::File> {
+        self.validate_parent()?;
+        let file = fluxheim_config::fs_trust::create_regular_file(&self.path, false)?;
+        let metadata = file.metadata()?;
+        if metadata_is_reparse_point(&metadata) || !metadata.is_file() {
+            return Err(unsafe_path_error(
+                "native disk cache path is not a real file",
+            ));
+        }
+        Ok(file)
     }
 
     pub(super) fn open_or_create_read_write_file(&self) -> std::io::Result<std::fs::File> {
@@ -218,23 +194,6 @@ impl NativeSafeDiskCachePath {
         fluxheim_windows_security::rename_regular_file(&source.path, &self.path)
     }
 
-    pub(super) fn persist_tempfile(
-        &self,
-        temporary: tempfile::NamedTempFile,
-    ) -> std::io::Result<()> {
-        self.validate_parent()?;
-        let (file, temporary_path) = temporary.keep().map_err(|error| error.error)?;
-        file.sync_all()?;
-        drop(file);
-        if let Err(error) =
-            fluxheim_windows_security::rename_regular_file(&temporary_path, &self.path)
-        {
-            let _ = fluxheim_windows_security::remove_regular_file(&temporary_path);
-            return Err(error);
-        }
-        self.sync_parent_dir()
-    }
-
     pub(super) fn sync_parent_dir(&self) -> std::io::Result<()> {
         let parent = self.parent()?;
         self.validate_parent()?;
@@ -254,29 +213,36 @@ fn path_contains_reparse_point(path: &Path) -> std::io::Result<bool> {
     {
         return Ok(true);
     }
-    let mut current = PathBuf::new();
-    for component in path.components() {
-        current.push(component.as_os_str());
-        match component {
-            Component::Prefix(_) | Component::CurDir => continue,
-            Component::ParentDir => return Ok(true),
-            Component::RootDir | Component::Normal(_) => {}
-        }
-        match path_metadata_no_follow(&current)? {
-            Some(metadata) if metadata_is_reparse_point(&metadata) => return Ok(true),
-            Some(_) => {}
-            None => return Ok(false),
-        }
-    }
-    Ok(false)
-}
-
-fn path_metadata_no_follow(path: &Path) -> std::io::Result<Option<std::fs::Metadata>> {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) => Ok(Some(metadata)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+    let absolute = absolute_path(path)?;
+    match fluxheim_windows_security::inspect_absolute_path(&absolute) {
+        Ok(_) => Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Ok(true),
         Err(error) => Err(error),
     }
+}
+
+fn absolute_path(path: &Path) -> std::io::Result<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "native disk cache path must not contain parent traversal",
+                ));
+            }
+        }
+    }
+    Ok(normalized)
 }
 
 fn metadata_is_reparse_point(metadata: &std::fs::Metadata) -> bool {
@@ -284,16 +250,20 @@ fn metadata_is_reparse_point(metadata: &std::fs::Metadata) -> bool {
 }
 
 fn reject_existing_reparse_point(path: &Path) -> std::io::Result<()> {
-    match path_metadata_no_follow(path)? {
-        Some(metadata) if metadata_is_reparse_point(&metadata) || !metadata.is_file() => Err(
-            unsafe_path_error("native disk cache path is not a real file"),
-        ),
-        Some(_) => Ok(()),
-        None => Err(std::io::Error::new(
+    let inspected = fluxheim_windows_security::inspect_absolute_path(&absolute_path(path)?)?;
+    if !inspected.target_exists() {
+        return Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "native disk cache path does not exist",
-        )),
+        ));
     }
+    let metadata = inspected.target()?.metadata()?;
+    if metadata_is_reparse_point(&metadata) || !metadata.is_file() {
+        return Err(unsafe_path_error(
+            "native disk cache path is not a real file",
+        ));
+    }
+    Ok(())
 }
 
 fn reject_existing_reparse_point_if_present(path: &Path) -> std::io::Result<()> {
@@ -310,8 +280,6 @@ fn unsafe_path_error(message: &'static str) -> std::io::Error {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write as _;
-
     use super::{
         NativeSafeDiskCachePath, path_contains_reparse_point, prepare_native_disk_cache_root,
     };
@@ -336,18 +304,40 @@ mod tests {
     }
 
     #[test]
-    fn persisted_tempfile_replaces_existing_regular_file() {
+    fn safe_temp_file_is_created_handle_relative() {
         let directory = tempfile::tempdir().unwrap();
-        let destination = directory.path().join("state");
-        std::fs::write(&destination, b"old").unwrap();
-        let mut temporary = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
-        temporary.write_all(b"new").unwrap();
-        temporary.as_file().sync_all().unwrap();
-
-        NativeSafeDiskCachePath::from_path(destination.clone())
-            .persist_tempfile(temporary)
+        let temporary = directory.path().join("state.tmp");
+        let file = NativeSafeDiskCachePath::from_path(temporary.clone())
+            .create_new_file()
             .unwrap();
 
-        assert_eq!(std::fs::read(destination).unwrap(), b"new");
+        assert!(file.metadata().unwrap().is_file());
+        assert!(temporary.is_file());
+    }
+
+    #[test]
+    fn cache_root_with_everyone_modify_acl_is_rejected() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("cache");
+        std::fs::create_dir(&root).unwrap();
+        let current = windows_permissions::utilities::current_process_sid().unwrap();
+        let descriptor: windows_permissions::LocalBox<windows_permissions::SecurityDescriptor> =
+            format!("D:P(A;;FA;;;{current})(A;;FA;;;SY)(A;;FA;;;BA)(A;;FW;;;WD)")
+                .parse()
+                .unwrap();
+        windows_permissions::wrappers::SetNamedSecurityInfo(
+            &root,
+            windows_permissions::constants::SeObjectType::SE_FILE_OBJECT,
+            windows_permissions::constants::SecurityInformation::Dacl,
+            None,
+            None,
+            descriptor.dacl(),
+            None,
+        )
+        .unwrap();
+
+        let error = prepare_native_disk_cache_root(&root).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
     }
 }

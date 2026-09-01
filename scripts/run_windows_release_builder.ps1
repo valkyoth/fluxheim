@@ -25,6 +25,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'windows_release_tag_policy.ps1')
 
 $expectedArchitecture = if ($Architecture -eq 'x86_64') { 'X64' } else { 'Arm64' }
 $actualArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
@@ -63,7 +64,13 @@ try {
     if ($LASTEXITCODE -ne 0 -or $tagCommit -ne $ExpectedCommit.ToLowerInvariant()) {
         throw "tag commit $tagCommit does not match expected commit $ExpectedCommit"
     }
-    & git.exe -c "gpg.ssh.allowedSignersFile=$allowedSigners" tag -v $tag 2>&1 |
+    $tagObject = (& git.exe cat-file tag $tag 2>&1) -join "`n"
+    if ($LASTEXITCODE -ne 0) { throw "release tag must be an annotated tag object: $tag" }
+    if (-not (Test-FluxheimSshSignedTagObject -TagObject $tagObject)) {
+        throw "release tag must contain exactly one SSH signature and no other signature format: $tag"
+    }
+    & git.exe -c 'gpg.format=ssh' -c 'gpg.minTrustLevel=fully' `
+        -c "gpg.ssh.allowedSignersFile=$allowedSigners" verify-tag $tag 2>&1 |
         Set-Content -LiteralPath (Join-Path $runRoot 'tag-verification.txt') -Encoding utf8
     if ($LASTEXITCODE -ne 0) { throw "signed tag verification failed: $tag" }
     & git.exe checkout --detach $tag
