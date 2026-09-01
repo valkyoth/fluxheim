@@ -101,6 +101,17 @@ fn confidential_creation_is_exclusive_until_the_protected_acl_is_installed() {
 }
 
 #[test]
+fn confidential_reopen_allows_readable_integrity_safe_parent() {
+    let directory = tempfile::tempdir().unwrap();
+    install_everyone_acl(directory.path(), "FR");
+    let path = directory.path().join("secret.key");
+
+    drop(create_confidential_file(&path).unwrap());
+
+    super::open_confidential_file(&path).unwrap();
+}
+
+#[test]
 fn integrity_file_create_and_update_use_the_retained_trusted_path() {
     use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 

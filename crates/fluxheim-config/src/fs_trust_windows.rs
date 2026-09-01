@@ -319,7 +319,16 @@ fn retained_handles_have_insecure_permissions(
         } else {
             InspectedPathRole::Ancestor
         };
-        if security_descriptor_is_insecure(&descriptor, role, policy)
+        // Confidentiality is enforced by the leaf file's protected DACL.
+        // Ancestors only need integrity protection against replacement or
+        // takeover; ordinary directory read/list access cannot expose the
+        // protected file contents.
+        let handle_policy = if index == 0 {
+            policy
+        } else {
+            TrustPolicy::IntegrityOnly
+        };
+        if security_descriptor_is_insecure(&descriptor, role, handle_policy)
             .map_err(|error| inspection_error("evaluate ACL security descriptor", error))?
         {
             return Ok(true);
