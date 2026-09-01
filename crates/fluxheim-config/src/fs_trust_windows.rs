@@ -46,6 +46,16 @@ pub fn open_regular_file_for_update(path: &Path) -> std::io::Result<std::fs::Fil
     open_existing_regular_file(path, true, TrustPolicy::IntegrityOnly)
 }
 
+pub fn existing_path_is_non_regular_file(path: &Path) -> std::io::Result<bool> {
+    let absolute = absolute_path(path)?;
+    let opened = fluxheim_windows_security::inspect_absolute_path(&absolute)?;
+    if !opened.target_exists() {
+        return Ok(false);
+    }
+    let metadata = opened.target()?.metadata()?;
+    Ok(!metadata.is_file())
+}
+
 pub fn create_regular_file(path: &Path, read: bool) -> std::io::Result<std::fs::File> {
     let absolute = absolute_path(path)?;
     let opened =

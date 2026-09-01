@@ -160,6 +160,14 @@ fn rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {
 
 #[cfg(windows)]
 fn open_regular_secret_file(path: &Path) -> Result<fs::File, Box<dyn Error + Send + Sync>> {
+    if fluxheim_config::fs_trust::existing_path_is_non_regular_file(path).map_err(|error| {
+        format!(
+            "failed to inspect admin token file type {}: {error}",
+            path.display()
+        )
+    })? {
+        return Err(format!("admin token file {} must be a regular file", path.display()).into());
+    }
     fluxheim_config::fs_trust::open_confidential_file(path).map_err(|error| {
         format!(
             "failed to securely open admin token file {}: {error}",

@@ -10,9 +10,10 @@ mod windows;
 #[cfg(windows)]
 pub use windows::{
     create_confidential_file, create_private_directory_all, create_regular_file,
-    harden_confidential_file, harden_private_directory, open_confidential_file,
-    open_or_create_confidential_file, open_or_create_regular_file, open_regular_file,
-    open_regular_file_for_update, opened_file_has_insecure_confidential_permissions,
+    existing_path_is_non_regular_file, harden_confidential_file, harden_private_directory,
+    open_confidential_file, open_or_create_confidential_file, open_or_create_regular_file,
+    open_regular_file, open_regular_file_for_update,
+    opened_file_has_insecure_confidential_permissions,
     opened_file_has_insecure_owner_or_write_permissions, sync_directory,
 };
 

@@ -121,7 +121,10 @@ fn admin_token_file_must_be_regular_file() {
 
     let error = read_secret_file(&token_dir).unwrap_err();
 
-    assert!(error.to_string().contains("must be a regular file"));
+    assert!(
+        error.to_string().contains("must be a regular file"),
+        "unexpected error: {error}"
+    );
 }
 
 #[cfg(target_os = "linux")]

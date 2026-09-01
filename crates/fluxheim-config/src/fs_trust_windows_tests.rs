@@ -1,7 +1,7 @@
 use super::{
     create_confidential_file, create_private_directory_all, create_regular_file,
-    existing_path_has_insecure_write_permissions, open_regular_file_for_update,
-    opened_file_has_insecure_confidential_permissions,
+    existing_path_has_insecure_write_permissions, existing_path_is_non_regular_file,
+    open_regular_file_for_update, opened_file_has_insecure_confidential_permissions,
     opened_file_has_insecure_owner_or_write_permissions, sync_directory,
 };
 use windows_permissions::constants::{SeObjectType, SecurityInformation};
@@ -26,6 +26,17 @@ fn shared_fluxheim_test_root_and_missing_descendant_are_trusted() {
 fn canonical_executable_path_is_inspectable() {
     let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
     existing_path_has_insecure_write_permissions(&executable).unwrap();
+}
+
+#[test]
+fn retained_path_type_check_distinguishes_files_directories_and_missing_targets() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("token");
+    std::fs::write(&file, b"secret").unwrap();
+
+    assert!(existing_path_is_non_regular_file(directory.path()).unwrap());
+    assert!(!existing_path_is_non_regular_file(&file).unwrap());
+    assert!(!existing_path_is_non_regular_file(&directory.path().join("missing")).unwrap());
 }
 
 #[test]

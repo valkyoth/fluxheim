@@ -180,6 +180,7 @@ foreach ($required in @(
     'confidential_hardening_removes_inherited_everyone_access',
     'confidential_creation_is_exclusive_until_the_protected_acl_is_installed',
     'confidential_reopen_allows_readable_integrity_safe_parent',
+    'retained_path_type_check_distinguishes_files_directories_and_missing_targets',
     'inherit_only_everyone_write_access_blocks_child_creation',
     'rejected_integrity_creation_removes_the_new_child',
     'private_directory_tree_uses_protected_acl_creation',
