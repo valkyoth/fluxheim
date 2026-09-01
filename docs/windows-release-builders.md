@@ -55,7 +55,9 @@ release host's real public `/32` or a narrowly scoped IPv6 prefix. The script:
   and keeps that policy outside any vendor `Match` block;
 - grants the build identity read-only access to its SSH key and trusted tag
   signers, read/execute traversal on `C:\FluxheimBuild`, and Modify only below
-  the precreated `runs` and `output` directories;
+  the precreated `runs` and `output` directories; trust roots and files are
+  assigned to the local `Administrators` owner so a reused build-account-owned
+  path cannot rewrite its DACL;
 - narrows the Windows firewall rule to the supplied source CIDR;
 - validates `sshd_config` before restart and prints host-key fingerprints;
 - reports missing build tools without downloading floating installers.
@@ -75,8 +77,8 @@ then independently:
    duplicate signature armor, and verifies its sole SSH signature against the
    installed `allowed_signers` file at full trust;
 2. proves that the build account cannot replace its SSH authorization, rename
-   the trusted signer directory, replace `allowed_signers`, or create a second
-   trusted directory;
+   the trusted signer directory, replace `allowed_signers`, change trust-anchor
+   ACLs or ownership, or create a second trusted directory;
 3. checks the native Rust host architecture;
 4. runs workspace tests and the mandatory native Windows live smoke;
 5. builds all seven profiles twice with the PowerShell archive builder and

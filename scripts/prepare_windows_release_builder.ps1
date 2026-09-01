@@ -68,10 +68,14 @@ $authorizedKeys = Join-Path $sshTrustRoot 'authorized_keys'
 
 if ($PSCmdlet.ShouldProcess($sshTrustRoot, 'Install administrator-controlled release-builder SSH key')) {
     New-Item -ItemType Directory -Force -Path $sshTrustRoot | Out-Null
+    & icacls.exe $sshTrustRoot /setowner 'Administrators' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'failed to set release-builder SSH trust directory owner' }
     & icacls.exe $sshTrustRoot /inheritance:r /grant:r `
         "$BuildUser`:(OI)(CI)RX" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'failed to secure release-builder SSH trust directory' }
     if (Test-Path -LiteralPath $authorizedKeys -PathType Leaf) {
+        & icacls.exe $authorizedKeys /setowner 'Administrators' | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'failed to set existing authorized_keys owner' }
         & icacls.exe $authorizedKeys /inheritance:r /grant:r `
             "$BuildUser`:R" 'SYSTEM:F' 'Administrators:F' | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'failed to secure existing authorized_keys' }
@@ -80,6 +84,8 @@ if ($PSCmdlet.ShouldProcess($sshTrustRoot, 'Install administrator-controlled rel
     & icacls.exe $authorizedKeys /inheritance:r /grant:r `
         "$BuildUser`:R" 'SYSTEM:F' 'Administrators:F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'failed to secure authorized_keys' }
+    & icacls.exe $authorizedKeys /setowner 'Administrators' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'failed to set authorized_keys owner' }
 }
 
 $trustedDirectory = Join-Path $WorkspaceRoot 'trusted'
@@ -88,20 +94,28 @@ $outputDirectory = Join-Path $WorkspaceRoot 'output'
 $allowedSigners = Join-Path $trustedDirectory 'allowed_signers'
 if ($PSCmdlet.ShouldProcess($WorkspaceRoot, 'Create private release workspace')) {
     New-Item -ItemType Directory -Force -Path $WorkspaceRoot | Out-Null
+    & icacls.exe $WorkspaceRoot /setowner 'Administrators' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'failed to set release workspace owner' }
     & icacls.exe $WorkspaceRoot /inheritance:r /grant:r `
         "$BuildUser`:RX" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'failed to secure release workspace' }
     New-Item -ItemType Directory -Force -Path `
         $trustedDirectory, $runsDirectory, $outputDirectory | Out-Null
+    & icacls.exe $trustedDirectory /setowner 'Administrators' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'failed to set trusted release directory owner' }
     & icacls.exe $trustedDirectory /inheritance:r /grant:r "$BuildUser`:(OI)(CI)RX" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'failed to secure trusted release directory' }
     if (Test-Path -LiteralPath $allowedSigners -PathType Leaf) {
+        & icacls.exe $allowedSigners /setowner 'Administrators' | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'failed to set existing trusted tag signer policy owner' }
         & icacls.exe $allowedSigners /inheritance:r /grant:r "$BuildUser`:R" 'SYSTEM:F' 'Administrators:F' | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'failed to secure existing trusted tag signer policy' }
     }
     Copy-Item -LiteralPath $TagAllowedSignersFile -Destination $allowedSigners -Force
     & icacls.exe $allowedSigners /inheritance:r /grant:r "$BuildUser`:R" 'SYSTEM:F' 'Administrators:F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'failed to secure trusted tag signer policy' }
+    & icacls.exe $allowedSigners /setowner 'Administrators' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'failed to set trusted tag signer policy owner' }
     foreach ($mutableDirectory in $runsDirectory, $outputDirectory) {
         & icacls.exe $mutableDirectory /inheritance:r /grant:r `
             "$BuildUser`:(OI)(CI)M" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null

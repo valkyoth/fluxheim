@@ -61,12 +61,15 @@ public static class FluxheimReleaseAclProbe {
 
     $accessDenied = 5
     $deleteAccess = 0x00010000
+    $writeDac = 0x00040000
+    $writeOwner = 0x00080000
     $genericWrite = 0x40000000
     $fileAddSubdirectory = 0x00000004
     $fileDeleteChild = 0x00000040
     $trusted = Join-Path $Root 'trusted'
     $allowedSignersPath = Join-Path $trusted 'allowed_signers'
-    $authorizedKeysPath = Join-Path $env:ProgramData 'ssh\fluxheim-release\authorized_keys'
+    $sshTrustRoot = Join-Path $env:ProgramData 'ssh\fluxheim-release'
+    $authorizedKeysPath = Join-Path $sshTrustRoot 'authorized_keys'
 
     $probes = @(
         [pscustomobject]@{
@@ -82,22 +85,106 @@ public static class FluxheimReleaseAclProbe {
             Operation = 'replace a trusted directory through its parent'
         },
         [pscustomobject]@{
+            Path = $Root
+            Access = $writeDac
+            Directory = $true
+            Operation = 'change the release workspace ACL'
+        },
+        [pscustomobject]@{
+            Path = $Root
+            Access = $writeOwner
+            Directory = $true
+            Operation = 'take ownership of the release workspace'
+        },
+        [pscustomobject]@{
             Path = $trusted
             Access = $deleteAccess
             Directory = $true
             Operation = 'rename the trusted directory'
         },
         [pscustomobject]@{
+            Path = $trusted
+            Access = $writeDac
+            Directory = $true
+            Operation = 'change the trusted directory ACL'
+        },
+        [pscustomobject]@{
+            Path = $trusted
+            Access = $writeOwner
+            Directory = $true
+            Operation = 'take ownership of the trusted directory'
+        },
+        [pscustomobject]@{
             Path = $allowedSignersPath
-            Access = ($genericWrite -bor $deleteAccess)
+            Access = $genericWrite
             Directory = $false
-            Operation = 'replace allowed_signers'
+            Operation = 'write allowed_signers'
+        },
+        [pscustomobject]@{
+            Path = $allowedSignersPath
+            Access = $deleteAccess
+            Directory = $false
+            Operation = 'delete allowed_signers'
+        },
+        [pscustomobject]@{
+            Path = $allowedSignersPath
+            Access = $writeDac
+            Directory = $false
+            Operation = 'change the allowed_signers ACL'
+        },
+        [pscustomobject]@{
+            Path = $allowedSignersPath
+            Access = $writeOwner
+            Directory = $false
+            Operation = 'take ownership of allowed_signers'
+        },
+        [pscustomobject]@{
+            Path = $trusted
+            Access = $fileDeleteChild
+            Directory = $true
+            Operation = 'replace allowed_signers through its parent'
         },
         [pscustomobject]@{
             Path = $authorizedKeysPath
-            Access = ($genericWrite -bor $deleteAccess)
+            Access = $genericWrite
             Directory = $false
-            Operation = 'replace authorized_keys'
+            Operation = 'write authorized_keys'
+        },
+        [pscustomobject]@{
+            Path = $authorizedKeysPath
+            Access = $deleteAccess
+            Directory = $false
+            Operation = 'delete authorized_keys'
+        },
+        [pscustomobject]@{
+            Path = $authorizedKeysPath
+            Access = $writeDac
+            Directory = $false
+            Operation = 'change the authorized_keys ACL'
+        },
+        [pscustomobject]@{
+            Path = $authorizedKeysPath
+            Access = $writeOwner
+            Directory = $false
+            Operation = 'take ownership of authorized_keys'
+        },
+        [pscustomobject]@{
+            Path = $sshTrustRoot
+            Access = $fileDeleteChild
+            Directory = $true
+            Operation = 'replace authorized_keys through its parent'
+        },
+        [pscustomobject]@{
+            Path = $sshTrustRoot
+            Access = $writeDac
+            Directory = $true
+            Operation = 'change the SSH trust directory ACL'
+        },
+        [pscustomobject]@{
+            Path = $sshTrustRoot
+            Access = $writeOwner
+            Directory = $true
+            Operation = 'take ownership of the SSH trust directory'
         }
     )
     foreach ($probe in $probes) {

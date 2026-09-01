@@ -155,7 +155,10 @@ fn open_trusted_regular_file(path: &Path, confidential: bool) -> std::io::Result
     }
     let descriptor = rustix::fs::open(
         path,
-        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::NONBLOCK,
         rustix::fs::Mode::empty(),
     )
     .map_err(std::io::Error::from)?;
@@ -301,6 +304,41 @@ mod tests {
         symlink(&file, &link).unwrap();
         let error = open_regular_file(&link).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn trusted_regular_file_open_rejects_fifo_without_blocking() {
+        let root = unique_temp_path("fs-trust-secure-open-fifo");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let fifo = root.join("upstreams.txt");
+        rustix::fs::mknodat(
+            rustix::fs::CWD,
+            &fifo,
+            rustix::fs::FileType::Fifo,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+            0,
+        )
+        .unwrap();
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || sender.send(open_regular_file(&fifo)).unwrap());
+        let result = receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("trusted file open blocked on a FIFO");
+        let error = result.unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn trusted_regular_file_open_rejects_unix_domain_socket() {
+        let unique = unique_temp_path("fs-trust-secure-open-socket");
+        let socket = PathBuf::from("target").join(unique.file_name().unwrap());
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+
+        assert!(open_regular_file(&socket).is_err());
+        drop(listener);
+        std::fs::remove_file(socket).unwrap();
     }
 }
 

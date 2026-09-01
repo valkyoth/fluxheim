@@ -3919,6 +3919,11 @@ upload directory accidentally contains a `.php` file. The list is capped at 128
 prefixes.
 `php.allowed_extensions` is capped at 16 plain extension names and rejects
 case-insensitive duplicates.
+PHP request, script, and `PATH_INFO` segments use one portable namespace on all
+platforms. Colons, trailing dots or spaces, and Windows device aliases such as
+`CON`, `AUX`, `COM1`, and `LPT1` are rejected even on Unix. This prevents a
+Linux Fluxheim process from forwarding unsafe names to an external Windows PHP
+backend; existing Unix scripts with those names must be renamed.
 `php.preset = "wordpress"` applies PHP-side WordPress migration defaults: it
 uses the WordPress front-controller mode when `try_files` is otherwise unset and
 adds deny prefixes for common upload/file directories such as

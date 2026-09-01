@@ -436,7 +436,8 @@ foreach ($required in @(
     '$BuildUser`:(OI)(CI)M',
     '$allowedSigners /inheritance:r',
     '$BuildUser`:R',
-    'Administrators:F'
+    'Administrators:F',
+    "/setowner 'Administrators'"
 )) {
     if (-not $preparation.Contains($required)) {
         throw "Windows preparation trust anchor is missing required ACL policy: $required"
@@ -456,8 +457,19 @@ foreach ($required in @(
     'FileFlagOpenReparsePoint',
     '$fileAddSubdirectory',
     '$fileDeleteChild',
-    'replace allowed_signers',
-    'replace authorized_keys',
+    '$writeDac',
+    '$writeOwner',
+    'write allowed_signers',
+    'delete allowed_signers',
+    'replace allowed_signers through its parent',
+    'write authorized_keys',
+    'delete authorized_keys',
+    'replace authorized_keys through its parent',
+    'change the release workspace ACL',
+    'change the trusted directory ACL',
+    'change the allowed_signers ACL',
+    'change the authorized_keys ACL',
+    'change the SSH trust directory ACL',
     'git.exe cat-file tag',
     'BEGIN SSH SIGNATURE',
     'END SSH SIGNATURE',
@@ -479,6 +491,9 @@ foreach ($required in @(
     if (-not $releaseContract.Contains($required)) {
         throw "Windows release runner is missing required evidence: $required"
     }
+}
+if ($release.Contains('($genericWrite -bor $deleteAccess)')) {
+    throw 'Windows release trust-anchor write and delete rights must be probed separately'
 }
 if ($release.Contains('checkout main') -or $release.Contains('|| git checkout')) {
     throw 'Windows release runner must not fall back from the requested tag'

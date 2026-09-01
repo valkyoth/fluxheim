@@ -213,6 +213,11 @@ eligible:
 - Use a small allow-list for CGI/FastCGI params.
 - Reject decoded control characters in path-derived FastCGI params and avoid
   protocol-relative directory-slash redirects.
+- Apply Windows-safe segment rules on every platform: reject colons, trailing
+  dots or spaces, and Windows device aliases such as `CON`, `AUX`, `COM1`, and
+  `LPT1`. This portable URL contract also protects Linux Fluxheim deployments
+  that forward FastCGI requests to an external Windows PHP backend. Scripts
+  using those names must be renamed even when Fluxheim itself runs on Unix.
 - Set `SCRIPT_NAME`, `SCRIPT_FILENAME`, `DOCUMENT_ROOT`, `REQUEST_METHOD`,
   `QUERY_STRING`, `REQUEST_URI`, `SERVER_NAME`, `SERVER_PORT`, and
   `SERVER_PROTOCOL` explicitly.
