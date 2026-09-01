@@ -62,6 +62,14 @@ release host's real public `/32` or a narrowly scoped IPv6 prefix. The script:
 - validates `sshd_config` before restart and prints host-key fingerprints;
 - reports missing build tools without downloading floating installers.
 
+Keep a custom `WorkspaceRoot` below administrator-controlled ancestors. The
+release runner rejects any ancestor on which the build identity can delete the
+directory or its children, create children, change the DACL, or take ownership.
+The volume root is still checked for every destructive and ACL/ownership right,
+but harmless sibling creation there is not treated as replacement of an
+existing protected path. The default `C:\FluxheimBuild` layout is designed for
+this policy.
+
 Verify the printed SSH host-key fingerprint out of band before accepting it on
 the Linux release machine. The Azure NSG remains a separate mandatory boundary;
 the local Windows firewall rule is not a replacement for it.
@@ -80,7 +88,8 @@ then independently:
    the trusted signer directory, replace `allowed_signers`, change trust-anchor
    content, ACLs, or ownership, or create a second trusted directory; content
    overwrite and append rights are checked independently, and every trust-path
-   ancestor must be free of junctions and other reparse points;
+   ancestor must be free of junctions and other reparse points and deny the
+   build identity delete, child-create, DACL-change, and ownership rights;
 3. checks the native Rust host architecture;
 4. runs workspace tests and the mandatory native Windows live smoke;
 5. builds all seven profiles twice with the PowerShell archive builder and

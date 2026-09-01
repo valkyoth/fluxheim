@@ -76,6 +76,7 @@ public static class FluxheimReleaseAclProbe {
     $deleteAccess = 0x00010000
     $fileWriteData = 0x00000002
     $fileAppendData = 0x00000004
+    $fileAddFile = 0x00000002
     $writeDac = 0x00040000
     $writeOwner = 0x00080000
     $genericWrite = 0x40000000
@@ -96,6 +97,36 @@ public static class FluxheimReleaseAclProbe {
             }
             $parent = [System.IO.Directory]::GetParent($current)
             $current = if ($null -eq $parent) { $null } else { $parent.FullName }
+        }
+    }
+
+    foreach ($trustPath in @(
+        $Root, $trusted, $allowedSignersPath, $sshTrustRoot, $authorizedKeysPath
+    )) {
+        $current = [System.IO.Directory]::GetParent(
+            [System.IO.Path]::GetFullPath($trustPath))
+        while ($null -ne $current) {
+            $parent = [System.IO.Directory]::GetParent($current.FullName)
+            $rights = @(
+                [pscustomobject]@{ Access = $deleteAccess; Operation = 'delete ancestor' },
+                [pscustomobject]@{ Access = $fileDeleteChild; Operation = 'delete ancestor children' },
+                [pscustomobject]@{ Access = $writeDac; Operation = 'change ancestor ACL' },
+                [pscustomobject]@{ Access = $writeOwner; Operation = 'take ancestor ownership' }
+            )
+            if ($null -ne $parent) {
+                $rights += @(
+                    [pscustomobject]@{ Access = $fileAddFile; Operation = 'create ancestor files' },
+                    [pscustomobject]@{ Access = $fileAddSubdirectory; Operation = 'create ancestor directories' }
+                )
+            }
+            foreach ($right in $rights) {
+                $errorCode = [FluxheimReleaseAclProbe]::Probe(
+                    $current.FullName, [uint32]$right.Access, $true)
+                if ($errorCode -ne $accessDenied) {
+                    throw "release build account can $($right.Operation): $($current.FullName) (Win32 error $errorCode)"
+                }
+            }
+            $current = $parent
         }
     }
 
