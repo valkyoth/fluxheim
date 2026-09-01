@@ -464,9 +464,6 @@ foreach ($required in @(
     '$fileDeleteChild',
     '$fileWriteData',
     '$fileAppendData',
-    '$fileAddFile',
-    'if ($null -ne $parent)',
-    '$rights += @(',
     '$writeDac',
     '$writeOwner',
     'write allowed_signers',
@@ -483,8 +480,6 @@ foreach ($required in @(
     'delete the SSH trust directory',
     'delete ancestor',
     'delete ancestor children',
-    'create ancestor files',
-    'create ancestor directories',
     'change ancestor ACL',
     'take ancestor ownership',
     'change the release workspace ACL',
@@ -516,6 +511,10 @@ foreach ($required in @(
 }
 if ($release.Contains('($genericWrite -bor $deleteAccess)')) {
     throw 'Windows release trust-anchor write and delete rights must be probed separately'
+}
+if ($release.Contains("Operation = 'create ancestor files'") -or
+    $release.Contains("Operation = 'create ancestor directories'")) {
+    throw 'Windows release checks must not reject harmless sibling creation in generic ancestors'
 }
 if ($release.Contains('checkout main') -or $release.Contains('|| git checkout')) {
     throw 'Windows release runner must not fall back from the requested tag'
