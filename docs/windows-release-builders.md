@@ -125,3 +125,69 @@ until the complete 1.8.2 parity matrix passes on x86_64.
 Windows outputs are unsigned `.zip` previews. Do not disable SmartScreen or
 execution policy globally. Authenticode, MSI/MSIX, Store delivery, and service
 installation remain later company-backed milestones.
+
+## Optional Public PHP Ingress Smoke
+
+The mandatory native smoke uses loopback listeners so it is deterministic and
+does not require a public firewall exception. Before the first Windows release,
+an operator can additionally prove off-host HTTP/HTTPS reachability and the
+real external FastCGI path with:
+
+```bash
+scripts/smoke_windows_public_php.sh \
+  WINDOWS_HOST ~/.ssh/windows-release-key \
+  dist/fluxheim-${RELEASE_VERSION}-php-x86_64-windows.zip \
+  windows-test.example.com
+```
+
+Run this from the trusted Linux release machine. The cloud firewall and Windows
+Firewall must allow TCP/80 and TCP/443 from that machine. Alternate ports can
+be selected with `FLUXHEIM_WINDOWS_PUBLIC_HTTP_PORT` and
+`FLUXHEIM_WINDOWS_PUBLIC_HTTPS_PORT`. The test DNS name must already resolve to
+the Windows host. Supply the public IP as the fifth argument when the SSH
+hostname is not the address clients use.
+
+The controller uploads the packaged `php` profile, starts it on the prepared
+Windows host, and requests a real `index.php` over both public listeners. HTTPS
+uses a short-lived private test CA and validates the supplied DNS name's SNI and
+hostname rather than disabling certificate verification. The POST assertion
+also proves request-body forwarding and PHP's `HTTPS`/`REQUEST_SCHEME` CGI
+context.
+
+The harness downloads the official PHP 8.4 NTS x86_64 archive and verifies its
+pinned SHA-256 before executing `php-cgi.exe` as a loopback-only external
+FastCGI server. PHP recommends NTS builds for FastCGI on Windows. This proves
+Fluxheim's supported external FastCGI contract with a real PHP runtime; it does
+not claim native Windows PHP-FPM or managed PHP-FPM support. The smoke is
+opt-in because it requires public ingress and an external download. It removes
+successful remote artifacts by default; set
+`FLUXHEIM_WINDOWS_PUBLIC_SMOKE_KEEP=1` to retain them.
+
+## Optional Public ACME Staging Smoke
+
+After public HTTP/HTTPS reachability is proven, the same disposable builder can
+exercise a real ACME HTTP-01 lifecycle with the packaged `full` profile:
+
+```bash
+scripts/smoke_windows_public_acme.sh \
+  WINDOWS_HOST ~/.ssh/windows-release-key \
+  dist/fluxheim-${RELEASE_VERSION}-full-x86_64-windows.zip \
+  windows-test.example.com release-test@example.com \
+  https://letsencrypt.org/documents/REVIEW-THE-CURRENT-TERMS.pdf
+```
+
+The final argument must be the exact Terms of Service URL currently advertised
+by the Let's Encrypt staging directory and must be reviewed and supplied by the
+operator. The script never silently accepts terms. The DNS name must resolve to
+the Windows host, and both the cloud firewall and Windows Firewall must permit
+public TCP/80 and TCP/443. Supply the public IP as the seventh argument when it
+differs from the SSH host.
+
+The harness uses a fresh isolated ACME storage directory, starts the packaged
+Windows binary on public port 80, and requests one staging certificate. It then
+restarts the same binary with HTTPS enabled. The Linux controller verifies the
+HTTP and HTTPS content off-host, validates the presented certificate hostname,
+and compares its SHA-256 fingerprint with the certificate Fluxheim installed.
+Only Let's Encrypt staging is used; this test must never request a production
+certificate or reuse production ACME state. Successful test state is removed
+unless `FLUXHEIM_WINDOWS_PUBLIC_SMOKE_KEEP=1` is set.

@@ -439,11 +439,13 @@ Fluxheim does not treat every planned idea as stable. Fluxheim is now on the
 `1.8` platform-parity line. Release `1.8.0` packages the completed Wasm
 line as an explicit image/archive profile and establishes the shared portable
 archive contract. Release `1.8.1` completed the defined unsigned Apple Silicon
-macOS parity gate. Development `v1.8.2` now targets native Windows x86_64 and
-ARM64 MSVC archives without weakening filesystem trust or cache-storage
+macOS parity gate. Development `v1.8.2` now targets native Windows x86_64 MSVC
+archives without weakening filesystem trust or cache-storage
 boundaries. The normal `full` profile remains Wasm-free. Signing and installer
 work follows platform parity. The unsigned macOS CLI preview publishes
-`.tar.gz` only; Windows will publish `.zip` only after both native gates pass.
+`.tar.gz` only; Windows will publish `.zip` only after its native x86_64 gate
+passes. Windows ARM64 is deferred until equivalent native build and test
+infrastructure is sustainable.
 See
 [Portable Releases](docs/portable-releases.md) for the shared archive contract,
 current platform support level, and unsigned-preview policy.

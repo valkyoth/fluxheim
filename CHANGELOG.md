@@ -24,6 +24,10 @@ behavior when the change improves security or project direction.
   upstream TLS, memory and persistent storage-bin cache, load balancing, admin,
   metrics, external TCP FastCGI, ACME storage, crash recovery, CTRL_BREAK
   shutdown, every packaged executable, and the packaged Wasm examples.
+- Add an opt-in public Windows HTTP/HTTPS smoke using the packaged `php`
+  profile and a checksum-pinned official PHP NTS FastCGI runtime.
+- Add an opt-in public Windows Let's Encrypt staging HTTP-01 smoke that proves
+  issuance, certificate activation, and off-host TLS presentation.
 
 ### Changed
 
@@ -36,6 +40,9 @@ behavior when the change improves security or project direction.
   existing filesystem and TLS trust boundaries or depending on Schannel key
   persistence under a noninteractive SSH token.
 - Update the yanked transitive `wnaf 0.14.0` package to `0.14.1`.
+- Convert canonical Win32 verbatim paths to PHP-compatible DOS or UNC paths in
+  FastCGI parameters, allowing the external Windows `php-cgi.exe` runtime to
+  resolve scripts correctly.
 
 ### Security
 

@@ -11,6 +11,8 @@ $scripts = @(
     'scripts/prepare_windows_release_builder.ps1',
     'scripts/run_windows_release_builder.ps1',
     'scripts/smoke_windows_native.ps1',
+    'scripts/smoke_windows_public_acme.ps1',
+    'scripts/smoke_windows_public_php.ps1',
     'scripts/smoke_windows_wasm_archive.ps1',
     'scripts/windows_console_signal_helper.ps1'
 )
@@ -27,6 +29,104 @@ foreach ($relative in $scripts) {
     if ($errors.Count -gt 0) {
         $messages = $errors | ForEach-Object { $_.Message }
         throw "$relative has PowerShell parse errors: $($messages -join '; ')"
+    }
+}
+
+$publicAcmeSmoke = Get-Content -LiteralPath `
+    (Join-Path $root 'scripts/smoke_windows_public_acme.ps1') -Raw
+foreach ($required in @(
+    "[ValidatePattern('^public-acme-[0-9a-f]{16}`$')]",
+    '[string]$PublicName',
+    '[string]$ContactEmail',
+    '[string]$TermsOfServiceUrl',
+    "-notmatch '-full-x86_64-windows[\\/]fluxheim[.]exe`$'",
+    'listen = ["0.0.0.0:$HttpPort"]',
+    'tls_listen = [`"0.0.0.0:$HttpsPort`"]',
+    'automation = "external"',
+    'https://acme-staging-v02.api.letsencrypt.org/directory',
+    'terms_of_service_agreed = true',
+    'terms_of_service_url = "$TermsOfServiceUrl"',
+    '& $fluxheimBinary --config $configPath acme-renew',
+    "Contains('certificate=installed')",
+    "-Filter 'fullchain.pem'",
+    "-Filter 'privkey.pem'",
+    "[IO.File]::WriteAllText(",
+    "'fluxheim-windows-public-acme-ok'",
+    'Windows public ACME staging harness: ok'
+)) {
+    if (-not $publicAcmeSmoke.Contains($required)) {
+        throw "Windows public ACME smoke is missing required behavior: $required"
+    }
+}
+
+$publicAcmeControllerPath = Join-Path $root 'scripts/smoke_windows_public_acme.sh'
+if (-not (Test-Path -LiteralPath $publicAcmeControllerPath -PathType Leaf)) {
+    throw 'Windows public ACME smoke Linux controller is missing'
+}
+$publicAcmeController = Get-Content -LiteralPath $publicAcmeControllerPath -Raw
+foreach ($required in @(
+    'StrictHostKeyChecking=yes',
+    'fluxheim-*-full-x86_64-windows.zip',
+    'smoke_windows_public_acme.ps1',
+    '-TermsOfServiceUrl $TERMS_URL',
+    '--resolve "$PUBLIC_NAME:$HTTP_PORT:$PUBLIC_IP"',
+    'openssl s_client -connect "$PUBLIC_IP:$HTTPS_PORT" -servername "$PUBLIC_NAME"',
+    'openssl x509 -in "$PRESENTED_LEAF" -noout -checkhost "$PUBLIC_NAME"',
+    'ISSUED_FINGERPRINT=',
+    'PRESENTED_FINGERPRINT=',
+    'Windows public Let''s Encrypt staging ACME HTTP-01 smoke: ok'
+)) {
+    if (-not $publicAcmeController.Contains($required)) {
+        throw "Windows public ACME smoke controller is missing required behavior: $required"
+    }
+}
+
+$publicPhpSmoke = Get-Content -LiteralPath `
+    (Join-Path $root 'scripts/smoke_windows_public_php.ps1') -Raw
+foreach ($required in @(
+    "[ValidatePattern('^public-php-[0-9a-f]{16}`$')]",
+    '[string]$PublicName',
+    'php-8.4.25-nts-Win32-vs17-x64.zip',
+    '43a8f67ed2e5223fafb21293c85976361808855405278cef2cf3037c3ae2529c',
+    "Get-FileHash -LiteralPath `$phpArchivePath -Algorithm SHA256",
+    "-notmatch '-php-x86_64-windows[\\/]fluxheim[.]exe`$'",
+    'listen = ["0.0.0.0:$HttpPort"]',
+    'tls_listen = ["0.0.0.0:$HttpsPort"]',
+    'runtime = "php-fpm"',
+    'mode = "external"',
+    'tcp = "127.0.0.1:$fastCgiPort"',
+    'allow_private_tcp_upstreams = true',
+    "`$phpProcess = Start-Process -FilePath `$phpCgi",
+    "`$fluxheimProcess = Start-Process -FilePath `$fluxheimBinary",
+    "`$body = file_get_contents('php://input');",
+    'fluxheim-windows-public-php-ok',
+    'Windows public PHP harness: ok'
+)) {
+    if (-not $publicPhpSmoke.Contains($required)) {
+        throw "Windows public PHP smoke is missing required behavior: $required"
+    }
+}
+
+$publicPhpControllerPath = Join-Path $root 'scripts/smoke_windows_public_php.sh'
+if (-not (Test-Path -LiteralPath $publicPhpControllerPath -PathType Leaf)) {
+    throw 'Windows public PHP smoke Linux controller is missing'
+}
+$publicPhpController = Get-Content -LiteralPath $publicPhpControllerPath -Raw
+foreach ($required in @(
+    'StrictHostKeyChecking=yes',
+    'fluxheim-*-php-x86_64-windows.zip',
+    'smoke_windows_public_php.ps1',
+    '-PublicName $PUBLIC_NAME',
+    '--resolve "$PUBLIC_NAME:$HTTP_PORT:$PUBLIC_ADDRESS"',
+    '--resolve "$PUBLIC_NAME:$HTTPS_PORT:$PUBLIC_ADDRESS"',
+    '--cacert "$CA_FILE"',
+    "--data-binary 'windows-fastcgi-post'",
+    'scheme=http|https=off|method=GET',
+    'scheme=https|https=on|method=POST',
+    'Windows public HTTP/HTTPS real-PHP FastCGI smoke: ok'
+)) {
+    if (-not $publicPhpController.Contains($required)) {
+        throw "Windows public PHP smoke controller is missing required behavior: $required"
     }
 }
 

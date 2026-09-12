@@ -64,6 +64,17 @@ native build and test infrastructure is available.
   pinned SL Micro base does not. Other SUSE Micro profiles remain supported,
   and Windows PHP continues to use external TCP FastCGI as documented.
 - Replace the yanked transitive `wnaf 0.14.0` dependency with `0.14.1`.
+- Add an opt-in off-host Windows ingress smoke that runs the packaged `php`
+  profile against a checksum-pinned official PHP NTS FastCGI process and
+  verifies real PHP output, request-body forwarding, and CGI TLS context over
+  public HTTP and certificate-validated HTTPS.
+- Normalize canonical Win32 verbatim roots to ordinary DOS or UNC paths before
+  sending `SCRIPT_FILENAME`, `DOCUMENT_ROOT`, or `PATH_TRANSLATED` to an
+  external Windows FastCGI process. This fixes real `php-cgi.exe` requests that
+  previously returned `No input file specified`.
+- Add a separate opt-in Windows ACME lifecycle smoke that performs an isolated
+  Let's Encrypt staging HTTP-01 issuance, activates the installed certificate,
+  and verifies its hostname and fingerprint from an off-host client.
 
 ## Remaining Release Blocks
 

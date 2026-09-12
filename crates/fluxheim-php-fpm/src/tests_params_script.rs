@@ -166,10 +166,35 @@ fn php_fpm_path_mapping_supports_split_container_roots_and_rejects_unsafe_path_i
     assert!(php_fpm_path_translated(fpm_root, "/uploads/file\x01.txt").is_none());
 
     #[cfg(windows)]
+    {
+        assert_eq!(
+            php_fpm_path_translated(Path::new(r"C:\app\public"), "/uploads/file.txt").as_deref(),
+            Some(r"C:\app\public\uploads\file.txt")
+        );
+        assert_eq!(
+            php_fpm_script_filename(
+                Path::new(r"\\?\C:\app\public"),
+                Path::new(r"\\?\C:\app\public"),
+                Path::new(r"\\?\C:\app\public\index.php")
+            )
+            .as_deref(),
+            Some(r"C:\app\public\index.php")
+        );
+    }
+}
+
+#[test]
+fn php_fpm_path_mapping_removes_windows_verbatim_namespace_from_wire_paths() {
     assert_eq!(
-        php_fpm_path_translated(Path::new(r"C:\app\public"), "/uploads/file.txt").as_deref(),
-        Some(r"C:\app\public\uploads\file.txt")
+        php_fpm_path_translated(Path::new(r"\\?\C:\app\public"), "/index.php").as_deref(),
+        Some(r"C:\app\public\index.php")
     );
+    assert_eq!(
+        php_fpm_path_translated(Path::new(r"\\?\UNC\server\share\public"), "/index.php").as_deref(),
+        Some(r"\\server\share\public\index.php")
+    );
+    assert!(php_fpm_path_translated(Path::new(r"\\?\GLOBALROOT"), "/index.php").is_none());
+    assert!(php_fpm_path_translated(Path::new(r"\\.\C:"), "/index.php").is_none());
 }
 
 #[test]

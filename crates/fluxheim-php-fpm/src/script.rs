@@ -32,7 +32,7 @@ fn php_fpm_join_wire_path<'a>(
     segments: impl IntoIterator<Item = Option<&'a str>>,
     reject_hidden_segments: bool,
 ) -> Option<String> {
-    let root = fpm_root.to_str()?;
+    let root = php_fpm_wire_root(fpm_root.to_str()?)?;
     if root.is_empty() || root.chars().any(char::is_control) {
         return None;
     }
@@ -41,7 +41,7 @@ fn php_fpm_join_wire_path<'a>(
     } else {
         '/'
     };
-    let mut translated = root.to_owned();
+    let mut translated = root;
     for segment in segments {
         let segment = segment?;
         if !valid_php_segment(segment, reject_hidden_segments) {
@@ -53,6 +53,31 @@ fn php_fpm_join_wire_path<'a>(
         translated.push_str(segment);
     }
     Some(translated)
+}
+
+fn php_fpm_wire_root(root: &str) -> Option<String> {
+    // php-cgi expects DOS/UNC paths and rejects the Win32 verbatim namespace.
+    let Some(verbatim) = root.strip_prefix(r#"\\?\"#) else {
+        return (!root.starts_with(r#"\\.\"#)).then(|| root.to_owned());
+    };
+    if let Some(unc) = verbatim.strip_prefix(r#"UNC\"#) {
+        let mut components = unc.split('\\');
+        if components.next().is_none_or(str::is_empty)
+            || components.next().is_none_or(str::is_empty)
+        {
+            return None;
+        }
+        return Some(format!(r"\\{unc}"));
+    }
+    let bytes = verbatim.as_bytes();
+    if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/')
+    {
+        return Some(verbatim.to_owned());
+    }
+    None
 }
 
 pub fn php_script_name_for_request(
