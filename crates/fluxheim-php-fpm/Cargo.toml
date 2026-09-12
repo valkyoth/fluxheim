@@ -2,7 +2,7 @@
 name = "fluxheim-php-fpm"
 version = "1.8.2"
 edition = "2024"
-rust-version = "1.98.0"
+rust-version = "1.98.1"
 license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim PHP-FPM protocol and runtime boundary."
@@ -15,7 +15,7 @@ getrandom = "0.4.3"
 log = "0.4.34"
 percent-encoding = "2.3.2"
 rustix = { version = "1.1.4", features = ["fs", "net", "process"] }
-sanitization = { version = "2.0.3", features = ["alloc"] }
+sanitization = { version = "2.1.0", features = ["alloc"] }
 tokio = { version = "1.53.1", default-features = false, features = ["fs", "io-util", "net", "rt", "time"] }
 
 [target.'cfg(windows)'.dependencies]

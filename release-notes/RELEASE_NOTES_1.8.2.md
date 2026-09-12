@@ -79,6 +79,10 @@ native build and test infrastructure is available.
   certificate-validated HTTPS through the Windows `proxy`, `load-balancer`,
   `cache`, and `full` ZIPs. It proves two-origin selection and failover, memory
   cache reuse, and persistent storage-bin recovery with the origin offline.
+- Refresh the pinned Rust toolchain and container builders to 1.98.1, update
+  compatible workspace dependencies, and move `sanitization`, `base64-ng`,
+  Brotli, Zstandard, MaxMindDB, AWS-LC, Rustls, Wasmtime, and the QEMU setup
+  action to their current reviewed releases.
 
 ## Remaining Release Blocks
 

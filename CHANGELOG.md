@@ -35,6 +35,11 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- Refresh Rust to 1.98.1, update compatible lockfile dependencies, and move the
+  direct `sanitization`, `base64-ng`, Brotli, Zstandard, MaxMindDB, AWS-LC,
+  Rustls, Wasmtime, and GitHub QEMU-action baselines to their current releases.
+- Refresh the pinned Rust, Wolfi, SUSE BCI, SUSE Micro, and UBI container image
+  digests while preserving immutable base-image references.
 - Require Windows release evidence to identify the exact signed tag commit,
   native host architecture, test scope, archive checksums, and reproducible
   build hashes before the Linux release aggregator accepts it.

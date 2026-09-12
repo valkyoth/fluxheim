@@ -1,5 +1,5 @@
-ARG RUST_IMAGE=docker.io/library/rust:1.98.0-alpine3.23@sha256:4743b6231029d726d7a0f81d730a7c9f4eff23225a4499c01e275efb5e260235
-ARG RUNTIME_IMAGE=registry.suse.com/bci/php:8@sha256:3d503ae4e521db6c3977414255e31a8608b629e41e2319aa559dc8051954ca0d
+ARG RUST_IMAGE=docker.io/library/rust:1.98.1-alpine3.23@sha256:737ba17e6a2ffe14475b59861cd69f3d7152c29c75140bdbf6750befcfda7e6c
+ARG RUNTIME_IMAGE=registry.suse.com/bci/php:8@sha256:9d6493f2492630eee0740b639afa4484db0ddef35b3a11cd5f896ccf6871dde6
 ARG FLUXHEIM_CONFIG=packaging/container/php-managed.toml
 
 FROM ${RUST_IMAGE} AS builder

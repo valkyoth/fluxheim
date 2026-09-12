@@ -2,7 +2,7 @@
 name = "fluxheim-acme"
 version = "1.8.2"
 edition = "2024"
-rust-version = "1.98.0"
+rust-version = "1.98.1"
 license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim ACME account, challenge, renewal, and certificate storage logic."
@@ -24,7 +24,7 @@ acme-client = [
 ]
 
 [dependencies]
-base64-ng = { version = "2.0.1", optional = true }
+base64-ng = { version = "2.0.4", optional = true }
 bytes = { version = "1.12.1", optional = true }
 fluxheim-config = { path = "../fluxheim-config", features = ["acme"] }
 getrandom = "0.4.3"
@@ -36,14 +36,14 @@ hyper-rustls = { version = "0.27.9", default-features = false, features = ["http
 hyper-util = { version = "0.1.20", default-features = false, features = ["client-legacy", "http1", "http2", "tokio"], optional = true }
 instant-acme = { version = "0.8.5", default-features = false, features = ["ring", "time", "x509-parser"] }
 log = "0.4.34"
-rcgen = { version = "0.14.9", default-features = false, features = ["pem", "ring"] }
+rcgen = { version = "0.14.10", default-features = false, features = ["pem", "ring"] }
 rustix = { version = "1.1.4", features = ["fs", "process"] }
-rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12"], optional = true }
-sanitization = { version = "2.0.3", features = ["alloc"] }
+rustls = { version = "0.23.44", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+sanitization = { version = "2.1.0", features = ["alloc"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
-toml = "1.1.4"
+toml = "1.1.6"
 tokio = { version = "1.53.1", default-features = false, features = ["rt", "time"], optional = true }
 x509-parser = { version = "0.18.1", default-features = false }
 
