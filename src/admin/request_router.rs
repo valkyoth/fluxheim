@@ -123,7 +123,11 @@ impl AdminApp {
             return json_response(StatusCode::UNAUTHORIZED, br#"{"error":"unauthorized"}"#);
         }
         self.auth_throttle.record_success(source);
-        drop(self.enforce_self_healing_deadline());
+        if let Some(response) = self.enforce_self_healing_deadline()
+            && !response.status.is_success()
+        {
+            return response;
+        }
         if health_request {
             if method != "GET" {
                 return json_response(

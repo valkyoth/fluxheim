@@ -92,6 +92,9 @@ native build and test infrastructure is available.
   administrator token.
 - Authenticate admin HTTP requests before they can trigger or observe an
   expired self-healing rollback.
+- Return failed expired-validation rollbacks directly to authenticated admin
+  clients so confirmation and successful health reports cannot overwrite the
+  preserved retryable recovery state.
 - Create private Windows directories relative to a retained parent handle and
   apply their protected ACL atomically, preventing junction replacement between
   validation and creation.

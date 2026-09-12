@@ -168,6 +168,102 @@ fn expired_self_healing_validation_rolls_back_fail_closed() {
 }
 
 #[test]
+fn expired_self_healing_failed_rollback_blocks_confirmation() {
+    let app = app_with_config_and_self_healing(Config::default(), true);
+    let candidate = app
+        .store
+        .snapshot_config(&Config::default(), Some("candidate"))
+        .unwrap();
+    set_test_runtime_state(
+        &app,
+        Some(candidate.id.clone()),
+        None,
+        Some(PendingValidation {
+            target_snapshot: candidate.id.clone(),
+            previous_snapshot: None,
+            impact: "snapshot".to_owned(),
+            expires_unix_secs: 0,
+            successful_checks: 0,
+            failed_checks: 0,
+            rollback_attempts: 0,
+            last_rollback_failure: None,
+        }),
+    );
+
+    let response = app.handle(
+        "POST",
+        "/_fluxheim/self-heal/confirm",
+        None,
+        &auth_headers(),
+    );
+
+    assert_eq!(response.status, StatusCode::BAD_REQUEST);
+    assert!(
+        String::from_utf8(response.body)
+            .unwrap()
+            .contains("no previous known-good snapshot")
+    );
+    let state = app.runtime_state();
+    assert_eq!(state.runtime_snapshot, Some(candidate.id.clone()));
+    assert_eq!(state.known_good_snapshot, None);
+    let pending = state
+        .pending_validation
+        .expect("rollback remains retryable");
+    assert_eq!(pending.target_snapshot, candidate.id);
+    assert_eq!(pending.rollback_attempts, 1);
+    assert!(pending.last_rollback_failure.is_some());
+}
+
+#[test]
+fn expired_self_healing_failed_rollback_blocks_successful_health_report() {
+    let mut app = app_with_config_and_self_healing(Config::default(), true);
+    app.min_successful_checks = 1;
+    let candidate = app
+        .store
+        .snapshot_config(&Config::default(), Some("candidate"))
+        .unwrap();
+    set_test_runtime_state(
+        &app,
+        Some(candidate.id.clone()),
+        None,
+        Some(PendingValidation {
+            target_snapshot: candidate.id.clone(),
+            previous_snapshot: None,
+            impact: "snapshot".to_owned(),
+            expires_unix_secs: 0,
+            successful_checks: 0,
+            failed_checks: 0,
+            rollback_attempts: 0,
+            last_rollback_failure: None,
+        }),
+    );
+
+    let response = app.handle(
+        "POST",
+        "/_fluxheim/self-heal/report",
+        Some("health=ok"),
+        &auth_headers(),
+    );
+
+    assert_eq!(response.status, StatusCode::BAD_REQUEST);
+    assert!(
+        String::from_utf8(response.body)
+            .unwrap()
+            .contains("no previous known-good snapshot")
+    );
+    let state = app.runtime_state();
+    assert_eq!(state.runtime_snapshot, Some(candidate.id.clone()));
+    assert_eq!(state.known_good_snapshot, None);
+    let pending = state
+        .pending_validation
+        .expect("rollback remains retryable");
+    assert_eq!(pending.target_snapshot, candidate.id);
+    assert_eq!(pending.successful_checks, 0);
+    assert_eq!(pending.rollback_attempts, 1);
+    assert!(pending.last_rollback_failure.is_some());
+}
+
+#[test]
 fn reload_endpoint_rejects_process_upgrade_config() {
     let app = app();
     let new_config = Config {

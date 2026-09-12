@@ -62,6 +62,9 @@ behavior when the change improves security or project direction.
   and reject elevated release-runner sessions.
 - Require admin authentication before an HTTP request can trigger an expired
   self-healing rollback or observe its resulting status.
+- Keep failed expired-validation rollbacks terminal for the authenticated admin
+  request, preventing confirmation or health reports from clearing retryable
+  recovery state after rollback failure.
 - Create private Windows directories through a retained parent handle with
   no-reparse semantics and an atomic protected ACL, closing the remaining
   junction-swap race in recursive private-directory creation.
