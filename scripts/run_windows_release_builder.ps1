@@ -307,8 +307,13 @@ foreach ($command in $requiredCommands) {
 $runId = [Guid]::NewGuid().ToString('N')
 $runRoot = Join-Path $WorkspaceRoot "runs\$runId"
 $sourceRoot = Join-Path $runRoot 'source'
+$tempRoot = Join-Path $runRoot 'temp'
 $outputRoot = Join-Path $WorkspaceRoot "output\$Version\$Architecture"
-New-Item -ItemType Directory -Force -Path $runRoot | Out-Null
+$previousTemp = $env:TEMP
+$previousTmp = $env:TMP
+New-Item -ItemType Directory -Force -Path $runRoot, $tempRoot | Out-Null
+$env:TEMP = $tempRoot
+$env:TMP = $tempRoot
 
 try {
     & git.exe clone --no-checkout --filter=blob:none $RepositoryUrl $sourceRoot
@@ -461,6 +466,8 @@ try {
 
     Write-Host "Windows release evidence written to $outputRoot"
 } finally {
+    $env:TEMP = $previousTemp
+    $env:TMP = $previousTmp
     Set-Location ($env:SystemDrive + '\')
     if (Test-Path -LiteralPath $runRoot) {
         Remove-Item -LiteralPath $runRoot -Recurse -Force

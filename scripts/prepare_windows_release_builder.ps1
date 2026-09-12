@@ -47,6 +47,14 @@ $administrators = Get-LocalGroupMember -Group 'Administrators' -ErrorAction Stop
 if ($administrators.Name -contains "$env:COMPUTERNAME\$BuildUser") {
     throw 'release build account must not be a local administrator'
 }
+$openSshUsersSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-585')
+$openSshUsers = Get-LocalGroup -SID $openSshUsersSid -ErrorAction Stop
+$openSshMembers = Get-LocalGroupMember -Group $openSshUsers.Name -ErrorAction Stop
+if ($openSshMembers.SID.Value -notcontains $localUser.SID.Value) {
+    if ($PSCmdlet.ShouldProcess($BuildUser, "Add to $($openSshUsers.Name)")) {
+        Add-LocalGroupMember -Group $openSshUsers.Name -Member $localUser
+    }
+}
 
 $authorizedKey = (Get-Content -LiteralPath $AuthorizedKeyFile -Raw).Trim()
 if ($authorizedKey -notmatch '^ssh-(ed25519|rsa|ecdsa-[^ ]+) [A-Za-z0-9+/=]+(?: .*)?$' -or $authorizedKey.Contains("`n")) {
@@ -130,7 +138,11 @@ if ($PSCmdlet.ShouldProcess($sshdConfig, 'Restrict release-builder SSH authentic
     Set-Content -LiteralPath $sshdConfig -Value $config -Encoding ascii
     & "$env:WINDIR\System32\OpenSSH\sshd.exe" -t
     if ($LASTEXITCODE -ne 0) { throw 'OpenSSH configuration validation failed' }
-    $effectiveSshd = (& "$env:WINDIR\System32\OpenSSH\sshd.exe" -T -C "user=$BuildUser,host=localhost,addr=127.0.0.1") -join "`n"
+    # A newly created local account has no Windows profile until its first
+    # successful logon. OpenSSH 9.5 cannot expand -T policy for that account,
+    # so validate the global policy through the established administrator.
+    $effectiveValidationUser = $env:USERNAME.ToLowerInvariant()
+    $effectiveSshd = (& "$env:WINDIR\System32\OpenSSH\sshd.exe" -T -C "user=$effectiveValidationUser,host=localhost,addr=127.0.0.1") -join "`n"
     if ($LASTEXITCODE -ne 0) { throw 'OpenSSH effective configuration validation failed' }
     foreach ($required in @(
         'passwordauthentication no',

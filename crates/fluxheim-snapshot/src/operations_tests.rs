@@ -120,8 +120,7 @@ fn snapshots_record_explicit_parent_and_generation() {
 fn authenticated_snapshot_rejects_modified_config() {
     let dir = TestDir::new("snapshot-integrity");
     let key = dir.child("snapshot.key");
-    std::fs::write(&key, [7u8; 32]).unwrap();
-    set_private_test_file(&key);
+    write_private_test_file(&key, &[7u8; 32]);
     let store = SnapshotStore::with_integrity_key_file(
         dir.child("store"),
         &key,
@@ -302,8 +301,7 @@ fn invalid_unicode_snapshot_filename_is_escaped_in_reports() {
     let store = SnapshotStore::new(dir.path());
     store.snapshot_config(&Config::default(), None).unwrap();
     let invalid_name = store.root().join("configs").join("forged-☃.toml");
-    std::fs::write(&invalid_name, b"").unwrap();
-    set_private_test_file(&invalid_name);
+    write_private_test_file(&invalid_name, b"");
 
     let entries = store.list_entries().unwrap();
     let invalid = entries
@@ -567,12 +565,26 @@ impl Drop for TestDir {
     }
 }
 
+#[cfg(unix)]
 fn set_private_test_file(path: &std::path::Path) {
-    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt as _;
+
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+}
+
+fn write_private_test_file(path: &std::path::Path, contents: &[u8]) {
+    #[cfg(windows)]
     {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        use std::io::Write as _;
+
+        let mut file = fluxheim_config::fs_trust::create_confidential_file(path).unwrap();
+        file.write_all(contents).unwrap();
+        file.sync_all().unwrap();
     }
-    #[cfg(not(unix))]
-    let _ = path;
+    #[cfg(not(windows))]
+    {
+        std::fs::write(path, contents).unwrap();
+        #[cfg(unix)]
+        set_private_test_file(path);
+    }
 }

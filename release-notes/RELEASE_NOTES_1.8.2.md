@@ -41,6 +41,13 @@ native build and test infrastructure is available.
 - Make dedicated builder SSH provisioning global and account-scoped even when
   the vendor configuration ends in a `Match` block, and reject non-SSH, mixed,
   or duplicate tag signature formats before allowed-signers verification.
+- Bootstrap disposable Windows Server 2025 Desktop Experience builders from a
+  trusted Linux release host, install the required native toolchain, transition
+  to a dedicated non-administrator SSH account, and verify Administrator SSH
+  is no longer accepted.
+- Run the verified-upstream-TLS smoke against a second native Fluxheim/Rustls
+  process so it remains reliable under public-key-only OpenSSH sessions without
+  granting access to the machine-wide Windows private-key store.
 - Flush the load-balancer state file and containing directory after atomic
   replacement on Windows.
 - Roll back newly created Windows files after a retained-parent ACL rejection
@@ -56,6 +63,7 @@ native build and test infrastructure is available.
   provides an official PHP repository and matching PHP-FPM stack, while the
   pinned SL Micro base does not. Other SUSE Micro profiles remain supported,
   and Windows PHP continues to use external TCP FastCGI as documented.
+- Replace the yanked transitive `wnaf 0.14.0` dependency with `0.14.1`.
 
 ## Remaining Release Blocks
 

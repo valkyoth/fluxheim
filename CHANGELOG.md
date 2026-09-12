@@ -16,6 +16,9 @@ behavior when the change improves security or project direction.
   sustainable native build and test infrastructure is available.
 - Add PowerShell-native Windows archive tooling and fail-closed release-builder
   preparation for dedicated Azure or operator-managed build hosts.
+- Add a Linux-side bootstrap that provisions the Windows build toolchain,
+  creates a dedicated non-administrator account, installs its SSH trust and
+  signed-tag policy, and verifies that Administrator SSH is disabled.
 - Add a native Windows x86_64 CI gate covering the complete workspace, all
   seven public profiles, live static and proxy traffic, downstream and verified
   upstream TLS, memory and persistent storage-bin cache, load balancing, admin,
@@ -29,8 +32,10 @@ behavior when the change improves security or project direction.
   build hashes before the Linux release aggregator accepts it.
 - Use Windows-native owner and ACL validation, reparse-point rejection,
   exclusive storage leases, atomic file replacement, portable path handling,
-  and Schannel-compatible ephemeral test credentials instead of weakening the
-  existing filesystem and TLS trust boundaries.
+  and a native Fluxheim/Rustls HTTPS test origin instead of weakening the
+  existing filesystem and TLS trust boundaries or depending on Schannel key
+  persistence under a noninteractive SSH token.
+- Update the yanked transitive `wnaf 0.14.0` package to `0.14.1`.
 
 ### Security
 

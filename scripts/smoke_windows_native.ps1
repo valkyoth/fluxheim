@@ -131,14 +131,16 @@ function New-WindowsSmokeCertificate {
 }
 
 function New-WindowsSmokeUpstreamCertificate {
-    param([Parameter(Mandatory = $true)][string]$CertificateAuthorityPath)
+    param(
+        [Parameter(Mandatory = $true)][string]$CertificateAuthorityPath,
+        [Parameter(Mandatory = $true)][string]$CertificatePath,
+        [Parameter(Mandatory = $true)][string]$PrivateKeyPath
+    )
 
     $caKey = [Security.Cryptography.RSA]::Create(2048)
     $originKey = [Security.Cryptography.RSA]::Create(2048)
     $caCertificate = $null
     $issuedCertificate = $null
-    $certificateWithKey = $null
-    $pkcs12 = $null
     try {
         $caRequest = [Security.Cryptography.X509Certificates.CertificateRequest]::new(
             'CN=Fluxheim Windows upstream smoke CA',
@@ -209,37 +211,17 @@ function New-WindowsSmokeUpstreamCertificate {
             [DateTimeOffset]::UtcNow.AddDays(1),
             $serial
         )
-        $certificateWithKey =
-            [Security.Cryptography.X509Certificates.RSACertificateExtensions]::CopyWithPrivateKey(
-            $issuedCertificate,
-            $originKey
+        [IO.File]::WriteAllText(
+            $CertificatePath,
+            (ConvertTo-Pem -Label 'CERTIFICATE' -Bytes $issuedCertificate.RawData),
+            [Text.Encoding]::ASCII
         )
-        if (-not $certificateWithKey.HasPrivateKey) {
-            throw 'Windows upstream smoke certificate has no private key'
-        }
-        $pkcs12 = $certificateWithKey.Export(
-            [Security.Cryptography.X509Certificates.X509ContentType]::Pkcs12,
-            [string]::Empty
+        [IO.File]::WriteAllText(
+            $PrivateKeyPath,
+            (ConvertTo-Pem -Label 'PRIVATE KEY' -Bytes $originKey.ExportPkcs8PrivateKey()),
+            [Text.Encoding]::ASCII
         )
-        # Schannel cannot authenticate SslStream servers with ephemeral keys.
-        # Omitting PersistKeySet lets disposal remove this generated test key.
-        $detachedCertificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
-            $pkcs12,
-            [string]::Empty,
-            [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::UserKeySet
-        )
-        if (-not $detachedCertificate.HasPrivateKey) {
-            $detachedCertificate.Dispose()
-            throw 'Windows upstream smoke certificate import lost its private key'
-        }
-        return $detachedCertificate
     } finally {
-        if ($null -ne $pkcs12) {
-            [Array]::Clear($pkcs12, 0, $pkcs12.Length)
-        }
-        if ($null -ne $certificateWithKey) {
-            $certificateWithKey.Dispose()
-        }
         if ($null -ne $issuedCertificate) {
             $issuedCertificate.Dispose()
         }
@@ -288,14 +270,9 @@ function Invoke-FluxheimRequest {
 
 Add-Type -TypeDefinition @'
 using System;
-using System.Collections.Generic;
-using System.ComponentModel;
 using System.IO;
 using System.Net;
-using System.Net.Security;
 using System.Net.Sockets;
-using System.Security.Authentication;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -304,26 +281,13 @@ public sealed class FluxheimWindowsSmokeOrigin : IDisposable
 {
     private readonly TcpListener listener;
     private readonly string label;
-    private readonly X509Certificate2 certificate;
     private readonly CancellationTokenSource cancellation = new CancellationTokenSource();
     private Task acceptLoop;
-    private string lastError;
-
-    public string LastError
-    {
-        get { return Volatile.Read(ref this.lastError); }
-    }
 
     public FluxheimWindowsSmokeOrigin(int port, string label)
-        : this(port, label, null)
-    {
-    }
-
-    public FluxheimWindowsSmokeOrigin(int port, string label, X509Certificate2 certificate)
     {
         this.listener = new TcpListener(IPAddress.Loopback, port);
         this.label = label;
-        this.certificate = certificate;
     }
 
     public void Start()
@@ -354,25 +318,9 @@ public sealed class FluxheimWindowsSmokeOrigin : IDisposable
                 }
                 catch (Exception error)
                 {
-                    StringBuilder diagnostic = new StringBuilder();
-                    for (Exception current = error; current != null; current = current.InnerException)
-                    {
-                        if (diagnostic.Length != 0)
-                        {
-                            diagnostic.Append(" -> ");
-                        }
-                        diagnostic.Append(current.GetType().FullName);
-                        diagnostic.Append(" (0x");
-                        diagnostic.Append(current.HResult.ToString("X8"));
-                        diagnostic.Append(')');
-                        Win32Exception win32 = current as Win32Exception;
-                        if (win32 != null)
-                        {
-                            diagnostic.Append(" native=0x");
-                            diagnostic.Append(win32.NativeErrorCode.ToString("X8"));
-                        }
-                    }
-                    Interlocked.Exchange(ref this.lastError, diagnostic.ToString());
+                    Console.Error.WriteLine(
+                        "Windows HTTP smoke origin failed: " + error.GetType().FullName
+                    );
                 }
             });
         }
@@ -383,68 +331,38 @@ public sealed class FluxheimWindowsSmokeOrigin : IDisposable
         using (client)
         using (NetworkStream networkStream = client.GetStream())
         {
-            Stream stream = networkStream;
-            SslStream tlsStream = null;
-            if (this.certificate != null)
-            {
-                tlsStream = new SslStream(networkStream, false);
-                SslServerAuthenticationOptions options = new SslServerAuthenticationOptions
-                {
-                    ServerCertificate = this.certificate,
-                    ClientCertificateRequired = false,
-                    EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
-                    CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
-                    ApplicationProtocols = new List<SslApplicationProtocol>
-                    {
-                        SslApplicationProtocol.Http11,
-                    },
-                };
-                await tlsStream.AuthenticateAsServerAsync(options, CancellationToken.None)
-                    .ConfigureAwait(false);
-                stream = tlsStream;
-            }
-
             byte[] request = new byte[16384];
             int used = 0;
-            try
+            while (used < request.Length)
             {
-                while (used < request.Length)
+                int read = await networkStream.ReadAsync(request, used, request.Length - used)
+                    .ConfigureAwait(false);
+                if (read == 0)
                 {
-                    int read = await stream.ReadAsync(request, used, request.Length - used)
-                        .ConfigureAwait(false);
-                    if (read == 0)
-                    {
-                        return;
-                    }
-                    used += read;
-                    if (used >= 4 && request[used - 4] == 13 && request[used - 3] == 10 &&
-                        request[used - 2] == 13 && request[used - 1] == 10)
-                    {
-                        break;
-                    }
+                    return;
                 }
+                used += read;
+                if (used >= 4 && request[used - 4] == 13 && request[used - 3] == 10 &&
+                    request[used - 2] == 13 && request[used - 1] == 10)
+                {
+                    break;
+                }
+            }
 
-                string firstLine = Encoding.ASCII.GetString(request, 0, used).Split('\n')[0].Trim();
-                string[] fields = firstLine.Split(' ');
-                string target = fields.Length >= 2 ? fields[1] : "/";
-                byte[] body = Encoding.ASCII.GetBytes(this.label + " path=" + target + "\n");
-                string headers = "HTTP/1.1 200 OK\r\n" +
-                    "Content-Type: text/plain; charset=ascii\r\n" +
-                    "Cache-Control: public, max-age=120\r\n" +
-                    "Content-Length: " + body.Length + "\r\n" +
-                    "X-Origin: " + this.label + "\r\n" +
-                    "Connection: close\r\n\r\n";
-                byte[] encodedHeaders = Encoding.ASCII.GetBytes(headers);
-                await stream.WriteAsync(encodedHeaders, 0, encodedHeaders.Length).ConfigureAwait(false);
-                await stream.WriteAsync(body, 0, body.Length).ConfigureAwait(false);
-            }
-            finally
-            {
-                if (tlsStream != null)
-                {
-                    tlsStream.Dispose();
-                }
-            }
+            string firstLine = Encoding.ASCII.GetString(request, 0, used).Split('\n')[0].Trim();
+            string[] fields = firstLine.Split(' ');
+            string target = fields.Length >= 2 ? fields[1] : "/";
+            byte[] body = Encoding.ASCII.GetBytes(this.label + " path=" + target + "\n");
+            string headers = "HTTP/1.1 200 OK\r\n" +
+                "Content-Type: text/plain; charset=ascii\r\n" +
+                "Cache-Control: public, max-age=120\r\n" +
+                "Content-Length: " + body.Length + "\r\n" +
+                "X-Origin: " + this.label + "\r\n" +
+                "Connection: close\r\n\r\n";
+            byte[] encodedHeaders = Encoding.ASCII.GetBytes(headers);
+            await networkStream.WriteAsync(encodedHeaders, 0, encodedHeaders.Length)
+                .ConfigureAwait(false);
+            await networkStream.WriteAsync(body, 0, body.Length).ConfigureAwait(false);
         }
     }
 
@@ -478,13 +396,20 @@ $cacheRoot = Join-Path $testRoot 'cache'
 $runtimeRoot = Join-Path $testRoot 'run'
 $snapshotRoot = Join-Path $testRoot 'snapshots'
 $tlsRoot = Join-Path $testRoot 'tls'
+$originTlsPublicRoot = Join-Path $testRoot 'origin-tls-public'
+$originTlsRuntimeRoot = Join-Path $runtimeRoot 'origin-tls'
 $certificatePath = Join-Path $tlsRoot 'certificate.pem'
 $privateKeyPath = Join-Path $tlsRoot 'private-key.pem'
 $upstreamCaPath = Join-Path $tlsRoot 'upstream-ca.pem'
+$originTlsCertificatePath = Join-Path $tlsRoot 'upstream-certificate.pem'
+$originTlsPrivateKeyPath = Join-Path $tlsRoot 'upstream-private-key.pem'
 $snapshotIntegrityKeyPath = Join-Path $testRoot 'snapshot-integrity.key'
 $configPath = Join-Path $testRoot 'fluxheim.toml'
+$originTlsConfigPath = Join-Path $testRoot 'origin-tls.toml'
 $stdoutPath = Join-Path $testRoot 'fluxheim.stdout.log'
 $stderrPath = Join-Path $testRoot 'fluxheim.stderr.log'
+$originTlsStdoutPath = Join-Path $testRoot 'origin-tls.stdout.log'
+$originTlsStderrPath = Join-Path $testRoot 'origin-tls.stderr.log'
 $restartStdoutPath = Join-Path $testRoot 'fluxheim-restart.stdout.log'
 $restartStderrPath = Join-Path $testRoot 'fluxheim-restart.stderr.log'
 $consoleHelperPath = Join-Path $root 'scripts\windows_console_signal_helper.ps1'
@@ -494,18 +419,20 @@ $gracefulHarness = $null
 $gracefulProcessId = $null
 $originOne = $null
 $originTwo = $null
-$originTls = $null
-$originTlsCertificate = $null
+$originTlsProcess = $null
 $previousAdminToken = $env:FLUXHEIM_WINDOWS_SMOKE_ADMIN_TOKEN
 $succeeded = $false
 
 New-Item -ItemType Directory -Force `
-    -Path $publicRoot, $cacheRoot, $runtimeRoot, $snapshotRoot, $tlsRoot | Out-Null
+    -Path $publicRoot, $cacheRoot, $runtimeRoot, $snapshotRoot, $tlsRoot, `
+        $originTlsPublicRoot, $originTlsRuntimeRoot | Out-Null
 Set-Content -LiteralPath (Join-Path $publicRoot 'index.html') `
     -Value '<!doctype html><title>Fluxheim Windows smoke</title><h1>windows-static-ok</h1>' `
     -Encoding ascii
 Set-Content -LiteralPath (Join-Path $publicRoot 'asset.webp') `
     -Value 'windows-cache-ok' -Encoding ascii
+Set-Content -LiteralPath (Join-Path $originTlsPublicRoot 'windows-upstream-tls') `
+    -Value 'verified-upstream-tls path=/windows-upstream-tls' -Encoding ascii
 $snapshotIntegrityKey = [byte[]]::new(32)
 $snapshotIntegrityRng = [Security.Cryptography.RandomNumberGenerator]::Create()
 try {
@@ -518,8 +445,10 @@ try {
 New-WindowsSmokeCertificate `
     -CertificatePath $certificatePath `
     -PrivateKeyPath $privateKeyPath
-$originTlsCertificate = New-WindowsSmokeUpstreamCertificate `
-    -CertificateAuthorityPath $upstreamCaPath
+New-WindowsSmokeUpstreamCertificate `
+    -CertificateAuthorityPath $upstreamCaPath `
+    -CertificatePath $originTlsCertificatePath `
+    -PrivateKeyPath $originTlsPrivateKeyPath
 
 $port = Get-FreeTcpPort
 $tlsPort = Get-FreeTcpPort
@@ -527,6 +456,7 @@ $adminPort = Get-FreeTcpPort
 $metricsPort = Get-FreeTcpPort
 $originOnePort = Get-FreeTcpPort
 $originTwoPort = Get-FreeTcpPort
+$originTlsHttpPort = Get-FreeTcpPort
 $originTlsPort = Get-FreeTcpPort
 $publicToml = ConvertTo-TomlPath $publicRoot
 $cacheToml = ConvertTo-TomlPath $cacheRoot
@@ -536,6 +466,55 @@ $snapshotIntegrityKeyToml = ConvertTo-TomlPath $snapshotIntegrityKeyPath
 $certificateToml = ConvertTo-TomlPath $certificatePath
 $privateKeyToml = ConvertTo-TomlPath $privateKeyPath
 $upstreamCaToml = ConvertTo-TomlPath $upstreamCaPath
+$originTlsPublicToml = ConvertTo-TomlPath $originTlsPublicRoot
+$originTlsRuntimeToml = ConvertTo-TomlPath $originTlsRuntimeRoot
+$originTlsCertificateToml = ConvertTo-TomlPath $originTlsCertificatePath
+$originTlsPrivateKeyToml = ConvertTo-TomlPath $originTlsPrivateKeyPath
+$originTlsConfig = @"
+[server]
+listen = ["127.0.0.1:$originTlsHttpPort"]
+tls_listen = ["127.0.0.1:$originTlsPort"]
+default_vhost = "origin.windows.test"
+trusted_proxies = []
+
+[server.process]
+pid_file = "$originTlsRuntimeToml/fluxheim.pid"
+upgrade_sock = "$originTlsRuntimeToml/fluxheim-upgrade.sock"
+certificate_reload_sock = "$originTlsRuntimeToml/fluxheim-cert-reload.sock"
+max_retries = 1
+
+[logging]
+level = "warn"
+format = "text"
+
+[logging.access]
+enabled = false
+request_id = false
+
+[tls]
+enabled = true
+backend = "rustls"
+
+[[tls.certificates]]
+cert_path = "$originTlsCertificateToml"
+key_path = "$originTlsPrivateKeyToml"
+
+[[vhosts]]
+name = "origin.windows.test"
+hosts = ["origin.windows.test"]
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "$originTlsCertificateToml"
+key_path = "$originTlsPrivateKeyToml"
+
+[vhosts.web]
+root = "$originTlsPublicToml"
+deny_dotfiles = true
+"@
+Set-Content -LiteralPath $originTlsConfigPath -Value $originTlsConfig -Encoding utf8
 $config = @"
 [server]
 listen = ["127.0.0.1:$port"]
@@ -705,14 +684,61 @@ Set-Content -LiteralPath $configPath -Value $config -Encoding utf8
 try {
     $originOne = [FluxheimWindowsSmokeOrigin]::new($originOnePort, 'origin-one')
     $originTwo = [FluxheimWindowsSmokeOrigin]::new($originTwoPort, 'origin-two')
-    $originTls = [FluxheimWindowsSmokeOrigin]::new(
-        $originTlsPort,
-        'verified-upstream-tls',
-        $originTlsCertificate
-    )
     $originOne.Start()
     $originTwo.Start()
-    $originTls.Start()
+
+    & $binary --config $originTlsConfigPath --validate-config
+    if ($LASTEXITCODE -ne 0) {
+        throw 'native Windows Rustls origin configuration validation failed'
+    }
+    $originTlsProcess = Start-Process -FilePath $binary `
+        -ArgumentList @('--config', $originTlsConfigPath) `
+        -RedirectStandardOutput $originTlsStdoutPath `
+        -RedirectStandardError $originTlsStderrPath `
+        -PassThru
+
+    $originTlsHandler = [Net.Http.HttpClientHandler]::new()
+    $originTlsHandler.ServerCertificateCustomValidationCallback =
+        [Net.Http.HttpClientHandler]::DangerousAcceptAnyServerCertificateValidator
+    $originTlsClient = [Net.Http.HttpClient]::new($originTlsHandler)
+    $originTlsClient.Timeout = [TimeSpan]::FromSeconds(2)
+    try {
+        $originTlsUri = [Uri]"https://127.0.0.1:$originTlsPort/windows-upstream-tls"
+        $originTlsResponse = $null
+        for ($attempt = 0; $attempt -lt 100; $attempt++) {
+            if ($originTlsProcess.HasExited) {
+                throw "Windows Rustls origin exited before readiness with code $($originTlsProcess.ExitCode)"
+            }
+            try {
+                $originTlsResponse = Invoke-FluxheimRequest -Client $originTlsClient `
+                    -Uri $originTlsUri -HostHeader 'origin.windows.test'
+                if ([int]$originTlsResponse.StatusCode -eq 200) {
+                    break
+                }
+                $originTlsResponse.Dispose()
+                $originTlsResponse = $null
+            } catch {
+                Start-Sleep -Milliseconds 100
+            }
+        }
+        if ($null -eq $originTlsResponse) {
+            throw "timed out waiting for native Windows Rustls origin at $originTlsUri"
+        }
+        try {
+            $originTlsBody =
+                $originTlsResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            if (-not $originTlsBody.Contains(
+                'verified-upstream-tls path=/windows-upstream-tls'
+            )) {
+                throw 'native Windows Rustls origin response body mismatch'
+            }
+        } finally {
+            $originTlsResponse.Dispose()
+        }
+    } finally {
+        $originTlsClient.Dispose()
+        $originTlsHandler.Dispose()
+    }
 
     # Test-only credential for an isolated loopback listener; never reuse it in deployment.
     $env:FLUXHEIM_WINDOWS_SMOKE_ADMIN_TOKEN = 'windows-admin-smoke-token'
@@ -904,7 +930,13 @@ try {
                 )) {
                 $upstreamTlsStatus = [int]$upstreamTlsResponse.StatusCode
                 $upstreamTlsBodyLength = [Text.Encoding]::UTF8.GetByteCount($upstreamTlsBody)
-                $upstreamTlsOriginError = $originTls.LastError
+                $upstreamTlsOriginError = if (
+                    Test-Path -LiteralPath $originTlsStderrPath -PathType Leaf
+                ) {
+                    Get-Content -LiteralPath $originTlsStderrPath -Raw
+                } else {
+                    '<no Rustls origin error log>'
+                }
                 throw "native Windows verified upstream TLS response mismatch: status=$upstreamTlsStatus body_bytes=$upstreamTlsBodyLength origin_error=$upstreamTlsOriginError"
             }
         } finally {
@@ -1220,6 +1252,9 @@ try {
     if (Test-Path -LiteralPath $restartStderrPath -PathType Leaf) {
         [Console]::Error.WriteLine((Get-Content -LiteralPath $restartStderrPath -Raw))
     }
+    if (Test-Path -LiteralPath $originTlsStderrPath -PathType Leaf) {
+        [Console]::Error.WriteLine((Get-Content -LiteralPath $originTlsStderrPath -Raw))
+    }
     throw
 } finally {
     if ($null -ne $process -and -not $process.HasExited) {
@@ -1236,6 +1271,10 @@ try {
     if ($null -ne $gracefulProcessId) {
         Stop-Process -Id $gracefulProcessId -Force -ErrorAction SilentlyContinue
     }
+    if ($null -ne $originTlsProcess -and -not $originTlsProcess.HasExited) {
+        Stop-Process -Id $originTlsProcess.Id -Force -ErrorAction SilentlyContinue
+        [void]$originTlsProcess.WaitForExit(5000)
+    }
     if ($null -eq $previousAdminToken) {
         Remove-Item Env:FLUXHEIM_WINDOWS_SMOKE_ADMIN_TOKEN -ErrorAction SilentlyContinue
     } else {
@@ -1246,12 +1285,6 @@ try {
     }
     if ($null -ne $originTwo) {
         $originTwo.Dispose()
-    }
-    if ($null -ne $originTls) {
-        $originTls.Dispose()
-    }
-    if ($null -ne $originTlsCertificate) {
-        $originTlsCertificate.Dispose()
     }
     if ($succeeded -and $env:FLUXHEIM_SMOKE_KEEP_LOGS -ne '1') {
         Remove-Item -LiteralPath $testRoot -Recurse -Force

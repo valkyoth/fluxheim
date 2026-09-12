@@ -30,7 +30,30 @@ rebuilding the host trust boundary for every release.
 
 ## One-Time Preparation
 
-Open an elevated Windows PowerShell session and run:
+For a disposable Windows Server 2025 Desktop Experience host, first start
+`sshd` and authorize the release machine's key for the initial Administrator
+connection. Then run this from the trusted Linux release machine:
+
+```bash
+scripts/bootstrap_windows_release_builder.sh \
+  WINDOWS_HOST ~/.ssh/windows-release-key PUBLIC_IP/32
+```
+
+The arguments are prompted for when omitted. The bootstrap verifies native
+x86_64 Windows, derives the SSH public key, creates an allowed-signers policy
+from the repository's configured Git SSH signing key, installs PowerShell 7,
+Git, Python, CMake, the MSVC C++ workload, and pinned Rustup, creates the
+non-administrator `fluxheim-build` account, and applies the hardened workspace,
+SSH, and firewall policy below. The initial Administrator SSH access is removed
+when that policy takes effect. Verify the SSH host-key fingerprint out of band
+before treating a newly created builder as trusted.
+
+The bootstrap uses `winget` and therefore expects Windows Server 2025 Desktop
+Experience rather than Server Core. It downloads Rustup 1.29.1 from the
+official Rust static archive and verifies the pinned SHA-256 before execution.
+
+To perform the policy step directly instead, open an elevated Windows
+PowerShell session and run:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass

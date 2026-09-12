@@ -30,6 +30,8 @@ const WASM_PLUGIN_O_NOFOLLOW: i32 = 0o400000;
 const WASM_PLUGIN_O_NOFOLLOW: i32 = 0x0100;
 #[cfg(windows)]
 const WASM_PLUGIN_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+#[cfg(windows)]
+const WASM_PLUGIN_FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
 #[cfg(all(
     unix,
     not(any(
@@ -170,7 +172,7 @@ fn open_plugin_file(
         path: requested.to_path_buf(),
         source,
     })?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
+    if metadata_is_link(&metadata) || !metadata.is_file() {
         return Err(WasmPluginError::UnsafePath {
             path: requested.to_path_buf(),
             message: "plugin handle must be a regular file",
@@ -212,7 +214,7 @@ fn validated_plugin_path(
             path: root.clone(),
             source,
         })?;
-        if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        if metadata_is_link(&root_metadata) || !root_metadata.is_dir() {
             return Err(WasmPluginError::UnsafePath {
                 path: root.clone(),
                 message: "approved root must be a real directory",
@@ -257,7 +259,7 @@ fn reject_symlink_components(path: &Path) -> Result<(), WasmPluginError> {
             path: current.clone(),
             source,
         })?;
-        if metadata.file_type().is_symlink() {
+        if metadata_is_link(&metadata) {
             return Err(WasmPluginError::UnsafePath {
                 path: current,
                 message: "path contains a symlink",
@@ -265,6 +267,19 @@ fn reject_symlink_components(path: &Path) -> Result<(), WasmPluginError> {
         }
     }
     Ok(())
+}
+
+fn metadata_is_link(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+
+        metadata.file_attributes() & WASM_PLUGIN_FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.file_type().is_symlink()
+    }
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -323,13 +338,23 @@ mod tests {
     #[test]
     fn plugin_loader_rejects_symlinked_plugin() {
         let directory = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
         let real = directory.path().join("real.wasm");
+        #[cfg(unix)]
         let link = directory.path().join("link.wasm");
+        #[cfg(unix)]
         fs::write(&real, b"\0asm\x01\0\0\0").unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink(&real, &link).unwrap();
         #[cfg(windows)]
-        std::os::windows::fs::symlink_file(&real, &link).unwrap();
+        let link = {
+            let real_root = directory.path().join("real");
+            let junction = directory.path().join("link");
+            fs::create_dir(&real_root).unwrap();
+            fs::write(real_root.join("plugin.wasm"), b"\0asm\x01\0\0\0").unwrap();
+            create_directory_junction(&junction, &real_root);
+            junction.join("plugin.wasm")
+        };
 
         let error = load_plugin_file(
             &link,
@@ -337,6 +362,8 @@ mod tests {
             WasmSandboxLimits::default(),
         )
         .unwrap_err();
+        #[cfg(windows)]
+        fs::remove_dir(link.parent().unwrap()).unwrap();
 
         assert!(matches!(error, WasmPluginError::UnsafePath { .. }));
     }
@@ -352,12 +379,30 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(&real_root, &root_link).unwrap();
         #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&real_root, &root_link).unwrap();
+        create_directory_junction(&root_link, &real_root);
 
-        let error =
-            load_plugin_file(&plugin, &[root_link], WasmSandboxLimits::default()).unwrap_err();
+        let error = load_plugin_file(
+            &plugin,
+            std::slice::from_ref(&root_link),
+            WasmSandboxLimits::default(),
+        )
+        .unwrap_err();
+        #[cfg(windows)]
+        fs::remove_dir(&root_link).unwrap();
 
         assert!(matches!(error, WasmPluginError::UnsafePath { .. }));
+    }
+
+    #[cfg(windows)]
+    fn create_directory_junction(link: &Path, target: &Path) {
+        let status = std::process::Command::new("cmd.exe")
+            .args(["/D", "/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "failed to create test directory junction");
     }
 
     #[test]

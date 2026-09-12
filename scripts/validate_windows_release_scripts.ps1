@@ -6,6 +6,7 @@ Set-StrictMode -Version Latest
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $scripts = @(
+    'scripts/install_windows_release_builder_tools.ps1',
     'scripts/build_release_assets.ps1',
     'scripts/prepare_windows_release_builder.ps1',
     'scripts/run_windows_release_builder.ps1',
@@ -97,14 +98,15 @@ foreach ($required in @(
     'Windows CTRL_BREAK graceful shutdown failed',
     'New-WindowsSmokeCertificate',
     'New-WindowsSmokeUpstreamCertificate',
-    '[Security.Cryptography.X509Certificates.RSACertificateExtensions]::CopyWithPrivateKey(',
-    '[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::UserKeySet',
-    '[Array]::Clear($pkcs12, 0, $pkcs12.Length)',
-    'public string LastError',
-    'Interlocked.Exchange(ref this.lastError, diagnostic.ToString())',
-    'win32.NativeErrorCode.ToString("X8")',
-    'SslServerAuthenticationOptions options',
-    'SslApplicationProtocol.Http11',
+    '-CertificatePath $originTlsCertificatePath',
+    '-PrivateKeyPath $originTlsPrivateKeyPath',
+    '$originKey.ExportPkcs8PrivateKey()',
+    '$originTlsConfigPath',
+    '$originTlsProcess = Start-Process',
+    'native Windows Rustls origin configuration validation failed',
+    'timed out waiting for native Windows Rustls origin',
+    'native Windows Rustls origin response body mismatch',
+    'Test-Path -LiteralPath $originTlsStderrPath -PathType Leaf',
     'origin_error=$upstreamTlsOriginError',
     'tls_listen',
     'https://127.0.0.1:',
@@ -137,16 +139,16 @@ foreach ($required in @(
         throw "Windows native smoke is missing required behavior: $required"
     }
 }
-if ($smoke.Contains('$issuedCertificate.CopyWithPrivateKey(')) {
-    throw 'Windows native smoke must invoke the RSA certificate extension explicitly'
+foreach ($forbidden in @(
+    'X509ContentType]::Pkcs12',
+    'X509KeyStorageFlags]::UserKeySet',
+    'SslServerAuthenticationOptions',
+    'SslStream'
+)) {
+    if ($smoke.Contains($forbidden)) {
+        throw "Windows native smoke must not depend on SSH-token-incompatible Schannel key persistence: $forbidden"
+    }
 }
-if ($smoke.Contains('X509KeyStorageFlags]::PersistKeySet')) {
-    throw 'Windows native smoke must not persist generated TLS private keys'
-}
-if ($smoke.Contains('X509KeyStorageFlags]::EphemeralKeySet')) {
-    throw 'Windows native smoke must not use ephemeral TLS keys that Schannel cannot authenticate'
-}
-
 $windowsTrust = @(
     Get-Content -LiteralPath `
         (Join-Path $root 'crates/fluxheim-config/src/fs_trust_windows.rs') -Raw
@@ -189,6 +191,19 @@ foreach ($required in @(
 )) {
     if (-not $windowsTrustTests.Contains($required)) {
         throw "Windows filesystem trust tests are missing required regression: $required"
+    }
+}
+
+$snapshotOperationsTests = Get-Content -LiteralPath `
+    (Join-Path $root 'crates/fluxheim-snapshot/src/operations_tests.rs') -Raw
+foreach ($required in @(
+    '#[cfg(windows)]',
+    'fluxheim_config::fs_trust::create_confidential_file(path)',
+    'file.write_all(contents)',
+    'file.sync_all()'
+)) {
+    if (-not $snapshotOperationsTests.Contains($required)) {
+        throw "Windows snapshot test fixture is missing explicit confidential ACL hardening: $required"
     }
 }
 
@@ -335,6 +350,19 @@ foreach ($required in @(
     }
 }
 
+$wasmFileBoundary = Get-Content -LiteralPath `
+    (Join-Path $root 'crates/fluxheim-wasm/src/file.rs') -Raw
+foreach ($required in @(
+    'WASM_PLUGIN_FILE_ATTRIBUTE_REPARSE_POINT',
+    'metadata.file_attributes()',
+    'create_directory_junction',
+    '.args(["/D", "/C", "mklink", "/J"])'
+)) {
+    if (-not $wasmFileBoundary.Contains($required)) {
+        throw "Windows Wasm plugin path boundary is missing reparse-point coverage: $required"
+    }
+}
+
 $archiveSmoke = Get-Content -LiteralPath `
     (Join-Path $root 'scripts/smoke_windows_archive_profiles.ps1') -Raw
 foreach ($required in @(
@@ -373,7 +401,43 @@ foreach ($required in @(
     }
 }
 
+$releaseRunner = Get-Content -LiteralPath `
+    (Join-Path $root 'scripts/run_windows_release_builder.ps1') -Raw
+foreach ($required in @(
+    "`$tempRoot = Join-Path `$runRoot 'temp'",
+    '$env:TEMP = $tempRoot',
+    '$env:TMP = $tempRoot',
+    '$env:TEMP = $previousTemp',
+    '$env:TMP = $previousTmp'
+)) {
+    if (-not $releaseRunner.Contains($required)) {
+        throw "Windows release runner is missing isolated temporary storage: $required"
+    }
+}
+
 $preparation = Get-Content -LiteralPath (Join-Path $root 'scripts/prepare_windows_release_builder.ps1') -Raw
+$toolInstaller = Get-Content -LiteralPath `
+    (Join-Path $root 'scripts/install_windows_release_builder_tools.ps1') -Raw
+foreach ($required in @(
+    "Install-WinGetPackage -Id 'Microsoft.PowerShell'",
+    "Install-WinGetPackage -Id 'Git.Git'",
+    "Install-WinGetPackage -Id 'Python.Python.3.13'",
+    "Install-WinGetPackage -Id 'Kitware.CMake'",
+    "Install-WinGetPackage -Id 'Microsoft.VisualStudio.2022.BuildTools'",
+    'Microsoft.VisualStudio.Workload.VCTools',
+    "`$rustupVersion = '1.29.1'",
+    "`$rustupSha256 = '6f4bef66261261fcb43131be8720bab817d403a09edec7455c371974b90bdb7e'",
+    '[Security.Cryptography.RandomNumberGenerator]::Create()',
+    '$random.GetBytes($passwordBytes)',
+    "[Security.Principal.SecurityIdentifier]::new('S-1-5-32-585')",
+    'Get-LocalGroup -SID $openSshUsersSid',
+    'Add-LocalGroupMember -Group $openSshUsers.Name -Member $localUser',
+    'release build account must not be a local administrator'
+)) {
+    if (-not $toolInstaller.Contains($required)) {
+        throw "Windows tool installer is missing required behavior: $required"
+    }
+}
 $sshdPolicyHelper = Get-Content -LiteralPath `
     (Join-Path $root 'scripts/windows_release_sshd_config.ps1') -Raw
 $preparationContract = $preparation + "`n" + $sshdPolicyHelper
@@ -384,6 +448,9 @@ foreach ($required in @(
     'AuthorizedKeysFile __PROGRAMDATA__/ssh/fluxheim-release/authorized_keys',
     'AllowedSourceCidr',
     'TagAllowedSignersFile',
+    "[Security.Principal.SecurityIdentifier]::new('S-1-5-32-585')",
+    'Get-LocalGroup -SID $openSshUsersSid',
+    'Add-LocalGroupMember -Group $openSshUsers.Name -Member $localUser',
     'icacls.exe',
     'sshd.exe',
     'Get-NetFirewallRule'
@@ -397,6 +464,7 @@ if (-not $preparation.Contains('Set-FluxheimReleaseBuilderSshdPolicy')) {
 }
 foreach ($required in @(
     'sshd.exe" -T -C',
+    '$effectiveValidationUser = $env:USERNAME.ToLowerInvariant()',
     'passwordauthentication no',
     'authenticationmethods publickey',
     'allowusers $BuildUser'

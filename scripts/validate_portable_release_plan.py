@@ -15,8 +15,10 @@ ROOT = Path(__file__).resolve().parents[1]
 BUILDER = ROOT / "scripts" / "build_release_assets.sh"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 WINDOWS_RELEASE_SCRIPTS = (
+    ROOT / "scripts" / "bootstrap_windows_release_builder.sh",
     ROOT / "scripts" / "build_release_assets.ps1",
     ROOT / "scripts" / "build_release_assets.sh",
+    ROOT / "scripts" / "install_windows_release_builder_tools.ps1",
     ROOT / "scripts" / "prepare_windows_release_builder.ps1",
     ROOT / "scripts" / "run_windows_release_builder.ps1",
     ROOT / "scripts" / "smoke_windows_archive_profiles.ps1",
