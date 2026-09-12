@@ -32,19 +32,26 @@ DISPOSABLE_DIR="$(cd -- "$DISPOSABLE_DIR" && pwd -P)"
 INDEPENDENT_DIR="$(cd -- "$INDEPENDENT_DIR" && pwd -P)"
 TAG="v$VERSION"
 PROFILES=(full wasm cache proxy load-balancer php config-tester)
-ARCHIVES=()
 
-for profile in "${PROFILES[@]}"; do
-    archive="$DISPOSABLE_DIR/fluxheim-$VERSION-$profile-x86_64-windows.zip"
-    [[ -f "$archive" && ! -L "$archive" ]] || {
-        echo "verified Windows archive is missing or unsafe: $archive" >&2
-        exit 1
-    }
-    ARCHIVES+=("$archive")
-done
+umask 077
+STAGE_ROOT="$(mktemp -d)"
+cleanup() {
+    chmod -R u+rwX -- "$STAGE_ROOT" 2>/dev/null || true
+    rm -rf -- "$STAGE_ROOT"
+}
+trap cleanup EXIT INT TERM
+chmod 0700 "$STAGE_ROOT"
+mkdir -m 0700 "$STAGE_ROOT/disposable" "$STAGE_ROOT/independent"
+
+cp -a -- "$DISPOSABLE_DIR/." "$STAGE_ROOT/disposable/"
+cp -a -- "$INDEPENDENT_DIR/." "$STAGE_ROOT/independent/"
+chmod -R a-w,go-rwx -- "$STAGE_ROOT"
+
+DISPOSABLE_DIR="$STAGE_ROOT/disposable"
+INDEPENDENT_DIR="$STAGE_ROOT/independent"
 
 # No GitHub release mutation is permitted before the authenticated independent
-# build gate has accepted every archive.
+# build gate has accepted the private, read-only snapshot.
 "$SCRIPT_DIR/verify_windows_release_publication.sh" \
     "$VERSION" "$COMMIT" "$RUN_ID" \
     "$DISPOSABLE_DIR" "$INDEPENDENT_DIR" "$REPOSITORY"
@@ -65,6 +72,15 @@ fi
 
 EXISTING_ASSETS="$(gh release view "$TAG" --repo "$REPOSITORY" \
     --json assets --jq '.assets[].name')"
+ARCHIVES=()
+for profile in "${PROFILES[@]}"; do
+    archive="$DISPOSABLE_DIR/fluxheim-$VERSION-$profile-x86_64-windows.zip"
+    [[ -f "$archive" && ! -L "$archive" ]] || {
+        echo "verified Windows archive is missing or unsafe: $archive" >&2
+        exit 1
+    }
+    ARCHIVES+=("$archive")
+done
 for archive in "${ARCHIVES[@]}"; do
     name="${archive##*/}"
     if grep -Fx "$name" <<<"$EXISTING_ASSETS" >/dev/null; then

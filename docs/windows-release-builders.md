@@ -162,15 +162,16 @@ scripts/publish_verified_release.sh \
   windows/disposable-builder windows/github-independent
 ```
 
-The entrypoint first runs `verify_windows_release_publication.sh`, which
-validates the repository, exact tag, commit, successful workflow run, artifact
-identity, GitHub-hosted runner provenance, signer workflow, and every archive
-digest before requiring byte-identical output. It then verifies the remote tag
-commit and mutable draft state, rejects existing archive names, and stages the
-seven disposable-builder ZIPs without `--clobber`. No repository-owned upload
-path runs before the gate succeeds. Workstation-local aggregation helpers do
-not constitute publication enforcement and must not upload Windows assets
-directly.
+The entrypoint first copies both evidence domains into a private temporary
+snapshot and removes write access. `verify_windows_release_publication.sh`
+validates that snapshot's repository, exact tag, commit, successful workflow
+run, artifact identity, GitHub-hosted runner provenance, signer workflow, and
+every archive digest before requiring byte-identical output. The entrypoint
+then verifies the remote tag commit and mutable draft state, rejects existing
+archive names, and uploads the seven verified ZIPs from that same snapshot
+without `--clobber`. Changing or replacing an input archive after verification
+cannot change the uploaded bytes. Workstation-local aggregation helpers do not
+constitute publication enforcement and must not upload Windows assets directly.
 
 The script fails when `scripts/smoke_windows_native.ps1` is absent or any
 native runtime assertion fails. This remains an intentional release block

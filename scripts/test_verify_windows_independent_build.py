@@ -101,6 +101,9 @@ class IndependentWindowsBuildTests(unittest.TestCase):
             "if [[ $1 == api && $* == *'/artifacts'* ]]; then\n"
             "  printf '123\\tfalse\\t%s\\n' \"$commit\"\n"
             "elif [[ $1 == api && $* == *'/commits/'* ]]; then\n"
+            "  if [[ -n ${GH_FAKE_MUTATE_ORIGINAL_ARCHIVE:-} ]]; then\n"
+            "    printf 'substituted-after-verification\\n' >\"$GH_FAKE_MUTATE_ORIGINAL_ARCHIVE\"\n"
+            "  fi\n"
             "  echo \"$commit\"\n"
             "elif [[ $1 == api ]]; then\n"
             "  case \"$*\" in\n"
@@ -123,6 +126,16 @@ class IndependentWindowsBuildTests(unittest.TestCase):
             "elif [[ $1 == release && $2 == view && $* == *'--json assets'* ]]; then\n"
             "  [[ -z ${GH_FAKE_EXISTING_ASSET:-} ]] || echo \"$GH_FAKE_EXISTING_ASSET\"\n"
             "elif [[ $1 == release && $2 == upload ]]; then\n"
+            "  if [[ ${GH_FAKE_VALIDATE_UPLOAD_PAYLOADS:-0} == 1 ]]; then\n"
+            "    shift 3\n"
+            "    for archive in \"$@\"; do\n"
+            "      [[ $archive != --repo ]] || break\n"
+            f"      name=${{archive##*/fluxheim-{VERSION}-}}\n"
+            "      profile=${name%-x86_64-windows.zip}\n"
+            "      [[ $(cat -- \"$archive\") == \"deterministic-$profile\" ]] || exit 9\n"
+            "      case $archive in \"${GH_FAKE_ORIGINAL_ROOT:-}/\"*) exit 10 ;; esac\n"
+            "    done\n"
+            "  fi\n"
             "  exit 0\n"
             "else\n"
             "  exit 2\n"
@@ -246,6 +259,22 @@ class IndependentWindowsBuildTests(unittest.TestCase):
         self.assertNotIn(
             f"release upload v{VERSION}", self.gh_log.read_text(encoding="ascii")
         )
+
+    def test_publisher_uploads_verified_snapshot_after_original_is_replaced(self) -> None:
+        original = self.local / f"fluxheim-{VERSION}-full-x86_64-windows.zip"
+        result = self.run_publisher(
+            GH_FAKE_MUTATE_ORIGINAL_ARCHIVE=str(original),
+            GH_FAKE_ORIGINAL_ROOT=str(self.local),
+            GH_FAKE_VALIDATE_UPLOAD_PAYLOADS="1",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(original.read_bytes(), b"substituted-after-verification\n")
+        upload = next(
+            line
+            for line in self.gh_log.read_text(encoding="ascii").splitlines()
+            if line.startswith(f"release upload v{VERSION} ")
+        )
+        self.assertNotIn(str(self.local), upload)
 
     def test_rejects_independent_archive_tampering(self) -> None:
         archive = self.independent / f"fluxheim-{VERSION}-full-x86_64-windows.zip"

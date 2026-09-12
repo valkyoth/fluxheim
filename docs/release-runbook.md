@@ -243,8 +243,9 @@ scripts/publish_verified_release.sh \
 
 Create the matching GitHub release as a draft without Windows assets first.
 The repository-owned entrypoint runs the authenticated independent-build gate,
-verifies the remote tag and draft state, and only then uploads the seven
-verified Windows ZIPs. Do not upload those ZIPs directly or use `--clobber`.
+verifies a private read-only snapshot, checks the remote tag and draft state,
+and only then uploads the seven Windows ZIPs from that same snapshot. Do not
+upload those ZIPs directly or use `--clobber`.
 
 Destroy the disposable host after the evidence and archives are collected.
 

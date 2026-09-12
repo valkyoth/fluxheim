@@ -315,10 +315,11 @@ scripts/smoke_1_0_core.sh
   and a fresh per-run Cargo home. Compare all seven archives byte-for-byte with
   the exact-commit artifact from the independent GitHub-hosted Windows builder
   through `scripts/publish_verified_release.sh`. This repository-owned
-  entrypoint must run the authenticated exact-tag GitHub/Sigstore gate before
-  it can stage Windows assets on a mutable draft release; same-host duplicate
-  builds alone are not sufficient. Do not upload or replace Windows ZIPs
-  outside this entrypoint.
+  entrypoint must copy both evidence domains into a private read-only snapshot
+  and run the authenticated exact-tag GitHub/Sigstore gate before it can stage
+  Windows assets on a mutable draft release; same-host duplicate builds alone
+  are not sufficient. Do not upload or replace Windows ZIPs outside this
+  entrypoint.
 - Human dependency review. Track the `cargo-vet` adoption path in
   [Rust Supply-Chain Security](supply-chain-security.md). Do not make `cargo-vet`
   a blocking release gate until the initial exemption set and trusted audit

@@ -66,8 +66,9 @@ behavior when the change improves security or project direction.
   stale/reused official builders, and require authenticated provenance plus
   byte-identical archives from the independent GitHub-hosted Windows build.
 - Add a repository-owned Windows release publisher that authenticates the
-  independent build before any upload, requires an exact-tag mutable draft,
-  and refuses to replace existing archive assets.
+  independent build from a private read-only artifact snapshot before any
+  upload, requires an exact-tag mutable draft, and refuses to replace existing
+  archive assets.
 - Require admin authentication before an HTTP request can trigger an expired
   self-healing rollback or observe its resulting status.
 - Keep failed expired-validation rollbacks terminal for the authenticated admin

@@ -1007,6 +1007,10 @@ if (-not (Test-Path -LiteralPath $publisherPath -PathType Leaf)) {
 }
 $publisher = Get-Content -LiteralPath $publisherPath -Raw
 foreach ($required in @(
+    'STAGE_ROOT="$(mktemp -d)"',
+    'cp -a -- "$DISPOSABLE_DIR/." "$STAGE_ROOT/disposable/"',
+    'cp -a -- "$INDEPENDENT_DIR/." "$STAGE_ROOT/independent/"',
+    'chmod -R a-w,go-rwx -- "$STAGE_ROOT"',
     'verify_windows_release_publication.sh',
     'repos/$REPOSITORY/commits/$TAG',
     '--json tagName,isDraft,isImmutable',
@@ -1018,10 +1022,13 @@ foreach ($required in @(
         throw "verified release publisher is missing required policy: $required"
     }
 }
+$snapshotIndex = $publisher.IndexOf('STAGE_ROOT="$(mktemp -d)"')
 $gateIndex = $publisher.IndexOf('verify_windows_release_publication.sh')
+$archiveIndex = $publisher.IndexOf('ARCHIVES=()')
 $uploadIndex = $publisher.IndexOf('gh release upload')
-if ($gateIndex -lt 0 -or $uploadIndex -le $gateIndex) {
-    throw 'verified release publisher can upload before the authenticated gate'
+if ($snapshotIndex -lt 0 -or $gateIndex -le $snapshotIndex -or
+    $archiveIndex -le $gateIndex -or $uploadIndex -le $archiveIndex) {
+    throw 'verified release publisher does not snapshot, authenticate, and upload in order'
 }
 
 $supportedWindowsContract = $builder + "`n" + $archiveSmoke + "`n" + $wasmSmoke +
