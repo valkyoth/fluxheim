@@ -7,49 +7,67 @@ Set-StrictMode -Version Latest
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $root
 
+function Invoke-FluxheimCargo {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    if ($Arguments.Count -eq 0) { throw 'Cargo command is missing' }
+    $cargoWorkingDirectory = if ($env:FLUXHEIM_TRUSTED_CARGO_CWD) {
+        $env:FLUXHEIM_TRUSTED_CARGO_CWD
+    } else {
+        $root
+    }
+    Push-Location $cargoWorkingDirectory
+    try {
+        & cargo.exe $Arguments[0] --manifest-path (Join-Path $root 'Cargo.toml') `
+            @($Arguments | Select-Object -Skip 1)
+    } finally {
+        Pop-Location
+    }
+}
+
 $features = 'profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp'
-& cargo.exe build --locked --no-default-features --features $features --bin fluxheim
+Invoke-FluxheimCargo -Arguments @('build', '--locked', '--no-default-features', '--features', $features, '--bin', 'fluxheim')
 if ($LASTEXITCODE -ne 0) {
     throw 'native Windows smoke binary build failed'
 }
 
-& cargo.exe test --locked -p fluxheim-acme --lib --features acme-client
+Invoke-FluxheimCargo -Arguments @('test', '--locked', '-p', 'fluxheim-acme', '--lib', '--features', 'acme-client')
 if ($LASTEXITCODE -ne 0) {
     throw 'native Windows ACME storage and lifecycle regressions failed'
 }
 
-& cargo.exe test --locked -p fluxheim-config --lib `
-    'rejects_managed_php_fpm_without_unix_process_support' -- --nocapture
+Invoke-FluxheimCargo -Arguments @('test', '--locked', '-p', 'fluxheim-config', '--lib', `
+    'rejects_managed_php_fpm_without_unix_process_support', '--', '--nocapture')
 if ($LASTEXITCODE -ne 0) {
     throw 'native Windows managed PHP-FPM config rejection regression failed'
 }
 
-& cargo.exe test --locked -p fluxheim-php-fpm --lib `
-    'managed_php_fpm_process_start_fails_closed_without_unix_support' -- --nocapture
+Invoke-FluxheimCargo -Arguments @('test', '--locked', '-p', 'fluxheim-php-fpm', '--lib', `
+    'managed_php_fpm_process_start_fails_closed_without_unix_support', '--', '--nocapture')
 if ($LASTEXITCODE -ne 0) {
     throw 'native Windows managed PHP-FPM runtime rejection regression failed'
 }
 
-& cargo.exe test --locked -p fluxheim-server --lib --features php-fpm `
-    'native_route_proxy_php_route_executes_fastcgi_responder' -- --nocapture
+Invoke-FluxheimCargo -Arguments @('test', '--locked', '-p', 'fluxheim-server', '--lib', `
+    '--features', 'php-fpm', 'native_route_proxy_php_route_executes_fastcgi_responder', '--', '--nocapture')
 if ($LASTEXITCODE -ne 0) {
     throw 'native Windows external TCP FastCGI regression failed'
 }
 
-& cargo.exe test --locked -p fluxheim-server --lib `
-    'native_http1_cache::lease_tests::storage_bin_' -- --nocapture
+Invoke-FluxheimCargo -Arguments @('test', '--locked', '-p', 'fluxheim-server', '--lib', `
+    'native_http1_cache::lease_tests::storage_bin_', '--', '--nocapture')
 if ($LASTEXITCODE -ne 0) {
     throw 'native Windows storage-bin lease regressions failed'
 }
 
-& cargo.exe test --locked -p fluxheim-cache --lib `
-    'storage_bin_fs::tests::absolute_storage_bin_root_skips_bare_windows_prefix' -- --nocapture
+Invoke-FluxheimCargo -Arguments @('test', '--locked', '-p', 'fluxheim-cache', '--lib', `
+    'storage_bin_fs::tests::absolute_storage_bin_root_skips_bare_windows_prefix', '--', '--nocapture')
 if ($LASTEXITCODE -ne 0) {
     throw 'native Windows storage-bin absolute-root regression failed'
 }
 
-& cargo.exe test --locked -p fluxheim-server --lib `
-    'absolute_native_cache_root_skips_bare_windows_prefix' -- --nocapture
+Invoke-FluxheimCargo -Arguments @('test', '--locked', '-p', 'fluxheim-server', '--lib', `
+    'absolute_native_cache_root_skips_bare_windows_prefix', '--', '--nocapture')
 if ($LASTEXITCODE -ne 0) {
     throw 'native Windows filesystem-cache absolute-root regression failed'
 }

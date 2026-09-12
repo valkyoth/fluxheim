@@ -1,7 +1,11 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [ValidatePattern('^[A-Za-z0-9_.-]+$')]
-    [string]$BuildUser = 'fluxheim-build'
+    [string]$BuildUser = 'fluxheim-build',
+
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^[0-9]+[.][0-9]+[.][0-9]+$')]
+    [string]$RustVersion
 )
 
 $ErrorActionPreference = 'Stop'
@@ -96,10 +100,23 @@ Install-WinGetPackage -Id 'Kitware.CMake' -Scope 'machine'
 Install-WinGetPackage -Id 'Microsoft.VisualStudio.2022.BuildTools' -Override `
     '--wait --quiet --norestart --nocache --installPath C:\BuildTools --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended'
 
-$rustRoot = Join-Path $env:ProgramData 'FluxheimRust'
+$programFiles = [Environment]::GetFolderPath(
+    [Environment+SpecialFolder]::ProgramFiles)
+$rustRoot = Join-Path $programFiles 'FluxheimRustTrusted'
 $rustupHome = Join-Path $rustRoot 'rustup'
 $cargoHome = Join-Path $rustRoot 'cargo'
 $cargoBin = Join-Path $cargoHome 'bin'
+$rustTarget = 'x86_64-pc-windows-msvc'
+$toolchainRoot = Join-Path $rustupHome "toolchains\$RustVersion-$rustTarget"
+$toolchainBin = Join-Path $toolchainRoot 'bin'
+$cargoWorkRoot = Join-Path $rustRoot 'cargo-work'
+$provisioningPath = Join-Path $rustRoot 'provisioning.json'
+$excludedCargoBins = @(
+    $cargoBin.TrimEnd('\'),
+    (Join-Path ([Environment]::GetFolderPath(
+        [Environment+SpecialFolder]::CommonApplicationData)) `
+        'FluxheimRust\cargo\bin').TrimEnd('\')
+)
 $rustupVersion = '1.29.1'
 $rustupSha256 = '6f4bef66261261fcb43131be8720bab817d403a09edec7455c371974b90bdb7e'
 $rustupUrl = "https://static.rust-lang.org/rustup/archive/$rustupVersion/x86_64-pc-windows-msvc/rustup-init.exe"
@@ -113,22 +130,65 @@ if ($PSCmdlet.ShouldProcess($rustupInstaller, 'Download pinned Rustup installer'
     }
 }
 
-if ($PSCmdlet.ShouldProcess($rustRoot, 'Install shared Rustup bootstrap')) {
-    New-Item -ItemType Directory -Force -Path $rustupHome, $cargoHome | Out-Null
+if (Test-Path -LiteralPath $rustRoot) {
+    throw "trusted Rust root already exists; provision a fresh disposable builder: $rustRoot"
+}
+
+if ($PSCmdlet.ShouldProcess($rustRoot, 'Install administrator-controlled Rust toolchain')) {
+    New-Item -ItemType Directory -Path $rustRoot | Out-Null
+    & icacls.exe $rustRoot /setowner 'Administrators' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'failed to set initial trusted Rust root ownership' }
+    & icacls.exe $rustRoot /inheritance:r /grant:r `
+        'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'failed to secure the initial trusted Rust root' }
+    New-Item -ItemType Directory -Path $rustupHome, $cargoHome, $cargoWorkRoot | Out-Null
     $env:RUSTUP_HOME = $rustupHome
     $env:CARGO_HOME = $cargoHome
     & $rustupInstaller -y --no-modify-path --default-toolchain none
     if ($LASTEXITCODE -ne 0) {
         throw "rustup-init failed with exit code $LASTEXITCODE"
     }
+    $rustup = Join-Path $cargoBin 'rustup.exe'
+    & $rustup toolchain install $RustVersion --profile minimal
+    if ($LASTEXITCODE -ne 0) {
+        throw "Rust toolchain installation failed: $RustVersion"
+    }
     Remove-Item Env:RUSTUP_HOME -ErrorAction SilentlyContinue
     Remove-Item Env:CARGO_HOME -ErrorAction SilentlyContinue
 
-    & icacls.exe $rustRoot /setowner 'Administrators' | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'failed to set shared Rust root owner' }
+    foreach ($required in 'cargo.exe', 'rustc.exe', 'rustdoc.exe') {
+        $requiredPath = Join-Path $toolchainBin $required
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+            throw "administrator-installed Rust toolchain is incomplete: $requiredPath"
+        }
+    }
+
+    $builderId = [Guid]::NewGuid().ToString('N')
+    $provisionedUtc = [DateTimeOffset]::UtcNow.ToString('O')
+    $rustRootPrefix = $rustRoot.TrimEnd('\') + '\'
+    $files = @(Get-ChildItem -LiteralPath $rustRoot -Recurse -File | ForEach-Object {
+        [ordered]@{
+            path = $_.FullName.Substring($rustRootPrefix.Length).Replace('\', '/')
+            sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    })
+    [ordered]@{
+        schema = 1
+        builder_mode = 'fresh-disposable'
+        builder_id = $builderId
+        provisioned_utc = $provisionedUtc
+        rust_version = $RustVersion
+        rust_target = $rustTarget
+        files = $files
+    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $provisioningPath -Encoding utf8
+
+    & icacls.exe $rustRoot /setowner 'Administrators' /T /C | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'failed to set trusted Rust root ownership' }
     & icacls.exe $rustRoot /inheritance:r /grant:r `
-        "$BuildUser`:(OI)(CI)M" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'failed to secure shared Rust root' }
+        "$BuildUser`:(OI)(CI)RX" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'failed to make the trusted Rust toolchain read-only' }
+    & icacls.exe $rustRoot /grant "$BuildUser`:RX" /T /C | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'failed to apply read-only access to every trusted Rust file' }
 
 }
 
@@ -137,7 +197,7 @@ if ($PSCmdlet.ShouldProcess('machine environment', 'Remove build-account Rust to
     [Environment]::SetEnvironmentVariable('CARGO_HOME', $null, 'Machine')
     $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     $machinePath = (($machinePath -split ';') | Where-Object {
-        -not [string]::IsNullOrWhiteSpace($_) -and $_.TrimEnd('\') -ne $cargoBin.TrimEnd('\')
+        -not [string]::IsNullOrWhiteSpace($_) -and $_.TrimEnd('\') -notin $excludedCargoBins
     }) -join ';'
     [Environment]::SetEnvironmentVariable('Path', $machinePath, 'Machine')
 }
@@ -148,7 +208,7 @@ $pathEntries = @(
     [Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';'
     [Environment]::GetEnvironmentVariable('Path', 'User') -split ';'
 ) | Where-Object {
-    -not [string]::IsNullOrWhiteSpace($_) -and $_.TrimEnd('\') -ne $cargoBin.TrimEnd('\')
+    -not [string]::IsNullOrWhiteSpace($_) -and $_.TrimEnd('\') -notin $excludedCargoBins
 }
 $env:Path = $pathEntries -join ';'
 foreach ($required in 'pwsh.exe', 'git.exe', 'python.exe', 'cmake.exe') {
@@ -156,9 +216,9 @@ foreach ($required in 'pwsh.exe', 'git.exe', 'python.exe', 'cmake.exe') {
         throw "required command is unavailable after installation: $required"
     }
 }
-foreach ($required in (Join-Path $cargoBin 'rustup.exe'), (Join-Path $cargoBin 'cargo.exe')) {
+foreach ($required in (Join-Path $toolchainBin 'rustc.exe'), (Join-Path $toolchainBin 'cargo.exe')) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
-        throw "required Rust bootstrap executable is unavailable after installation: $required"
+        throw "required trusted Rust executable is unavailable after installation: $required"
     }
 }
 

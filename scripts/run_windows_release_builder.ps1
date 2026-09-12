@@ -20,7 +20,9 @@ param(
     [string]$RepositoryUrl = 'https://github.com/valkyoth/fluxheim.git',
 
     [ValidatePattern('^[A-Za-z]:\\[A-Za-z0-9_.\\-]+$')]
-    [string]$WorkspaceRoot = 'C:\FluxheimBuild'
+    [string]$WorkspaceRoot = 'C:\FluxheimBuild',
+
+    [switch]$ValidateBuilderOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -32,14 +34,10 @@ $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'Windows release builds must run as the dedicated non-administrator account'
 }
-$rustRoot = Join-Path $env:ProgramData 'FluxheimRust'
-$env:RUSTUP_HOME = Join-Path $rustRoot 'rustup'
-$env:CARGO_HOME = Join-Path $rustRoot 'cargo'
-$cargoBin = Join-Path $env:CARGO_HOME 'bin'
-$pathEntries = @($cargoBin) + @($env:Path -split ';' | Where-Object {
-    -not [string]::IsNullOrWhiteSpace($_) -and $_.TrimEnd('\') -ne $cargoBin.TrimEnd('\')
-})
-$env:Path = $pathEntries -join ';'
+$programFiles = [Environment]::GetFolderPath(
+    [Environment+SpecialFolder]::ProgramFiles)
+$trustedRustRoot = Join-Path $programFiles 'FluxheimRustTrusted'
+$maximumBuilderAgeHours = 24
 
 function Assert-FluxheimReleaseBuilderTrustAnchorsReadOnly {
     param([Parameter(Mandatory = $true)][string]$Root)
@@ -297,6 +295,198 @@ public static class FluxheimReleaseAclProbe {
     }
 }
 
+function Assert-FluxheimTrustedRustToolchain {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$ExpectedRustVersion,
+        [Parameter(Mandatory = $true)][int]$MaximumAgeHours
+    )
+
+    $provisioningPath = Join-Path $Root 'provisioning.json'
+    if (-not (Test-Path -LiteralPath $provisioningPath -PathType Leaf)) {
+        throw "trusted Rust provisioning manifest is missing: $provisioningPath"
+    }
+    $provisioning = Get-Content -LiteralPath $provisioningPath -Raw | ConvertFrom-Json
+    if ([int]$provisioning.schema -ne 1 -or
+        [string]$provisioning.builder_mode -ne 'fresh-disposable' -or
+        [string]$provisioning.rust_version -ne $ExpectedRustVersion -or
+        [string]$provisioning.rust_target -ne 'x86_64-pc-windows-msvc' -or
+        [string]::IsNullOrWhiteSpace([string]$provisioning.builder_id)) {
+        throw 'trusted Rust provisioning manifest does not match the requested release toolchain'
+    }
+    $provisionedUtc = [DateTimeOffset]::Parse([string]$provisioning.provisioned_utc)
+    $builderAge = [DateTimeOffset]::UtcNow - $provisionedUtc
+    if ($builderAge.TotalMinutes -lt -5 -or $builderAge.TotalHours -gt $MaximumAgeHours) {
+        throw "official Windows releases require a builder provisioned within $MaximumAgeHours hours"
+    }
+
+    $toolchainRoot = Join-Path $Root "rustup\toolchains\$ExpectedRustVersion-x86_64-pc-windows-msvc"
+    $toolchainBin = Join-Path $toolchainRoot 'bin'
+    $cargoWorkRoot = Join-Path $Root 'cargo-work'
+    foreach ($path in $Root, $toolchainRoot, $toolchainBin, $cargoWorkRoot, $provisioningPath) {
+        $current = [IO.Path]::GetFullPath($path)
+        while ($null -ne $current) {
+            if ([FluxheimReleaseAclProbe]::IsReparsePoint($current)) {
+                throw "trusted Rust path must not contain a reparse point: $current"
+            }
+            $parent = [IO.Directory]::GetParent($current)
+            $current = if ($null -eq $parent) { $null } else { $parent.FullName }
+        }
+    }
+
+    $accessDenied = 5
+    $genericWrite = 0x40000000
+    $deleteAccess = 0x00010000
+    $writeDac = 0x00040000
+    $writeOwner = 0x00080000
+    $fileAddFile = 0x00000002
+    $fileAddSubdirectory = 0x00000004
+    $fileDeleteChild = 0x00000040
+    $current = [IO.Directory]::GetParent([IO.Path]::GetFullPath($Root))
+    while ($null -ne $current) {
+        foreach ($right in @(
+            [pscustomobject]@{ Access = $fileAddFile; Operation = 'create files in a trusted Rust ancestor' },
+            [pscustomobject]@{ Access = $fileAddSubdirectory; Operation = 'create directories in a trusted Rust ancestor' },
+            [pscustomobject]@{ Access = $deleteAccess; Operation = 'delete a trusted Rust ancestor' },
+            [pscustomobject]@{ Access = $fileDeleteChild; Operation = 'replace trusted Rust through an ancestor' },
+            [pscustomobject]@{ Access = $writeDac; Operation = 'change a trusted Rust ancestor ACL' },
+            [pscustomobject]@{ Access = $writeOwner; Operation = 'take ownership of a trusted Rust ancestor' }
+        )) {
+            $errorCode = [FluxheimReleaseAclProbe]::Probe(
+                $current.FullName, [uint32]$right.Access, $true)
+            if ($errorCode -ne $accessDenied) {
+                throw "release build account can $($right.Operation): $($current.FullName) (Win32 error $errorCode)"
+            }
+        }
+        $current = [IO.Directory]::GetParent($current.FullName)
+    }
+    foreach ($probe in @(
+        [pscustomobject]@{ Path = $Root; Access = $genericWrite; Directory = $true; Operation = 'write the trusted Rust root' },
+        [pscustomobject]@{ Path = $Root; Access = $fileAddFile; Directory = $true; Operation = 'add files to the trusted Rust root' },
+        [pscustomobject]@{ Path = $Root; Access = $deleteAccess; Directory = $true; Operation = 'delete the trusted Rust root' },
+        [pscustomobject]@{ Path = $Root; Access = $fileDeleteChild; Directory = $true; Operation = 'replace trusted Rust files through their parent' },
+        [pscustomobject]@{ Path = $Root; Access = $writeDac; Directory = $true; Operation = 'change the trusted Rust root ACL' },
+        [pscustomobject]@{ Path = $Root; Access = $writeOwner; Directory = $true; Operation = 'take ownership of the trusted Rust root' },
+        [pscustomobject]@{ Path = $provisioningPath; Access = $genericWrite; Directory = $false; Operation = 'write the Rust provisioning manifest' },
+        [pscustomobject]@{ Path = $provisioningPath; Access = $deleteAccess; Directory = $false; Operation = 'delete the Rust provisioning manifest' },
+        [pscustomobject]@{ Path = $provisioningPath; Access = $writeDac; Directory = $false; Operation = 'change the Rust provisioning manifest ACL' },
+        [pscustomobject]@{ Path = $provisioningPath; Access = $writeOwner; Directory = $false; Operation = 'take ownership of the Rust provisioning manifest' }
+    )) {
+        $errorCode = [FluxheimReleaseAclProbe]::Probe(
+            $probe.Path, [uint32]$probe.Access, [bool]$probe.Directory)
+        if ($errorCode -ne $accessDenied) {
+            throw "release build account can $($probe.Operation) (Win32 error $errorCode)"
+        }
+    }
+
+    $expectedFiles = @{}
+    foreach ($file in @($provisioning.files)) {
+        $relative = [string]$file.path
+        $expectedHash = [string]$file.sha256
+        if ([string]::IsNullOrWhiteSpace($relative) -or
+            $relative.Contains('..') -or
+            [IO.Path]::IsPathRooted($relative) -or
+            $expectedHash -notmatch '^[0-9a-f]{64}$' -or
+            $expectedFiles.ContainsKey($relative)) {
+            throw 'trusted Rust provisioning manifest contains an invalid file entry'
+        }
+        $expectedFiles[$relative] = $expectedHash
+    }
+    $actualFiles = @(Get-ChildItem -LiteralPath $Root -Recurse -File | Where-Object {
+        $_.FullName -ne $provisioningPath
+    })
+    if ($actualFiles.Count -ne $expectedFiles.Count) {
+        throw 'trusted Rust toolchain file inventory changed after provisioning'
+    }
+    $rootPrefix = $Root.TrimEnd('\') + '\'
+    foreach ($file in $actualFiles) {
+        if (-not $file.FullName.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "trusted Rust inventory escaped its root: $($file.FullName)"
+        }
+        if ([FluxheimReleaseAclProbe]::IsReparsePoint($file.FullName)) {
+            throw "trusted Rust file must not be a reparse point: $($file.FullName)"
+        }
+        $relative = $file.FullName.Substring($rootPrefix.Length).Replace('\', '/')
+        if (-not $expectedFiles.ContainsKey($relative)) {
+            throw "unprovisioned file exists in trusted Rust toolchain: $relative"
+        }
+        $actualHash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualHash -ne $expectedFiles[$relative]) {
+            throw "trusted Rust toolchain file hash changed after provisioning: $relative"
+        }
+        foreach ($access in $genericWrite, $deleteAccess, $writeDac, $writeOwner) {
+            $errorCode = [FluxheimReleaseAclProbe]::Probe(
+                $file.FullName, [uint32]$access, $false)
+            if ($errorCode -ne $accessDenied) {
+                throw "release build account can modify trusted Rust file: $relative (Win32 error $errorCode)"
+            }
+        }
+    }
+
+    foreach ($directory in @(Get-ChildItem -LiteralPath $Root -Recurse -Directory)) {
+        if ([FluxheimReleaseAclProbe]::IsReparsePoint($directory.FullName)) {
+            throw "trusted Rust directory must not be a reparse point: $($directory.FullName)"
+        }
+        foreach ($access in $fileAddFile, $fileAddSubdirectory, $fileDeleteChild,
+                $deleteAccess, $writeDac, $writeOwner) {
+            $errorCode = [FluxheimReleaseAclProbe]::Probe(
+                $directory.FullName, [uint32]$access, $true)
+            if ($errorCode -ne $accessDenied) {
+                throw "release build account can modify trusted Rust directory: $($directory.FullName) (Win32 error $errorCode)"
+            }
+        }
+    }
+
+    foreach ($name in 'cargo.exe', 'rustc.exe', 'rustdoc.exe') {
+        $path = Join-Path $toolchainBin $name
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "trusted Rust executable is missing: $path"
+        }
+    }
+    if (-not (Test-Path -LiteralPath $cargoWorkRoot -PathType Container)) {
+        throw "trusted Cargo working directory is missing: $cargoWorkRoot"
+    }
+
+    [pscustomobject]@{
+        BuilderId = [string]$provisioning.builder_id
+        ProvisionedUtc = $provisionedUtc.ToString('O')
+        ManifestSha256 = (Get-FileHash -LiteralPath $provisioningPath `
+            -Algorithm SHA256).Hash.ToLowerInvariant()
+        ManifestPath = $provisioningPath
+        ToolchainBin = $toolchainBin
+        CargoWorkRoot = $cargoWorkRoot
+    }
+}
+
+function Assert-NoUntrustedCargoConfiguration {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $current = [IO.Directory]::GetParent([IO.Path]::GetFullPath($Path))
+    while ($null -ne $current) {
+        foreach ($relative in '.cargo\config', '.cargo\config.toml') {
+            $candidate = Join-Path $current.FullName $relative
+            if (Test-Path -LiteralPath $candidate) {
+                throw "untrusted ancestor Cargo configuration: $candidate"
+            }
+        }
+        $current = $current.Parent
+    }
+}
+
+function Invoke-TrustedCargo {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    if ($Arguments.Count -eq 0) { throw 'Cargo command is missing' }
+    $command = $Arguments[0]
+    $remaining = @($Arguments | Select-Object -Skip 1)
+    Push-Location $trustedRust.CargoWorkRoot
+    try {
+        & $cargo $command --manifest-path (Join-Path $sourceRoot 'Cargo.toml') @remaining
+    } finally {
+        Pop-Location
+    }
+}
+
 $expectedArchitecture = 'X64'
 $actualArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
 if ($actualArchitecture -ne $expectedArchitecture) {
@@ -310,13 +500,8 @@ if (-not (Test-Path -LiteralPath $allowedSigners -PathType Leaf)) {
     throw "trusted tag allowed-signers file is missing: $allowedSigners"
 }
 Assert-FluxheimReleaseBuilderTrustAnchorsReadOnly -Root $WorkspaceRoot
-
-$requiredCommands = 'git.exe', 'rustup.exe', 'rustc.exe', 'cargo.exe', 'python.exe'
-foreach ($command in $requiredCommands) {
-    if ($null -eq (Get-Command $command -ErrorAction SilentlyContinue)) {
-        throw "required release command is unavailable: $command"
-    }
-}
+$trustedRust = Assert-FluxheimTrustedRustToolchain -Root $trustedRustRoot `
+    -ExpectedRustVersion $RustVersion -MaximumAgeHours $maximumBuilderAgeHours
 
 $runId = [Guid]::NewGuid().ToString('N')
 $runRoot = Join-Path $WorkspaceRoot "runs\$runId"
@@ -325,9 +510,78 @@ $tempRoot = Join-Path $runRoot 'temp'
 $outputRoot = Join-Path $WorkspaceRoot "output\$Version\$Architecture"
 $previousTemp = $env:TEMP
 $previousTmp = $env:TMP
+$machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
 New-Item -ItemType Directory -Force -Path $runRoot, $tempRoot | Out-Null
+$systemRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::Windows)
+$programData = [Environment]::GetFolderPath(
+    [Environment+SpecialFolder]::CommonApplicationData)
+$allowedEnvironment = @{
+    SystemRoot = $systemRoot
+    WINDIR = $systemRoot
+    SystemDrive = [IO.Path]::GetPathRoot($systemRoot).TrimEnd('\')
+    ProgramData = $programData
+    ALLUSERSPROFILE = $programData
+    COMSPEC = Join-Path $systemRoot 'System32\cmd.exe'
+}
+foreach ($name in @(
+    'ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432',
+    'CommonProgramFiles', 'CommonProgramFiles(x86)', 'CommonProgramW6432',
+    'PATHEXT', 'PSModulePath', 'OS', 'NUMBER_OF_PROCESSORS',
+    'PROCESSOR_ARCHITECTURE', 'PROCESSOR_IDENTIFIER', 'PROCESSOR_LEVEL',
+    'PROCESSOR_REVISION'
+)) {
+    $value = [Environment]::GetEnvironmentVariable($name, 'Machine')
+    if ($null -ne $value) { $allowedEnvironment[$name] = $value }
+}
+foreach ($entry in @(Get-ChildItem Env:)) {
+    Remove-Item -LiteralPath "Env:$($entry.Name)"
+}
+foreach ($entry in $allowedEnvironment.GetEnumerator()) {
+    Set-Item -LiteralPath "Env:$($entry.Name)" -Value $entry.Value
+}
 $env:TEMP = $tempRoot
 $env:TMP = $tempRoot
+$env:CARGO_HOME = Join-Path $runRoot 'cargo-home'
+New-Item -ItemType Directory -Path $env:CARGO_HOME | Out-Null
+$env:RUSTC = Join-Path $trustedRust.ToolchainBin 'rustc.exe'
+$env:RUSTDOC = Join-Path $trustedRust.ToolchainBin 'rustdoc.exe'
+$cargo = Join-Path $trustedRust.ToolchainBin 'cargo.exe'
+$env:Path = $trustedRust.ToolchainBin + ';' + $machinePath
+$env:FLUXHEIM_TRUSTED_CARGO_CWD = $trustedRust.CargoWorkRoot
+$env:GIT_CONFIG_GLOBAL = 'NUL'
+$env:GIT_CONFIG_NOSYSTEM = '1'
+Assert-NoUntrustedCargoConfiguration -Path $sourceRoot
+Assert-NoUntrustedCargoConfiguration -Path $trustedRust.CargoWorkRoot
+
+$requiredCommands = 'git.exe', 'python.exe', 'cmake.exe'
+foreach ($command in $requiredCommands) {
+    if ($null -eq (Get-Command $command -ErrorAction SilentlyContinue)) {
+        throw "required release command is unavailable from the machine toolchain: $command"
+    }
+}
+
+$rustcVersionOutput = @(& $env:RUSTC -vV)
+if ($LASTEXITCODE -ne 0) { throw 'trusted Rust compiler identity check failed' }
+$host = ($rustcVersionOutput | Select-String '^host: ' | ForEach-Object { $_.Line.Substring(6) })
+$rustcRelease = ($rustcVersionOutput | Select-String '^release: ' | ForEach-Object { $_.Line.Substring(9) })
+$expectedHost = 'x86_64-pc-windows-msvc'
+if ($host -ne $expectedHost) {
+    throw "Rust host $host does not match release target $expectedHost"
+}
+if ($rustcRelease -ne $RustVersion) {
+    throw "Rust compiler release $rustcRelease does not match requested $RustVersion"
+}
+Push-Location $trustedRust.CargoWorkRoot
+try {
+    & $cargo --version --verbose | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'trusted Cargo identity check failed' }
+} finally {
+    Pop-Location
+}
+if ($ValidateBuilderOnly) {
+    Write-Output "Fluxheim Windows release builder policy: ok ($($trustedRust.BuilderId))"
+    return
+}
 
 try {
     & git.exe clone --no-checkout --filter=blob:none $RepositoryUrl $sourceRoot
@@ -351,18 +605,6 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "signed tag verification failed: $tag" }
     & git.exe checkout --detach $tag
     if ($LASTEXITCODE -ne 0) { throw "tag checkout failed: $tag" }
-
-    & rustup.exe toolchain install $RustVersion --profile minimal
-    if ($LASTEXITCODE -ne 0) { throw "Rust toolchain installation failed: $RustVersion" }
-    & rustup.exe override set $RustVersion
-    if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain override failed' }
-
-    $host = (& rustc.exe -vV | Select-String '^host: ' | ForEach-Object { $_.Line.Substring(6) })
-    $expectedHost = 'x86_64-pc-windows-msvc'
-    if ($host -ne $expectedHost) {
-        throw "Rust host $host does not match release target $expectedHost"
-    }
-
     $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem
     $osCaption = ([string]$operatingSystem.Caption).Replace("`r", ' ').Replace("`n", ' ').Trim()
     $osVersion = ([string]$operatingSystem.Version).Trim()
@@ -375,7 +617,7 @@ try {
 
     & python.exe scripts/validate_portable_release_plan.py
     if ($LASTEXITCODE -ne 0) { throw 'portable release-plan validation failed' }
-    & cargo.exe test --workspace --locked
+    Invoke-TrustedCargo -Arguments @('test', '--workspace', '--locked')
     if ($LASTEXITCODE -ne 0) { throw 'native Windows workspace tests failed' }
     $nativeSmoke = Join-Path $sourceRoot 'scripts\smoke_windows_native.ps1'
     if (-not (Test-Path -LiteralPath $nativeSmoke -PathType Leaf)) {
@@ -450,6 +692,8 @@ try {
     New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
     Copy-Item -Path (Join-Path $secondBuild '*.zip') -Destination $outputRoot
     Copy-Item -LiteralPath (Join-Path $runRoot 'tag-verification.txt') -Destination $outputRoot
+    Copy-Item -LiteralPath $trustedRust.ManifestPath -Destination `
+        (Join-Path $outputRoot "toolchain-provisioning-$targetLabel.json")
 
     $checksumLines = @($secondHashes.GetEnumerator() | Sort-Object Name | ForEach-Object {
         "$($_.Value)  $($_.Name)"
@@ -473,6 +717,15 @@ try {
         "windows_os_caption=$osCaption"
         "windows_os_version=$osVersion"
         "windows_os_build=$osBuild"
+        "builder_id=$($trustedRust.BuilderId)"
+        "builder_provisioned_utc=$($trustedRust.ProvisionedUtc)"
+        "toolchain_manifest_sha256=$($trustedRust.ManifestSha256)"
+        'builder_mode=fresh-disposable'
+        'toolchain_read_only=true'
+        'cargo_home_scope=per-run'
+        'cargo_config_scope=trusted-cwd'
+        'environment_scope=allowlist'
+        'independent_windows_build_required=true'
         'test_scope=workspace-native-all-archives-and-wasm-smoke'
         'archive_count=7'
         'reproducible=true'

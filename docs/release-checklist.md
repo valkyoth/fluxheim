@@ -309,6 +309,15 @@ scripts/smoke_1_0_core.sh
   builder can reproduce its own release artifact from the tagged source and
   pinned lockfile. Cross-distro/container reproducibility remains a future
   hardening goal.
+- Windows compiler provenance. Official Windows archives require a disposable
+  builder provisioned within 24 hours, an Administrator-installed Rust
+  toolchain whose complete file inventory is read-only to the build account,
+  and a fresh per-run Cargo home. Compare all seven archives byte-for-byte with
+  the exact-commit artifact from the independent GitHub-hosted Windows builder
+  by running `scripts/verify_windows_release_publication.sh`. This gate must
+  authenticate the exact successful tag workflow and GitHub/Sigstore
+  provenance for every archive; same-host duplicate builds alone are not
+  sufficient.
 - Human dependency review. Track the `cargo-vet` adoption path in
   [Rust Supply-Chain Security](supply-chain-security.md). Do not make `cargo-vet`
   a blocking release gate until the initial exemption set and trusted audit

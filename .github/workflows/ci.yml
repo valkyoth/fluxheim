@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   pull_request:
     branches:
       - main
@@ -84,7 +86,9 @@ jobs:
         run: scripts/validate_wasm_release_profile.py
 
       - name: Validate portable release plan
-        run: scripts/validate_portable_release_plan.py
+        run: |
+          scripts/validate_portable_release_plan.py
+          python3 scripts/test_verify_windows_independent_build.py
 
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
@@ -334,3 +338,89 @@ jobs:
           scripts/build_release_assets.ps1 -Version $version -Architecture x86_64
           scripts/smoke_windows_archive_profiles.ps1 -Version $version -Architecture x86_64
           scripts/smoke_windows_wasm_archive.ps1 -Version $version -Architecture x86_64
+
+      - name: Record independent Windows archive evidence
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $commit = (& git.exe rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-f]{40}$') {
+            throw 'could not resolve the independently checked-out commit'
+          }
+          $archives = @(Get-ChildItem -LiteralPath dist -Filter 'fluxheim-*-x86_64-windows.zip' -File)
+          if ($archives.Count -ne 7) { throw "expected seven Windows archives, found $($archives.Count)" }
+          $archives | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content -LiteralPath dist/SHA256SUMS-independent-x86_64-windows.txt -Encoding ascii
+          @(
+            "version=$version"
+            "tag=${{ github.ref_name }}"
+            "commit=$commit"
+            'builder_domain=github-hosted-windows-2025'
+            'repository=${{ github.repository }}'
+            'workflow=.github/workflows/ci.yml'
+            'workflow_run_id=${{ github.run_id }}'
+            'archive_count=7'
+          ) | Set-Content -LiteralPath dist/release-evidence-independent-x86_64-windows.txt -Encoding ascii
+
+      - name: Upload unprivileged Windows archive evidence
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fluxheim-windows-unattested-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            dist/fluxheim-*-x86_64-windows.zip
+            dist/SHA256SUMS-independent-x86_64-windows.txt
+            dist/release-evidence-independent-x86_64-windows.txt
+
+  windows-x86_64-attest:
+    name: Attest Windows x86_64 portable archives
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows-x86_64-portable
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+
+    steps:
+      - name: Download unprivileged Windows archive evidence
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: fluxheim-windows-unattested-${{ github.sha }}
+          path: dist
+
+      - name: Validate exact Windows archive evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF_NAME" == "v$version" && -n "$version" ]]
+          cd dist
+          [[ "$(find . -maxdepth 1 -type f -name "fluxheim-$version-*-x86_64-windows.zip" | wc -l)" -eq 7 ]]
+          sha256sum -c SHA256SUMS-independent-x86_64-windows.txt
+          grep -Fx "version=$version" release-evidence-independent-x86_64-windows.txt
+          grep -Fx "tag=$GITHUB_REF_NAME" release-evidence-independent-x86_64-windows.txt
+          grep -Fx "commit=$GITHUB_SHA" release-evidence-independent-x86_64-windows.txt
+          grep -Fx 'builder_domain=github-hosted-windows-2025' release-evidence-independent-x86_64-windows.txt
+          grep -Fx 'archive_count=7' release-evidence-independent-x86_64-windows.txt
+
+      - name: Attest independent Windows archives
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: dist/fluxheim-*-x86_64-windows.zip
+
+      - name: Upload attested independent Windows archive evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fluxheim-windows-independent-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist/fluxheim-*-x86_64-windows.zip
+            dist/SHA256SUMS-independent-x86_64-windows.txt
+            dist/release-evidence-independent-x86_64-windows.txt

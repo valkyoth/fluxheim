@@ -15,6 +15,23 @@ Set-StrictMode -Version Latest
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $root
 
+function Invoke-FluxheimCargo {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    $cargoWorkingDirectory = if ($env:FLUXHEIM_TRUSTED_CARGO_CWD) {
+        $env:FLUXHEIM_TRUSTED_CARGO_CWD
+    } else {
+        $root
+    }
+    Push-Location $cargoWorkingDirectory
+    try {
+        & cargo.exe $Arguments[0] --manifest-path (Join-Path $root 'Cargo.toml') `
+            @($Arguments | Select-Object -Skip 1)
+    } finally {
+        Pop-Location
+    }
+}
+
 function Get-FreeTcpPort {
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     try {
@@ -171,7 +188,8 @@ if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
     throw "Windows Wasm archive omitted fluxheim.exe: $archiveName"
 }
 
-& cargo.exe run --locked -p fluxheim-wasm --example build_policy_examples --quiet
+Invoke-FluxheimCargo -Arguments @('run', '--locked', '-p', 'fluxheim-wasm', `
+    '--example', 'build_policy_examples', '--quiet')
 if ($LASTEXITCODE -ne 0) {
     throw 'building Windows Wasm policy examples failed'
 }

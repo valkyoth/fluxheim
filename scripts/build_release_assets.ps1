@@ -69,7 +69,21 @@ function Invoke-CargoBuild {
     foreach ($binary in $Binaries) {
         $arguments += @('--bin', $binary)
     }
-    & cargo.exe @arguments
+    $cargoWorkingDirectory = if ($env:FLUXHEIM_TRUSTED_CARGO_CWD) {
+        $env:FLUXHEIM_TRUSTED_CARGO_CWD
+    } else {
+        $root
+    }
+    if (-not (Test-Path -LiteralPath $cargoWorkingDirectory -PathType Container)) {
+        throw "Cargo working directory is unavailable: $cargoWorkingDirectory"
+    }
+    Push-Location $cargoWorkingDirectory
+    try {
+        & cargo.exe build --manifest-path (Join-Path $root 'Cargo.toml') `
+            @($arguments | Select-Object -Skip 1)
+    } finally {
+        Pop-Location
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "cargo build failed for $($Binaries -join ', ')"
     }

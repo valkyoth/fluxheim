@@ -75,7 +75,7 @@ scp "${SSH_OPTIONS[@]}" \
 
 echo "--- Installing Windows build tools ---"
 ssh "${SSH_OPTIONS[@]}" "$ADMIN_TARGET" \
-    "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\FluxheimBootstrap\\install_windows_release_builder_tools.ps1 -BuildUser $BUILD_USER"
+    "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\FluxheimBootstrap\\install_windows_release_builder_tools.ps1 -BuildUser $BUILD_USER -RustVersion $RUST_VERSION"
 
 echo "--- Applying the hardened release-builder policy ---"
 set +e
@@ -92,7 +92,7 @@ echo "--- Verifying dedicated Windows release account ---"
 BUILD_READY=0
 for _ in {1..30}; do
     if ssh "${SSH_OPTIONS[@]}" "$BUILD_TARGET" \
-        "pwsh.exe -NoProfile -NonInteractive -Command \"\$identity = [Security.Principal.WindowsIdentity]::GetCurrent(); \$principal = [Security.Principal.WindowsPrincipal]::new(\$identity); if (\$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'release build account must not be an administrator' }; \$rustRoot = Join-Path \$env:ProgramData 'FluxheimRust'; \$env:RUSTUP_HOME = Join-Path \$rustRoot 'rustup'; \$env:CARGO_HOME = Join-Path \$rustRoot 'cargo'; \$env:Path = (Join-Path \$env:CARGO_HOME 'bin') + ';' + \$env:Path; rustup.exe toolchain install $RUST_VERSION --profile minimal; if (\$LASTEXITCODE -ne 0) { exit \$LASTEXITCODE }; foreach (\$name in 'git.exe','python.exe','cmake.exe','rustup.exe','rustc.exe','cargo.exe') { if (\$null -eq (Get-Command \$name -ErrorAction SilentlyContinue)) { throw ('missing release command: ' + \$name) } }; Write-Output 'Fluxheim Windows release builder: ready'\""; then
+        "pwsh.exe -NoProfile -NonInteractive -Command \"\$identity = [Security.Principal.WindowsIdentity]::GetCurrent(); \$principal = [Security.Principal.WindowsPrincipal]::new(\$identity); if (\$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'release build account must not be an administrator' }; \$programFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles); \$trustedRust = Join-Path \$programFiles 'FluxheimRustTrusted'; \$toolchainBin = Join-Path \$trustedRust 'rustup\\toolchains\\$RUST_VERSION-x86_64-pc-windows-msvc\\bin'; \$provisioning = Get-Content -LiteralPath (Join-Path \$trustedRust 'provisioning.json') -Raw | ConvertFrom-Json; if ([string]\$provisioning.rust_version -ne '$RUST_VERSION') { throw 'trusted Rust provisioning manifest has the wrong version' }; \$env:Path = \$toolchainBin + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine'); foreach (\$name in 'git.exe','python.exe','cmake.exe','rustc.exe','cargo.exe') { if (\$null -eq (Get-Command \$name -ErrorAction SilentlyContinue)) { throw ('missing release command: ' + \$name) } }; & (Join-Path \$toolchainBin 'rustc.exe') --version; if (\$LASTEXITCODE -ne 0) { throw 'trusted rustc is not executable' }; & (Join-Path \$toolchainBin 'cargo.exe') --version; if (\$LASTEXITCODE -ne 0) { throw 'trusted cargo is not executable' }; if (Test-Path Env:RUSTUP_HOME) { throw 'release build account inherited RUSTUP_HOME' }; Write-Output 'Fluxheim Windows release builder: ready'\""; then
         BUILD_READY=1
         break
     fi
@@ -103,6 +103,17 @@ if [[ "$BUILD_READY" -ne 1 ]]; then
     echo 'dedicated Windows release account did not become ready' >&2
     exit 1
 fi
+
+echo "--- Verifying complete compiler provenance policy ---"
+scp "${SSH_OPTIONS[@]}" \
+    "$ROOT/scripts/run_windows_release_builder.ps1" \
+    "$ROOT/scripts/windows_release_tag_policy.ps1" \
+    "$BUILD_TARGET:"
+EXPECTED_COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
+ssh "${SSH_OPTIONS[@]}" "$BUILD_TARGET" pwsh.exe -NoProfile -NonInteractive \
+    -ExecutionPolicy Bypass -File run_windows_release_builder.ps1 \
+    -Version 0.0.0 -RustVersion "$RUST_VERSION" -Architecture x86_64 \
+    -ExpectedCommit "$EXPECTED_COMMIT" -ValidateBuilderOnly
 
 echo "--- Verifying Administrator SSH is rejected ---"
 if ssh "${SSH_OPTIONS[@]}" -o ConnectTimeout=10 "$ADMIN_TARGET" 'exit 0'; then

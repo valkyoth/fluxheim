@@ -22,7 +22,7 @@ foreach ($relative in $scripts) {
     $path = Join-Path $root $relative
     $tokens = $null
     $errors = $null
-    [void][System.Management.Automation.Language.Parser]::ParseFile(
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile(
         $path,
         [ref]$tokens,
         [ref]$errors
@@ -30,6 +30,21 @@ foreach ($relative in $scripts) {
     if ($errors.Count -gt 0) {
         $messages = $errors | ForEach-Object { $_.Message }
         throw "$relative has PowerShell parse errors: $($messages -join '; ')"
+    }
+    if ($relative -eq 'scripts/run_windows_release_builder.ps1') {
+        $functionNames = @($ast.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst]
+        }, $true) | ForEach-Object { $_.Name })
+        foreach ($requiredFunction in
+            'Assert-FluxheimReleaseBuilderTrustAnchorsReadOnly',
+            'Assert-FluxheimTrustedRustToolchain',
+            'Assert-NoUntrustedCargoConfiguration',
+            'Invoke-TrustedCargo') {
+            if ($functionNames -notcontains $requiredFunction) {
+                throw "Windows release runner function is not executable PowerShell: $requiredFunction"
+            }
+        }
     }
 }
 
@@ -227,7 +242,7 @@ foreach ($required in @(
     "expected MISS",
     "expected HIT",
     'backend = "storage-bin"',
-    'cargo.exe test --locked -p fluxheim-acme --lib --features acme-client',
+    "Invoke-FluxheimCargo -Arguments @('test', '--locked', '-p', 'fluxheim-acme'",
     'native Windows ACME storage and lifecycle regressions failed',
     'rejects_managed_php_fpm_without_unix_process_support',
     'native Windows managed PHP-FPM config rejection regression failed',
@@ -565,7 +580,9 @@ foreach ($required in @(
     'scripts/portable_release_plan.py',
     'scripts/create_release_archives.py',
     'x86_64-pc-windows-msvc',
-    "[ValidateSet('x86_64')]"
+    "[ValidateSet('x86_64')]",
+    '$env:FLUXHEIM_TRUSTED_CARGO_CWD',
+    "--manifest-path (Join-Path `$root 'Cargo.toml')"
 )) {
     if (-not $builder.Contains($required)) {
         throw "Windows archive builder is missing required contract: $required"
@@ -586,6 +603,26 @@ foreach ($required in @(
     }
 }
 
+$bootstrap = Get-Content -LiteralPath `
+    (Join-Path $root 'scripts/bootstrap_windows_release_builder.sh') -Raw
+foreach ($required in @(
+    '-RustVersion $RUST_VERSION',
+    "'FluxheimRustTrusted'",
+    'rustup\\toolchains\\',
+    "'provisioning.json'",
+    "'rustc.exe') --version",
+    "'cargo.exe') --version",
+    '-ValidateBuilderOnly'
+)) {
+    if (-not $bootstrap.Contains($required)) {
+        throw "Windows builder bootstrap is missing trusted-toolchain behavior: $required"
+    }
+}
+if ($bootstrap.Contains('rustup.exe toolchain install') -or
+    $bootstrap.Contains("'FluxheimRust'")) {
+    throw 'Windows builder bootstrap must not let the build identity install or select Rust toolchains'
+}
+
 $preparation = Get-Content -LiteralPath (Join-Path $root 'scripts/prepare_windows_release_builder.ps1') -Raw
 $toolInstaller = Get-Content -LiteralPath `
     (Join-Path $root 'scripts/install_windows_release_builder_tools.ps1') -Raw
@@ -598,6 +635,18 @@ foreach ($required in @(
     'Microsoft.VisualStudio.Workload.VCTools',
     "`$rustupVersion = '1.29.1'",
     "`$rustupSha256 = '6f4bef66261261fcb43131be8720bab817d403a09edec7455c371974b90bdb7e'",
+    '[Environment+SpecialFolder]::ProgramFiles',
+    "Join-Path `$programFiles 'FluxheimRustTrusted'",
+    "`$cargoWorkRoot = Join-Path `$rustRoot 'cargo-work'",
+    '& $rustup toolchain install $RustVersion --profile minimal',
+    "builder_mode = 'fresh-disposable'",
+    'provisioned_utc = $provisionedUtc',
+    'Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256',
+    "New-Item -ItemType Directory -Path `$rustRoot",
+    "`$rustRoot /inheritance:r /grant:r",
+    "'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F'",
+    '"$BuildUser`:(OI)(CI)RX"',
+    '"$BuildUser`:RX" /T /C',
     '[Security.Cryptography.RandomNumberGenerator]::Create()',
     '$random.GetBytes($passwordBytes)',
     "[Security.Principal.SecurityIdentifier]::new('S-1-5-32-585')",
@@ -613,7 +662,8 @@ foreach ($required in @(
 foreach ($forbidden in @(
     "SetEnvironmentVariable('RUSTUP_HOME', `$rustupHome, 'Machine')",
     "SetEnvironmentVariable('CARGO_HOME', `$cargoHome, 'Machine')",
-    'SetEnvironmentVariable(''Path'', "$machinePath;$cargoBin", ''Machine'')'
+    'SetEnvironmentVariable(''Path'', "$machinePath;$cargoBin", ''Machine'')',
+    '"$BuildUser`:(OI)(CI)M"'
 )) {
     if ($toolInstaller.Contains($forbidden)) {
         throw "Windows tool installer publishes build-account-writable Rust tools machine-wide: $forbidden"
@@ -626,8 +676,8 @@ foreach ($required in @(
     'Remove-Item Env:CARGO_HOME -ErrorAction SilentlyContinue',
     '$openSshMemberSids = @($openSshMembers | ForEach-Object { $_.SID.Value })',
     "`$env:Path = `$pathEntries -join ';'",
-    "Join-Path `$cargoBin 'rustup.exe'",
-    "Join-Path `$cargoBin 'cargo.exe'"
+    "Join-Path `$toolchainBin 'rustc.exe'",
+    "Join-Path `$toolchainBin 'cargo.exe'"
 )) {
     if (-not $toolInstaller.Contains($required)) {
         throw "Windows tool installer is missing process-scoped Rust environment hardening: $required"
@@ -724,10 +774,39 @@ $tagPolicy = Get-Content -LiteralPath `
 $releaseContract = $release + "`n" + $tagPolicy
 foreach ($required in @(
     'Assert-FluxheimReleaseBuilderTrustAnchorsReadOnly',
+    'Assert-FluxheimTrustedRustToolchain',
+    '[switch]$ValidateBuilderOnly',
+    'Fluxheim Windows release builder policy: ok',
+    'trusted Cargo identity check failed',
     'Windows release builds must run as the dedicated non-administrator account',
-    "`$env:RUSTUP_HOME = Join-Path `$rustRoot 'rustup'",
-    "`$env:CARGO_HOME = Join-Path `$rustRoot 'cargo'",
-    "`$env:Path = `$pathEntries -join ';'",
+    '[Environment+SpecialFolder]::ProgramFiles',
+    "Join-Path `$programFiles 'FluxheimRustTrusted'",
+    "`$env:CARGO_HOME = Join-Path `$runRoot 'cargo-home'",
+    "`$env:FLUXHEIM_TRUSTED_CARGO_CWD = `$trustedRust.CargoWorkRoot",
+    "`$env:RUSTC = Join-Path `$trustedRust.ToolchainBin 'rustc.exe'",
+    "`$env:RUSTDOC = Join-Path `$trustedRust.ToolchainBin 'rustdoc.exe'",
+    "`$env:Path = `$trustedRust.ToolchainBin + ';'",
+    "`$env:GIT_CONFIG_GLOBAL = 'NUL'",
+    "`$env:GIT_CONFIG_NOSYSTEM = '1'",
+    "`$maximumBuilderAgeHours = 24",
+    'trusted Rust toolchain file hash changed after provisioning',
+    'release build account can modify trusted Rust file',
+    'release build account can modify trusted Rust directory',
+    'write the Rust provisioning manifest',
+    'delete the Rust provisioning manifest',
+    'change the Rust provisioning manifest ACL',
+    'take ownership of the Rust provisioning manifest',
+    'replace trusted Rust through an ancestor',
+    'create files in a trusted Rust ancestor',
+    'create directories in a trusted Rust ancestor',
+    'official Windows releases require a builder provisioned within',
+    'Assert-NoUntrustedCargoConfiguration -Path $sourceRoot',
+    'untrusted ancestor Cargo configuration',
+    "'.cargo\config', '.cargo\config.toml'",
+    'foreach ($entry in @(Get-ChildItem Env:))',
+    '$allowedEnvironment.GetEnumerator()',
+    'Invoke-TrustedCargo -Arguments @(''test'', ''--workspace'', ''--locked'')',
+    "--manifest-path (Join-Path `$sourceRoot 'Cargo.toml')",
     'FileFlagOpenReparsePoint',
     'FileAttributeReparsePoint',
     'GetFileAttributesW',
@@ -767,7 +846,6 @@ foreach ($required in @(
     "gpg.format=ssh",
     'gpg.minTrustLevel=fully',
     'verify-tag',
-    'cargo.exe test --workspace --locked',
     'smoke_windows_native.ps1',
     'smoke_windows_archive_profiles.ps1',
     'smoke_windows_wasm_archive.ps1',
@@ -775,6 +853,16 @@ foreach ($required in @(
     'windows_os_caption=',
     'windows_os_version=',
     'windows_os_build=',
+    'builder_id=',
+    'builder_provisioned_utc=',
+    'toolchain_manifest_sha256=',
+    'toolchain-provisioning-$targetLabel.json',
+    'builder_mode=fresh-disposable',
+    'toolchain_read_only=true',
+    'cargo_home_scope=per-run',
+    'cargo_config_scope=trusted-cwd',
+    'environment_scope=allowlist',
+    'independent_windows_build_required=true',
     'archive_count=7',
     'reproducible=true',
     'test_scope=workspace-native-all-archives-and-wasm-smoke'
@@ -783,8 +871,22 @@ foreach ($required in @(
         throw "Windows release runner is missing required evidence: $required"
     }
 }
+foreach ($forbidden in @(
+    'rustup.exe toolchain install',
+    'rustup.exe override set',
+    "`$env:RUSTUP_HOME =",
+    "`$env:CARGO_HOME = Join-Path `$rustRoot 'cargo'"
+)) {
+    if ($release.Contains($forbidden)) {
+        throw "Windows release runner must not use a build-account-writable Rust toolchain: $forbidden"
+    }
+}
 if ($release.Contains('($genericWrite -bor $deleteAccess)')) {
     throw 'Windows release trust-anchor write and delete rights must be probed separately'
+}
+if ($release.IndexOf('if ($ValidateBuilderOnly)') -lt 0 -or
+    $release.IndexOf('if ($ValidateBuilderOnly)') -gt $release.IndexOf('& git.exe clone')) {
+    throw 'Windows builder-only validation must complete before source checkout'
 }
 if ($release.Contains("Operation = 'create ancestor files'") -or
     $release.Contains("Operation = 'create ancestor directories'")) {
@@ -830,10 +932,72 @@ foreach ($required in @(
     'run: cargo test --workspace --locked',
     'name: Build and test Windows portable archives',
     'scripts/build_release_assets.ps1 -Version $version -Architecture x86_64',
-    'scripts/smoke_windows_archive_profiles.ps1 -Version $version -Architecture x86_64'
+    'scripts/smoke_windows_archive_profiles.ps1 -Version $version -Architecture x86_64',
+    'name: Record independent Windows archive evidence',
+    'git.exe rev-parse HEAD',
+    'commit=$commit',
+    'version=$version',
+    'workflow_run_id=${{ github.run_id }}',
+    'builder_domain=github-hosted-windows-2025',
+    'name: Upload unprivileged Windows archive evidence',
+    'fluxheim-windows-unattested-${{ github.sha }}',
+    'name: Attest Windows x86_64 portable archives',
+    'needs: windows-x86_64-portable',
+    'actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53',
+    'name: Validate exact Windows archive evidence',
+    'grep -Fx "commit=$GITHUB_SHA"',
+    'name: Attest independent Windows archives',
+    'actions/attest@a1948c3f048ba23858d222213b7c278aabede763',
+    'subject-path: dist/fluxheim-*-x86_64-windows.zip',
+    'attestations: write',
+    'artifact-metadata: write',
+    'name: Upload attested independent Windows archive evidence',
+    'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
 )) {
     if (-not $ci.Contains($required)) {
         throw "Windows CI is missing required native test policy: $required"
+    }
+}
+
+$independentVerifier = Get-Content -LiteralPath `
+    (Join-Path $root 'scripts/verify_windows_independent_build.py') -Raw
+foreach ($required in @(
+    'parser.add_argument("--expected-version", required=True)',
+    'parser.add_argument("--expected-commit", required=True)',
+    'archive inventory does not match the intended release',
+    'builder evidence does not match the intended release commit',
+    'cargo_config_scope',
+    'environment_scope'
+)) {
+    if (-not $independentVerifier.Contains($required)) {
+        throw "independent Windows verifier is missing intended-release binding: $required"
+    }
+}
+
+$publicationGatePath = Join-Path $root 'scripts/verify_windows_release_publication.sh'
+if (-not (Test-Path -LiteralPath $publicationGatePath -PathType Leaf)) {
+    throw 'authenticated Windows publication gate is missing'
+}
+$publicationGate = Get-Content -LiteralPath $publicationGatePath -Raw
+foreach ($required in @(
+    'actions/runs/$RUN_ID',
+    '.repository.full_name',
+    '.head_sha',
+    '.head_branch',
+    '.conclusion',
+    '.github/workflows/ci.yml',
+    'workflow_run_id=$RUN_ID',
+    'repository=$REPOSITORY',
+    'gh attestation verify',
+    '--signer-workflow',
+    '--source-ref',
+    '--source-digest',
+    '--deny-self-hosted-runners',
+    '--expected-version "$VERSION"',
+    '--expected-commit "$COMMIT"'
+)) {
+    if (-not $publicationGate.Contains($required)) {
+        throw "authenticated Windows publication gate is missing required policy: $required"
     }
 }
 

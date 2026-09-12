@@ -230,6 +230,19 @@ host. The exact-tag Linux aggregator can invoke it over OpenSSH. Windows ARM64
 is deferred and must not be published. See
 [Windows Release Builders](windows-release-builders.md).
 
+The official Windows builder must be a fresh disposable host with the
+Administrator-provisioned read-only Rust toolchain. Download the exact-commit
+`fluxheim-windows-independent-<commit>` artifact from the GitHub-hosted Windows
+job and authenticate its run and provenance before comparison:
+
+```bash
+scripts/verify_windows_release_publication.sh \
+  "$VERSION" "$RELEASE_COMMIT" "$GITHUB_WORKFLOW_RUN_ID" \
+  "$WINDOWS_DISPOSABLE_OUTPUT" "$WINDOWS_GITHUB_OUTPUT"
+```
+
+Destroy the disposable host after the evidence and archives are collected.
+
 The native matrix must also execute
 `scripts/smoke_wasm_policy_examples_binary.sh` against the staged `wasm`
 archive binary. Do not substitute source-tree Wasm tests for packaged-binary

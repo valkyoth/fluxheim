@@ -92,8 +92,12 @@ must pass natively on x86_64 before Windows archives are published.
 
 The normal native x86_64 CI gate now passes that complete matrix, including
 crash-restart storage-bin recovery and execution of all seven generated ZIP
-profiles. Exact-tag native x86_64 execution and two-build reproducibility
-evidence from the dedicated release builder remain mandatory release blocks.
+profiles. Exact-tag execution on a freshly provisioned disposable host with an
+Administrator-controlled read-only Rust toolchain remains mandatory. Its
+archives must also be byte-identical to the exact-commit artifact from the
+independent GitHub-hosted Windows builder. Publication authenticates that
+builder's exact tag workflow and GitHub/Sigstore provenance for every archive;
+same-host two-build reproducibility alone is insufficient release evidence.
 Windows ARM64 is deferred until sustainable native build and test
 infrastructure can provide the same evidence; no ARM64 Windows archive is
 currently generated or supported.

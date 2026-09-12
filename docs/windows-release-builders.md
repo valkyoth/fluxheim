@@ -15,7 +15,6 @@ Use a dedicated, disposable or tightly managed Windows build host with:
 - native x86_64 Windows for `x86_64-pc-windows-msvc`;
 - PowerShell 7 (`pwsh.exe`), Git for Windows, Python 3, CMake, and Rustup;
 - Visual Studio Build Tools with the native MSVC C++ toolset and Windows SDK;
-- one existing non-administrator local build account;
 - an Azure NSG or external firewall that permits TCP/22 only from the Linux
   release host.
 
@@ -23,10 +22,11 @@ Windows ARM64 is deferred. Do not generate or publish ARM64 Windows archives
 until the project has sustainable native ARM64 infrastructure and the complete
 runtime and reproducibility matrix passes there.
 
-For high-assurance releases, provision the builder from a measured disposable
-image for each release and destroy it after collecting evidence. Reusing a
-long-lived builder is operationally supported, but it is not equivalent to
-rebuilding the host trust boundary for every release.
+Official release evidence requires a fresh disposable host provisioned from a
+measured cloud image for that release. The runner rejects toolchains provisioned
+more than 24 hours earlier. Destroy the host after collecting evidence.
+Long-lived or reused Windows hosts may be used for development smoke tests, but
+they cannot produce accepted release evidence.
 
 ## One-Time Preparation
 
@@ -45,19 +45,25 @@ from the repository's configured Git SSH signing key, installs PowerShell 7,
 Git, Python, CMake, the MSVC C++ workload, and pinned Rustup, creates the
 non-administrator `fluxheim-build` account, and applies the hardened workspace,
 SSH, and firewall policy below. The initial Administrator SSH access is removed
-when that policy takes effect. Verify the SSH host-key fingerprint out of band
-before treating a newly created builder as trusted.
+when that policy takes effect. Before reporting success, bootstrap runs the real
+release runner in `-ValidateBuilderOnly` mode to verify every compiler file,
+directory, hash, ACL, and sanitized compiler selection without requiring a
+release tag. Verify the SSH host-key fingerprint out of band before treating a
+newly created builder as trusted.
 
 The bootstrap uses `winget` and therefore expects Windows Server 2025 Desktop
 Experience rather than Server Core. It downloads Rustup 1.29.1 from the
 official Rust static archive and verifies the pinned SHA-256 before execution.
-Rustup and Cargo remain writable by the dedicated build account, so their home
-directories and executable directory are added only to that account's build
-process environment. They are deliberately absent from the machine-wide
-environment and `PATH`; the installer also removes obsolete machine-wide
-entries when upgrading an existing builder. The release runner refuses to run
-from an administrator token. Administrators that need Rust must use a separate
-installation that the build account cannot modify.
+Administrator installs the exact pinned Rust toolchain under
+`C:\Program Files\FluxheimRustTrusted`, records hashes for every installed file,
+and keeps the tree Administrator/SYSTEM-only during installation before
+recursively granting the build account read/execute access. The release runner
+verifies the manifest, every file hash, every file and directory ACL, and
+non-reparse-point ancestry before source checkout. It never invokes Rustup,
+ignores user-level executable search paths, clears inherited Rust/Cargo
+overrides, and creates a fresh Cargo home inside each run. The trusted root must
+not already exist when a builder is provisioned; use a new host rather than
+reusing or repairing it for an official release.
 
 The bootstrap supports a fresh OpenSSH Users group and refreshes its elevated
 process environment after `winget` installs the native prerequisites. The
@@ -125,12 +131,45 @@ then independently:
    ancestor must be free of junctions and other reparse points and deny the
    build identity delete, DACL-change, and ownership rights;
 3. checks the native Rust host architecture;
-4. runs workspace tests and the mandatory native Windows live smoke;
-5. builds all seven profiles twice with the PowerShell archive builder and
+4. verifies the Administrator-provisioned toolchain inventory, read-only ACL,
+   fresh-disposable marker, and 24-hour age limit, then creates an isolated
+   per-run Cargo home and reconstructs the process environment from an
+   allowlist;
+5. runs workspace tests and the mandatory native Windows live smoke;
+6. builds all seven profiles twice with the PowerShell archive builder and
    launches every packaged executable to verify its version;
-6. requires byte-identical ZIP hashes and emits checksums plus machine-readable
-   commit, architecture, Windows edition/build, test-scope, and reproducibility
-   evidence.
+7. requires byte-identical ZIP hashes and emits checksums plus machine-readable
+   commit, architecture, Windows edition/build, toolchain-manifest hash,
+   test-scope, and reproducibility evidence. The hashed provisioning manifest
+   is retained with the output so it remains auditable after host destruction.
+
+Cargo always runs from the Administrator-controlled `cargo-work` directory and
+receives the authenticated checkout through an explicit `--manifest-path`.
+The runner rejects `.cargo/config` and `.cargo/config.toml` in checkout
+ancestors. This prevents a previous build from persisting a compiler wrapper;
+the per-run Cargo home prevents cross-run Cargo configuration or cache state.
+
+The GitHub-hosted `windows-2025` job is the independent builder domain. On the
+exact tag it uploads `fluxheim-windows-independent-<commit>` containing all
+seven ZIPs, their hashes, and commit evidence, and creates GitHub/Sigstore SLSA
+provenance attestations for every ZIP. Download that artifact beside the
+disposable-builder output and run the authenticated publication gate:
+
+```bash
+scripts/verify_windows_release_publication.sh \
+  "$VERSION" "$RELEASE_COMMIT" "$GITHUB_WORKFLOW_RUN_ID" \
+  windows/disposable-builder windows/github-independent
+```
+
+The gate validates the repository, exact tag, commit, successful workflow run,
+artifact identity, GitHub-hosted runner provenance, signer workflow, and every
+archive digest before requiring byte-identical output. Do not publish Windows
+archives when it fails. Signing or copying the disposable builder's checksums
+alone is not independent verification. The Linux `release_helper.sh` downloads
+the successful exact-tag artifact and runs this gate automatically. When
+importing a previously downloaded artifact, set both
+`FLUXHEIM_WINDOWS_INDEPENDENT_DIR` and
+`FLUXHEIM_WINDOWS_INDEPENDENT_RUN_ID`.
 
 The script fails when `scripts/smoke_windows_native.ps1` is absent or any
 native runtime assertion fails. This remains an intentional release block

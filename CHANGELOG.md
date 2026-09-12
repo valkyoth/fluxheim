@@ -60,6 +60,11 @@ behavior when the change improves security or project direction.
 - Keep build-account-writable Rust tools out of the Windows machine `PATH`,
   remove obsolete machine-wide Rust environment entries during builder setup,
   and reject elevated release-runner sessions.
+- Install the pinned Windows Rust toolchain as Administrator, lock its complete
+  inventory read-only with recorded hashes, isolate Cargo state per run, use a
+  protected Cargo working directory and allowlisted environment, reject
+  stale/reused official builders, and require authenticated provenance plus
+  byte-identical archives from the independent GitHub-hosted Windows build.
 - Require admin authentication before an HTTP request can trigger an expired
   self-healing rollback or observe its resulting status.
 - Keep failed expired-validation rollbacks terminal for the authenticated admin

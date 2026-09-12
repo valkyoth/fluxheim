@@ -90,6 +90,12 @@ native build and test infrastructure is available.
   machine-wide executable search path, clean obsolete machine environment
   entries, and make the release runner fail closed when invoked with an
   administrator token.
+- Move the Windows release compiler into an Administrator-provisioned,
+  recursively read-only tree with a verified file inventory. Official evidence
+  now requires a builder provisioned within 24 hours, a fresh per-run Cargo
+  home, allowlisted build environment, protected Cargo working directory, and
+  byte-identical archives with authenticated GitHub/Sigstore provenance from
+  the independent GitHub-hosted Windows builder domain.
 - Authenticate admin HTTP requests before they can trigger or observe an
   expired self-healing rollback.
 - Return failed expired-validation rollbacks directly to authenticated admin
@@ -108,6 +114,8 @@ native build and test infrastructure is available.
   normal x86_64 CI result are not substitutes for exact-tag release evidence.
 - Verify two clean archive builds are byte-identical on the dedicated builder
   before publishing the x86_64 archives.
+- Compare those archives byte-for-byte with the exact-commit artifact produced
+  by the GitHub-hosted Windows builder, then destroy the disposable builder.
 
 The Unix/OpenSSL FIPS support shim remains excluded as an independent Windows
 workspace package while staying covered by the dedicated Linux OpenSSL-FIPS
