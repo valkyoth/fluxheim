@@ -1,0 +1,8 @@
+php-fpm
+php-curl
+php-gd
+php-intl
+php-mbstring
+php-mysql
+php-xml
+php-zip

@@ -50,6 +50,15 @@ same seven public profiles used by Linux and Apple Silicon macOS.
   through delete-capable handles, and surface any rollback failure explicitly.
 - Bind the Windows filesystem-security audit to the complete reviewed
   first-party source boundary as well as the pinned ACL dependency checksum.
+- Make the focused Wolfi, Alpine, Debian, and SUSE BCI PHP images
+  self-contained managed
+  PHP-FPM runtimes with one smoke-verified application extension contract,
+  including MySQLi and its required MySQLnd module. The PHP image smoke rejects
+  extension load warnings and executes a real request through each image.
+- Replace `php-suse-micro` with `php-suse-bci`. The dedicated SUSE BCI PHP base
+  provides an official PHP repository and matching PHP-FPM stack, while the
+  pinned SL Micro base does not. Other SUSE Micro profiles remain supported,
+  and Windows PHP continues to use external TCP FastCGI as documented.
 
 ## Remaining Release Blocks
 

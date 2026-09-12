@@ -216,12 +216,13 @@ OS that fits their security and operations model.
 | `alpine` | `containers/Containerfile.alpine` | `alpine:3.23` | Small musl-based runtime with broad availability. |
 | `suse-micro` | `containers/Containerfile.suse-micro` | `registry.suse.com/suse/sl-micro/6.2/base-os-container:latest` | SUSE Micro runtime base aligned with Leap Micro-style deployments. |
 | `debian` | `containers/Containerfile.debian` | `debian:trixie-slim` | Conservative glibc runtime for broad compatibility. |
+| `suse-bci` | `containers/Containerfile.suse-bci` | `registry.suse.com/bci/php:8` | PHP-only SUSE variant with the official BCI PHP repository and managed PHP-FPM. |
 
 The root `Containerfile` remains the Debian default for simple local builds.
 New packaging and publishing work should use the explicit variant files under
 `containers/`.
 
-The Alpine, Wolfi, and SUSE Micro variants build with the official Rust
+The Alpine, Wolfi, SUSE Micro, and PHP-only SUSE BCI variants build with the official Rust
 `1.98.0-alpine3.23` image to keep a musl-linked release binary portable across
 small runtime bases. The Debian variant builds with the official Rust
 `1.98.0-bookworm` image and runs on `debian:trixie-slim`.
@@ -314,12 +315,15 @@ These focused profiles use TLS/ACME as shared ingress capabilities. The
 `cache` image is TLS-capable and omits local static web serving. The `proxy`
 image is TLS-capable and omits cache and static web serving. The `php` image is
 TLS-capable, includes static web serving and PHP-FPM support, and omits cache
-and proxy-edge extras. Starting with `1.3.7`, the recommended Wolfi `php` image
-also installs `php-8.5-fpm` and uses
+and proxy-edge extras. The Wolfi, Alpine, Debian, and SUSE BCI `php` images
+install managed PHP-FPM plus the common modules listed in
+[packaging/container/php-required-modules.txt](../packaging/container/php-required-modules.txt)
+and use
 [packaging/container/php-managed.toml](../packaging/container/php-managed.toml)
 so `mode = "managed"` works out of the box for content mounted under
-`/srv/fluxheim`. The non-Wolfi PHP image variants keep the external php-fpm
-container config unless their runtime packages are customized. The
+`/srv/fluxheim`. The SUSE PHP image is `php-suse-bci`; `php-suse-micro` is not
+published because the minimal SUSE Micro runtime has no matching enabled PHP
+package repository. The
 `load-balancer` image is TLS-capable and omits cache and static web serving.
 Starting with the `1.5` load-balancer line, it is part of the normal focused
 release image set. The
@@ -384,16 +388,17 @@ Build the self-contained managed PHP-FPM Wolfi profile locally:
 podman build \
   --build-arg FLUXHEIM_FEATURES=profile-web-server,php-fpm,acme-client \
   --build-arg FLUXHEIM_CONFIG=packaging/container/php-managed.toml \
-  --build-arg FLUXHEIM_RUNTIME_PACKAGES=php-8.5-fpm \
+  --build-arg FLUXHEIM_RUNTIME_PACKAGES="$(paste -sd ' ' packaging/container/php-wolfi-runtime-packages.txt)" \
   -t fluxheim:php-wolfi \
   -f containers/Containerfile.wolfi .
 ```
 
-The matching smoke test builds that image when needed and verifies `/index.php`
-is executed through Fluxheim-managed php-fpm:
+The managed PHP image smoke builds Wolfi, Alpine, Debian, and SUSE BCI images,
+rejects extension-load warnings, verifies the common module contract, and
+executes `/index.php` through Fluxheim-managed PHP-FPM in each image:
 
 ```bash
-scripts/smoke_fluxheim_php_wolfi.sh
+scripts/smoke_fluxheim_php_images.sh
 ```
 
 Build the development Wolfi profile locally:
@@ -557,8 +562,8 @@ The focused image profiles publish tags with a profile segment:
   `v1.8.1-proxy-suse-micro`, `v1.8.1-proxy-debian`
 - `v1.8.1-load-balancer-wolfi`, `v1.8.1-load-balancer-alpine`,
   `v1.8.1-load-balancer-suse-micro`, `v1.8.1-load-balancer-debian`
-- `v1.8.1-php-wolfi`, `v1.8.1-php-alpine`,
-  `v1.8.1-php-suse-micro`, `v1.8.1-php-debian`
+- Starting with `1.8.2`: `v1.8.2-php-wolfi`, `v1.8.2-php-alpine`,
+  `v1.8.2-php-debian`, `v1.8.2-php-suse-bci`
 - `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`,
   `sha-<short-sha>-load-balancer-wolfi`, `sha-<short-sha>-php-wolfi`, etc.
 - `latest-cache-wolfi`, `latest-proxy-wolfi`,

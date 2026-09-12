@@ -51,6 +51,9 @@ scripts/validate-runtime-fixtures.sh check
 echo "stable release gate: Wasm example parity plan"
 scripts/validate-wasm-example-plan.sh
 
+echo "stable release gate: managed PHP image plan"
+scripts/validate_php_image_plan.sh
+
 if [ "$mode" = "release" ]; then
     echo "stable release gate: compatible crate freshness"
     scripts/check_latest_crates.sh
@@ -150,11 +153,12 @@ else
     echo "stable release gate: skipping Wasm container smoke; set FLUXHEIM_GATE_WASM_CONTAINER=1 to enable"
 fi
 
-if [ "${FLUXHEIM_GATE_PHP_WOLFI:-0}" = "1" ]; then
-    echo "stable release gate: PHP Wolfi image smoke"
-    scripts/smoke_fluxheim_php_wolfi.sh
+php_image_gate="${FLUXHEIM_GATE_PHP_IMAGES:-${FLUXHEIM_GATE_PHP_WOLFI:-0}}"
+if [ "$php_image_gate" = "1" ]; then
+    echo "stable release gate: managed PHP image matrix smoke"
+    scripts/smoke_fluxheim_php_images.sh
 else
-    echo "stable release gate: skipping PHP Wolfi image smoke; set FLUXHEIM_GATE_PHP_WOLFI=1 to enable"
+    echo "stable release gate: skipping managed PHP image matrix smoke; set FLUXHEIM_GATE_PHP_IMAGES=1 to enable"
 fi
 
 if [ "${FLUXHEIM_GATE_RPM_BUILD:-0}" = "1" ]; then

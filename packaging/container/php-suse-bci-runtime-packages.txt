@@ -1,0 +1,13 @@
+php8-fpm
+php8-mysql
+php8-gd
+php8-intl
+php8-ctype
+php8-dom
+php8-exif
+php8-fileinfo
+php8-iconv
+php8-pdo
+php8-sodium
+php8-xmlreader
+php8-xmlwriter

@@ -298,8 +298,12 @@ when PHP behavior changes. The local WordPress smoke accepts `external`,
 `managed-respawn`, or `both` so the same install/login/admin flow can verify an
 operator-managed php-fpm container, every Fluxheim-managed php-fpm process
 manager mode, and the managed php-fpm post-start crash respawn watchdog.
-`scripts/smoke_fluxheim_php_wolfi.sh` verifies the self-contained Wolfi PHP
-image path with bundled `php-8.5-fpm` and managed php-fpm enabled.
+`scripts/smoke_fluxheim_php_images.sh` verifies the self-contained Wolfi,
+Alpine, Debian, and SUSE BCI PHP images. It rejects PHP module load warnings,
+checks the shared application extension baseline (including MySQLi/MySQLnd),
+and executes a real request through Fluxheim-managed PHP-FPM in every image.
+The SUSE PHP profile uses `registry.suse.com/bci/php:8` and is published as
+`php-suse-bci`; non-PHP SUSE profiles continue to use SUSE Micro.
 
 Managed php-fpm starts the php-fpm master from a retained, owner/mode-validated
 executable descriptor with a cleared environment and a fixed minimal `PATH`, so

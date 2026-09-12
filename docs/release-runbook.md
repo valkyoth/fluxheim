@@ -65,7 +65,7 @@ For PHP-FPM releases, also run:
 ```bash
 scripts/smoke_wordpress_php_fpm.sh both
 scripts/smoke_wordpress_proxy_tls.sh
-scripts/smoke_fluxheim_php_wolfi.sh
+scripts/smoke_fluxheim_php_images.sh
 ```
 
 When collecting release evidence on a host that cannot build every FIPS
@@ -422,8 +422,8 @@ for image in \
   "${TAG}-proxy-debian" \
   "${TAG}-php-wolfi" \
   "${TAG}-php-alpine" \
-  "${TAG}-php-suse-micro" \
-  "${TAG}-php-debian"
+  "${TAG}-php-debian" \
+  "${TAG}-php-suse-bci"
 do
   podman pull "ghcr.io/valkyoth/fluxheim:${image}"
   podman inspect "ghcr.io/valkyoth/fluxheim:${image}" --format '{{index .RepoDigests 0}}'
@@ -450,8 +450,8 @@ for image in \
   "${TAG}-proxy-debian" \
   "${TAG}-php-wolfi" \
   "${TAG}-php-alpine" \
-  "${TAG}-php-suse-micro" \
-  "${TAG}-php-debian"
+  "${TAG}-php-debian" \
+  "${TAG}-php-suse-bci"
 do
   podman pull "quay.io/valkyoth/fluxheim:${image}"
   podman inspect "quay.io/valkyoth/fluxheim:${image}" --format '{{index .RepoDigests 0}}'

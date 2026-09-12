@@ -3237,7 +3237,11 @@ Stable scope:
   load-balancer, observability, and Wasm tests, and define
   Windows path, ACL, file-locking, shutdown, service, certificate-storage, and
   Unix-control-path replacements. Any unsupported profile must be named and
-  justified rather than silently omitted.
+  justified rather than silently omitted. Make the Wolfi, Alpine, Debian, and
+  SUSE BCI PHP images self-contained with managed PHP-FPM and a common tested
+  extension contract. Publish the SUSE PHP profile as `php-suse-bci` because
+  the dedicated BCI PHP base supplies an official PHP repository; retain SUSE
+  Micro for the non-PHP profiles.
 - `v1.8.3`: cross-platform parity hardening. Compare Linux, macOS, and Windows
   behavior profile by profile, close practical gaps, document intentional
   differences, add `scripts/test_starter.py` platform entries, and require

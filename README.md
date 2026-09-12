@@ -123,7 +123,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | OpenTelemetry | ✅ | OTLP metrics and tracing export profiles. |
 | Structured access logs | ✅ | Trusted client IP, cache phase, route, selected upstream/alias/retries, TLS identity, compression, and optional Geo-Context fields. |
 | Config tester | ✅ | Release-page config diagnostics through `fluxheim-config-tester`. |
-| Rootless containers | ✅ | Wolfi, Alpine, SUSE Micro, Debian, focused full/Wasm/cache/proxy/load-balancer/PHP images. |
+| Rootless containers | ✅ | Wolfi, Alpine, SUSE Micro, Debian, focused full/Wasm/cache/proxy/load-balancer/PHP images, plus a SUSE BCI PHP image. |
 | Native services | ✅ | systemd units and RPM packaging files. |
 | Default page | ✅ | Packaged `/srv/fluxheim/index.html` with no external assets. |
 
@@ -378,9 +378,11 @@ and explicit `.php` scripts to php-fpm. See
 [`docs/php-fpm-app-recipes.md`](docs/php-fpm-app-recipes.md), and
 [`examples/php-fpm.toml`](examples/php-fpm.toml).
 Fluxheim `1.3.7` completed the production PHP-FPM line with managed php-fpm
-supervision as an opt-in runtime mode. The Wolfi PHP image is self-contained
-for managed PHP-FPM and includes the Wolfi `php-8.5-fpm` runtime; non-Wolfi PHP
-image variants keep the external php-fpm container config unless customized.
+supervision as an opt-in runtime mode. The focused Wolfi, Alpine, Debian, and
+SUSE BCI PHP images are self-contained managed PHP-FPM runtimes with a common
+smoke-tested application extension baseline. The SUSE PHP image uses the
+dedicated BCI PHP base and is published as `php-suse-bci`; SUSE Micro remains
+the base for non-PHP SUSE profiles.
 Managed supervision requires Unix process and socket primitives. Windows PHP
 archives support operator-managed external FastCGI pools over TCP and reject
 `mode = "managed"` during configuration validation.

@@ -307,11 +307,11 @@ TESTS: tuple[TestEntry, ...] = (
         "Builds and runs the main Fluxheim container smoke.",
     ),
     TestEntry(
-        "php-wolfi",
-        "PHP Wolfi container smoke",
+        "php-images",
+        "Managed PHP container matrix smoke",
         "containers",
-        ("scripts/smoke_fluxheim_php_wolfi.sh",),
-        "Builds/runs the PHP-capable Wolfi image profile.",
+        ("scripts/smoke_fluxheim_php_images.sh",),
+        "Builds and runs the managed PHP image profiles with their required extension baseline.",
     ),
     TestEntry(
         "rpm-fedora",

@@ -215,9 +215,10 @@ The `1.3.7` support promise completes the production PHP-FPM line. External
 php-fpm remains the default, while `mode = "managed"` lets Fluxheim generate a
 private php-fpm pool, supervise the php-fpm master, respawn it after post-start
 crashes with bounded backoff, and run WordPress-compatible PHP through the same
-FastCGI request path. The recommended Wolfi PHP image includes `php-8.5-fpm`
-for this managed mode; other image variants keep the external php-fpm
-deployment shape unless customized.
+FastCGI request path. The focused Wolfi, Alpine, Debian, and SUSE BCI PHP images
+include managed PHP-FPM and a shared smoke-tested application extension
+baseline. SUSE PHP is published as `php-suse-bci`; the minimal SUSE Micro base
+continues to serve only non-PHP profiles.
 
 The `1.4.0` support promise is the first production proxy parity baseline.
 It adds opt-in edge ACLs, request rate limits, concurrency limits,

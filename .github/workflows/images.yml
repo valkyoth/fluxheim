@@ -58,43 +58,42 @@ jobs:
           - alpine
           - wolfi
           - suse-micro
+          - suse-bci
         profile:
           - name: full
             tag: ""
             features: profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
             config: packaging/container/fluxheim.toml
             wolfi_config: ""
-            wolfi_runtime_packages: ""
           - name: wasm
             tag: wasm
             features: profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
             config: packaging/container/fluxheim.toml
             wolfi_config: ""
-            wolfi_runtime_packages: ""
           - name: cache
             tag: cache
             features: profile-cache-edge,acme-client
             config: packaging/container/cache.toml
             wolfi_config: ""
-            wolfi_runtime_packages: ""
           - name: proxy
             tag: proxy
             features: profile-proxy-edge,acme-client
             config: packaging/container/proxy.toml
             wolfi_config: ""
-            wolfi_runtime_packages: ""
           - name: php
             tag: php
             features: profile-web-server,php-fpm,acme-client
             config: packaging/container/php.toml
-            wolfi_config: packaging/container/php-managed.toml
-            wolfi_runtime_packages: php-8.5-fpm
+            managed_config: packaging/container/php-managed.toml
+            wolfi_runtime_packages_file: packaging/container/php-wolfi-runtime-packages.txt
+            alpine_runtime_packages_file: packaging/container/php-alpine-runtime-packages.txt
+            debian_runtime_packages_file: packaging/container/php-debian-runtime-packages.txt
+            suse_bci_runtime_packages_file: packaging/container/php-suse-bci-runtime-packages.txt
           - name: load-balancer
             tag: load-balancer
             features: profile-load-balancer-edge,acme-client
             config: packaging/container/load-balancer.toml
             wolfi_config: ""
-            wolfi_runtime_packages: ""
     env:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -111,9 +110,15 @@ jobs:
         shell: bash
         env:
           PROFILE: ${{ matrix.profile.name }}
+          VARIANT: ${{ matrix.variant }}
         run: |
           set -euo pipefail
           build="true"
+          if [[ "${PROFILE}" == "php" && "${VARIANT}" == "suse-micro" ]]; then
+            build="false"
+          elif [[ "${PROFILE}" != "php" && "${VARIANT}" == "suse-bci" ]]; then
+            build="false"
+          fi
           if [[ "${PROFILE}" == "load-balancer" ]]; then
             if [[ "${GITHUB_EVENT_NAME}" != "push" && ! "${GITHUB_REF_NAME}" =~ ^v(1\.[5-9]|[2-9]\.) && "${INCLUDE_LOAD_BALANCER}" != "true" ]]; then
               build="false"
@@ -121,7 +126,7 @@ jobs:
           fi
           echo "build=${build}" >> "${GITHUB_OUTPUT}"
           if [[ "${build}" == "false" ]]; then
-            echo "Skipping ${PROFILE} image profile for manual ref before the load-balancer image line without include_load_balancer=true."
+            echo "Skipping unsupported or gated image combination: ${PROFILE}-${VARIANT}."
           fi
 
       - name: Checkout repository
@@ -285,7 +290,11 @@ jobs:
           MATRIX_FEATURES: ${{ matrix.profile.features }}
           MATRIX_CONFIG: ${{ matrix.profile.config }}
           MATRIX_WOLFI_CONFIG: ${{ matrix.profile.wolfi_config || '' }}
-          MATRIX_WOLFI_RUNTIME_PACKAGES: ${{ matrix.profile.wolfi_runtime_packages || '' }}
+          MATRIX_MANAGED_CONFIG: ${{ matrix.profile.managed_config || '' }}
+          MATRIX_WOLFI_RUNTIME_PACKAGES_FILE: ${{ matrix.profile.wolfi_runtime_packages_file || '' }}
+          MATRIX_ALPINE_RUNTIME_PACKAGES_FILE: ${{ matrix.profile.alpine_runtime_packages_file || '' }}
+          MATRIX_DEBIAN_RUNTIME_PACKAGES_FILE: ${{ matrix.profile.debian_runtime_packages_file || '' }}
+          MATRIX_SUSE_BCI_RUNTIME_PACKAGES_FILE: ${{ matrix.profile.suse_bci_runtime_packages_file || '' }}
           INPUT_FEATURES: ${{ inputs.features || '' }}
           INPUT_CONFIG: ${{ inputs.config || '' }}
         run: |
@@ -293,11 +302,39 @@ jobs:
           features="${INPUT_FEATURES:-$MATRIX_FEATURES}"
           config="${INPUT_CONFIG:-$MATRIX_CONFIG}"
           runtime_packages=""
-          if [[ "${VARIANT}" == "wolfi" && -z "${INPUT_CONFIG}" ]]; then
-            if [[ -n "${MATRIX_WOLFI_CONFIG}" ]]; then
-              config="${MATRIX_WOLFI_CONFIG}"
+          if [[ -z "${INPUT_CONFIG}" ]]; then
+            runtime_packages_file=""
+            case "${VARIANT}" in
+              wolfi)
+                if [[ -n "${MATRIX_WOLFI_CONFIG}" ]]; then
+                  config="${MATRIX_WOLFI_CONFIG}"
+                elif [[ -n "${MATRIX_MANAGED_CONFIG}" ]]; then
+                  config="${MATRIX_MANAGED_CONFIG}"
+                fi
+                runtime_packages_file="${MATRIX_WOLFI_RUNTIME_PACKAGES_FILE}"
+                ;;
+              alpine)
+                if [[ -n "${MATRIX_MANAGED_CONFIG}" ]]; then
+                  config="${MATRIX_MANAGED_CONFIG}"
+                fi
+                runtime_packages_file="${MATRIX_ALPINE_RUNTIME_PACKAGES_FILE}"
+                ;;
+              debian)
+                if [[ -n "${MATRIX_MANAGED_CONFIG}" ]]; then
+                  config="${MATRIX_MANAGED_CONFIG}"
+                fi
+                runtime_packages_file="${MATRIX_DEBIAN_RUNTIME_PACKAGES_FILE}"
+                ;;
+              suse-bci)
+                if [[ -n "${MATRIX_MANAGED_CONFIG}" ]]; then
+                  config="${MATRIX_MANAGED_CONFIG}"
+                fi
+                runtime_packages_file="${MATRIX_SUSE_BCI_RUNTIME_PACKAGES_FILE}"
+                ;;
+            esac
+            if [[ -n "${runtime_packages_file}" ]]; then
+              runtime_packages="$(paste -sd ' ' "${runtime_packages_file}")"
             fi
-            runtime_packages="${MATRIX_WOLFI_RUNTIME_PACKAGES}"
           fi
           {
             echo "features=${features}"

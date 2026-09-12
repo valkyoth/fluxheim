@@ -1,15 +1,11 @@
-ARG RUST_IMAGE=docker.io/library/rust:1.98.0-bookworm@sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922
-ARG RUNTIME_IMAGE=docker.io/library/debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
-ARG FLUXHEIM_CONFIG=packaging/container/fluxheim.toml
+ARG RUST_IMAGE=docker.io/library/rust:1.98.0-alpine3.23@sha256:4743b6231029d726d7a0f81d730a7c9f4eff23225a4499c01e275efb5e260235
+ARG RUNTIME_IMAGE=registry.suse.com/bci/php:8@sha256:3d503ae4e521db6c3977414255e31a8608b629e41e2319aa559dc8051954ca0d
+ARG FLUXHEIM_CONFIG=packaging/container/php-managed.toml
 
 FROM ${RUST_IMAGE} AS builder
 WORKDIR /usr/src/fluxheim
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends cmake \
-    && rm -rf /var/lib/apt/lists/* \
+RUN apk add --no-cache build-base cmake perl pkgconf \
     && mkdir -p scripts
 
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
@@ -20,33 +16,26 @@ COPY crates ./crates
 COPY src ./src
 COPY scripts/validate-features.sh scripts/feature-policy.sh ./scripts/
 
-ARG FLUXHEIM_FEATURES=profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
-RUN if [ "${FLUXHEIM_FEATURES}" = "default" ]; then \
-        cargo build --locked --release; \
-    else \
-        scripts/validate-features.sh "${FLUXHEIM_FEATURES}" && \
-        cargo build --locked --release --no-default-features --features "${FLUXHEIM_FEATURES}"; \
-    fi
+ARG FLUXHEIM_FEATURES=profile-web-server,php-fpm,acme-client
+RUN scripts/validate-features.sh "${FLUXHEIM_FEATURES}" \
+    && cargo build --locked --release --no-default-features --features "${FLUXHEIM_FEATURES}"
 
 FROM ${RUNTIME_IMAGE}
-ARG FLUXHEIM_CONFIG=packaging/container/fluxheim.toml
+ARG FLUXHEIM_CONFIG=packaging/container/php-managed.toml
 ARG FLUXHEIM_RUNTIME_UID=65532
 ARG FLUXHEIM_RUNTIME_GID=65532
 ARG FLUXHEIM_RUNTIME_PACKAGES=""
 
-ENV DEBIAN_FRONTEND=noninteractive
-
 LABEL org.opencontainers.image.title="Fluxheim"
-LABEL org.opencontainers.image.description="Fluxheim static web server and reverse proxy on Debian"
+LABEL org.opencontainers.image.description="Fluxheim managed PHP-FPM web server on SUSE BCI"
 LABEL org.opencontainers.image.licenses="EUPL-1.2"
 LABEL org.opencontainers.image.source="https://github.com/valkyoth/fluxheim"
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates ${FLUXHEIM_RUNTIME_PACKAGES} \
-    && if [ -x /usr/sbin/php-fpm8.4 ] && [ ! -e /usr/bin/php-fpm ]; then \
-        ln /usr/sbin/php-fpm8.4 /usr/bin/php-fpm; \
+RUN zypper --non-interactive install ${FLUXHEIM_RUNTIME_PACKAGES} \
+    && zypper --non-interactive clean --all \
+    && if [ -x /usr/sbin/php-fpm ] && [ ! -e /usr/bin/php-fpm ]; then \
+        ln /usr/sbin/php-fpm /usr/bin/php-fpm; \
     fi \
-    && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /etc/fluxheim /run/fluxheim /var/lib/fluxheim/acme /var/cache/fluxheim /var/log/fluxheim /srv/fluxheim \
     && chown -R ${FLUXHEIM_RUNTIME_UID}:${FLUXHEIM_RUNTIME_GID} /etc/fluxheim /run/fluxheim /var/lib/fluxheim /var/cache/fluxheim /var/log/fluxheim /srv/fluxheim
 
