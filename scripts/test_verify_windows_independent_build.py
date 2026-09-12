@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VERIFIER = ROOT / "scripts" / "verify_windows_independent_build.py"
 PUBLICATION_GATE = ROOT / "scripts" / "verify_windows_release_publication.sh"
+PUBLISHER = ROOT / "scripts" / "publish_verified_release.sh"
 PROFILES = ("full", "wasm", "cache", "proxy", "load-balancer", "php", "config-tester")
 COMMIT = "a" * 40
 VERSION = "1.8.2"
@@ -31,6 +32,7 @@ class IndependentWindowsBuildTests(unittest.TestCase):
         self.independent.mkdir()
         self.fake_bin = root / "bin"
         self.fake_bin.mkdir()
+        self.gh_log = root / "gh.log"
         checksum_lines: list[str] = []
         for profile in PROFILES:
             name = f"fluxheim-{VERSION}-{profile}-x86_64-windows.zip"
@@ -95,8 +97,11 @@ class IndependentWindowsBuildTests(unittest.TestCase):
             "#!/usr/bin/env bash\n"
             "set -eu\n"
             f"commit=${{GH_FAKE_COMMIT:-{COMMIT}}}\n"
+            "[[ -z ${GH_FAKE_LOG:-} ]] || printf '%s\\n' \"$*\" >>\"$GH_FAKE_LOG\"\n"
             "if [[ $1 == api && $* == *'/artifacts'* ]]; then\n"
             "  printf '123\\tfalse\\t%s\\n' \"$commit\"\n"
+            "elif [[ $1 == api && $* == *'/commits/'* ]]; then\n"
+            "  echo \"$commit\"\n"
             "elif [[ $1 == api ]]; then\n"
             "  case \"$*\" in\n"
             "    *'.repository.full_name'*) echo valkyoth/fluxheim ;;\n"
@@ -113,6 +118,12 @@ class IndependentWindowsBuildTests(unittest.TestCase):
             f"  [[ $* == *'--source-ref refs/tags/v{VERSION}'* ]]\n"
             f"  [[ $* == *'--source-digest {COMMIT}'* ]]\n"
             "  [[ $* == *'--deny-self-hosted-runners'* ]]\n"
+            "elif [[ $1 == release && $2 == view && $* == *'tagName,isDraft,isImmutable'* ]]; then\n"
+            f"  printf 'v{VERSION}\\t%s\\tfalse\\n' \"${{GH_FAKE_RELEASE_DRAFT:-true}}\"\n"
+            "elif [[ $1 == release && $2 == view && $* == *'--json assets'* ]]; then\n"
+            "  [[ -z ${GH_FAKE_EXISTING_ASSET:-} ]] || echo \"$GH_FAKE_EXISTING_ASSET\"\n"
+            "elif [[ $1 == release && $2 == upload ]]; then\n"
+            "  exit 0\n"
             "else\n"
             "  exit 2\n"
             "fi\n",
@@ -161,6 +172,28 @@ class IndependentWindowsBuildTests(unittest.TestCase):
             env=process_environment,
         )
 
+    def run_publisher(self, **environment: str) -> subprocess.CompletedProcess[str]:
+        process_environment = os.environ.copy()
+        process_environment.update(environment)
+        process_environment["GH_FAKE_LOG"] = str(self.gh_log)
+        process_environment["PATH"] = f"{self.fake_bin}:{process_environment['PATH']}"
+        return subprocess.run(
+            [
+                "bash",
+                str(PUBLISHER),
+                VERSION,
+                COMMIT,
+                "1234",
+                str(self.local),
+                str(self.independent),
+                "valkyoth/fluxheim",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=process_environment,
+        )
+
     def test_accepts_identical_archives_from_two_builder_domains(self) -> None:
         result = self.run_verifier()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -179,6 +212,40 @@ class IndependentWindowsBuildTests(unittest.TestCase):
     def test_publication_gate_rejects_failed_attestation(self) -> None:
         result = self.run_publication_gate(GH_FAKE_ATTESTATION_FAILURE="1")
         self.assertNotEqual(result.returncode, 0)
+
+    def test_publisher_stages_verified_archives_after_gate(self) -> None:
+        result = self.run_publisher()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        log = self.gh_log.read_text(encoding="ascii")
+        self.assertIn(f"release upload v{VERSION}", log)
+        for profile in PROFILES:
+            self.assertIn(
+                f"fluxheim-{VERSION}-{profile}-x86_64-windows.zip", log
+            )
+
+    def test_publisher_never_uploads_when_gate_fails(self) -> None:
+        result = self.run_publisher(GH_FAKE_ATTESTATION_FAILURE="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn(
+            f"release upload v{VERSION}", self.gh_log.read_text(encoding="ascii")
+        )
+
+    def test_publisher_rejects_non_draft_release_without_upload(self) -> None:
+        result = self.run_publisher(GH_FAKE_RELEASE_DRAFT="false")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("mutable draft release", result.stderr)
+        self.assertNotIn(
+            f"release upload v{VERSION}", self.gh_log.read_text(encoding="ascii")
+        )
+
+    def test_publisher_refuses_to_replace_existing_archive(self) -> None:
+        name = f"fluxheim-{VERSION}-full-x86_64-windows.zip"
+        result = self.run_publisher(GH_FAKE_EXISTING_ASSET=name)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("refusing to replace existing release asset", result.stderr)
+        self.assertNotIn(
+            f"release upload v{VERSION}", self.gh_log.read_text(encoding="ascii")
+        )
 
     def test_rejects_independent_archive_tampering(self) -> None:
         archive = self.independent / f"fluxheim-{VERSION}-full-x86_64-windows.zip"

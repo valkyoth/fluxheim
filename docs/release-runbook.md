@@ -236,10 +236,15 @@ Administrator-provisioned read-only Rust toolchain. Download the exact-commit
 job and authenticate its run and provenance before comparison:
 
 ```bash
-scripts/verify_windows_release_publication.sh \
+scripts/publish_verified_release.sh \
   "$VERSION" "$RELEASE_COMMIT" "$GITHUB_WORKFLOW_RUN_ID" \
   "$WINDOWS_DISPOSABLE_OUTPUT" "$WINDOWS_GITHUB_OUTPUT"
 ```
+
+Create the matching GitHub release as a draft without Windows assets first.
+The repository-owned entrypoint runs the authenticated independent-build gate,
+verifies the remote tag and draft state, and only then uploads the seven
+verified Windows ZIPs. Do not upload those ZIPs directly or use `--clobber`.
 
 Destroy the disposable host after the evidence and archives are collected.
 

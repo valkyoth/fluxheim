@@ -1001,6 +1001,29 @@ foreach ($required in @(
     }
 }
 
+$publisherPath = Join-Path $root 'scripts/publish_verified_release.sh'
+if (-not (Test-Path -LiteralPath $publisherPath -PathType Leaf)) {
+    throw 'verified release publication entrypoint is missing'
+}
+$publisher = Get-Content -LiteralPath $publisherPath -Raw
+foreach ($required in @(
+    'verify_windows_release_publication.sh',
+    'repos/$REPOSITORY/commits/$TAG',
+    '--json tagName,isDraft,isImmutable',
+    'matching mutable draft release',
+    'refusing to replace existing release asset',
+    'gh release upload'
+)) {
+    if (-not $publisher.Contains($required)) {
+        throw "verified release publisher is missing required policy: $required"
+    }
+}
+$gateIndex = $publisher.IndexOf('verify_windows_release_publication.sh')
+$uploadIndex = $publisher.IndexOf('gh release upload')
+if ($gateIndex -lt 0 -or $uploadIndex -le $gateIndex) {
+    throw 'verified release publisher can upload before the authenticated gate'
+}
+
 $supportedWindowsContract = $builder + "`n" + $archiveSmoke + "`n" + $wasmSmoke +
     "`n" + $release + "`n" + $preparation + "`n" + $ci
 foreach ($unsupported in @(

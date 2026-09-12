@@ -116,7 +116,7 @@ the local Windows firewall rule is not a replacement for it.
 
 ## Exact-Tag Build
 
-The Linux `release_helper.sh` can upload and invoke
+An operator-owned Linux aggregator can transfer and invoke
 `scripts/run_windows_release_builder.ps1` over OpenSSH. It passes the already
 verified tag commit and downloads the resulting evidence. The Windows script
 then independently:
@@ -152,24 +152,25 @@ the per-run Cargo home prevents cross-run Cargo configuration or cache state.
 The GitHub-hosted `windows-2025` job is the independent builder domain. On the
 exact tag it uploads `fluxheim-windows-independent-<commit>` containing all
 seven ZIPs, their hashes, and commit evidence, and creates GitHub/Sigstore SLSA
-provenance attestations for every ZIP. Download that artifact beside the
-disposable-builder output and run the authenticated publication gate:
+provenance attestations for every ZIP. Create the matching GitHub release as a
+draft without Windows assets, then download that artifact beside the
+disposable-builder output and use the repository-owned publication entrypoint:
 
 ```bash
-scripts/verify_windows_release_publication.sh \
+scripts/publish_verified_release.sh \
   "$VERSION" "$RELEASE_COMMIT" "$GITHUB_WORKFLOW_RUN_ID" \
   windows/disposable-builder windows/github-independent
 ```
 
-The gate validates the repository, exact tag, commit, successful workflow run,
-artifact identity, GitHub-hosted runner provenance, signer workflow, and every
-archive digest before requiring byte-identical output. Do not publish Windows
-archives when it fails. Signing or copying the disposable builder's checksums
-alone is not independent verification. The Linux `release_helper.sh` downloads
-the successful exact-tag artifact and runs this gate automatically. When
-importing a previously downloaded artifact, set both
-`FLUXHEIM_WINDOWS_INDEPENDENT_DIR` and
-`FLUXHEIM_WINDOWS_INDEPENDENT_RUN_ID`.
+The entrypoint first runs `verify_windows_release_publication.sh`, which
+validates the repository, exact tag, commit, successful workflow run, artifact
+identity, GitHub-hosted runner provenance, signer workflow, and every archive
+digest before requiring byte-identical output. It then verifies the remote tag
+commit and mutable draft state, rejects existing archive names, and stages the
+seven disposable-builder ZIPs without `--clobber`. No repository-owned upload
+path runs before the gate succeeds. Workstation-local aggregation helpers do
+not constitute publication enforcement and must not upload Windows assets
+directly.
 
 The script fails when `scripts/smoke_windows_native.ps1` is absent or any
 native runtime assertion fails. This remains an intentional release block
