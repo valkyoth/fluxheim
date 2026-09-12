@@ -1,7 +1,7 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('X64', 'Arm64')]
+    [ValidateSet('X64')]
     [string]$ExpectedArchitecture,
 
     [Parameter(Mandatory = $true)]

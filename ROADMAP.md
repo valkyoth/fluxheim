@@ -167,6 +167,10 @@ Store publication only if the Store model fits Fluxheim's server/service
 behavior; otherwise use a signed MSI or signed zip plus documented Windows
 service installation. HTTP/3 and QUIC become the following `1.9` line after
 cross-platform release evidence is stable.
+The active `1.8.2` Windows release target is x86_64 MSVC only. Windows ARM64
+remains future work and must not receive public artifacts or support claims
+until the project has sustainable native ARM64 Windows build infrastructure,
+live runtime coverage, and repeatable release evidence equivalent to x86_64.
 After Pingora is removed from normal builds, add a native
 nginx/Ketama-compatible consistent-hash selection mode implemented by
 Fluxheim, not by depending on `pingora-ketama`. The current Fluxheim-owned

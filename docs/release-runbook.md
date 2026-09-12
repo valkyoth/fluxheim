@@ -159,7 +159,6 @@ triple:
 | `aarch64-unknown-linux-gnu` | `aarch64-linux` |
 | `aarch64-apple-darwin` | `aarch64-macos` |
 | `x86_64-pc-windows-msvc` | `x86_64-windows` |
-| `aarch64-pc-windows-msvc` | `aarch64-windows` |
 
 Build the current Linux host target:
 
@@ -218,17 +217,18 @@ scripts/validate_portable_release_plan.py
 Build the seven portable profiles on a matching supported host. Native CI
 builds every public archive profile on Apple Silicon. Intel macOS is not a
 supported release target. During `1.8.2`, Windows archives additionally require
-separate native x86_64 and ARM64 builder evidence; do not publish either
-architecture when one platform gate is incomplete:
+native x86_64 builder evidence; do not publish them when that gate is
+incomplete:
 
 ```bash
 scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos
 sh scripts/smoke_macos_native_parity.sh
 ```
 
-Run `scripts/run_windows_release_builder.ps1` separately on the prepared native
-x86_64 and ARM64 hosts. The exact-tag Linux aggregator can invoke both hosts
-over OpenSSH. See [Windows Release Builders](windows-release-builders.md).
+Run `scripts/run_windows_release_builder.ps1` on the prepared native x86_64
+host. The exact-tag Linux aggregator can invoke it over OpenSSH. Windows ARM64
+is deferred and must not be published. See
+[Windows Release Builders](windows-release-builders.md).
 
 The native matrix must also execute
 `scripts/smoke_wasm_policy_examples_binary.sh` against the staged `wasm`

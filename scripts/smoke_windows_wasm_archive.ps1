@@ -5,7 +5,7 @@ param(
     [string]$Version,
 
     [Parameter(Mandatory = $true)]
-    [ValidateSet('x86_64', 'aarch64')]
+    [ValidateSet('x86_64')]
     [string]$Architecture
 )
 
@@ -141,11 +141,7 @@ public sealed class FluxheimWindowsWasmSmokeOrigin : IDisposable
 }
 '@
 
-$targetLabel = if ($Architecture -eq 'x86_64') {
-    'x86_64-windows'
-} else {
-    'aarch64-windows'
-}
+$targetLabel = 'x86_64-windows'
 $archiveName = "fluxheim-$Version-wasm-$targetLabel.zip"
 $archivePath = Join-Path (Join-Path $root 'dist') $archiveName
 if (-not (Test-Path -LiteralPath $archivePath -PathType Leaf)) {

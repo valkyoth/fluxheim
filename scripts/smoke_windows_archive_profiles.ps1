@@ -5,7 +5,7 @@ param(
     [string]$Version,
 
     [Parameter(Mandatory = $true)]
-    [ValidateSet('x86_64', 'aarch64')]
+    [ValidateSet('x86_64')]
     [string]$Architecture
 )
 
@@ -13,12 +13,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$targetLabel = if ($Architecture -eq 'x86_64') {
-    'x86_64-windows'
-} else {
-    'aarch64-windows'
-}
-$expectedHostArchitecture = if ($Architecture -eq 'x86_64') { 'X64' } else { 'Arm64' }
+$targetLabel = 'x86_64-windows'
+$expectedHostArchitecture = 'X64'
 $actualHostArchitecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
 if ($actualHostArchitecture -ne $expectedHostArchitecture) {
     throw "native Windows archive smoke requires $expectedHostArchitecture, running on $actualHostArchitecture"

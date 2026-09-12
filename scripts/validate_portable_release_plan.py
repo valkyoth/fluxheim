@@ -14,6 +14,14 @@ from portable_release_plan import PLATFORMS, PROFILES, release_plan
 ROOT = Path(__file__).resolve().parents[1]
 BUILDER = ROOT / "scripts" / "build_release_assets.sh"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+WINDOWS_RELEASE_SCRIPTS = (
+    ROOT / "scripts" / "build_release_assets.ps1",
+    ROOT / "scripts" / "build_release_assets.sh",
+    ROOT / "scripts" / "prepare_windows_release_builder.ps1",
+    ROOT / "scripts" / "run_windows_release_builder.ps1",
+    ROOT / "scripts" / "smoke_windows_archive_profiles.ps1",
+    ROOT / "scripts" / "smoke_windows_wasm_archive.ps1",
+)
 
 
 def package_version() -> str:
@@ -89,16 +97,28 @@ def main() -> int:
     windows_targets = {
         target for kind, target, _label, _suffix in PLATFORMS if kind == "windows"
     }
-    if windows_targets != {
-        "x86_64-pc-windows-msvc",
+    if windows_targets != {"x86_64-pc-windows-msvc"}:
+        raise ValueError("portable plan must contain only the supported Windows x86_64 target")
+
+    unsupported_windows_markers = (
         "aarch64-pc-windows-msvc",
-    }:
-        raise ValueError("portable plan must contain both Windows MSVC architectures")
+        "aarch64-windows",
+        "Architecture aarch64",
+        "Windows ARM64 portable profiles",
+    )
+    for path in (CI_WORKFLOW, *WINDOWS_RELEASE_SCRIPTS):
+        contents = path.read_text(encoding="utf-8")
+        for marker in unsupported_windows_markers:
+            if marker in contents:
+                raise ValueError(
+                    f"{path.relative_to(ROOT)} advertises deferred Windows ARM64: {marker}"
+                )
 
     version = package_version()
     for platform in PLATFORMS:
         validate_platform(version, *platform)
     expect_plan_rejection(version, "windows", "x86_64-unknown-linux-gnu")
+    expect_plan_rejection(version, "windows", "aarch64-pc-windows-msvc")
     expect_plan_rejection(version, "macos", "x86_64-apple-darwin")
     expect_plan_rejection(version, "macos-dev", "x86_64-apple-darwin")
     expect_plan_rejection(version, "linux", "../../escape")

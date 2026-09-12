@@ -87,9 +87,6 @@ case "$target" in
     x86_64-pc-windows-msvc)
         label="x86_64-windows"
         ;;
-    aarch64-pc-windows-msvc)
-        label="aarch64-windows"
-        ;;
     *)
         label="$target"
         ;;

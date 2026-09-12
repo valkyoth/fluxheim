@@ -11,8 +11,9 @@ behavior when the change improves security or project direction.
 
 ### Added
 
-- Start native unsigned Windows portable parity for x86_64 and ARM64 MSVC
-  hosts, with one validated seven-profile archive contract for both targets.
+- Start native unsigned Windows portable parity for x86_64 MSVC hosts, with a
+  validated seven-profile archive contract. Defer Windows ARM64 until
+  sustainable native build and test infrastructure is available.
 - Add PowerShell-native Windows archive tooling and fail-closed release-builder
   preparation for dedicated Azure or operator-managed build hosts.
 - Add a native Windows x86_64 CI gate covering the complete workspace, all

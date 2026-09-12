@@ -9,7 +9,7 @@ param(
     [string]$RustVersion,
 
     [Parameter(Mandatory = $true)]
-    [ValidateSet('x86_64', 'aarch64')]
+    [ValidateSet('x86_64')]
     [string]$Architecture,
 
     [Parameter(Mandatory = $true)]
@@ -283,14 +283,14 @@ public static class FluxheimReleaseAclProbe {
     }
 }
 
-$expectedArchitecture = if ($Architecture -eq 'x86_64') { 'X64' } else { 'Arm64' }
+$expectedArchitecture = 'X64'
 $actualArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
 if ($actualArchitecture -ne $expectedArchitecture) {
     throw "expected native $expectedArchitecture host, found $actualArchitecture"
 }
 
 $tag = "v$Version"
-$targetLabel = if ($Architecture -eq 'x86_64') { 'x86_64-windows' } else { 'aarch64-windows' }
+$targetLabel = 'x86_64-windows'
 $allowedSigners = Join-Path $WorkspaceRoot 'trusted\allowed_signers'
 if (-not (Test-Path -LiteralPath $allowedSigners -PathType Leaf)) {
     throw "trusted tag allowed-signers file is missing: $allowedSigners"
@@ -339,11 +339,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain override failed' }
 
     $host = (& rustc.exe -vV | Select-String '^host: ' | ForEach-Object { $_.Line.Substring(6) })
-    $expectedHost = if ($Architecture -eq 'x86_64') {
-        'x86_64-pc-windows-msvc'
-    } else {
-        'aarch64-pc-windows-msvc'
-    }
+    $expectedHost = 'x86_64-pc-windows-msvc'
     if ($host -ne $expectedHost) {
         throw "Rust host $host does not match release target $expectedHost"
     }

@@ -1,8 +1,9 @@
 # Fluxheim 1.8.2 Release Notes
 
 Fluxheim 1.8.2 is the Windows portable-parity development line. It targets
-native MSVC builds on both x86_64 and ARM64 Windows hosts while preserving the
-same seven public profiles used by Linux and Apple Silicon macOS.
+native x86_64 MSVC builds while preserving the same seven public profiles used
+by Linux and Apple Silicon macOS. Windows ARM64 is deferred until sustainable
+native build and test infrastructure is available.
 
 ## Completed On Native x86_64 CI
 
@@ -21,10 +22,6 @@ same seven public profiles used by Linux and Apple Silicon macOS.
   external TCP pools. Managed PHP-FPM supervision remains Unix-only and is
   rejected during Windows configuration validation and runtime construction;
   a native Windows TCP FastCGI responder regression proves the supported path.
-- Cross-check all seven public profiles for `aarch64-pc-windows-msvc` on the
-  normal Windows CI host so target-specific compile failures surface before a
-  native ARM64 release-builder run. This check does not execute ARM64 code and
-  is not accepted as release evidence.
 - Enforce confidential Windows ACLs for TLS, ACME, admin, metrics, snapshot,
   cache-encryption, peer-fill, and discovery credentials; new private files and
   directories receive protected DACLs before secret bytes are written.
@@ -62,15 +59,13 @@ same seven public profiles used by Linux and Apple Silicon macOS.
 
 ## Remaining Release Blocks
 
-- Run the same workspace, seven-profile, live-runtime, archive, and packaged
-  Wasm matrix on a native Windows ARM64 cloud builder.
 - Produce exact-tag, architecture, checksum, test, and reproducibility evidence
-  from dedicated native x86_64 and ARM64 Windows builders. Evidence records the
+  from a dedicated native x86_64 Windows builder. Evidence records the
   Windows edition and build, and every executable in all seven ZIP profiles
   must launch and report the expected version. Planning-only output and the
   normal x86_64 CI result are not substitutes for exact-tag release evidence.
-- Verify two clean archive builds are byte-identical on both dedicated builders
-  before publishing either architecture.
+- Verify two clean archive builds are byte-identical on the dedicated builder
+  before publishing the x86_64 archives.
 
 The Unix/OpenSSL FIPS support shim remains excluded as an independent Windows
 workspace package while staying covered by the dedicated Linux OpenSSL-FIPS

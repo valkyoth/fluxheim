@@ -5,7 +5,7 @@ param(
     [string]$Version,
 
     [Parameter(Mandatory = $true)]
-    [ValidateSet('x86_64', 'aarch64')]
+    [ValidateSet('x86_64')]
     [string]$Architecture,
 
     [ValidateSet('all', 'full', 'wasm', 'cache', 'proxy', 'load-balancer', 'php', 'config-tester')]
@@ -24,11 +24,7 @@ if ($Version.Contains('..')) {
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $root
 
-$target = if ($Architecture -eq 'x86_64') {
-    'x86_64-pc-windows-msvc'
-} else {
-    'aarch64-pc-windows-msvc'
-}
+$target = 'x86_64-pc-windows-msvc'
 
 $python = Get-Command python.exe -ErrorAction SilentlyContinue
 if ($null -eq $python) {
@@ -51,7 +47,7 @@ if ($Plan) {
     exit 0
 }
 
-$expectedHostArchitecture = if ($Architecture -eq 'x86_64') { 'X64' } else { 'Arm64' }
+$expectedHostArchitecture = 'X64'
 $actualHostArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
 if ($actualHostArchitecture -ne $expectedHostArchitecture) {
     throw "native Windows release build requires $expectedHostArchitecture, running on $actualHostArchitecture"

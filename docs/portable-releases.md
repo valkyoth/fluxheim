@@ -33,12 +33,11 @@ publish `.zip` once its native gate is complete. Windows binaries retain their
 fluxheim-VERSION-wasm-x86_64-linux.tar.gz
 fluxheim-VERSION-wasm-aarch64-macos.tar.gz
 fluxheim-VERSION-wasm-x86_64-windows.zip
-fluxheim-VERSION-wasm-aarch64-windows.zip
 ```
 
 Windows uses the same naming contract during `1.8.2` development. Do not
-publish those archives until the native runtime and release evidence gates pass
-on both architectures.
+publish those archives until the native x86_64 runtime and exact-tag release
+evidence gates pass. Windows ARM64 is not a supported release target.
 
 The shared matrix can be inspected without compiling:
 
@@ -46,8 +45,8 @@ The shared matrix can be inspected without compiling:
 VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | sed -n '1p')"
 scripts/build_release_assets.sh "$VERSION" --kind linux --plan
 scripts/build_release_assets.sh "$VERSION" --kind macos --plan
-scripts/build_release_assets.sh "$VERSION" --kind windows --plan
-python scripts/portable_release_plan.py "$VERSION" --kind windows --target aarch64-pc-windows-msvc
+scripts/build_release_assets.sh "$VERSION" --kind windows \
+  --target x86_64-pc-windows-msvc --plan
 scripts/validate_portable_release_plan.py
 ```
 
@@ -61,10 +60,10 @@ Build on the operating system and architecture represented by the target:
 scripts/build_release_assets.sh "$VERSION" --kind macos --profile wasm
 ```
 
-Cross-compiling a Windows MSVC binary from Linux is not an authoritative
-release proof because the MSVC linker and Windows SDK are absent. The Windows
-release builders must run natively on x86_64 and ARM64 hosts and use
-`scripts/build_release_assets.ps1`. See
+Cross-compiling a Windows MSVC binary from Linux is not authoritative release
+proof because it does not execute the Windows ACL, locking, shutdown, and live
+runtime checks. The Windows release builder must run natively on x86_64 and
+use `scripts/build_release_assets.ps1`. See
 [Windows Release Builders](windows-release-builders.md). The same host-native
 rule applies to Apple SDK and linker validation.
 
@@ -89,16 +88,15 @@ verification, admin, metrics, graceful-shutdown, external FastCGI, ACME
 storage, and packaged-Wasm checks. Every packaged executable must also launch
 and report the expected version. These checks preserve the existing trust
 boundary instead of replacing it with permissive cross-platform fallbacks, and
-must pass natively on both x86_64 and ARM64 before Windows archives are
-published.
+must pass natively on x86_64 before Windows archives are published.
 
 The normal native x86_64 CI gate now passes that complete matrix, including
 crash-restart storage-bin recovery and execution of all seven generated ZIP
-profiles. It also cross-checks all seven profiles for
-`aarch64-pc-windows-msvc` to catch target-specific compile failures early.
-That cross-check does not execute ARM64 code and is not release evidence.
-Native ARM64 execution and exact-tag, two-build reproducibility evidence from
-both dedicated cloud builders remain mandatory release blocks.
+profiles. Exact-tag native x86_64 execution and two-build reproducibility
+evidence from the dedicated release builder remain mandatory release blocks.
+Windows ARM64 is deferred until sustainable native build and test
+infrastructure can provide the same evidence; no ARM64 Windows archive is
+currently generated or supported.
 
 Windows filesystem parity uses protected DACLs for newly created secret and
 private state, rejects untrusted read access to credentials, and rejects

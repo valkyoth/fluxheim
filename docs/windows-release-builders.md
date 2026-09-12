@@ -1,32 +1,30 @@
 # Windows Release Builders
 
-Fluxheim `1.8.2` uses separate native Windows x86_64 and ARM64 hosts for its
-unsigned portable archive evidence. A Linux cross-build is not accepted as a
-substitute for the native MSVC linker, Windows SDK, ACL, locking, shutdown, and
-live-runtime checks.
+Fluxheim `1.8.2` uses a native Windows x86_64 host for its unsigned portable
+archive evidence. A Linux cross-build is not accepted as a substitute for the
+native Windows ACL, locking, shutdown, and live-runtime checks.
 
 This is release infrastructure for the active parity line. Windows archives
 must not be published until the runtime and live-smoke gates in the exact tag
-pass on both architectures.
+pass on x86_64.
 
 ## Host Requirements
 
 Use a dedicated, disposable or tightly managed Windows build host with:
 
-- native x86_64 Windows for `x86_64-pc-windows-msvc`, or native ARM64 Windows
-  for `aarch64-pc-windows-msvc`;
+- native x86_64 Windows for `x86_64-pc-windows-msvc`;
 - PowerShell 7 (`pwsh.exe`), Git for Windows, Python 3, CMake, and Rustup;
 - Visual Studio Build Tools with the native MSVC C++ toolset and Windows SDK;
 - one existing non-administrator local build account;
 - an Azure NSG or external firewall that permits TCP/22 only from the Linux
   release host.
 
-Azure may require a Windows 11 ARM64 image rather than Windows Server for the
-ARM builder. Evidence must name the actual tested OS; it must not be presented
-as Windows Server ARM support.
+Windows ARM64 is deferred. Do not generate or publish ARM64 Windows archives
+until the project has sustainable native ARM64 infrastructure and the complete
+runtime and reproducibility matrix passes there.
 
-For high-assurance releases, provision both builders from a measured disposable
-image for each release and destroy them after collecting evidence. Reusing a
+For high-assurance releases, provision the builder from a measured disposable
+image for each release and destroy it after collecting evidence. Reusing a
 long-lived builder is operationally supported, but it is not equivalent to
 rebuilding the host trust boundary for every release.
 
@@ -44,8 +42,8 @@ Set-ExecutionPolicy -Scope Process Bypass
   -TagAllowedSignersFile C:\Bootstrap\fluxheim-allowed-signers
 ```
 
-Use `Arm64` on the ARM host. Replace the documentation address with the Linux
-release host's real public `/32` or a narrowly scoped IPv6 prefix. The script:
+Replace the documentation address with the Linux release host's real public
+`/32` or a narrowly scoped IPv6 prefix. The script:
 
 - verifies architecture and rejects an administrator build account;
 - installs and enables Windows OpenSSH Server;
@@ -99,7 +97,7 @@ then independently:
 
 The script fails when `scripts/smoke_windows_native.ps1` is absent or any
 native runtime assertion fails. This remains an intentional release block
-until the complete 1.8.2 parity matrix passes on both architectures.
+until the complete 1.8.2 parity matrix passes on x86_64.
 
 Windows outputs are unsigned `.zip` previews. Do not disable SmartScreen or
 execution policy globally. Authenticode, MSI/MSIX, Store delivery, and service

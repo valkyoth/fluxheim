@@ -366,7 +366,7 @@ foreach ($required in @(
     'scripts/portable_release_plan.py',
     'scripts/create_release_archives.py',
     'x86_64-pc-windows-msvc',
-    'aarch64-pc-windows-msvc'
+    "[ValidateSet('x86_64')]"
 )) {
     if (-not $builder.Contains($required)) {
         throw "Windows archive builder is missing required contract: $required"
@@ -554,21 +554,25 @@ foreach ($required in @(
     'RUSTFLAGS: -Dwarnings',
     'name: Run Windows workspace tests',
     'run: cargo test --workspace --locked',
-    'name: Cross-check Windows ARM64 portable profiles',
-    'rustup target add aarch64-pc-windows-msvc',
-    'cargo check --locked --target aarch64-pc-windows-msvc --no-default-features --features profile-full',
-    'cargo check --locked --target aarch64-pc-windows-msvc --no-default-features --features profile-wasm',
-    'cargo check --locked --target aarch64-pc-windows-msvc --no-default-features --features profile-cache-edge',
-    'cargo check --locked --target aarch64-pc-windows-msvc --no-default-features --features profile-proxy-edge',
-    'cargo check --locked --target aarch64-pc-windows-msvc --no-default-features --features profile-load-balancer-edge',
-    'cargo check --locked --target aarch64-pc-windows-msvc --no-default-features --features profile-web-server',
-    'cargo check --locked --target aarch64-pc-windows-msvc --no-default-features --features profile-development',
     'name: Build and test Windows portable archives',
     'scripts/build_release_assets.ps1 -Version $version -Architecture x86_64',
     'scripts/smoke_windows_archive_profiles.ps1 -Version $version -Architecture x86_64'
 )) {
     if (-not $ci.Contains($required)) {
         throw "Windows CI is missing required native test policy: $required"
+    }
+}
+
+$supportedWindowsContract = $builder + "`n" + $archiveSmoke + "`n" + $wasmSmoke +
+    "`n" + $release + "`n" + $preparation + "`n" + $ci
+foreach ($unsupported in @(
+    'aarch64-pc-windows-msvc',
+    'aarch64-windows',
+    "Architecture aarch64",
+    'Windows ARM64 portable profiles'
+)) {
+    if ($supportedWindowsContract.Contains($unsupported)) {
+        throw "Windows release scripts still advertise deferred ARM64 support: $unsupported"
     }
 }
 

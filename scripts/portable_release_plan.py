@@ -21,7 +21,6 @@ PLATFORMS = (
     ("linux", "x86_64-unknown-linux-gnu", "x86_64-linux", ""),
     ("macos", "aarch64-apple-darwin", "aarch64-macos", ""),
     ("windows", "x86_64-pc-windows-msvc", "x86_64-windows", ".exe"),
-    ("windows", "aarch64-pc-windows-msvc", "aarch64-windows", ".exe"),
 )
 TARGET_LABELS = {
     "x86_64-unknown-linux-gnu": "x86_64-linux",
@@ -30,7 +29,6 @@ TARGET_LABELS = {
     "aarch64-unknown-linux-musl": "aarch64-linux",
     "aarch64-apple-darwin": "aarch64-macos",
     "x86_64-pc-windows-msvc": "x86_64-windows",
-    "aarch64-pc-windows-msvc": "aarch64-windows",
 }
 
 
@@ -49,8 +47,10 @@ def _validate_inputs(version: str, kind: str, target: str, profile: str) -> None
         raise ValueError(
             f"--kind {kind} supports only aarch64-apple-darwin, got {target}"
         )
-    if kind == "windows" and not target.endswith("-windows-msvc"):
-        raise ValueError(f"--kind windows requires a Windows MSVC target, got {target}")
+    if kind == "windows" and target != "x86_64-pc-windows-msvc":
+        raise ValueError(
+            f"--kind windows supports only x86_64-pc-windows-msvc, got {target}"
+        )
     if kind == "macos-dev" and profile != "all":
         raise ValueError("--profile is not supported with --kind macos-dev")
 

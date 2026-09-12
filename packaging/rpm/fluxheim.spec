@@ -158,8 +158,8 @@ fi
 
 %changelog
 * Sat Aug 29 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.8.2-1
-- Start native unsigned Windows portable parity for x86_64 and ARM64 MSVC
-  hosts and add fail-closed release-builder automation.
+- Start native unsigned Windows portable parity for x86_64 MSVC hosts and add
+  fail-closed release-builder automation; defer Windows ARM64.
 
 * Fri Aug 28 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.8.1-1
 - Start the native Apple Silicon macOS parity gate.
