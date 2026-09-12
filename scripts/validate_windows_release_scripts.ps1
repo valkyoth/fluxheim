@@ -13,6 +13,7 @@ $scripts = @(
     'scripts/smoke_windows_native.ps1',
     'scripts/smoke_windows_public_acme.ps1',
     'scripts/smoke_windows_public_php.ps1',
+    'scripts/smoke_windows_public_profiles.ps1',
     'scripts/smoke_windows_wasm_archive.ps1',
     'scripts/windows_console_signal_helper.ps1'
 )
@@ -78,6 +79,59 @@ foreach ($required in @(
 )) {
     if (-not $publicAcmeController.Contains($required)) {
         throw "Windows public ACME smoke controller is missing required behavior: $required"
+    }
+}
+
+$publicProfilesSmoke = Get-Content -LiteralPath `
+    (Join-Path $root 'scripts/smoke_windows_public_profiles.ps1') -Raw
+foreach ($required in @(
+    "[ValidatePattern('^public-profiles-[0-9a-f]{16}`$')]",
+    "Resolve-ProfileBinary -Profile 'proxy'",
+    "Resolve-ProfileBinary -Profile 'load-balancer'",
+    "Resolve-ProfileBinary -Profile 'cache'",
+    "Resolve-ProfileBinary -Profile 'full'",
+    '-notmatch "-$Profile-x86_64-windows[\\/]fluxheim[.]exe`$"',
+    'listen = ["0.0.0.0:$HttpPort"]',
+    'tls_listen = ["0.0.0.0:$HttpsPort"]',
+    'strict = true',
+    'upstreams = ["127.0.0.1:$originPort"]',
+    'selection = "round-robin"',
+    'Stop-OwnedProcess $originOne',
+    'READY load-balancer-failover',
+    '[vhosts.cache.memory]',
+    'backend = "storage-bin"',
+    'Stop-OwnedProcess $origin',
+    'READY cache-restarted-origin-offline',
+    "'fluxheim-windows-public-full-ok'",
+    'Windows public packaged-profile harness: ok'
+)) {
+    if (-not $publicProfilesSmoke.Contains($required)) {
+        throw "Windows public profile smoke is missing required behavior: $required"
+    }
+}
+
+$publicProfilesControllerPath = Join-Path $root 'scripts/smoke_windows_public_profiles.sh'
+if (-not (Test-Path -LiteralPath $publicProfilesControllerPath -PathType Leaf)) {
+    throw 'Windows public profile smoke Linux controller is missing'
+}
+$publicProfilesController = Get-Content -LiteralPath $publicProfilesControllerPath -Raw
+foreach ($required in @(
+    'StrictHostKeyChecking=yes',
+    'fluxheim-*-$profile-x86_64-windows.zip',
+    'smoke_windows_public_profiles.ps1',
+    '--cacert "$CA_CERT"',
+    '--resolve "$PUBLIC_NAME:$HTTPS_PORT:$PUBLIC_ADDRESS"',
+    'strict Windows host routing returned $UNKNOWN_STATUS, expected 421',
+    'public Windows load balancer did not reach both origins',
+    'load-balancer failover reached an unexpected origin',
+    'first public Windows cache status was $CACHE_STATUS, expected MISS',
+    'second public Windows cache request was not an identical HIT',
+    'restarted Windows cache did not serve the persistent HIT with origin offline',
+    'packaged Windows full profile static response mismatch',
+    'Windows public packaged proxy/load-balancer/cache/full profile smoke: ok'
+)) {
+    if (-not $publicProfilesController.Contains($required)) {
+        throw "Windows public profile smoke controller is missing required behavior: $required"
     }
 }
 

@@ -28,6 +28,10 @@ behavior when the change improves security or project direction.
   profile and a checksum-pinned official PHP NTS FastCGI runtime.
 - Add an opt-in public Windows Let's Encrypt staging HTTP-01 smoke that proves
   issuance, certificate activation, and off-host TLS presentation.
+- Add an opt-in public Windows packaged-profile matrix for exact `proxy`,
+  `load-balancer`, `cache`, and `full` ZIPs, including strict Host routing,
+  two-origin failover, memory-cache reuse, persistent disk-cache restart
+  recovery with the origin offline, and certificate-validated HTTPS.
 
 ### Changed
 

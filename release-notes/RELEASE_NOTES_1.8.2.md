@@ -75,6 +75,10 @@ native build and test infrastructure is available.
 - Add a separate opt-in Windows ACME lifecycle smoke that performs an isolated
   Let's Encrypt staging HTTP-01 issuance, activates the installed certificate,
   and verifies its hostname and fingerprint from an off-host client.
+- Add an opt-in off-host packaged-profile matrix that verifies public HTTP and
+  certificate-validated HTTPS through the Windows `proxy`, `load-balancer`,
+  `cache`, and `full` ZIPs. It proves two-origin selection and failover, memory
+  cache reuse, and persistent storage-bin recovery with the origin offline.
 
 ## Remaining Release Blocks
 

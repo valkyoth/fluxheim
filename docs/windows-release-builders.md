@@ -163,6 +163,36 @@ opt-in because it requires public ingress and an external download. It removes
 successful remote artifacts by default; set
 `FLUXHEIM_WINDOWS_PUBLIC_SMOKE_KEEP=1` to retain them.
 
+## Optional Public Packaged-Profile Matrix
+
+The native loopback gate proves the complete runtime without opening test
+services to the Internet. Before publishing the first Windows release, run a
+separate off-host check against the exact packaged `proxy`, `load-balancer`,
+`cache`, and `full` archives:
+
+```bash
+scripts/smoke_windows_public_profiles.sh \
+  WINDOWS_HOST ~/.ssh/windows-release-key \
+  dist/fluxheim-${RELEASE_VERSION}-proxy-x86_64-windows.zip \
+  dist/fluxheim-${RELEASE_VERSION}-load-balancer-x86_64-windows.zip \
+  dist/fluxheim-${RELEASE_VERSION}-cache-x86_64-windows.zip \
+  dist/fluxheim-${RELEASE_VERSION}-full-x86_64-windows.zip \
+  windows-test.example.com
+```
+
+The cloud firewall and Windows Firewall must permit TCP/80 and TCP/443. Supply
+the public IP as the eighth argument when it differs from the SSH host. The
+controller generates a short-lived private test CA and validates the public
+hostname over HTTPS; it never disables certificate verification.
+
+The matrix proves off-host proxying to a loopback-only origin, strict rejection
+of an unknown Host, round-robin use of two load-balancer origins, failover after
+one origin stops, a memory-cache `MISS` to `HIT`, and a persistent storage-bin
+`HIT` after Fluxheim restarts with the origin offline. It finishes with static
+HTTP/HTTPS delivery from the packaged `full` profile. Origins, control files,
+and cache state are never exposed as public listeners. Successful artifacts are
+removed unless `FLUXHEIM_WINDOWS_PUBLIC_SMOKE_KEEP=1` is set.
+
 ## Optional Public ACME Staging Smoke
 
 After public HTTP/HTTPS reachability is proven, the same disposable builder can
