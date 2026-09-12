@@ -64,23 +64,23 @@ ssh "${SSH_OPTIONS[@]}" "$ADMIN_TARGET" \
 
 echo "--- Uploading Fluxheim builder bootstrap ---"
 ssh "${SSH_OPTIONS[@]}" "$ADMIN_TARGET" \
-    'powershell.exe -NoProfile -NonInteractive -Command "New-Item -ItemType Directory -Force C:\FluxheimBootstrap | Out-Null; & icacls.exe C:\FluxheimBootstrap /setowner '\''Administrators'\'' | Out-Null; if ($LASTEXITCODE -ne 0) { throw '\''failed to set bootstrap directory owner'\'' }; & icacls.exe C:\FluxheimBootstrap /inheritance:r /grant:r '\''SYSTEM:(OI)(CI)F'\'' '\''Administrators:(OI)(CI)F'\'' | Out-Null; if ($LASTEXITCODE -ne 0) { throw '\''failed to secure bootstrap directory'\'' }"'
+    'powershell.exe -NoProfile -NonInteractive -Command "$path = '\''C:\Users\Administrator\FluxheimBootstrap'\''; if (Test-Path -LiteralPath $path) { throw '\''bootstrap directory already exists; use a fresh disposable host'\'' }; New-Item -ItemType Directory -Path $path -ErrorAction Stop | Out-Null; & icacls.exe $path /setowner '\''Administrators'\'' | Out-Null; if ($LASTEXITCODE -ne 0) { throw '\''failed to set bootstrap directory owner'\'' }; & icacls.exe $path /inheritance:r /grant:r '\''SYSTEM:(OI)(CI)F'\'' '\''Administrators:(OI)(CI)F'\'' | Out-Null; if ($LASTEXITCODE -ne 0) { throw '\''failed to secure bootstrap directory'\'' }"'
 scp "${SSH_OPTIONS[@]}" \
     "$ROOT/scripts/install_windows_release_builder_tools.ps1" \
     "$ROOT/scripts/prepare_windows_release_builder.ps1" \
     "$ROOT/scripts/windows_release_sshd_config.ps1" \
     "$WORK/authorized_key" \
     "$WORK/allowed_signers" \
-    "$ADMIN_TARGET:C:/FluxheimBootstrap/"
+    "$ADMIN_TARGET:C:/Users/Administrator/FluxheimBootstrap/"
 
 echo "--- Installing Windows build tools ---"
 ssh "${SSH_OPTIONS[@]}" "$ADMIN_TARGET" \
-    "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\FluxheimBootstrap\\install_windows_release_builder_tools.ps1 -BuildUser $BUILD_USER -RustVersion $RUST_VERSION"
+    "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\Users\\Administrator\\FluxheimBootstrap\\install_windows_release_builder_tools.ps1 -BuildUser $BUILD_USER -RustVersion $RUST_VERSION"
 
 echo "--- Applying the hardened release-builder policy ---"
 set +e
 ssh "${SSH_OPTIONS[@]}" "$ADMIN_TARGET" \
-    "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\FluxheimBootstrap\\prepare_windows_release_builder.ps1 -ExpectedArchitecture X64 -BuildUser $BUILD_USER -AuthorizedKeyFile C:\\FluxheimBootstrap\\authorized_key -AllowedSourceCidr $SOURCE_CIDR -TagAllowedSignersFile C:\\FluxheimBootstrap\\allowed_signers"
+    "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\Users\\Administrator\\FluxheimBootstrap\\prepare_windows_release_builder.ps1 -ExpectedArchitecture X64 -BuildUser $BUILD_USER -AuthorizedKeyFile C:\\Users\\Administrator\\FluxheimBootstrap\\authorized_key -AllowedSourceCidr $SOURCE_CIDR -TagAllowedSignersFile C:\\Users\\Administrator\\FluxheimBootstrap\\allowed_signers"
 PREPARE_STATUS="$?"
 set -e
 if [[ "$PREPARE_STATUS" -ne 0 ]]; then

@@ -28,6 +28,15 @@ more than 24 hours earlier. Destroy the host after collecting evidence.
 Long-lived or reused Windows hosts may be used for development smoke tests, but
 they cannot produce accepted release evidence.
 
+The release-builder threat model assumes that this fresh host is single-tenant:
+no untrusted local account, workload, startup script, or management agent may run
+before or during provisioning and the release build. The bootstrap is not a
+general-purpose hardening tool for shared or previously used Windows machines.
+Its protected staging directory and dedicated build identity are defense in
+depth for that narrow lifecycle; they do not make a compromised host trustworthy.
+The independently attested GitHub-hosted build and byte-for-byte archive
+comparison remain mandatory controls against a compromised disposable builder.
+
 ## One-Time Preparation
 
 For a disposable Windows Server 2025 Desktop Experience host, first start
@@ -50,6 +59,16 @@ release runner in `-ValidateBuilderOnly` mode to verify every compiler file,
 directory, hash, ACL, and sanitized compiler selection without requiring a
 release tag. Verify the SSH host-key fingerprint out of band before treating a
 newly created builder as trusted.
+
+Administrator bootstrap files are staged at
+`C:\Users\Administrator\FluxheimBootstrap`, inside the protected profile of
+the initial Administrator account. Provisioning fails if a file, directory,
+junction, or other object already occupies that path; it never adopts or
+repairs a pre-existing staging directory. The directory is created without
+`-Force` before any upload and is restricted to Administrators and SYSTEM. If
+this check fails, discard the VM instead of deleting the object and retrying on
+the same host. Official provisioning assumes the standard Administrator
+profile path supplied by the required fresh Windows Server image.
 
 The bootstrap uses `winget` and therefore expects Windows Server 2025 Desktop
 Experience rather than Server Core. It downloads Rustup 1.29.1 from the

@@ -60,6 +60,10 @@ behavior when the change improves security or project direction.
 
 ### Security
 
+- Stage Windows provisioning scripts inside the protected Administrator profile,
+  reject every pre-existing bootstrap object before upload, and document the
+  fresh single-tenant disposable-host boundary and mandatory independent build
+  comparison.
 - Keep build-account-writable Rust tools out of the Windows machine `PATH`,
   remove obsolete machine-wide Rust environment entries during builder setup,
   and reject elevated release-runner sessions.

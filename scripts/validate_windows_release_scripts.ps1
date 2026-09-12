@@ -607,6 +607,15 @@ $bootstrap = Get-Content -LiteralPath `
     (Join-Path $root 'scripts/bootstrap_windows_release_builder.sh') -Raw
 foreach ($required in @(
     '-RustVersion $RUST_VERSION',
+    "'C:\Users\Administrator\FluxheimBootstrap'",
+    'Test-Path -LiteralPath $path',
+    "throw '\''bootstrap directory already exists; use a fresh disposable host'\''",
+    'New-Item -ItemType Directory -Path $path -ErrorAction Stop',
+    '$ADMIN_TARGET:C:/Users/Administrator/FluxheimBootstrap/',
+    'C:\\Users\\Administrator\\FluxheimBootstrap\\install_windows_release_builder_tools.ps1',
+    'C:\\Users\\Administrator\\FluxheimBootstrap\\prepare_windows_release_builder.ps1',
+    '-AuthorizedKeyFile C:\\Users\\Administrator\\FluxheimBootstrap\\authorized_key',
+    '-TagAllowedSignersFile C:\\Users\\Administrator\\FluxheimBootstrap\\allowed_signers',
     "'FluxheimRustTrusted'",
     'rustup\\toolchains\\',
     "'provisioning.json'",
@@ -617,6 +626,16 @@ foreach ($required in @(
     if (-not $bootstrap.Contains($required)) {
         throw "Windows builder bootstrap is missing trusted-toolchain behavior: $required"
     }
+}
+if ($bootstrap.Contains('C:\FluxheimBootstrap') -or
+    $bootstrap.Contains('New-Item -ItemType Directory -Force')) {
+    throw 'Windows builder bootstrap must not adopt or repair a preexisting staging directory'
+}
+$bootstrapCreation = $bootstrap.IndexOf('New-Item -ItemType Directory -Path $path -ErrorAction Stop')
+$bootstrapUpload = $bootstrap.IndexOf('scp "${SSH_OPTIONS[@]}"')
+if ($bootstrapCreation -lt 0 -or $bootstrapUpload -lt 0 -or
+    $bootstrapCreation -gt $bootstrapUpload) {
+    throw 'Windows builder bootstrap must exclusively create protected staging before upload'
 }
 if ($bootstrap.Contains('rustup.exe toolchain install') -or
     $bootstrap.Contains("'FluxheimRust'")) {

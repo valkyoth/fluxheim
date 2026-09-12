@@ -109,6 +109,11 @@ native build and test infrastructure is available.
   proxy links before sealing future toolchain inventories and correctly record
   the native compiler host without colliding with PowerShell's reserved
   `$Host` variable.
+- Stage privileged bootstrap scripts only in a newly created directory inside
+  the protected Administrator profile. Provisioning rejects any
+  pre-existing object instead of attempting to repair its ACL. Official
+  evidence remains limited to fresh, single-tenant disposable hosts and must be
+  matched byte-for-byte against the independently attested GitHub-hosted build.
 
 ## Remaining Release Blocks
 
