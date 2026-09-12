@@ -133,6 +133,27 @@ fn private_directory_is_created_with_a_protected_acl() {
 }
 
 #[test]
+fn private_directory_creation_rejects_a_junction_parent() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let junction = root.path().join("junction");
+    let status = std::process::Command::new("cmd.exe")
+        .args(["/D", "/C", "mklink", "/J"])
+        .arg(dunce::simplified(&junction))
+        .arg(dunce::simplified(outside.path()))
+        .stdout(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success(), "failed to create test directory junction");
+
+    let result = create_private_directory(&junction.join("private"));
+    std::fs::remove_dir(&junction).unwrap();
+
+    assert!(result.is_err(), "directory creation traversed a junction");
+    assert!(!outside.path().join("private").exists());
+}
+
+#[test]
 fn acl_update_opener_retains_parent_handles_and_requires_a_directory() {
     let root = tempfile::tempdir().unwrap();
     let nested = root.path().join("nested");

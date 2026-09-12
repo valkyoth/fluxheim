@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::io;
-use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::io::AsRawHandle as _;
 use std::path::Path;
 
@@ -9,13 +8,13 @@ use windows_sys::Wdk::Storage::FileSystem::{
     FileRenameInformation, NtSetInformationFile,
 };
 use windows_sys::Win32::Foundation::{HANDLE, RtlNtStatusToDosError};
-use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateDirectoryW, FILE_DISPOSITION_INFO, FILE_READ_ATTRIBUTES, FileDispositionInfo,
-    SYNCHRONIZE, SetFileInformationByHandle,
+    FILE_DISPOSITION_INFO, FILE_READ_ATTRIBUTES, FileDispositionInfo, SYNCHRONIZE,
+    SetFileInformationByHandle,
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
+use super::relative_open::create_relative_private_directory;
 use super::{
     DELETE_ACCESS, aligned_native_buffer, open_absolute_parent,
     open_absolute_regular_file_with_access, validated_name_wide,
@@ -25,24 +24,9 @@ pub fn create_private_directory(path: &Path) -> io::Result<()> {
     let current = windows_permissions::utilities::current_process_sid()?;
     let descriptor: windows_permissions::LocalBox<windows_permissions::SecurityDescriptor> =
         format!("D:P(A;;FA;;;{current})(A;;FA;;;SY)(A;;FA;;;BA)").parse()?;
-    let mut wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
-    if wide.is_empty() || wide.contains(&0) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "private directory path is empty or contains NUL",
-        ));
-    }
-    wide.push(0);
-    let attributes = SECURITY_ATTRIBUTES {
-        nLength: u32::try_from(std::mem::size_of::<SECURITY_ATTRIBUTES>()).unwrap_or(u32::MAX),
-        lpSecurityDescriptor: descriptor.as_ptr().cast(),
-        bInheritHandle: 0,
-    };
-    // SAFETY: the path is NUL-terminated, and both the self-relative security
-    // descriptor and its attributes remain live for the duration of the call.
-    if unsafe { CreateDirectoryW(wide.as_ptr(), &raw const attributes) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
+    let (parent, name) = open_absolute_parent(path)?;
+    let directory = create_relative_private_directory(&parent, &name, descriptor.as_ptr().cast())?;
+    drop(directory);
     Ok(())
 }
 

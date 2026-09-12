@@ -1,6 +1,6 @@
 # Windows Filesystem Security Audit
 
-Audit date: 2026-09-01
+Audit date: 2026-09-12
 
 This record covers the Windows filesystem security boundary used by Fluxheim
 1.8.2. It is a scoped source audit, not a claim that every public API in the
@@ -51,13 +51,14 @@ account. Any change to that value requires a fresh ACL-policy review.
 `crates/fluxheim-windows-security` is the only first-party crate permitted to
 use unsafe Rust for handle-relative Windows path traversal and mutation. The
 reviewed source digest is
-`de216c1b695ed735b2bae3ac196e85f639cac228a1beb423d045aa1f96b3eb9a`.
+`73362b380c18811b94388b49bb4ec0bd47ebc55796abd4db521d2f46662913d8`.
 It covers, in this order, each UTF-8 path, a NUL delimiter, the complete file,
 and another NUL delimiter for:
 
 - `crates/fluxheim-windows-security/src/lib.rs`;
 - `crates/fluxheim-windows-security/src/file_mutation.rs`; and
-- `crates/fluxheim-windows-security/src/path_handles.rs`.
+- `crates/fluxheim-windows-security/src/path_handles.rs`; and
+- `crates/fluxheim-windows-security/src/relative_open.rs`.
 
 First-party unsafe operations and their reviewed invariants are:
 
@@ -73,8 +74,11 @@ First-party unsafe operations and their reviewed invariants are:
   payload lengths are checked before allocation and raw writes;
 - `SetFileInformationByHandle` receives a live file handle opened with delete
   access and an exact `FILE_DISPOSITION_INFO` value;
-- `CreateDirectoryW` receives a NUL-terminated path and a live protected
-  security descriptor through a correctly sized `SECURITY_ATTRIBUTES`; and
+- private-directory creation retains the inspected parent handle and uses
+  `NtCreateFile` with `FILE_CREATE`, `FILE_DIRECTORY_FILE`,
+  `OBJ_DONT_REPARSE`, and the live protected DACL supplied through
+  `OBJECT_ATTRIBUTES.SecurityDescriptor`, avoiding a second absolute path
+  resolution; and
 - raw writes into variable-length rename and link structures stay within the
   checked allocation and use the Windows-declared field layout.
 

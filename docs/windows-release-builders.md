@@ -51,6 +51,13 @@ before treating a newly created builder as trusted.
 The bootstrap uses `winget` and therefore expects Windows Server 2025 Desktop
 Experience rather than Server Core. It downloads Rustup 1.29.1 from the
 official Rust static archive and verifies the pinned SHA-256 before execution.
+Rustup and Cargo remain writable by the dedicated build account, so their home
+directories and executable directory are added only to that account's build
+process environment. They are deliberately absent from the machine-wide
+environment and `PATH`; the installer also removes obsolete machine-wide
+entries when upgrading an existing builder. The release runner refuses to run
+from an administrator token. Administrators that need Rust must use a separate
+installation that the build account cannot modify.
 
 To perform the policy step directly instead, open an elevated Windows
 PowerShell session and run:

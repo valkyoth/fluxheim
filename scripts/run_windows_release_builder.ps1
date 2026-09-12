@@ -27,6 +27,20 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'windows_release_tag_policy.ps1')
 
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = [Security.Principal.WindowsPrincipal]::new($identity)
+if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw 'Windows release builds must run as the dedicated non-administrator account'
+}
+$rustRoot = Join-Path $env:ProgramData 'FluxheimRust'
+$env:RUSTUP_HOME = Join-Path $rustRoot 'rustup'
+$env:CARGO_HOME = Join-Path $rustRoot 'cargo'
+$cargoBin = Join-Path $env:CARGO_HOME 'bin'
+$pathEntries = @($cargoBin) + @($env:Path -split ';' | Where-Object {
+    -not [string]::IsNullOrWhiteSpace($_) -and $_.TrimEnd('\') -ne $cargoBin.TrimEnd('\')
+})
+$env:Path = $pathEntries -join ';'
+
 function Assert-FluxheimReleaseBuilderTrustAnchorsReadOnly {
     param([Parameter(Mandatory = $true)][string]$Root)
 

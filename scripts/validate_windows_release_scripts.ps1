@@ -369,6 +369,8 @@ $windowsCapability = @(
     Get-Content -LiteralPath `
         (Join-Path $root 'crates/fluxheim-windows-security/src/path_handles.rs') -Raw
     Get-Content -LiteralPath `
+        (Join-Path $root 'crates/fluxheim-windows-security/src/relative_open.rs') -Raw
+    Get-Content -LiteralPath `
         (Join-Path $root 'crates/fluxheim-windows-security/src/windows_security_tests.rs') -Raw
 ) -join "`n"
 foreach ($required in @(
@@ -381,6 +383,8 @@ foreach ($required in @(
     'GENERIC_READ | GENERIC_WRITE | DELETE_ACCESS | READ_CONTROL | WRITE_DAC',
     'newly_created_regular_file_handle_supports_rejection_cleanup',
     'create_private_directory',
+    'create_relative_private_directory',
+    'private_directory_creation_rejects_a_junction_parent',
     'create_hard_link_regular_file',
     'rename_regular_file',
     'remove_regular_file',
@@ -390,6 +394,19 @@ foreach ($required in @(
     if (-not $windowsCapability.Contains($required)) {
         throw "Windows handle-relative filesystem boundary is missing required behavior: $required"
     }
+}
+$windowsDirectoryMutation = Get-Content -LiteralPath `
+    (Join-Path $root 'crates/fluxheim-windows-security/src/file_mutation.rs') -Raw
+foreach ($required in @(
+    'open_absolute_parent(path)?',
+    'create_relative_private_directory(&parent, &name, descriptor.as_ptr().cast())?'
+)) {
+    if (-not $windowsDirectoryMutation.Contains($required)) {
+        throw "Windows private-directory creation is missing retained-parent behavior: $required"
+    }
+}
+if ($windowsDirectoryMutation.Contains('CreateDirectoryW')) {
+    throw 'Windows private-directory creation must not re-resolve an absolute path'
 }
 
 foreach ($relative in @(
@@ -592,6 +609,30 @@ foreach ($required in @(
         throw "Windows tool installer is missing required behavior: $required"
     }
 }
+foreach ($forbidden in @(
+    "SetEnvironmentVariable('RUSTUP_HOME', `$rustupHome, 'Machine')",
+    "SetEnvironmentVariable('CARGO_HOME', `$cargoHome, 'Machine')",
+    'SetEnvironmentVariable(''Path'', "$machinePath;$cargoBin", ''Machine'')'
+)) {
+    if ($toolInstaller.Contains($forbidden)) {
+        throw "Windows tool installer publishes build-account-writable Rust tools machine-wide: $forbidden"
+    }
+}
+foreach ($required in @(
+    "SetEnvironmentVariable('RUSTUP_HOME', `$null, 'Machine')",
+    "SetEnvironmentVariable('CARGO_HOME', `$null, 'Machine')",
+    'Remove-Item Env:RUSTUP_HOME -ErrorAction SilentlyContinue',
+    'Remove-Item Env:CARGO_HOME -ErrorAction SilentlyContinue',
+    "Join-Path `$cargoBin 'rustup.exe'",
+    "Join-Path `$cargoBin 'cargo.exe'"
+)) {
+    if (-not $toolInstaller.Contains($required)) {
+        throw "Windows tool installer is missing process-scoped Rust environment hardening: $required"
+    }
+}
+if ($toolInstaller.Contains("`$env:Path = `$cargoBin + ';'")) {
+    throw 'Windows tool installer must not resolve build-account Rust tools from an elevated PATH'
+}
 $sshdPolicyHelper = Get-Content -LiteralPath `
     (Join-Path $root 'scripts/windows_release_sshd_config.ps1') -Raw
 $preparationContract = $preparation + "`n" + $sshdPolicyHelper
@@ -676,6 +717,10 @@ $tagPolicy = Get-Content -LiteralPath `
 $releaseContract = $release + "`n" + $tagPolicy
 foreach ($required in @(
     'Assert-FluxheimReleaseBuilderTrustAnchorsReadOnly',
+    'Windows release builds must run as the dedicated non-administrator account',
+    "`$env:RUSTUP_HOME = Join-Path `$rustRoot 'rustup'",
+    "`$env:CARGO_HOME = Join-Path `$rustRoot 'cargo'",
+    "`$env:Path = `$pathEntries -join ';'",
     'FileFlagOpenReparsePoint',
     'FileAttributeReparsePoint',
     'GetFileAttributesW',

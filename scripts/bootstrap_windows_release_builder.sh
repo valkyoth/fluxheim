@@ -92,7 +92,7 @@ echo "--- Verifying dedicated Windows release account ---"
 BUILD_READY=0
 for _ in {1..30}; do
     if ssh "${SSH_OPTIONS[@]}" "$BUILD_TARGET" \
-        "pwsh.exe -NoProfile -NonInteractive -Command \"rustup.exe toolchain install $RUST_VERSION --profile minimal; if (\$LASTEXITCODE -ne 0) { exit \$LASTEXITCODE }; foreach (\$name in 'git.exe','python.exe','cmake.exe','rustup.exe','rustc.exe','cargo.exe') { if (\$null -eq (Get-Command \$name -ErrorAction SilentlyContinue)) { throw ('missing release command: ' + \$name) } }; Write-Output 'Fluxheim Windows release builder: ready'\""; then
+        "pwsh.exe -NoProfile -NonInteractive -Command \"\$identity = [Security.Principal.WindowsIdentity]::GetCurrent(); \$principal = [Security.Principal.WindowsPrincipal]::new(\$identity); if (\$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'release build account must not be an administrator' }; \$rustRoot = Join-Path \$env:ProgramData 'FluxheimRust'; \$env:RUSTUP_HOME = Join-Path \$rustRoot 'rustup'; \$env:CARGO_HOME = Join-Path \$rustRoot 'cargo'; \$env:Path = (Join-Path \$env:CARGO_HOME 'bin') + ';' + \$env:Path; rustup.exe toolchain install $RUST_VERSION --profile minimal; if (\$LASTEXITCODE -ne 0) { exit \$LASTEXITCODE }; foreach (\$name in 'git.exe','python.exe','cmake.exe','rustup.exe','rustc.exe','cargo.exe') { if (\$null -eq (Get-Command \$name -ErrorAction SilentlyContinue)) { throw ('missing release command: ' + \$name) } }; Write-Output 'Fluxheim Windows release builder: ready'\""; then
         BUILD_READY=1
         break
     fi

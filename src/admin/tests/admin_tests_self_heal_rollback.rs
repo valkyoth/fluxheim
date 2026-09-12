@@ -61,7 +61,7 @@ fn self_healing_fail_rolls_back_to_previous_snapshot() {
             target_snapshot: candidate.id.clone(),
             previous_snapshot: Some(baseline.id.clone()),
             impact: "snapshot".to_owned(),
-            expires_unix_secs: 1,
+            expires_unix_secs: super::super::unix_secs().saturating_add(30),
             successful_checks: 0,
             failed_checks: 0,
             rollback_attempts: 0,
@@ -150,14 +150,18 @@ fn expired_self_healing_validation_rolls_back_fail_closed() {
     );
     app.proxy.reload_from_config(&candidate_config).unwrap();
 
+    let response = app.handle("GET", "/_fluxheim/status", None, &HeaderMap::new());
+
+    assert_eq!(response.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(app.store.current_id().unwrap(), Some(candidate.id.clone()));
+    assert_eq!(app.proxy.route_host(Some("candidate.test")), "candidate");
+    assert!(app.runtime_state().pending_validation.is_some());
+
     let response = app.handle("GET", "/_fluxheim/status", None, &auth_headers());
 
     assert_eq!(response.status, StatusCode::OK);
     assert_eq!(app.store.current_id().unwrap(), Some(baseline.id.clone()));
     assert_eq!(app.proxy.route_host(Some("baseline.test")), "baseline");
-    let body = String::from_utf8(response.body).unwrap();
-    assert!(body.contains(r#""reason":"expired""#));
-    assert!(body.contains(&candidate.id));
     let state = app.runtime_state();
     assert_eq!(state.pending_validation, None);
     assert_eq!(state.known_good_snapshot, Some(baseline.id));

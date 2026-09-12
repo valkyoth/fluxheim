@@ -5,12 +5,13 @@ import tomllib
 
 VERSION = "0.2.4"
 CHECKSUM = "9e2ccdc3c6bf4d4a094e031b63fadd08d8e42abd259940eb8aa5fdc09d4bf9be"
-REVIEW_DATE = "2026-09-01"
-SOURCE_DIGEST = "de216c1b695ed735b2bae3ac196e85f639cac228a1beb423d045aa1f96b3eb9a"
+REVIEW_DATE = "2026-09-12"
+SOURCE_DIGEST = "73362b380c18811b94388b49bb4ec0bd47ebc55796abd4db521d2f46662913d8"
 SOURCE_FILES = (
     Path("crates/fluxheim-windows-security/src/lib.rs"),
     Path("crates/fluxheim-windows-security/src/file_mutation.rs"),
     Path("crates/fluxheim-windows-security/src/path_handles.rs"),
+    Path("crates/fluxheim-windows-security/src/relative_open.rs"),
 )
 AUDIT = Path("docs/dependency-audits/windows-filesystem-security.md")
 
@@ -49,7 +50,7 @@ for required in (
     "NtCreateFile",
     "NtSetInformationFile",
     "SetFileInformationByHandle",
-    "CreateDirectoryW",
+    "SecurityDescriptor",
     "RtlNtStatusToDosError",
     "RetainedPathHandles",
 ):

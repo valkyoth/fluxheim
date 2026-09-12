@@ -20,10 +20,6 @@ impl AdminApp {
         headers: &HeaderMap,
         source: Option<IpAddr>,
     ) -> AdminResponse {
-        if let Some(response) = self.enforce_self_healing_deadline() {
-            return response;
-        }
-
         if path.len() > MAX_ADMIN_PATH_BYTES {
             return json_response(StatusCode::URI_TOO_LONG, br#"{"error":"path_too_large"}"#);
         }
@@ -127,6 +123,7 @@ impl AdminApp {
             return json_response(StatusCode::UNAUTHORIZED, br#"{"error":"unauthorized"}"#);
         }
         self.auth_throttle.record_success(source);
+        drop(self.enforce_self_healing_deadline());
         if health_request {
             if method != "GET" {
                 return json_response(

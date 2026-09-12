@@ -98,6 +98,7 @@ Install-WinGetPackage -Id 'Microsoft.VisualStudio.2022.BuildTools' -Override `
 $rustRoot = Join-Path $env:ProgramData 'FluxheimRust'
 $rustupHome = Join-Path $rustRoot 'rustup'
 $cargoHome = Join-Path $rustRoot 'cargo'
+$cargoBin = Join-Path $cargoHome 'bin'
 $rustupVersion = '1.29.1'
 $rustupSha256 = '6f4bef66261261fcb43131be8720bab817d403a09edec7455c371974b90bdb7e'
 $rustupUrl = "https://static.rust-lang.org/rustup/archive/$rustupVersion/x86_64-pc-windows-msvc/rustup-init.exe"
@@ -119,6 +120,8 @@ if ($PSCmdlet.ShouldProcess($rustRoot, 'Install shared Rustup bootstrap')) {
     if ($LASTEXITCODE -ne 0) {
         throw "rustup-init failed with exit code $LASTEXITCODE"
     }
+    Remove-Item Env:RUSTUP_HOME -ErrorAction SilentlyContinue
+    Remove-Item Env:CARGO_HOME -ErrorAction SilentlyContinue
 
     & icacls.exe $rustRoot /setowner 'Administrators' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'failed to set shared Rust root owner' }
@@ -126,22 +129,28 @@ if ($PSCmdlet.ShouldProcess($rustRoot, 'Install shared Rustup bootstrap')) {
         "$BuildUser`:(OI)(CI)M" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'failed to secure shared Rust root' }
 
-    [Environment]::SetEnvironmentVariable('RUSTUP_HOME', $rustupHome, 'Machine')
-    [Environment]::SetEnvironmentVariable('CARGO_HOME', $cargoHome, 'Machine')
+}
+
+if ($PSCmdlet.ShouldProcess('machine environment', 'Remove build-account Rust tool paths')) {
+    [Environment]::SetEnvironmentVariable('RUSTUP_HOME', $null, 'Machine')
+    [Environment]::SetEnvironmentVariable('CARGO_HOME', $null, 'Machine')
     $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-    $cargoBin = Join-Path $cargoHome 'bin'
-    if (($machinePath -split ';') -notcontains $cargoBin) {
-        [Environment]::SetEnvironmentVariable('Path', "$machinePath;$cargoBin", 'Machine')
-    }
+    $machinePath = (($machinePath -split ';') | Where-Object {
+        -not [string]::IsNullOrWhiteSpace($_) -and $_.TrimEnd('\') -ne $cargoBin.TrimEnd('\')
+    }) -join ';'
+    [Environment]::SetEnvironmentVariable('Path', $machinePath, 'Machine')
 }
 
 Remove-Item -LiteralPath $rustupInstaller -Force -ErrorAction SilentlyContinue
 
-$env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
-    [Environment]::GetEnvironmentVariable('Path', 'User')
-foreach ($required in 'pwsh.exe', 'git.exe', 'python.exe', 'cmake.exe', 'rustup.exe') {
+foreach ($required in 'pwsh.exe', 'git.exe', 'python.exe', 'cmake.exe') {
     if ($null -eq (Get-Command $required -ErrorAction SilentlyContinue)) {
         throw "required command is unavailable after installation: $required"
+    }
+}
+foreach ($required in (Join-Path $cargoBin 'rustup.exe'), (Join-Path $cargoBin 'cargo.exe')) {
+    if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+        throw "required Rust bootstrap executable is unavailable after installation: $required"
     }
 }
 

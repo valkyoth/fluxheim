@@ -83,6 +83,15 @@ native build and test infrastructure is available.
   compatible workspace dependencies, and move `sanitization`, `base64-ng`,
   Brotli, Zstandard, MaxMindDB, AWS-LC, Rustls, Wasmtime, and the QEMU setup
   action to their current reviewed releases.
+- Keep the dedicated Windows build account's mutable Rust toolchain out of the
+  machine-wide executable search path, clean obsolete machine environment
+  entries, and make the release runner fail closed when invoked with an
+  administrator token.
+- Authenticate admin HTTP requests before they can trigger or observe an
+  expired self-healing rollback.
+- Create private Windows directories relative to a retained parent handle and
+  apply their protected ACL atomically, preventing junction replacement between
+  validation and creation.
 
 ## Remaining Release Blocks
 

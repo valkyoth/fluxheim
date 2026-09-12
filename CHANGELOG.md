@@ -55,6 +55,14 @@ behavior when the change improves security or project direction.
 
 ### Security
 
+- Keep build-account-writable Rust tools out of the Windows machine `PATH`,
+  remove obsolete machine-wide Rust environment entries during builder setup,
+  and reject elevated release-runner sessions.
+- Require admin authentication before an HTTP request can trigger an expired
+  self-healing rollback or observe its resulting status.
+- Create private Windows directories through a retained parent handle with
+  no-reparse semantics and an atomic protected ACL, closing the remaining
+  junction-swap race in recursive private-directory creation.
 - Separate Windows integrity-only ACL checks from confidential-secret checks,
   reject untrusted credential readers and directory delete-child rights, and
   apply protected DACLs to newly created secret and private-state objects.
