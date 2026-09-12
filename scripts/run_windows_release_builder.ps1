@@ -323,6 +323,8 @@ function Assert-FluxheimTrustedRustToolchain {
     $toolchainRoot = Join-Path $Root "rustup\toolchains\$ExpectedRustVersion-x86_64-pc-windows-msvc"
     $toolchainBin = Join-Path $toolchainRoot 'bin'
     $cargoWorkRoot = Join-Path $Root 'cargo-work'
+    $rustupProxyRoot = Join-Path $Root 'cargo\bin'
+    $rustupProxyTarget = Join-Path $rustupProxyRoot 'rustup.exe'
     foreach ($path in $Root, $toolchainRoot, $toolchainBin, $cargoWorkRoot, $provisioningPath) {
         $current = [IO.Path]::GetFullPath($path)
         while ($null -ne $current) {
@@ -344,21 +346,29 @@ function Assert-FluxheimTrustedRustToolchain {
     $fileDeleteChild = 0x00000040
     $current = [IO.Directory]::GetParent([IO.Path]::GetFullPath($Root))
     while ($null -ne $current) {
-        foreach ($right in @(
-            [pscustomobject]@{ Access = $fileAddFile; Operation = 'create files in a trusted Rust ancestor' },
-            [pscustomobject]@{ Access = $fileAddSubdirectory; Operation = 'create directories in a trusted Rust ancestor' },
+        $ancestorParent = [IO.Directory]::GetParent($current.FullName)
+        $ancestorRights = @(
             [pscustomobject]@{ Access = $deleteAccess; Operation = 'delete a trusted Rust ancestor' },
             [pscustomobject]@{ Access = $fileDeleteChild; Operation = 'replace trusted Rust through an ancestor' },
             [pscustomobject]@{ Access = $writeDac; Operation = 'change a trusted Rust ancestor ACL' },
             [pscustomobject]@{ Access = $writeOwner; Operation = 'take ownership of a trusted Rust ancestor' }
-        )) {
+        )
+        # A standard Windows volume root permits Users to create directories. That
+        # cannot replace the protected existing child while delete-child is denied.
+        if ($null -ne $ancestorParent) {
+            $ancestorRights += @(
+                [pscustomobject]@{ Access = $fileAddFile; Operation = 'create files in a trusted Rust ancestor' },
+                [pscustomobject]@{ Access = $fileAddSubdirectory; Operation = 'create directories in a trusted Rust ancestor' }
+            )
+        }
+        foreach ($right in $ancestorRights) {
             $errorCode = [FluxheimReleaseAclProbe]::Probe(
                 $current.FullName, [uint32]$right.Access, $true)
             if ($errorCode -ne $accessDenied) {
                 throw "release build account can $($right.Operation): $($current.FullName) (Win32 error $errorCode)"
             }
         }
-        $current = [IO.Directory]::GetParent($current.FullName)
+        $current = $ancestorParent
     }
     foreach ($probe in @(
         [pscustomobject]@{ Path = $Root; Access = $genericWrite; Directory = $true; Operation = 'write the trusted Rust root' },
@@ -404,7 +414,17 @@ function Assert-FluxheimTrustedRustToolchain {
             throw "trusted Rust inventory escaped its root: $($file.FullName)"
         }
         if ([FluxheimReleaseAclProbe]::IsReparsePoint($file.FullName)) {
-            throw "trusted Rust file must not be a reparse point: $($file.FullName)"
+            $proxyTarget = [string]$file.Target
+            $isPinnedRustupProxy =
+                $file.LinkType -eq 'SymbolicLink' -and
+                $file.DirectoryName -eq $rustupProxyRoot -and
+                $proxyTarget -eq 'rustup.exe' -and
+                $expectedFiles.ContainsKey('cargo/bin/rustup.exe') -and
+                (Test-Path -LiteralPath $rustupProxyTarget -PathType Leaf) -and
+                -not [FluxheimReleaseAclProbe]::IsReparsePoint($rustupProxyTarget)
+            if (-not $isPinnedRustupProxy) {
+                throw "trusted Rust file must not be an unrecognized reparse point: $($file.FullName)"
+            }
         }
         $relative = $file.FullName.Substring($rootPrefix.Length).Replace('\', '/')
         if (-not $expectedFiles.ContainsKey($relative)) {
@@ -562,11 +582,11 @@ foreach ($command in $requiredCommands) {
 
 $rustcVersionOutput = @(& $env:RUSTC -vV)
 if ($LASTEXITCODE -ne 0) { throw 'trusted Rust compiler identity check failed' }
-$host = ($rustcVersionOutput | Select-String '^host: ' | ForEach-Object { $_.Line.Substring(6) })
+$rustcHost = ($rustcVersionOutput | Select-String '^host: ' | ForEach-Object { $_.Line.Substring(6) })
 $rustcRelease = ($rustcVersionOutput | Select-String '^release: ' | ForEach-Object { $_.Line.Substring(9) })
 $expectedHost = 'x86_64-pc-windows-msvc'
-if ($host -ne $expectedHost) {
-    throw "Rust host $host does not match release target $expectedHost"
+if ($rustcHost -ne $expectedHost) {
+    throw "Rust host $rustcHost does not match release target $expectedHost"
 }
 if ($rustcRelease -ne $RustVersion) {
     throw "Rust compiler release $rustcRelease does not match requested $RustVersion"
@@ -713,7 +733,7 @@ try {
         "tag=$tag"
         "commit=$tagCommit"
         "architecture=$Architecture"
-        "rust_host=$host"
+        "rust_host=$rustcHost"
         "windows_os_caption=$osCaption"
         "windows_os_version=$osVersion"
         "windows_os_build=$osBuild"

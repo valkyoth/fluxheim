@@ -54,6 +54,9 @@ behavior when the change improves security or project direction.
 - Convert canonical Win32 verbatim paths to PHP-compatible DOS or UNC paths in
   FastCGI parameters, allowing the external Windows `php-cgi.exe` runtime to
   resolve scripts correctly.
+- Make fresh Windows builder validation compatible with the standard volume-root
+  ACL, remove unused Rustup proxy links before sealing new toolchains, and avoid
+  PowerShell's reserved `$Host` variable when recording compiler identity.
 
 ### Security
 

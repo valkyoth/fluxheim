@@ -639,6 +639,7 @@ foreach ($required in @(
     "Join-Path `$programFiles 'FluxheimRustTrusted'",
     "`$cargoWorkRoot = Join-Path `$rustRoot 'cargo-work'",
     '& $rustup toolchain install $RustVersion --profile minimal',
+    'Remove-Item -LiteralPath $cargoHome -Recurse -Force',
     "builder_mode = 'fresh-disposable'",
     'provisioned_utc = $provisionedUtc',
     'Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256',
@@ -785,11 +786,18 @@ foreach ($required in @(
     "`$env:FLUXHEIM_TRUSTED_CARGO_CWD = `$trustedRust.CargoWorkRoot",
     "`$env:RUSTC = Join-Path `$trustedRust.ToolchainBin 'rustc.exe'",
     "`$env:RUSTDOC = Join-Path `$trustedRust.ToolchainBin 'rustdoc.exe'",
+    "`$rustcHost = (`$rustcVersionOutput | Select-String '^host: '",
     "`$env:Path = `$trustedRust.ToolchainBin + ';'",
     "`$env:GIT_CONFIG_GLOBAL = 'NUL'",
     "`$env:GIT_CONFIG_NOSYSTEM = '1'",
     "`$maximumBuilderAgeHours = 24",
     'trusted Rust toolchain file hash changed after provisioning',
+    "`$rustupProxyRoot = Join-Path `$Root 'cargo\bin'",
+    "`$rustupProxyTarget = Join-Path `$rustupProxyRoot 'rustup.exe'",
+    "`$proxyTarget -eq 'rustup.exe'",
+    "`$expectedFiles.ContainsKey('cargo/bin/rustup.exe')",
+    '-not [FluxheimReleaseAclProbe]::IsReparsePoint($rustupProxyTarget)',
+    'trusted Rust file must not be an unrecognized reparse point',
     'release build account can modify trusted Rust file',
     'release build account can modify trusted Rust directory',
     'write the Rust provisioning manifest',
@@ -799,6 +807,9 @@ foreach ($required in @(
     'replace trusted Rust through an ancestor',
     'create files in a trusted Rust ancestor',
     'create directories in a trusted Rust ancestor',
+    '$ancestorParent = [IO.Directory]::GetParent($current.FullName)',
+    'if ($null -ne $ancestorParent)',
+    '$current = $ancestorParent',
     'official Windows releases require a builder provisioned within',
     'Assert-NoUntrustedCargoConfiguration -Path $sourceRoot',
     'untrusted ancestor Cargo configuration',
@@ -875,7 +886,8 @@ foreach ($forbidden in @(
     'rustup.exe toolchain install',
     'rustup.exe override set',
     "`$env:RUSTUP_HOME =",
-    "`$env:CARGO_HOME = Join-Path `$rustRoot 'cargo'"
+    "`$env:CARGO_HOME = Join-Path `$rustRoot 'cargo'",
+    '$host = ($rustcVersionOutput'
 )) {
     if ($release.Contains($forbidden)) {
         throw "Windows release runner must not use a build-account-writable Rust toolchain: $forbidden"

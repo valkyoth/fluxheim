@@ -104,6 +104,11 @@ native build and test infrastructure is available.
 - Create private Windows directories relative to a retained parent handle and
   apply their protected ACL atomically, preventing junction replacement between
   validation and creation.
+- Validate fresh builders against the standard Windows volume-root ACL without
+  weakening replacement, ownership, or ACL protections; remove unused Rustup
+  proxy links before sealing future toolchain inventories and correctly record
+  the native compiler host without colliding with PowerShell's reserved
+  `$Host` variable.
 
 ## Remaining Release Blocks
 

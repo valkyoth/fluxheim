@@ -57,13 +57,20 @@ official Rust static archive and verifies the pinned SHA-256 before execution.
 Administrator installs the exact pinned Rust toolchain under
 `C:\Program Files\FluxheimRustTrusted`, records hashes for every installed file,
 and keeps the tree Administrator/SYSTEM-only during installation before
-recursively granting the build account read/execute access. The release runner
+recursively granting the build account read/execute access. Rustup's bootstrap
+proxy directory is removed before that inventory is sealed because release
+builds execute Cargo directly from the versioned toolchain. The release runner
 verifies the manifest, every file hash, every file and directory ACL, and
 non-reparse-point ancestry before source checkout. It never invokes Rustup,
 ignores user-level executable search paths, clears inherited Rust/Cargo
 overrides, and creates a fresh Cargo home inside each run. The trusted root must
 not already exist when a builder is provisioned; use a new host rather than
 reusing or repairing it for an official release.
+
+The verifier permits the standard Windows volume-root right to create unrelated
+directories. It still requires every non-root ancestor to deny child creation
+and every ancestor, including the volume root, to deny deletion, child
+replacement, ACL changes, and ownership changes by the build account.
 
 The bootstrap supports a fresh OpenSSH Users group and refreshes its elevated
 process environment after `winget` installs the native prerequisites. The

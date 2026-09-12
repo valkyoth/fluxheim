@@ -153,6 +153,9 @@ if ($PSCmdlet.ShouldProcess($rustRoot, 'Install administrator-controlled Rust to
     if ($LASTEXITCODE -ne 0) {
         throw "Rust toolchain installation failed: $RustVersion"
     }
+    # The release runner invokes Cargo directly from the versioned toolchain.
+    # Remove Rustup's unused symlink proxies before sealing the file inventory.
+    Remove-Item -LiteralPath $cargoHome -Recurse -Force
     Remove-Item Env:RUSTUP_HOME -ErrorAction SilentlyContinue
     Remove-Item Env:CARGO_HOME -ErrorAction SilentlyContinue
 
