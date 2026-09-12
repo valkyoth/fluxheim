@@ -18,7 +18,9 @@ behavior when the change improves security or project direction.
   preparation for dedicated Azure or operator-managed build hosts.
 - Add a Linux-side bootstrap that provisions the Windows build toolchain,
   creates a dedicated non-administrator account, installs its SSH trust and
-  signed-tag policy, and verifies that Administrator SSH is disabled.
+  signed-tag policy, and verifies that Administrator SSH is disabled. Fresh
+  hosts with an empty OpenSSH Users group, a newly installed toolchain PATH,
+  or the stock administrator `Match` block are handled explicitly.
 - Add a native Windows x86_64 CI gate covering the complete workspace, all
   seven public profiles, live static and proxy traffic, downstream and verified
   upstream TLS, memory and persistent storage-bin cache, load balancing, admin,

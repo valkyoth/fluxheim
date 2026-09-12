@@ -59,6 +59,13 @@ entries when upgrading an existing builder. The release runner refuses to run
 from an administrator token. Administrators that need Rust must use a separate
 installation that the build account cannot modify.
 
+The bootstrap supports a fresh OpenSSH Users group and refreshes its elevated
+process environment after `winget` installs the native prerequisites. The
+stock OpenSSH `Match Group administrators` key-file override may still appear
+when inspecting the initial Administrator session; the generated global
+`AllowUsers fluxheim-build` policy excludes that account, and the bootstrap
+proves that Administrator SSH is rejected before it reports success.
+
 To perform the policy step directly instead, open an elevated Windows
 PowerShell session and run:
 

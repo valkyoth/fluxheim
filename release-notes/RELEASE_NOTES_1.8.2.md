@@ -44,7 +44,10 @@ native build and test infrastructure is available.
 - Bootstrap disposable Windows Server 2025 Desktop Experience builders from a
   trusted Linux release host, install the required native toolchain, transition
   to a dedicated non-administrator SSH account, and verify Administrator SSH
-  is no longer accepted.
+  is no longer accepted. Fresh-host provisioning handles empty OpenSSH groups,
+  refreshes newly installed prerequisite paths without exposing mutable Rust
+  tools machine-wide, and validates the global policy around the stock
+  administrator `Match` block.
 - Run the verified-upstream-TLS smoke against a second native Fluxheim/Rustls
   process so it remains reliable under public-key-only OpenSSH sessions without
   granting access to the machine-wide Windows private-key store.

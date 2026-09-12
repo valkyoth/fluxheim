@@ -50,7 +50,8 @@ if ($administrators.Name -contains "$env:COMPUTERNAME\$BuildUser") {
 $openSshUsersSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-585')
 $openSshUsers = Get-LocalGroup -SID $openSshUsersSid -ErrorAction Stop
 $openSshMembers = Get-LocalGroupMember -Group $openSshUsers.Name -ErrorAction Stop
-if ($openSshMembers.SID.Value -notcontains $localUser.SID.Value) {
+$openSshMemberSids = @($openSshMembers | ForEach-Object { $_.SID.Value })
+if ($openSshMemberSids -notcontains $localUser.SID.Value) {
     if ($PSCmdlet.ShouldProcess($BuildUser, "Add to $($openSshUsers.Name)")) {
         Add-LocalGroupMember -Group $openSshUsers.Name -Member $localUser
     }
@@ -138,17 +139,25 @@ if ($PSCmdlet.ShouldProcess($sshdConfig, 'Restrict release-builder SSH authentic
     Set-Content -LiteralPath $sshdConfig -Value $config -Encoding ascii
     & "$env:WINDIR\System32\OpenSSH\sshd.exe" -t
     if ($LASTEXITCODE -ne 0) { throw 'OpenSSH configuration validation failed' }
+    $authorizedKeysPolicy = 'AuthorizedKeysFile __PROGRAMDATA__/ssh/fluxheim-release/authorized_keys'
+    $authorizedKeysPolicyIndex = $config.IndexOf($authorizedKeysPolicy)
+    $firstMatch = [regex]::Match($config, '(?im)^\s*Match\s+')
+    if ($authorizedKeysPolicyIndex -lt 0 -or
+        ($firstMatch.Success -and $authorizedKeysPolicyIndex -gt $firstMatch.Index)) {
+        throw 'OpenSSH authorized-keys policy is not in global scope'
+    }
     # A newly created local account has no Windows profile until its first
     # successful logon. OpenSSH 9.5 cannot expand -T policy for that account,
-    # so validate the global policy through the established administrator.
+    # so validate the remaining global policy through the established
+    # administrator. Its vendor Match Group administrators block may override
+    # AuthorizedKeysFile, but AllowUsers below still excludes that account.
     $effectiveValidationUser = $env:USERNAME.ToLowerInvariant()
     $effectiveSshd = (& "$env:WINDIR\System32\OpenSSH\sshd.exe" -T -C "user=$effectiveValidationUser,host=localhost,addr=127.0.0.1") -join "`n"
     if ($LASTEXITCODE -ne 0) { throw 'OpenSSH effective configuration validation failed' }
     foreach ($required in @(
         'passwordauthentication no',
         'authenticationmethods publickey',
-        "allowusers $BuildUser",
-        'authorizedkeysfile __PROGRAMDATA__/ssh/fluxheim-release/authorized_keys'
+        "allowusers $BuildUser"
     )) {
         if ($effectiveSshd -notmatch "(?m)^$([regex]::Escape($required))$") {
             throw "OpenSSH effective configuration does not enforce: $required"
@@ -169,7 +178,7 @@ if ($PSCmdlet.ShouldProcess('sshd', 'Enable and restart OpenSSH Server')) {
     Restart-Service -Name sshd
 }
 
-$requiredCommands = 'pwsh.exe', 'git.exe', 'rustup.exe', 'rustc.exe', 'cargo.exe', 'python.exe', 'cmake.exe'
+$requiredCommands = 'pwsh.exe', 'git.exe', 'python.exe', 'cmake.exe'
 $missing = @($requiredCommands | Where-Object { $null -eq (Get-Command $_ -ErrorAction SilentlyContinue) })
 if ($missing.Count -gt 0) {
     Write-Warning "Install these tools for the build account and add them to PATH: $($missing -join ', ')"

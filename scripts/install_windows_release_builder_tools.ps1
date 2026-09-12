@@ -82,7 +82,8 @@ if ($administrators.Name -contains "$env:COMPUTERNAME\$BuildUser") {
 $openSshUsersSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-585')
 $openSshUsers = Get-LocalGroup -SID $openSshUsersSid -ErrorAction Stop
 $openSshMembers = Get-LocalGroupMember -Group $openSshUsers.Name -ErrorAction Stop
-if ($openSshMembers.SID.Value -notcontains $localUser.SID.Value) {
+$openSshMemberSids = @($openSshMembers | ForEach-Object { $_.SID.Value })
+if ($openSshMemberSids -notcontains $localUser.SID.Value) {
     if ($PSCmdlet.ShouldProcess($BuildUser, "Add to $($openSshUsers.Name)")) {
         Add-LocalGroupMember -Group $openSshUsers.Name -Member $localUser
     }
@@ -143,6 +144,13 @@ if ($PSCmdlet.ShouldProcess('machine environment', 'Remove build-account Rust to
 
 Remove-Item -LiteralPath $rustupInstaller -Force -ErrorAction SilentlyContinue
 
+$pathEntries = @(
+    [Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';'
+    [Environment]::GetEnvironmentVariable('Path', 'User') -split ';'
+) | Where-Object {
+    -not [string]::IsNullOrWhiteSpace($_) -and $_.TrimEnd('\') -ne $cargoBin.TrimEnd('\')
+}
+$env:Path = $pathEntries -join ';'
 foreach ($required in 'pwsh.exe', 'git.exe', 'python.exe', 'cmake.exe') {
     if ($null -eq (Get-Command $required -ErrorAction SilentlyContinue)) {
         throw "required command is unavailable after installation: $required"

@@ -602,6 +602,7 @@ foreach ($required in @(
     '$random.GetBytes($passwordBytes)',
     "[Security.Principal.SecurityIdentifier]::new('S-1-5-32-585')",
     'Get-LocalGroup -SID $openSshUsersSid',
+    '$openSshMemberSids = @($openSshMembers | ForEach-Object { $_.SID.Value })',
     'Add-LocalGroupMember -Group $openSshUsers.Name -Member $localUser',
     'release build account must not be a local administrator'
 )) {
@@ -623,6 +624,8 @@ foreach ($required in @(
     "SetEnvironmentVariable('CARGO_HOME', `$null, 'Machine')",
     'Remove-Item Env:RUSTUP_HOME -ErrorAction SilentlyContinue',
     'Remove-Item Env:CARGO_HOME -ErrorAction SilentlyContinue',
+    '$openSshMemberSids = @($openSshMembers | ForEach-Object { $_.SID.Value })',
+    "`$env:Path = `$pathEntries -join ';'",
     "Join-Path `$cargoBin 'rustup.exe'",
     "Join-Path `$cargoBin 'cargo.exe'"
 )) {
@@ -645,6 +648,7 @@ foreach ($required in @(
     'TagAllowedSignersFile',
     "[Security.Principal.SecurityIdentifier]::new('S-1-5-32-585')",
     'Get-LocalGroup -SID $openSshUsersSid',
+    '$openSshMemberSids = @($openSshMembers | ForEach-Object { $_.SID.Value })',
     'Add-LocalGroupMember -Group $openSshUsers.Name -Member $localUser',
     'icacls.exe',
     'sshd.exe',
@@ -660,6 +664,9 @@ if (-not $preparation.Contains('Set-FluxheimReleaseBuilderSshdPolicy')) {
 foreach ($required in @(
     'sshd.exe" -T -C',
     '$effectiveValidationUser = $env:USERNAME.ToLowerInvariant()',
+    "`$authorizedKeysPolicy = 'AuthorizedKeysFile __PROGRAMDATA__/ssh/fluxheim-release/authorized_keys'",
+    "`$firstMatch = [regex]::Match(`$config, '(?im)^\s*Match\s+')",
+    'OpenSSH authorized-keys policy is not in global scope',
     'passwordauthentication no',
     'authenticationmethods publickey',
     'allowusers $BuildUser'
