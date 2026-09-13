@@ -18,8 +18,8 @@ they were built on. For portable release artifacts, omit the flag.
 The cross-platform profile and archive contract is documented in
 [Portable Releases](portable-releases.md).
 
-The `v1.8.2` development line adds native Windows x86_64 release
-builder automation. Linux cross-builds do not stand in for the Windows MSVC
+The `v1.8.2` release adds native Windows x86_64 release-builder automation.
+Linux cross-builds do not stand in for the Windows MSVC
 SDK, ACL, locking, or live-runtime gates. See
 [Windows Release Builders](windows-release-builders.md).
 
@@ -535,17 +535,17 @@ Optional Quay repository secrets and variables:
 
 The workflow publishes OS-variant tags for the full/default image profile:
 
-The `1.8.1` release retains this naming contract.
+The `1.8.2` release retains this naming contract.
 
-- `v1.8.1-wolfi`, `v1.8.1-alpine`, `v1.8.1-suse-micro`, `v1.8.1-debian`
+- `v1.8.2-wolfi`, `v1.8.2-alpine`, `v1.8.2-suse-micro`, `v1.8.2-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
 For the recommended Wolfi runtime, the full/default profile also gets short
 aliases:
 
-- `v1.8.1`
-- `v1.8.1-base`
+- `v1.8.2`
+- `v1.8.2-base`
 - `latest`
 - `latest-base`
 
@@ -554,23 +554,23 @@ automation. They point at the full/default image profile.
 
 The focused image profiles publish tags with a profile segment:
 
-- `v1.8.1-wasm-wolfi`, `v1.8.1-wasm-alpine`,
-  `v1.8.1-wasm-suse-micro`, `v1.8.1-wasm-debian`
-- `v1.8.1-cache-wolfi`, `v1.8.1-cache-alpine`,
-  `v1.8.1-cache-suse-micro`, `v1.8.1-cache-debian`
-- `v1.8.1-proxy-wolfi`, `v1.8.1-proxy-alpine`,
-  `v1.8.1-proxy-suse-micro`, `v1.8.1-proxy-debian`
-- `v1.8.1-load-balancer-wolfi`, `v1.8.1-load-balancer-alpine`,
-  `v1.8.1-load-balancer-suse-micro`, `v1.8.1-load-balancer-debian`
-- Starting with `1.8.2`: `v1.8.2-php-wolfi`, `v1.8.2-php-alpine`,
+- `v1.8.2-wasm-wolfi`, `v1.8.2-wasm-alpine`,
+  `v1.8.2-wasm-suse-micro`, `v1.8.2-wasm-debian`
+- `v1.8.2-cache-wolfi`, `v1.8.2-cache-alpine`,
+  `v1.8.2-cache-suse-micro`, `v1.8.2-cache-debian`
+- `v1.8.2-proxy-wolfi`, `v1.8.2-proxy-alpine`,
+  `v1.8.2-proxy-suse-micro`, `v1.8.2-proxy-debian`
+- `v1.8.2-load-balancer-wolfi`, `v1.8.2-load-balancer-alpine`,
+  `v1.8.2-load-balancer-suse-micro`, `v1.8.2-load-balancer-debian`
+- `v1.8.2-php-wolfi`, `v1.8.2-php-alpine`,
   `v1.8.2-php-debian`, `v1.8.2-php-suse-bci`
 - `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`,
   `sha-<short-sha>-load-balancer-wolfi`, `sha-<short-sha>-php-wolfi`, etc.
 - `latest-cache-wolfi`, `latest-proxy-wolfi`,
   `latest-load-balancer-wolfi`, `latest-php-wolfi`, etc. when run from the
   default branch
-- Wolfi short aliases: `v1.8.1-wasm`, `v1.8.1-cache`, `v1.8.1-proxy`,
-  `v1.8.1-load-balancer`, `v1.8.1-php`, `latest-wasm`, `latest-cache`,
+- Wolfi short aliases: `v1.8.2-wasm`, `v1.8.2-cache`, `v1.8.2-proxy`,
+  `v1.8.2-load-balancer`, `v1.8.2-php`, `latest-wasm`, `latest-cache`,
   `latest-proxy`, `latest-load-balancer`, and `latest-php`
 
 Starting with `v1.5.0`, the load-balancer image profile is part of normal tag

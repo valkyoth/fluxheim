@@ -157,9 +157,15 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
-* Sat Aug 29 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.8.2-1
-- Start native unsigned Windows portable parity for x86_64 MSVC hosts and add
-  fail-closed release-builder automation; defer Windows ARM64.
+* Sun Sep 13 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.8.2-1
+- Complete native unsigned Windows portable parity for x86_64 MSVC hosts and
+  add fail-closed exact-tag release-builder automation; defer Windows ARM64.
+- Build and smoke all seven Windows archive profiles, including external
+  FastCGI, ACME, persistent cache, load-balancer, and Wasm policy paths.
+- Make focused PHP images self-contained across Wolfi, Alpine, Debian, and
+  SUSE BCI, with a common smoke-tested extension contract.
+- Restore ABI-correct no-follow file opening on Linux ARM and make Windows
+  release binaries reproducible across clean target directories.
 
 * Fri Aug 28 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.8.1-1
 - Start the native Apple Silicon macOS parity gate.

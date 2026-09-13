@@ -26,7 +26,7 @@ Every staged directory is emitted internally as both `.tar.gz` and `.zip` so
 the archive builder can verify that both formats contain the same paths and
 file payloads. Publication format is platform-specific: Linux publishes
 `.tar.gz`, unsigned macOS CLI previews publish `.tar.gz`, and Windows will
-publish `.zip` once its native gate is complete. Windows binaries retain their
+publish `.zip` after its exact-tag native gate passes. Windows binaries retain their
 `.exe` suffix. Archive names use normalized platform labels such as:
 
 ```text
@@ -35,9 +35,9 @@ fluxheim-VERSION-wasm-aarch64-macos.tar.gz
 fluxheim-VERSION-wasm-x86_64-windows.zip
 ```
 
-Windows uses the same naming contract during `1.8.2` development. Do not
-publish those archives until the native x86_64 runtime and exact-tag release
-evidence gates pass. Windows ARM64 is not a supported release target.
+Windows uses the same naming contract starting with `1.8.2`. Publish those
+archives only after the native x86_64 runtime and exact-tag release-evidence
+gates pass. Windows ARM64 is not a supported release target.
 
 The shared matrix can be inspected without compiling:
 
@@ -79,7 +79,7 @@ release target and does not receive official archives.
 External Prometheus and Jaeger collector integration remains in the Linux gate
 because the macOS portable gate does not require a container runtime.
 
-`1.8.0` did not publish Windows binaries. The active `1.8.2` line implements
+`1.8.0` did not publish Windows binaries. Release `1.8.2` implements
 native owner/ACL trust checks for configuration and runtime paths, Windows-safe
 static and cache file handling, all seven MSVC profile builds, and native live
 static, downstream/upstream TLS, memory and persistent disk cache, proxy,
@@ -118,7 +118,8 @@ Live platform parity remains staged:
 - `1.8.1` completes the defined unsigned native macOS runtime and archive
   smoke matrix while retaining explicit foreground and filesystem-policy
   limitations.
-- `1.8.2` expands native Windows runtime and archive smoke coverage.
+- `1.8.2` completes the defined unsigned native Windows x86_64 runtime and
+  archive smoke matrix.
 - `1.8.3` compares all published profiles and records intentional platform
   differences.
 
@@ -139,9 +140,8 @@ out explicitly before release rather than silently omitted.
 
 ## Unsigned Preview Policy
 
-macOS archives are unsigned portable previews until Fluxheim has company-backed
-publisher credentials. Windows archives will follow the same policy when they
-begin in `1.8.2`. SHA-256 checksums prove downloaded-byte integrity against the
+macOS and Windows archives are unsigned portable previews until Fluxheim has
+company-backed publisher credentials. SHA-256 checksums prove downloaded-byte integrity against the
 published release metadata; they do not establish a signed publisher identity.
 
 The public macOS preview uses only `.tar.gz`. Fluxheim is a command-line server,

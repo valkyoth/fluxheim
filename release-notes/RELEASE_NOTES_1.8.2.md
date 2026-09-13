@@ -1,11 +1,11 @@
 # Fluxheim 1.8.2 Release Notes
 
-Fluxheim 1.8.2 is the Windows portable-parity development line. It targets
-native x86_64 MSVC builds while preserving the same seven public profiles used
-by Linux and Apple Silicon macOS. Windows ARM64 is deferred until sustainable
-native build and test infrastructure is available.
+Fluxheim 1.8.2 completes unsigned Windows portable parity on native x86_64
+MSVC while preserving the same seven public profiles used by Linux and Apple
+Silicon macOS. Windows ARM64 is deferred until sustainable native build and
+test infrastructure is available.
 
-## Completed On Native x86_64 CI
+## Windows Portable Release
 
 - Build and execute unsigned `.zip` previews for `full`, `wasm`, `cache`,
   `proxy`, `load-balancer`, `php`, and `config-tester` with the native MSVC
@@ -115,10 +115,19 @@ native build and test infrastructure is available.
   default release binary in two clean target directories, build each of the
   seven profile archives once, and aggregate native test evidence and checksums
   through the repository-owned Linux helper.
+- Build Windows MSVC executables with deterministic PE timestamps and CodeView
+  identifiers, proving byte-identical default binaries across clean target
+  directories on the native release host.
+- Derive Unix `O_NOFOLLOW` from each target ABI instead of using an x86 Linux
+  literal, restoring symlink rejection on Linux ARM for configuration, ACME,
+  Wasm, GeoIP, observability CA, upstream TLS, and static-file inputs.
+- Run the complete Linux x86_64 and aarch64 archive matrices, the native
+  Windows runtime and seven-ZIP matrix, and the Apple Silicon seven-profile
+  archive validation before release preparation.
 
-## Remaining Release Blocks
+## Exact-Tag Publication Gate
 
-- Produce exact-tag, architecture, checksum, test, and reproducibility evidence
+- Produce exact-tag architecture, checksum, test, and reproducibility evidence
   from a dedicated native x86_64 Windows builder. Evidence records the
   Windows edition and build, and every executable in all seven ZIP profiles
   must launch and report the expected version. Planning-only output and the

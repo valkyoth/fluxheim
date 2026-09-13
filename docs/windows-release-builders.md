@@ -4,9 +4,9 @@ Fluxheim `1.8.2` uses a native Windows x86_64 host for its unsigned portable
 archive evidence. A Linux cross-build is not accepted as a substitute for the
 native Windows ACL, locking, shutdown, and live-runtime checks.
 
-This is release infrastructure for the active parity line. Windows archives
-must not be published until the runtime and live-smoke gates in the exact tag
-pass on x86_64.
+This is release infrastructure for the supported unsigned Windows x86_64
+portable line. Windows archives must not be published until the runtime and
+live-smoke gates in the exact tag pass on x86_64.
 
 ## Host Requirements
 
@@ -186,8 +186,8 @@ GitHub-hosted `windows-2025` job separately runs the native test and archive
 matrix. It does not need to reproduce the cloud builder's archive bytes.
 
 The script fails when `scripts/smoke_windows_native.ps1` is absent or any
-native runtime assertion fails. This remains an intentional release block
-until the complete 1.8.2 parity matrix passes on x86_64.
+native runtime assertion fails. Every 1.8.2 release build therefore remains
+blocked unless the complete parity matrix passes on x86_64.
 
 Windows outputs are unsigned `.zip` previews. Do not disable SmartScreen or
 execution policy globally. Authenticode, MSI/MSIX, Store delivery, and service

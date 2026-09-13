@@ -135,7 +135,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Config module split | ✅ | `1.4.3`; config loading, shared helpers, domain validation, and large config tests are split into focused `config_*` modules while keeping `crate::config::*` stable. |
 | Load-balancer module split | ✅ | `1.5.0`; health checks, backend state, persistence, selection algorithms, backend policy/status, and file/DNS discovery are split into focused `load_balancer/*` modules while keeping `crate::load_balancer::*` stable. |
 | macOS portable builds | 🧪 | `1.4.4` established Apple Silicon development support; `1.8.0` added the shared unsigned archive contract, and `1.8.1` builds all seven public profiles and runs the native subsystem parity suite on Apple Silicon. Archives remain unsigned previews. Intel macOS is not a supported release target. |
-| Windows portable builds | 🧪 | `1.8.2` is the active native MSVC parity line for x86_64. Native x86_64 CI passes the workspace, seven profiles, live runtime, archives, and packaged Wasm; release ZIPs come from an exact-tag disposable native builder using the same default-binary reproducibility and checksum model as Linux ARM. Windows ARM64 is deferred until sustainable native build and test infrastructure is available. |
+| Windows portable builds | 🧪 | `1.8.2` completes unsigned native MSVC parity for x86_64. Native x86_64 CI passes the workspace, seven profiles, live runtime, archives, and packaged Wasm; release ZIPs come from an exact-tag disposable native builder using the same default-binary reproducibility and checksum model as Linux ARM. Windows ARM64 is deferred until sustainable native build and test infrastructure is available. |
 | GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional bounded local MMDB support with trusted-file enforcement for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. The [GeoIP guide](docs/geoip.md) includes a pinned real CIRCL database proof for static, proxy, and load-balancer paths. |
 | Pingora-free runtime | ✅ | `1.6.34`; normal Fluxheim builds no longer compile Pingora crates. Server/listener/TLS, HTTP/1, HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and background-service paths run through Fluxheim-owned Rust crates. |
 | HTTP/3/QUIC | ❌ | Planned as a Fluxheim-owned `1.9` protocol milestone using the Rust `quinn`/`h3` stack after the `1.8` macOS/Windows production parity line. |
@@ -354,9 +354,9 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries. The `1.8.x`
-image line adds a dedicated Wasm profile. Tags include `v1.8.1-wolfi`,
-`v1.8.1-wasm-wolfi`, `v1.8.1-cache-wolfi`, `v1.8.1-proxy-wolfi`,
-`v1.8.1-load-balancer-wolfi`, and `v1.8.1-php-wolfi`. Wasm is not included in
+image line adds a dedicated Wasm profile. Tags include `v1.8.2-wolfi`,
+`v1.8.2-wasm-wolfi`, `v1.8.2-cache-wolfi`, `v1.8.2-proxy-wolfi`,
+`v1.8.2-load-balancer-wolfi`, and `v1.8.2-php-wolfi`. Wasm is not included in
 the unsuffixed full image.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
@@ -433,18 +433,18 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Current Development: 1.8.2 Windows Portable Parity
+## Current Release: 1.8.2 Windows Portable Parity
 
 Fluxheim does not treat every planned idea as stable. Fluxheim is now on the
 `1.8` platform-parity line. Release `1.8.0` packages the completed Wasm
 line as an explicit image/archive profile and establishes the shared portable
 archive contract. Release `1.8.1` completed the defined unsigned Apple Silicon
-macOS parity gate. Development `v1.8.2` now targets native Windows x86_64 MSVC
+macOS parity gate. Release `v1.8.2` completes native Windows x86_64 MSVC
 archives without weakening filesystem trust or cache-storage
 boundaries. The normal `full` profile remains Wasm-free. Signing and installer
 work follows platform parity. The unsigned macOS CLI preview publishes
-`.tar.gz` only; Windows will publish `.zip` only after its native x86_64 gate
-passes. Windows ARM64 is deferred until equivalent native build and test
+`.tar.gz` only; Windows publishes `.zip` only after its exact-tag native x86_64
+gate passes. Windows ARM64 is deferred until equivalent native build and test
 infrastructure is sustainable.
 See
 [Portable Releases](docs/portable-releases.md) for the shared archive contract,
