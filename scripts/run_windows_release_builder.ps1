@@ -629,10 +629,12 @@ try {
     if ($LASTEXITCODE -ne 0 -or $env:SOURCE_DATE_EPOCH -notmatch '^[0-9]+$') {
         throw 'could not determine the release source timestamp'
     }
-    $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem
-    $osCaption = ([string]$operatingSystem.Caption).Replace("`r", ' ').Replace("`n", ' ').Trim()
-    $osVersion = ([string]$operatingSystem.Version).Trim()
-    $osBuild = ([string]$operatingSystem.BuildNumber).Trim()
+    $windowsVersion = Get-ItemProperty -LiteralPath `
+        'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+    $runtimeVersion = [Environment]::OSVersion.Version
+    $osCaption = ([string]$windowsVersion.ProductName).Replace("`r", ' ').Replace("`n", ' ').Trim()
+    $osVersion = "$($runtimeVersion.Major).$($runtimeVersion.Minor).$($runtimeVersion.Build)"
+    $osBuild = ([string]$windowsVersion.CurrentBuildNumber).Trim()
     if ([string]::IsNullOrWhiteSpace($osCaption) -or
         [string]::IsNullOrWhiteSpace($osVersion) -or
         [string]::IsNullOrWhiteSpace($osBuild)) {

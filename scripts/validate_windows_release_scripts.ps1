@@ -885,7 +885,8 @@ foreach ($required in @(
     'smoke_windows_archive_profiles.ps1',
     'smoke_windows_wasm_archive.ps1',
     'SOURCE_DATE_EPOCH',
-    'Get-CimInstance -ClassName Win32_OperatingSystem',
+    'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion',
+    '[Environment]::OSVersion.Version',
     'windows_os_caption=',
     'windows_os_version=',
     'windows_os_build=',
@@ -912,7 +913,9 @@ foreach ($forbidden in @(
     'rustup.exe override set',
     "`$env:RUSTUP_HOME =",
     "`$env:CARGO_HOME = Join-Path `$rustRoot 'cargo'",
-    '$host = ($rustcVersionOutput'
+    '$host = ($rustcVersionOutput',
+    'Get-CimInstance',
+    'Invoke-WmiMethod'
 )) {
     if ($release.Contains($forbidden)) {
         throw "Windows release runner must not use a build-account-writable Rust toolchain: $forbidden"
