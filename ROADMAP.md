@@ -1367,6 +1367,9 @@ without parsing text fixtures for every module.
 15. **Future HTTP/3 And QUIC**
    - HTTP/3 is the modern protocol direction, not a legacy-compatibility
      feature.
+   - Execute the work through the numbered, pentested checkpoints in the
+     [HTTP/3 And QUIC Commit Plan](docs/http3-quic-commit-plan.md), followed by
+     one complete public `1.9.0` release rather than partial protocol releases.
    - Track it as Fluxheim-owned `1.9` work, after server bootstrap/listener/TLS
      ownership and the HTTP proxy runtime are stable. The intended ecosystem
      path is Rust `quinn` for QUIC transport plus the `h3` stack for HTTP/3

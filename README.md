@@ -568,6 +568,7 @@ moves to the following Fluxheim-owned `1.9` protocol line based on the Rust
 - [WASM Extensibility](docs/wasm-extensibility.md)
 - [Wasm Policy Example Parity](docs/wasm-policy-example-parity.md)
 - [Portable Releases](docs/portable-releases.md)
+- [HTTP/3 And QUIC Commit Plan](docs/http3-quic-commit-plan.md)
 - [Windows Release Builders](docs/windows-release-builders.md)
 - [Zero-Downtime Upgrades](docs/zero-downtime-upgrades.md)
 - [Crypto RPC Edge](docs/crypto-rpc-edge.md)

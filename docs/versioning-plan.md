@@ -3242,16 +3242,18 @@ Stable scope:
   extension contract. Publish the SUSE PHP profile as `php-suse-bci` because
   the dedicated BCI PHP base supplies an official PHP repository; retain SUSE
   Micro for the non-PHP profiles.
-- `v1.8.3`: cross-platform parity hardening. Compare Linux, macOS, and Windows
-  behavior profile by profile, close practical gaps, document intentional
-  differences, add `scripts/test_starter.py` platform entries, and require
+- `v1.8.3` candidate: cross-platform parity hardening. Compare Linux, macOS,
+  and Windows behavior profile by profile, close practical gaps, document
+  intentional differences, add `scripts/test_starter.py` platform entries, and require
   stable/deep gates to prove every published portable artifact. Evaluate a
   capability-style storage-bin lifecycle that retains validated root,
   data-directory, shard, manifest, and index descriptors instead of reopening
   assembled paths for each operation; retain the documented dedicated-UID/root
   boundary unless that redesign lands. Unsigned archives must be clearly
   labeled and accompanied by checksums and provenance; users remain responsible
-  for local trust-policy exceptions.
+  for local trust-policy exceptions. Land internal parity polish as ordinary
+  commits; create a public `v1.8.3` only if the accepted closeout includes an
+  operator-visible fix or deliverable worth publishing.
 - `v1.8.4`: company-backed signing foundation, conditional on Fluxheim having
   the required legal publisher identity and credentials. Add Apple Developer
   ID signing/notarization and Windows Authenticode without making unavailable
@@ -3271,7 +3273,10 @@ Stable scope:
   route policy exists, and require interop, malformed-input, packet-loss,
   anti-amplification, timeout, container-network, and mixed-protocol boundary
   tests. Do not add generic UDP proxying, DNS/GSLB, WAF, VPN/firewall
-  appliance behavior, or new Wasm ABI scope in this release.
+  appliance behavior, or new Wasm ABI scope in this release. Implement this as
+  pentested commit checkpoints rather than partial public versions; the
+  complete scope and post-`1.9.0` vertical releases are defined in
+  [HTTP/3 And QUIC Commit Plan](http3-quic-commit-plan.md).
 
 Scope rules:
 
@@ -4885,10 +4890,12 @@ circular dependencies.
 - `v1.8.2`: unsigned Windows MSVC portable parity with the same supported
   profile/archive contract and explicit replacements or limitations for
   Unix-only behavior.
-- `v1.8.3`: cross-platform parity hardening, platform test-starter entries,
-  documented intentional differences, and stable/deep release-gate evidence
-  for every published archive. Evaluate lifetime-retained storage-bin
+- `v1.8.3` candidate: cross-platform parity hardening, platform test-starter
+  entries, documented intentional differences, and stable/deep release-gate
+  evidence for every published archive. Evaluate lifetime-retained storage-bin
   descriptors as defense in depth against a hostile same-UID/root local actor.
+  Keep this as a commit-only closeout unless it contains an operator-visible
+  fix or deliverable that justifies a public tag.
 - `v1.8.4`: company-backed Apple Developer ID and Windows Authenticode signing
   foundation once the legal publisher identity and credentials exist.
 - `v1.8.5`: notarized macOS and signed Windows installer delivery, including
@@ -4904,7 +4911,9 @@ circular dependencies.
   route policy exists, and require interop, malformed-input, packet-loss,
   anti-amplification, timeout, container-network, and mixed-protocol boundary
   tests. Do not add generic UDP proxying, DNS/GSLB, WAF, VPN/firewall
-  appliance behavior, or new Wasm ABI scope in this release.
+  appliance behavior, or new Wasm ABI scope in this release. Use the
+  [HTTP/3 And QUIC Commit Plan](http3-quic-commit-plan.md) for the numbered
+  implementation checkpoints and user-facing `1.9.x` release boundaries.
 
 ## Long-Term Ecosystem
 
