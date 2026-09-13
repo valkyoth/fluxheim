@@ -20,7 +20,7 @@ cross-platform evidence is not independently useful to operators. Patch and
 minor releases after `1.9.0` are reserved for complete user-facing additions or
 bug and security fixes.
 
-The estimated train is **20 planned commits**. `Commit N` is a logical accepted
+The estimated train is **23 planned commits**. `Commit N` is a logical accepted
 checkpoint, not a promise that exactly one Git object will exist for that
 scope. Remediation and evidence commits can increase the Git commit count
 without changing the numbered scope. If a commit becomes too large for one
@@ -109,7 +109,7 @@ The required boundary is:
 
 Commit 1 must record the exact Brynja capability gaps for QUIC/TLS 1.3 without
 adding a Brynja dependency. Commit 4 freezes the adapter contract. Commit 5
-proves that the initial rustls providers use only that boundary. Commit 20 must
+proves that the initial rustls providers use only that boundary. Commit 23 must
 recheck that no implementation-specific types or assumptions escaped during
 the train.
 
@@ -591,37 +591,136 @@ Pentest stop: pentest the exact Commit 16 reload, readiness, discovery, GOAWAY,
 drain, shutdown, and stale-advertisement boundary. Remediate, retest, and wait
 for green GitHub checks before authorizing Commit 17.
 
-## Commit 17 - Cross-Platform Packaging And Containers
+## Commit 17 - Cross-Platform Packaging And Container Artifacts
 
 Commit status: planned; blocked on accepted Commit 16 pentest, retest, and
 GitHub checks.
 
-Goal: make the feature obtainable and runnable on every supported release OS.
+Goal: make the feature obtainable in artifacts that the following native live
+commits can execute without Cargo.
 
 Deliverables: `http3` archives for Linux x86_64/aarch64, macOS Apple Silicon,
 and Windows x86_64; matching container variants; UDP port documentation;
 rootless Podman guidance; checksums, SBOM, and reproducibility evidence; and
 platform test-starter entries.
 
-Verification: native archive binaries, container UDP publication, read-only
-configuration and certificate mounts, Linux/macOS/Windows live smokes, archive
-profile validation, dependency isolation in non-HTTP/3 profiles, and exact-tag
-release-helper aggregation.
+Verification: native archive binary inspection, container UDP exposure,
+read-only configuration and certificate mounts, archive profile validation,
+dependency isolation in non-HTTP/3 profiles, exact-tag release-helper
+aggregation, and checks that live tests consume extracted archives or published-
+shape local images rather than `target/debug` binaries.
 
-Exit criteria: operators have a precompiled supported artifact and one tested
-deployment recipe per supported platform.
+Exit criteria: every supported platform has a precompiled candidate artifact
+and deployment recipe ready for the mandatory live qualification commits.
 
 Pentest stop: pentest the exact Commit 17 feature graph, archive, container,
-filesystem, UDP publication, provenance, and cross-platform boundary.
+filesystem, UDP publication, provenance, and artifact-consumption boundary.
 Remediate, retest, and wait for green GitHub checks before authorizing Commit
 18.
 
-## Commit 18 - Interoperability And Impaired Networks
+## Commit 18 - Linux And Rootless Container Live Proof
 
 Commit status: planned; blocked on accepted Commit 17 pentest, retest, and
 GitHub checks.
 
-Goal: prove behavior beyond same-process happy-path clients.
+Goal: prove the packaged HTTP/3 profile serves real traffic on supported Linux
+architectures and through the production rootless container boundary.
+
+Deliverables: a live script that starts the extracted Linux `profile-http3`
+binary and a separate script that starts the release-shape rootless Podman
+image with the same numeric TCP and UDP ports published; ephemeral TLS material;
+static, proxy, cache, load-balancer, PHP/external FastCGI where available, and
+generated-error routes; and retained bounded evidence containing artifact/image
+identity, config, client version, negotiated protocol, response markers, logs,
+metrics, reload, drain, and exit status.
+
+Verification: use a pinned independent client process with an explicit HTTP/3-
+only mode and prove `HTTP/3` negotiation from client evidence, not merely a 200
+response. Exercise at least one request across the container network and host
+UDP publication boundary, verify TCP HTTP/1.1 or HTTP/2 fallback on the same
+service, reload certificates/configuration, stop and restart the container, and
+prove graceful and forced shutdown cleanup. Run Linux x86_64 and aarch64 native
+jobs; cross-compilation does not satisfy either row.
+
+Exit criteria: a clean host can start the packaged binary and rootless image,
+receive an independently negotiated HTTP/3 response through mapped UDP, retain
+HTTP/1.1/HTTP/2 service, and shut down without leaked processes or sockets.
+
+Pentest stop: pentest the exact Commit 18 Linux process, rootless container,
+network namespace, UDP publication, TLS mount, evidence, and cleanup boundary.
+Remediate, retest, and wait for green GitHub checks before authorizing Commit
+19.
+
+## Commit 19 - Apple Silicon macOS Native Live Proof
+
+Commit status: planned; blocked on accepted Commit 18 pentest, retest, and
+GitHub checks.
+
+Goal: prove HTTP/3 on an actual supported Apple Silicon macOS host rather than
+assuming Unix behavior matches Linux.
+
+Deliverables: an Apple Silicon native live script that extracts the macOS
+`profile-http3` release archive into a fresh directory, starts Fluxheim as a
+separate foreground process, drives it with a pinned independent HTTP/3 client,
+and retains bounded artifact identity, architecture, macOS version, client
+version, negotiated protocol, response, log, reload, drain, and exit evidence.
+
+Verification: prove the binary is Mach-O arm64, verify ad-hoc signature state
+without treating it as publisher trust, perform HTTP/3-only static, proxy,
+cache, load-balancer, and representative body-stream requests, confirm TCP
+HTTP/1.1/HTTP/2 fallback, reload configuration and certificates, reject an
+invalid reload without losing service, and exercise graceful and deadline-
+forced shutdown. The server and client must be different processes; Rust unit
+tests, cross-compilation, and a same-process QUIC peer do not satisfy this gate.
+
+Exit criteria: the extracted unsigned macOS archive runs on a real supported
+Apple Silicon host and independently negotiates HTTP/3 across a UDP socket with
+the same application semantics and lifecycle guarantees as Linux.
+
+Pentest stop: pentest the exact Commit 19 macOS archive, process, filesystem,
+UDP socket, TLS material, reload, evidence, and cleanup boundary. Remediate,
+retest, and wait for green GitHub checks before authorizing Commit 20.
+
+## Commit 20 - Windows x86_64 Native Live Proof
+
+Commit status: planned; blocked on accepted Commit 19 pentest, retest, and
+GitHub checks.
+
+Goal: prove the MSVC archive serves real HTTP/3 on a disposable native Windows
+x86_64 host, including traffic that crosses the host firewall.
+
+Deliverables: a PowerShell live script that extracts the Windows
+`profile-http3` ZIP into a fresh directory, starts the packaged executable,
+configures only the required temporary TCP/UDP firewall rules, and retains
+bounded artifact identity, PE architecture, Windows build, client version,
+negotiated protocol, response, event/log, reload, drain, and exit evidence. The
+test must support a pinned independent client on the host and a remote Linux
+HTTP/3 client against an explicitly provided test hostname or address.
+
+Verification: prove native MSVC execution, HTTP/3-only static, proxy, cache,
+load-balancer, external FastCGI/PHP, request-body, and generated-error paths;
+verify TCP HTTP/1.1/HTTP/2 fallback; confirm UDP is externally reachable rather
+than inferring success from a local request; reload configuration and
+certificates; reject invalid reload; stop/restart; enforce graceful and forced
+shutdown; and remove temporary services, processes, files, and firewall rules.
+Cross-compilation, Wine, WSL, or a Windows container does not satisfy this
+native gate.
+
+Exit criteria: a fresh disposable Windows Server host can run the extracted
+release ZIP and serve independently verified HTTP/3 over external UDP while
+preserving supported routing, policy, fallback, reload, and shutdown behavior.
+
+Pentest stop: pentest the exact Commit 20 Windows archive, PowerShell, ACL,
+firewall, UDP reachability, TLS material, evidence, and cleanup boundary.
+Remediate, retest, and wait for green GitHub checks before authorizing Commit
+21.
+
+## Commit 21 - Interoperability And Impaired Networks
+
+Commit status: planned; blocked on accepted Commit 20 pentest, retest, and
+GitHub checks.
+
+Goal: prove behavior beyond platform-specific happy-path clients and networks.
 
 Deliverables: pinned independent client matrix, browser-compatible smoke,
 version negotiation, IPv4/IPv6, loss/reordering/duplication/delay scenarios,
@@ -635,14 +734,14 @@ idle transitions, server overload, and mixed HTTP/1.1/HTTP/2/HTTP/3 traffic.
 Exit criteria: success does not depend on Fluxheim's own test peer or a perfect
 loopback network.
 
-Pentest stop: pentest the exact Commit 18 independent-client, malformed-packet,
+Pentest stop: pentest the exact Commit 21 independent-client, malformed-packet,
 loss, reordering, MTU, overload, migration-disabled, and mixed-traffic
 boundary. Remediate, retest, and wait for green GitHub checks before authorizing
-Commit 19.
+Commit 22.
 
-## Commit 19 - Documentation And Release Gates
+## Commit 22 - Documentation And Release Gates
 
-Commit status: planned; blocked on accepted Commit 18 pentest, retest, and
+Commit status: planned; blocked on accepted Commit 21 pentest, retest, and
 GitHub checks.
 
 Goal: turn the implementation into an explicit support contract.
@@ -659,13 +758,13 @@ and proof that release gates fail if HTTP/3 evidence is absent.
 Exit criteria: no supported behavior or operational limitation exists only in
 source code or test names.
 
-Pentest stop: pentest the exact Commit 19 documentation, configuration example,
+Pentest stop: pentest the exact Commit 22 documentation, configuration example,
 test-starter, release-helper, and fail-closed release-gate boundary. Remediate,
-retest, and wait for green GitHub checks before authorizing Commit 20.
+retest, and wait for green GitHub checks before authorizing Commit 23.
 
-## Commit 20 - Security Stabilization And Release Candidate
+## Commit 23 - Security Stabilization And Release Candidate
 
-Commit status: planned; blocked on accepted Commit 19 pentest, retest, and
+Commit status: planned; blocked on accepted Commit 22 pentest, retest, and
 GitHub checks.
 
 Goal: freeze scope and qualify `1.9.0`.
@@ -740,11 +839,49 @@ defined. If those semantics cannot be made clear and testable, keep zero-RTT
 disabled permanently. QUIC DATAGRAM, WebTransport, MASQUE, and multipath remain
 separate future decisions rather than automatic `1.9.x` scope.
 
+## Live Evidence Rules
+
+The platform commits and final release gate distinguish executable behavior
+from compile and unit-test evidence:
+
+1. Fluxheim runs as a separate operating-system process from an extracted
+   release-shape archive or release-shape container image. `cargo test`, an
+   in-process endpoint, or a binary invoked from `target/debug` cannot satisfy a
+   native or packaged live row.
+2. At least one pinned client from an implementation independent of Fluxheim's
+   server stack sends a request in explicit HTTP/3-only mode. Client output or
+   a protocol API must prove HTTP/3 was negotiated; response status alone is
+   insufficient because it could have used TCP fallback.
+3. TLS verification remains enabled. Tests use a bounded ephemeral CA explicitly
+   trusted by the client or a staging/production certificate for an authorized
+   test hostname. An insecure client flag cannot satisfy the release gate.
+4. The fixture returns an unpredictable per-run marker and checks the exact
+   marker, status, selected vhost, security headers, access-log protocol, and
+   low-cardinality metrics. A response from another process or stale server
+   must not pass.
+5. TCP and UDP use the documented deployment ports concurrently. Tests prove
+   HTTP/1.1 or HTTP/2 fallback separately and prove HTTP/3 over UDP rather than
+   inferring UDP availability from configuration or `Alt-Svc`.
+6. Every live run has bounded startup, request, reload, drain, shutdown, and
+   cleanup deadlines. Failure retains bounded diagnostics; success removes
+   temporary processes, containers, firewall rules, certificates, and files.
+7. Required platform rows fail when prerequisites or clients are absent. They
+   may not print `skipped` and return success. Optional developer convenience
+   runs are kept separate from release evidence.
+8. Evidence records the exact source commit, archive or image digest, Fluxheim
+   version, OS and architecture, independent-client name/version, configuration
+   digest, negotiated protocol, route results, and cleanup result.
+9. The release candidate reruns the Linux/container, macOS, and Windows live
+   scripts against final artifacts. Evidence from an earlier implementation
+   commit cannot substitute for final-candidate execution.
+
 ## Required Test Matrix
 
 The `1.9.0` release candidate must cover:
 
 - Linux x86_64 and aarch64, macOS Apple Silicon, and Windows x86_64;
+- extracted release archives running as separate native processes on all four
+  platform/architecture rows;
 - IPv4, IPv6, dual-stack, and same numeric TCP/UDP ports;
 - static, redirect, proxy, PHP, cache, load balancer, and policy routes;
 - rustls ring and rustls AWS-LC provider builds where QUIC APIs permit the
@@ -754,6 +891,7 @@ The `1.9.0` release candidate must cover:
 - independent command-line and browser-family clients;
 - loss, delay, reordering, duplication, MTU, cancellation, idle, and overload;
 - rootless containers with explicit UDP publication;
+- external Windows UDP reachability and real Apple Silicon HTTP/3 negotiation;
 - configuration reload, certificate reload, drain, shutdown, and restart; and
 - malformed protocol, fuzz, memory-bound, descriptor/handle, logging-redaction,
   and metric-cardinality checks.
