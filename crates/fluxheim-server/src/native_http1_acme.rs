@@ -96,17 +96,17 @@ pub fn http_01_token_from_path(path: &str) -> Option<&str> {
     valid_http_01_token(token).then_some(token)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn open_regular_http_01_challenge_file(path: &Path) -> io::Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
 
     std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(0o400000)
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
         .open(path)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(unix))]
 fn open_regular_http_01_challenge_file(path: &Path) -> io::Result<std::fs::File> {
     let metadata = std::fs::symlink_metadata(path)?;
     if !metadata.file_type().is_file() {

@@ -15,6 +15,7 @@ SSH_KEY="${2:-}"
 SOURCE_CIDR="${3:-}"
 BUILD_USER="${FLUXHEIM_WINDOWS_BUILD_USER:-fluxheim-build}"
 KNOWN_HOSTS="${FLUXHEIM_WINDOWS_KNOWN_HOSTS:-$HOME/.ssh/known_hosts}"
+SSH_CONFIG="${FLUXHEIM_WINDOWS_SSH_CONFIG:-/dev/null}"
 RUST_VERSION="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)"
 
 [[ -n "$HOST" ]] || read -r -p 'Windows builder host or IP: ' HOST
@@ -23,6 +24,7 @@ if [[ -z "$HOST" || -z "$SSH_KEY" ]]; then usage; exit 2; fi
 case "$HOST" in *[!0-9A-Za-z:._-]*) echo "unsafe Windows host: $HOST" >&2; exit 2;; esac
 case "$BUILD_USER" in '' | *[!0-9A-Za-z_.-]*) echo "unsafe Windows build user" >&2; exit 2;; esac
 [[ -f "$SSH_KEY" ]] || { echo "SSH private key is missing: $SSH_KEY" >&2; exit 2; }
+[[ -r "$SSH_CONFIG" ]] || { echo "SSH client config is not readable: $SSH_CONFIG" >&2; exit 2; }
 if [[ -z "$SOURCE_CIDR" ]]; then
     SOURCE_CIDR="$(curl -4 --fail --silent --show-error https://api.ipify.org)/32"
 fi
@@ -50,6 +52,7 @@ SIGNING_PRINCIPAL="$(git config --get user.email)"
 printf '%s %s\n' "$SIGNING_PRINCIPAL" "$(cat "$SIGNING_KEY")" > "$WORK/allowed_signers"
 
 SSH_OPTIONS=(
+    -F "$SSH_CONFIG"
     -i "$SSH_KEY"
     -o BatchMode=yes
     -o IdentitiesOnly=yes

@@ -60,6 +60,9 @@ behavior when the change improves security or project direction.
 
 ### Security
 
+- Derive Unix `O_NOFOLLOW` from the target ABI instead of hard-coding the
+  x86 Linux value, restoring symlink rejection on Linux ARM for ACME secrets,
+  config, Wasm, GeoIP, observability CA files, upstream TLS, and static files.
 - Stage Windows provisioning scripts inside the protected Administrator profile,
   reject every pre-existing bootstrap object before upload, and document the
   fresh single-tenant disposable-host boundary.
@@ -73,6 +76,13 @@ behavior when the change improves security or project direction.
 - Align Windows packaging with the Linux ARM and macOS release model: reproduce
   the default release binary twice, build the seven public ZIP profiles once,
   and aggregate exact-tag checksums and native test evidence from Linux.
+- Build Windows MSVC executables with deterministic PE and CodeView metadata so
+  two clean release target directories produce byte-identical binaries.
+- Keep Cargo in the protected Windows builder directory while running the built
+  Wasm policy-example generator from the writable release checkout.
+- Isolate release-builder SSH connections from machine-wide client
+  configuration while retaining an explicit opt-in override, and create local
+  and remote release workspaces under a restrictive umask.
 - Require admin authentication before an HTTP request can trigger an expired
   self-healing rollback or observe its resulting status.
 - Keep failed expired-validation rollbacks terminal for the authenticated admin

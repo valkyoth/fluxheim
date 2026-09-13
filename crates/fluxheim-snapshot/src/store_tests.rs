@@ -389,10 +389,18 @@ mod tests {
         let entries = store.list_entries().unwrap();
 
         assert_eq!(entries.len(), super::MAX_SNAPSHOT_STORE_ENTRIES + 1);
-        assert_eq!(
-            entries.last().unwrap().status,
-            crate::SnapshotEntryStatus::Corrupt
+        let expected_error = format!(
+            "snapshot store contains more than {} snapshots",
+            super::MAX_SNAPSHOT_STORE_ENTRIES
         );
+        let capacity_errors = entries
+            .iter()
+            .filter(|entry| {
+                entry.status == crate::SnapshotEntryStatus::Corrupt
+                    && entry.error.as_deref() == Some(expected_error.as_str())
+            })
+            .count();
+        assert_eq!(capacity_errors, 1);
     }
 
     #[test]

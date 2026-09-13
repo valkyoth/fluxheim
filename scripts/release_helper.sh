@@ -3,11 +3,13 @@
 # Build and aggregate exact-tag Fluxheim release evidence on Linux.
 
 set -euo pipefail
+umask 077
 
 REPO_URL="${FLUXHEIM_REPO_URL:-https://github.com/valkyoth/fluxheim.git}"
 REPO_SLUG="${FLUXHEIM_REPO_SLUG:-valkyoth/fluxheim}"
 LINUX_USER="${FLUXHEIM_LINUX_BUILD_USER:-ubuntu}"
 WINDOWS_USER="${FLUXHEIM_WINDOWS_BUILD_USER:-fluxheim-build}"
+SSH_CONFIG="${FLUXHEIM_RELEASE_SSH_CONFIG:-/dev/null}"
 PROFILES=(full wasm cache proxy php load-balancer config-tester)
 
 LINUX_HOST="${FLUXHEIM_AARCH64_LINUX_HOST:-}"
@@ -38,6 +40,7 @@ for command in cargo curl git podman python3 rustc rustup scp sha256sum ssh tar 
     command -v "$command" >/dev/null 2>&1 || { echo "error: missing command: $command" >&2; exit 2; }
 done
 [[ -f "$LINUX_SSH_KEY" ]] || { echo "error: Linux SSH key missing: $LINUX_SSH_KEY" >&2; exit 2; }
+[[ -r "$SSH_CONFIG" ]] || { echo "error: SSH client config is not readable: $SSH_CONFIG" >&2; exit 2; }
 if [[ -n "$WINDOWS_HOST" && ! -f "$WINDOWS_SSH_KEY" ]]; then
     echo "error: Windows SSH key missing: $WINDOWS_SSH_KEY" >&2
     exit 2
@@ -111,9 +114,10 @@ done
 printf '%s\n' "$LOCAL_REPRO_HASH" > "$OUTPUT_DIR/linux/x86_64/REPRODUCIBLE-BUILD-SHA256-x86_64-linux.txt"
 
 echo "--- Building Linux aarch64 archives on $LINUX_HOST ---"
-ssh -i "$LINUX_SSH_KEY" "$LINUX_USER@$LINUX_HOST" bash -s -- \
+ssh -F "$SSH_CONFIG" -i "$LINUX_SSH_KEY" "$LINUX_USER@$LINUX_HOST" bash -s -- \
     "$RELEASE_VERSION" "$RUST_VERSION" "$COMMIT_HASH" "$REPO_URL" <<'REMOTE_LINUX'
 set -euo pipefail
+umask 077
 version="$1"; rust_version="$2"; expected_commit="$3"; repo_url="$4"
 case "$version$rust_version$expected_commit" in *[!0-9A-Za-z._+-]*) exit 2;; esac
 [[ "$(uname -m)" == "aarch64" ]] || { echo "not an aarch64 host" >&2; exit 1; }
@@ -140,7 +144,7 @@ printf '%s\n' "$repro" > REPRODUCIBLE-BUILD-SHA256-aarch64-linux.txt
 printf 'version=%s\ncommit=%s\narchitecture=aarch64\narchive_count=7\nreproducible=true\n' \
     "$version" "$expected_commit" > release-evidence-aarch64-linux.txt
 REMOTE_LINUX
-scp -i "$LINUX_SSH_KEY" "$LINUX_USER@$LINUX_HOST:fluxheim-release-${RELEASE_VERSION}/output/*" \
+scp -F "$SSH_CONFIG" -i "$LINUX_SSH_KEY" "$LINUX_USER@$LINUX_HOST:fluxheim-release-${RELEASE_VERSION}/output/*" \
     "$OUTPUT_DIR/linux/aarch64/"
 (
     cd "$OUTPUT_DIR/linux/aarch64"
@@ -162,13 +166,13 @@ import_evidence() {
 
 if [[ -n "$WINDOWS_HOST" ]]; then
     echo "--- Building Windows x86_64 archives on $WINDOWS_HOST ---"
-    scp -i "$WINDOWS_SSH_KEY" scripts/run_windows_release_builder.ps1 \
+    scp -F "$SSH_CONFIG" -i "$WINDOWS_SSH_KEY" scripts/run_windows_release_builder.ps1 \
         scripts/windows_release_tag_policy.ps1 "$WINDOWS_USER@$WINDOWS_HOST:"
-    ssh -i "$WINDOWS_SSH_KEY" "$WINDOWS_USER@$WINDOWS_HOST" pwsh.exe -NoProfile \
+    ssh -F "$SSH_CONFIG" -i "$WINDOWS_SSH_KEY" "$WINDOWS_USER@$WINDOWS_HOST" pwsh.exe -NoProfile \
         -NonInteractive -ExecutionPolicy Bypass -File run_windows_release_builder.ps1 \
         -Version "$RELEASE_VERSION" -RustVersion "$RUST_VERSION" -Architecture x86_64 \
         -ExpectedCommit "$COMMIT_HASH"
-    scp -i "$WINDOWS_SSH_KEY" \
+    scp -F "$SSH_CONFIG" -i "$WINDOWS_SSH_KEY" \
         "$WINDOWS_USER@$WINDOWS_HOST:/C:/FluxheimBuild/output/$RELEASE_VERSION/x86_64/*" \
         "$OUTPUT_DIR/windows/x86_64/"
 else

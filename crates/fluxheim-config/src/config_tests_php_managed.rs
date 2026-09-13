@@ -44,6 +44,7 @@ fn rejects_symlinked_managed_php_fpm_binary() {
 fn rejects_managed_php_fpm_dynamic_without_spare_bounds() {
     let root = secure_test_dir("config-php-fpm-managed-dynamic-root");
     let socket_dir = secure_test_dir("config-php-fpm-managed-dynamic-socket");
+    let php_fpm_binary = secure_test_executable("config-php-fpm-managed-dynamic-executable");
     let config: Config = toml::from_str(&format!(
         r#"
             {}
@@ -58,12 +59,13 @@ fn rejects_managed_php_fpm_dynamic_without_spare_bounds() {
 
             [vhosts.php.fpm]
             mode = "managed"
-            php_fpm_binary = "/usr/bin/env"
+            php_fpm_binary = '{}'
             socket_dir = '{}'
             process_manager = "dynamic"
             "#,
         test_process_config_toml("config-php-fpm-managed-dynamic-process"),
         root.display(),
+        php_fpm_binary.display(),
         socket_dir.display()
     ))
     .unwrap();
@@ -77,6 +79,8 @@ fn rejects_managed_php_fpm_dynamic_without_spare_bounds() {
 fn rejects_managed_php_fpm_dynamic_inverted_spare_bounds() {
     let root = secure_test_dir("config-php-fpm-managed-dynamic-inverted-root");
     let socket_dir = secure_test_dir("config-php-fpm-managed-dynamic-inverted-socket");
+    let php_fpm_binary =
+        secure_test_executable("config-php-fpm-managed-dynamic-inverted-executable");
     let config: Config = toml::from_str(&format!(
         r#"
             {}
@@ -91,7 +95,7 @@ fn rejects_managed_php_fpm_dynamic_inverted_spare_bounds() {
 
             [vhosts.php.fpm]
             mode = "managed"
-            php_fpm_binary = "/usr/bin/env"
+            php_fpm_binary = '{}'
             socket_dir = '{}'
             workers = 4
             process_manager = "dynamic"
@@ -100,6 +104,7 @@ fn rejects_managed_php_fpm_dynamic_inverted_spare_bounds() {
             "#,
         test_process_config_toml("config-php-fpm-managed-dynamic-inverted-process"),
         root.display(),
+        php_fpm_binary.display(),
         socket_dir.display()
     ))
     .unwrap();
@@ -114,6 +119,7 @@ fn rejects_managed_php_fpm_dynamic_inverted_spare_bounds() {
 fn rejects_managed_php_fpm_with_external_endpoint() {
     let root = secure_test_dir("config-php-fpm-managed-endpoint-root");
     let socket_dir = secure_test_dir("config-php-fpm-managed-endpoint-socket");
+    let php_fpm_binary = secure_test_executable("config-php-fpm-managed-endpoint-executable");
     let config: Config = toml::from_str(&format!(
         r#"
             {}
@@ -128,13 +134,14 @@ fn rejects_managed_php_fpm_with_external_endpoint() {
 
             [vhosts.php.fpm]
             mode = "managed"
-            php_fpm_binary = "/usr/bin/env"
+            php_fpm_binary = '{}'
             socket_dir = '{}'
             tcp = "127.0.0.1:9000"
             allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-fpm-managed-endpoint-process"),
         root.display(),
+        php_fpm_binary.display(),
         socket_dir.display()
     ))
     .unwrap();
@@ -149,6 +156,7 @@ fn rejects_managed_php_fpm_with_external_endpoint() {
 fn rejects_managed_php_fpm_user_without_group() {
     let root = secure_test_dir("config-php-fpm-managed-user-root");
     let socket_dir = secure_test_dir("config-php-fpm-managed-user-socket");
+    let php_fpm_binary = secure_test_executable("config-php-fpm-managed-user-executable");
     let config: Config = toml::from_str(&format!(
         r#"
             {}
@@ -163,12 +171,13 @@ fn rejects_managed_php_fpm_user_without_group() {
 
             [vhosts.php.fpm]
             mode = "managed"
-            php_fpm_binary = "/usr/bin/env"
+            php_fpm_binary = '{}'
             socket_dir = '{}'
             user = "fluxheim"
             "#,
         test_process_config_toml("config-php-fpm-managed-user-process"),
         root.display(),
+        php_fpm_binary.display(),
         socket_dir.display()
     ))
     .unwrap();
@@ -183,6 +192,7 @@ fn rejects_managed_php_fpm_user_without_group() {
 fn rejects_managed_php_fpm_listen_owner_without_group() {
     let root = secure_test_dir("config-php-fpm-managed-listen-owner-root");
     let socket_dir = secure_test_dir("config-php-fpm-managed-listen-owner-socket");
+    let php_fpm_binary = secure_test_executable("config-php-fpm-managed-listen-owner-executable");
     let config: Config = toml::from_str(&format!(
         r#"
             {}
@@ -197,12 +207,13 @@ fn rejects_managed_php_fpm_listen_owner_without_group() {
 
             [vhosts.php.fpm]
             mode = "managed"
-            php_fpm_binary = "/usr/bin/env"
+            php_fpm_binary = '{}'
             socket_dir = '{}'
             listen_owner = "fluxheim"
             "#,
         test_process_config_toml("config-php-fpm-managed-listen-owner-process"),
         root.display(),
+        php_fpm_binary.display(),
         socket_dir.display()
     ))
     .unwrap();
@@ -217,6 +228,7 @@ fn rejects_managed_php_fpm_listen_owner_without_group() {
 fn rejects_managed_php_fpm_unsafe_listen_mode() {
     let root = secure_test_dir("config-php-fpm-managed-listen-mode-root");
     let socket_dir = secure_test_dir("config-php-fpm-managed-listen-mode-socket");
+    let php_fpm_binary = secure_test_executable("config-php-fpm-managed-listen-mode-executable");
     let config: Config = toml::from_str(&format!(
         r#"
             {}
@@ -231,12 +243,13 @@ fn rejects_managed_php_fpm_unsafe_listen_mode() {
 
             [vhosts.php.fpm]
             mode = "managed"
-            php_fpm_binary = "/usr/bin/env"
+            php_fpm_binary = '{}'
             socket_dir = '{}'
             listen_mode = "0666"
             "#,
         test_process_config_toml("config-php-fpm-managed-listen-mode-process"),
         root.display(),
+        php_fpm_binary.display(),
         socket_dir.display()
     ))
     .unwrap();

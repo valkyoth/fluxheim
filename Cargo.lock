@@ -1505,6 +1505,7 @@ dependencies = [
 name = "fluxheim-wasm"
 version = "1.8.2"
 dependencies = [
+ "rustix",
  "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.20",

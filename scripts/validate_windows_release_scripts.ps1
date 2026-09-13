@@ -526,6 +526,8 @@ foreach ($required in @(
     'Expand-Archive',
     'irules-access-policy.wasm',
     'Get-FileHash',
+    'target\debug\examples\build_policy_examples.exe',
+    'Push-Location $root',
     'FluxheimWindowsWasmSmokeOrigin.ServeAsync(client)',
     'windows-wasm-origin-ok',
     'wasm access denied',
@@ -568,7 +570,8 @@ $buildScript = Get-Content -LiteralPath (Join-Path $root 'build.rs') -Raw
 foreach ($required in @(
     'CARGO_CFG_TARGET_OS',
     'CARGO_CFG_TARGET_ENV',
-    'cargo:rustc-link-arg-bins=/STACK:8388608'
+    'cargo:rustc-link-arg-bins=/STACK:8388608',
+    'cargo:rustc-link-arg-bins=/Brepro'
 )) {
     if (-not $buildScript.Contains($required)) {
         throw "Windows build script is missing required stack-reserve contract: $required"
@@ -606,6 +609,8 @@ foreach ($required in @(
 $bootstrap = Get-Content -LiteralPath `
     (Join-Path $root 'scripts/bootstrap_windows_release_builder.sh') -Raw
 foreach ($required in @(
+    'FLUXHEIM_WINDOWS_SSH_CONFIG',
+    '-F "$SSH_CONFIG"',
     '-RustVersion $RUST_VERSION',
     "'C:\Users\Administrator\FluxheimBootstrap'",
     'Test-Path -LiteralPath $path',

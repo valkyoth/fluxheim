@@ -235,6 +235,7 @@ fn parses_php_fpm_tcp_upstreams() {
 fn parses_managed_php_fpm_config() {
     let root = secure_test_dir("config-php-fpm-managed-root");
     let socket_dir = secure_test_dir("config-php-fpm-managed-socket");
+    let php_fpm_binary = secure_test_executable("config-php-fpm-managed-executable");
     let session_dir = secure_test_dir("config-php-fpm-managed-session");
     let upload_dir = secure_test_dir("config-php-fpm-managed-upload");
     let config: Config = toml::from_str(&format!(
@@ -251,7 +252,7 @@ fn parses_managed_php_fpm_config() {
 
             [vhosts.php.fpm]
             mode = "managed"
-            php_fpm_binary = "/usr/bin/env"
+            php_fpm_binary = '{}'
             socket_dir = '{}'
             workers = 4
             max_requests_per_worker = 250
@@ -276,6 +277,7 @@ fn parses_managed_php_fpm_config() {
             "#,
         test_process_config_toml("config-php-fpm-managed-process"),
         root.display(),
+        php_fpm_binary.display(),
         socket_dir.display(),
         session_dir.display(),
         upload_dir.display()
@@ -287,7 +289,7 @@ fn parses_managed_php_fpm_config() {
     assert_eq!(php.fpm.mode, crate::PhpFpmMode::Managed);
     assert_eq!(
         php.fpm.php_fpm_binary.as_deref(),
-        Some(Path::new("/usr/bin/env"))
+        Some(php_fpm_binary.as_path())
     );
     assert_eq!(php.fpm.socket_dir.as_deref(), Some(socket_dir.as_path()));
     assert_eq!(php.fpm.workers, 4);

@@ -5,34 +5,8 @@ use crate::NativeHttp1Error;
 
 const MAX_UPSTREAM_TLS_FILE_BYTES: u64 = 1024 * 1024;
 
-#[cfg(target_os = "linux")]
-const UPSTREAM_TLS_O_NOFOLLOW: i32 = 0o400000;
-
-#[cfg(any(
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-))]
-const UPSTREAM_TLS_O_NOFOLLOW: i32 = 0x0100;
-
-#[cfg(all(
-    unix,
-    not(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly"
-    ))
-))]
-compile_error!(
-    "O_NOFOLLOW is unknown on this Unix platform; audit native upstream TLS file opening before building Fluxheim"
-);
+#[cfg(unix)]
+const UPSTREAM_TLS_O_NOFOLLOW: i32 = rustix::fs::OFlags::NOFOLLOW.bits() as i32;
 
 pub(super) fn read_upstream_tls_file(path: &Path) -> Result<Vec<u8>, NativeHttp1Error> {
     read_upstream_tls_input(path, false)

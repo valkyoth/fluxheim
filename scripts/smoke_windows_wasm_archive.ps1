@@ -188,10 +188,24 @@ if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
     throw "Windows Wasm archive omitted fluxheim.exe: $archiveName"
 }
 
-Invoke-FluxheimCargo -Arguments @('run', '--locked', '-p', 'fluxheim-wasm', `
+Invoke-FluxheimCargo -Arguments @('build', '--locked', '-p', 'fluxheim-wasm', `
     '--example', 'build_policy_examples', '--quiet')
 if ($LASTEXITCODE -ne 0) {
     throw 'building Windows Wasm policy examples failed'
+}
+$exampleBuilder = Join-Path $root 'target\debug\examples\build_policy_examples.exe'
+if (-not (Test-Path -LiteralPath $exampleBuilder -PathType Leaf)) {
+    throw 'built Windows Wasm policy example helper is missing'
+}
+Push-Location $root
+try {
+    & $exampleBuilder
+    $exampleBuilderExitCode = $LASTEXITCODE
+} finally {
+    Pop-Location
+}
+if ($exampleBuilderExitCode -ne 0) {
+    throw 'generating Windows Wasm policy examples failed'
 }
 $sourcePlugin = Join-Path $root 'target\wasm-policy-examples\irules-access-policy.wasm'
 $pluginPath = Join-Path $pluginRoot 'irules-access-policy.wasm'

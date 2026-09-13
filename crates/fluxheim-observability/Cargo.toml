@@ -10,7 +10,7 @@ description = "Internal Fluxheim observability and trace context boundary."
 [features]
 default = []
 metrics-secret = ["dep:fluxheim-config", "dep:rustix", "dep:sanitization", "dep:zeroize"]
-otlp-http = ["dep:ureq"]
+otlp-http = ["dep:rustix", "dep:ureq"]
 otlp-metrics = ["dep:prometheus", "dep:serde_json"]
 otlp-trace = ["dep:fluxheim-config", "dep:serde_json", "otlp-http"]
 

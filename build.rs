@@ -40,6 +40,9 @@ fn emit_windows_stack_reserve() {
         // Windows defaults PE executables to a 1 MiB main-thread stack. Full config
         // validation constructs the native router and requires Linux/macOS-equivalent headroom.
         println!("cargo:rustc-link-arg-bins=/STACK:8388608");
+        // Suppress wall-clock PE timestamps and derive the CodeView identifier from
+        // the linked content so clean release builds are byte-for-byte reproducible.
+        println!("cargo:rustc-link-arg-bins=/Brepro");
     }
 }
 

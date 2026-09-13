@@ -98,6 +98,17 @@ fn secure_test_dir(label: &str) -> PathBuf {
     path
 }
 
+#[cfg(unix)]
+fn secure_test_executable(label: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let directory = secure_test_dir(label);
+    let path = safe_child_path(&directory, "executable");
+    fs::write(&path, b"#!/bin/sh\n").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    path
+}
+
 fn portable_test_path(path: PathBuf) -> PathBuf {
     #[cfg(windows)]
     {

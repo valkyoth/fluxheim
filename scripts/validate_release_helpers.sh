@@ -10,11 +10,14 @@ bash -n "$linux_helper" "$macos_helper"
 for required in \
     'Enter Linux aarch64 SSH key path:' \
     'Enter Windows x86_64 SSH key path:' \
+    'FLUXHEIM_RELEASE_SSH_CONFIG' \
+    '-F "$SSH_CONFIG"' \
+    'umask 077' \
     '## Checksums And Signatures' \
     'SHA256SUMS-x86_64-windows.txt' \
     'REPRODUCIBLE-BUILD-SHA256-x86_64-windows.txt' \
     'base=suse-bci'; do
-    grep -F "$required" "$linux_helper" >/dev/null || {
+    grep -F -- "$required" "$linux_helper" >/dev/null || {
         echo "release helper is missing required behavior: $required" >&2
         exit 1
     }
@@ -25,7 +28,7 @@ for required in \
     'smoke_macos_native_parity.sh' \
     'SHA256SUMS-aarch64-macos.txt' \
     'seven tar.gz archives'; do
-    grep -F "$required" "$macos_helper" >/dev/null || {
+    grep -F -- "$required" "$macos_helper" >/dev/null || {
         echo "macOS release helper is missing required behavior: $required" >&2
         exit 1
     }

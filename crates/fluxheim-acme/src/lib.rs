@@ -22,35 +22,8 @@ const MAX_ACCOUNT_CREDENTIALS_BYTES: u64 = 32 * 1024;
 const MAX_CERTIFICATE_CHAIN_BYTES: usize = 1024 * 1024;
 const MAX_PRIVATE_KEY_BYTES: usize = 128 * 1024;
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
-const UNIX_O_NOFOLLOW: i32 = 0o400000;
-
-#[cfg(any(
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-))]
-const UNIX_O_NOFOLLOW: i32 = 0x0100;
-
-#[cfg(all(
-    unix,
-    not(any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly"
-    ))
-))]
-compile_error!(
-    "O_NOFOLLOW is unknown on this Unix platform; audit symlink-safe file opening before building Fluxheim"
-);
+#[cfg(unix)]
+const UNIX_O_NOFOLLOW: i32 = rustix::fs::OFlags::NOFOLLOW.bits() as i32;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AcmeRenewalTarget {

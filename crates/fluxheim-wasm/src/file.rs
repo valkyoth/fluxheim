@@ -7,48 +7,12 @@ use thiserror::Error;
 
 use crate::WasmSandboxLimits;
 
-#[cfg(all(
-    unix,
-    not(any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd",
-        target_os = "dragonfly"
-    ))
-))]
-const WASM_PLUGIN_O_NOFOLLOW: i32 = 0o400000;
-#[cfg(any(
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "freebsd",
-    target_os = "openbsd",
-    target_os = "netbsd",
-    target_os = "dragonfly"
-))]
-const WASM_PLUGIN_O_NOFOLLOW: i32 = 0x0100;
+#[cfg(unix)]
+const WASM_PLUGIN_O_NOFOLLOW: i32 = rustix::fs::OFlags::NOFOLLOW.bits() as i32;
 #[cfg(windows)]
 const WASM_PLUGIN_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 #[cfg(windows)]
 const WASM_PLUGIN_FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
-#[cfg(all(
-    unix,
-    not(any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd",
-        target_os = "dragonfly"
-    ))
-))]
-compile_error!(
-    "O_NOFOLLOW is unknown on this Unix platform; audit symlink-safe Wasm plugin opening before building Fluxheim"
-);
-
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct WasmPluginFile {
     path: PathBuf,

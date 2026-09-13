@@ -1,41 +1,8 @@
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use std::io;
 
-#[cfg(all(
-    any(feature = "tls-rustls-backend", feature = "tls-openssl"),
-    target_os = "linux"
-))]
-const UPSTREAM_TLS_O_NOFOLLOW: i32 = 0o400000;
-
-#[cfg(all(
-    any(feature = "tls-rustls-backend", feature = "tls-openssl"),
-    any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly"
-    )
-))]
-const UPSTREAM_TLS_O_NOFOLLOW: i32 = 0x0100;
-
-#[cfg(all(
-    unix,
-    any(feature = "tls-rustls-backend", feature = "tls-openssl"),
-    not(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly"
-    ))
-))]
-compile_error!(
-    "O_NOFOLLOW is unknown on this Unix platform; audit upstream TLS file opening before building Fluxheim"
-);
+#[cfg(all(unix, any(feature = "tls-rustls-backend", feature = "tls-openssl"),))]
+const UPSTREAM_TLS_O_NOFOLLOW: i32 = rustix::fs::OFlags::NOFOLLOW.bits() as i32;
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 const MAX_UPSTREAM_TLS_FILE_BYTES: u64 = 1024 * 1024;

@@ -30,35 +30,8 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_FLAG_OPEN_REPARSE_POINT, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
 };
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
-const O_NOFOLLOW: i32 = 0o400000;
-
-#[cfg(any(
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-))]
-const O_NOFOLLOW: i32 = 0x0100;
-
-#[cfg(all(
-    unix,
-    not(any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly"
-    ))
-))]
-compile_error!(
-    "O_NOFOLLOW is unknown on this Unix platform; audit symlink-safe config file opening before building Fluxheim"
-);
+#[cfg(unix)]
+const O_NOFOLLOW: i32 = rustix::fs::OFlags::NOFOLLOW.bits() as i32;
 
 pub const MAX_CONFIG_DIRECTORY_FILES: usize = 256;
 pub const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
