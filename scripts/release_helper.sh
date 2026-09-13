@@ -164,6 +164,19 @@ import_evidence() {
     )
 }
 
+normalize_windows_text_evidence() {
+    local directory="$1" name path
+    for name in \
+        SHA256SUMS-x86_64-windows.txt \
+        REPRODUCIBLE-BUILD-SHA256-x86_64-windows.txt \
+        release-evidence-x86_64-windows.txt \
+        tag-verification.txt; do
+        path="$directory/$name"
+        [[ -f "$path" ]] || { echo "error: Windows evidence file missing: $path" >&2; exit 1; }
+        sed -i 's/\r$//' "$path"
+    done
+}
+
 if [[ -n "$WINDOWS_HOST" ]]; then
     echo "--- Building Windows x86_64 archives on $WINDOWS_HOST ---"
     scp -F "$SSH_CONFIG" -i "$WINDOWS_SSH_KEY" scripts/run_windows_release_builder.ps1 \
@@ -179,6 +192,7 @@ else
     import_evidence "$INPUT_DIR/windows/x86_64" "$OUTPUT_DIR/windows/x86_64" \
         SHA256SUMS-x86_64-windows.txt 7 '*.zip'
 fi
+normalize_windows_text_evidence "$OUTPUT_DIR/windows/x86_64"
 (
     cd "$OUTPUT_DIR/windows/x86_64"
     [[ "$(find . -maxdepth 1 -name '*.zip' -type f | wc -l)" -eq 7 ]]
