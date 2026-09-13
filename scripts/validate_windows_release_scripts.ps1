@@ -879,6 +879,7 @@ foreach ($required in @(
     'smoke_windows_native.ps1',
     'smoke_windows_archive_profiles.ps1',
     'smoke_windows_wasm_archive.ps1',
+    'SOURCE_DATE_EPOCH',
     'Get-CimInstance -ClassName Win32_OperatingSystem',
     'windows_os_caption=',
     'windows_os_version=',
@@ -892,9 +893,9 @@ foreach ($required in @(
     'cargo_home_scope=per-run',
     'cargo_config_scope=trusted-cwd',
     'environment_scope=allowlist',
-    'independent_windows_build_required=true',
     'archive_count=7',
     'reproducible=true',
+    'reproducibility_scope=default-release-binary',
     'test_scope=workspace-native-all-archives-and-wasm-smoke'
 )) {
     if (-not $releaseContract.Contains($required)) {
@@ -925,6 +926,12 @@ if ($release.Contains("Operation = 'create ancestor files'") -or
 }
 if ($release.Contains('checkout main') -or $release.Contains('|| git checkout')) {
     throw 'Windows release runner must not fall back from the requested tag'
+}
+if ([regex]::Matches($release, 'Build-ReproducibleBinary -Destination').Count -ne 2) {
+    throw 'Windows release runner must reproduce the default binary in exactly two clean targets'
+}
+if ([regex]::Matches($release, 'Build-ArchiveSet -Destination').Count -ne 1) {
+    throw 'Windows release runner must build the seven-profile archive set exactly once'
 }
 . (Join-Path $root 'scripts/windows_release_tag_policy.ps1')
 $sshTagFixture = "object`n-----BEGIN SSH SIGNATURE-----`nbody`n-----END SSH SIGNATURE-----"
@@ -963,103 +970,15 @@ foreach ($required in @(
     'run: cargo test --workspace --locked',
     'name: Build and test Windows portable archives',
     'scripts/build_release_assets.ps1 -Version $version -Architecture x86_64',
-    'scripts/smoke_windows_archive_profiles.ps1 -Version $version -Architecture x86_64',
-    'name: Record independent Windows archive evidence',
-    'git.exe rev-parse HEAD',
-    'commit=$commit',
-    'version=$version',
-    'workflow_run_id=${{ github.run_id }}',
-    'builder_domain=github-hosted-windows-2025',
-    'name: Upload unprivileged Windows archive evidence',
-    'fluxheim-windows-unattested-${{ github.sha }}',
-    'name: Attest Windows x86_64 portable archives',
-    'needs: windows-x86_64-portable',
-    'actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53',
-    'name: Validate exact Windows archive evidence',
-    'grep -Fx "commit=$GITHUB_SHA"',
-    'name: Attest independent Windows archives',
-    'actions/attest@a1948c3f048ba23858d222213b7c278aabede763',
-    'subject-path: dist/fluxheim-*-x86_64-windows.zip',
-    'attestations: write',
-    'artifact-metadata: write',
-    'name: Upload attested independent Windows archive evidence',
-    'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
+    'scripts/smoke_windows_archive_profiles.ps1 -Version $version -Architecture x86_64'
 )) {
     if (-not $ci.Contains($required)) {
         throw "Windows CI is missing required native test policy: $required"
     }
 }
-
-$independentVerifier = Get-Content -LiteralPath `
-    (Join-Path $root 'scripts/verify_windows_independent_build.py') -Raw
-foreach ($required in @(
-    'parser.add_argument("--expected-version", required=True)',
-    'parser.add_argument("--expected-commit", required=True)',
-    'archive inventory does not match the intended release',
-    'builder evidence does not match the intended release commit',
-    'cargo_config_scope',
-    'environment_scope'
-)) {
-    if (-not $independentVerifier.Contains($required)) {
-        throw "independent Windows verifier is missing intended-release binding: $required"
-    }
-}
-
-$publicationGatePath = Join-Path $root 'scripts/verify_windows_release_publication.sh'
-if (-not (Test-Path -LiteralPath $publicationGatePath -PathType Leaf)) {
-    throw 'authenticated Windows publication gate is missing'
-}
-$publicationGate = Get-Content -LiteralPath $publicationGatePath -Raw
-foreach ($required in @(
-    'actions/runs/$RUN_ID',
-    '.repository.full_name',
-    '.head_sha',
-    '.head_branch',
-    '.conclusion',
-    '.github/workflows/ci.yml',
-    'workflow_run_id=$RUN_ID',
-    'repository=$REPOSITORY',
-    'gh attestation verify',
-    '--signer-workflow',
-    '--source-ref',
-    '--source-digest',
-    '--deny-self-hosted-runners',
-    '--expected-version "$VERSION"',
-    '--expected-commit "$COMMIT"'
-)) {
-    if (-not $publicationGate.Contains($required)) {
-        throw "authenticated Windows publication gate is missing required policy: $required"
-    }
-}
-
-$publisherPath = Join-Path $root 'scripts/publish_verified_release.sh'
-if (-not (Test-Path -LiteralPath $publisherPath -PathType Leaf)) {
-    throw 'verified release publication entrypoint is missing'
-}
-$publisher = Get-Content -LiteralPath $publisherPath -Raw
-foreach ($required in @(
-    'STAGE_ROOT="$(mktemp -d)"',
-    'cp -a -- "$DISPOSABLE_DIR/." "$STAGE_ROOT/disposable/"',
-    'cp -a -- "$INDEPENDENT_DIR/." "$STAGE_ROOT/independent/"',
-    'chmod -R a-w,go-rwx -- "$STAGE_ROOT"',
-    'verify_windows_release_publication.sh',
-    'repos/$REPOSITORY/commits/$TAG',
-    '--json tagName,isDraft,isImmutable',
-    'matching mutable draft release',
-    'refusing to replace existing release asset',
-    'gh release upload'
-)) {
-    if (-not $publisher.Contains($required)) {
-        throw "verified release publisher is missing required policy: $required"
-    }
-}
-$snapshotIndex = $publisher.IndexOf('STAGE_ROOT="$(mktemp -d)"')
-$gateIndex = $publisher.IndexOf('verify_windows_release_publication.sh')
-$archiveIndex = $publisher.IndexOf('ARCHIVES=()')
-$uploadIndex = $publisher.IndexOf('gh release upload')
-if ($snapshotIndex -lt 0 -or $gateIndex -le $snapshotIndex -or
-    $archiveIndex -le $gateIndex -or $uploadIndex -le $archiveIndex) {
-    throw 'verified release publisher does not snapshot, authenticate, and upload in order'
+if ($ci.Contains('windows-x86_64-attest') -or
+    $ci.Contains('fluxheim-windows-independent-')) {
+    throw 'Windows CI must remain a native test domain rather than a second publication source'
 }
 
 $supportedWindowsContract = $builder + "`n" + $archiveSmoke + "`n" + $wasmSmoke +

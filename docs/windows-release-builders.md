@@ -34,8 +34,10 @@ before or during provisioning and the release build. The bootstrap is not a
 general-purpose hardening tool for shared or previously used Windows machines.
 Its protected staging directory and dedicated build identity are defense in
 depth for that narrow lifecycle; they do not make a compromised host trustworthy.
-The independently attested GitHub-hosted build and byte-for-byte archive
-comparison remain mandatory controls against a compromised disposable builder.
+The native GitHub Windows job remains an independent test environment, but its
+archives are CI evidence rather than a second publication source. This matches
+the Linux ARM release model: publish the exact-tag archives produced by the
+disposable native host after their checksums and native smoke evidence pass.
 
 ## One-Time Preparation
 
@@ -162,12 +164,14 @@ then independently:
    per-run Cargo home and reconstructs the process environment from an
    allowlist;
 5. runs workspace tests and the mandatory native Windows live smoke;
-6. builds all seven profiles twice with the PowerShell archive builder and
-   launches every packaged executable to verify its version;
-7. requires byte-identical ZIP hashes and emits checksums plus machine-readable
-   commit, architecture, Windows edition/build, toolchain-manifest hash,
-   test-scope, and reproducibility evidence. The hashed provisioning manifest
-   is retained with the output so it remains auditable after host destruction.
+6. builds the default release binary in two clean target directories and
+   requires identical SHA-256 hashes, matching the Linux and macOS
+   reproducibility check;
+7. builds all seven profiles once, launches every packaged executable to verify
+   its version, and emits archive checksums plus machine-readable commit,
+   architecture, Windows edition/build, toolchain-manifest hash, test-scope,
+   and reproducibility evidence. The hashed provisioning manifest is retained
+   with the output so it remains auditable after host destruction.
 
 Cargo always runs from the Administrator-controlled `cargo-work` directory and
 receives the authenticated checkout through an explicit `--manifest-path`.
@@ -175,29 +179,11 @@ The runner rejects `.cargo/config` and `.cargo/config.toml` in checkout
 ancestors. This prevents a previous build from persisting a compiler wrapper;
 the per-run Cargo home prevents cross-run Cargo configuration or cache state.
 
-The GitHub-hosted `windows-2025` job is the independent builder domain. On the
-exact tag it uploads `fluxheim-windows-independent-<commit>` containing all
-seven ZIPs, their hashes, and commit evidence, and creates GitHub/Sigstore SLSA
-provenance attestations for every ZIP. Create the matching GitHub release as a
-draft without Windows assets, then download that artifact beside the
-disposable-builder output and use the repository-owned publication entrypoint:
-
-```bash
-scripts/publish_verified_release.sh \
-  "$VERSION" "$RELEASE_COMMIT" "$GITHUB_WORKFLOW_RUN_ID" \
-  windows/disposable-builder windows/github-independent
-```
-
-The entrypoint first copies both evidence domains into a private temporary
-snapshot and removes write access. `verify_windows_release_publication.sh`
-validates that snapshot's repository, exact tag, commit, successful workflow
-run, artifact identity, GitHub-hosted runner provenance, signer workflow, and
-every archive digest before requiring byte-identical output. The entrypoint
-then verifies the remote tag commit and mutable draft state, rejects existing
-archive names, and uploads the seven verified ZIPs from that same snapshot
-without `--clobber`. Changing or replacing an input archive after verification
-cannot change the uploaded bytes. Workstation-local aggregation helpers do not
-constitute publication enforcement and must not upload Windows assets directly.
+The repository `scripts/release_helper.sh` invokes this builder over SSH,
+downloads its seven ZIPs and evidence, verifies their checksums and commit, and
+adds them to the same release report as Linux and imported macOS assets. The
+GitHub-hosted `windows-2025` job separately runs the native test and archive
+matrix. It does not need to reproduce the cloud builder's archive bytes.
 
 The script fails when `scripts/smoke_windows_native.ps1` is absent or any
 native runtime assertion fails. This remains an intentional release block

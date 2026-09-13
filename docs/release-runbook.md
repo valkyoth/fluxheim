@@ -231,23 +231,30 @@ is deferred and must not be published. See
 [Windows Release Builders](windows-release-builders.md).
 
 The official Windows builder must be a fresh disposable host with the
-Administrator-provisioned read-only Rust toolchain. Download the exact-commit
-`fluxheim-windows-independent-<commit>` artifact from the GitHub-hosted Windows
-job and authenticate its run and provenance before comparison:
+Administrator-provisioned read-only Rust toolchain. Run
+`scripts/release_helper.sh` from the Linux release machine and provide the
+Linux ARM and Windows hosts and SSH keys when prompted. The helper invokes the
+exact-tag Windows build, verifies its seven ZIP checksums and evidence, imports
+the separately produced macOS evidence, and creates the complete Markdown
+checksum report used for the GitHub release.
+
+Build the macOS set first with `scripts/release_helper_macos.sh`, then transfer
+its output directory to the Linux release machine. Set
+`FLUXHEIM_MACOS_ASSET_DIR` to that directory or enter it when prompted. The
+Linux helper accepts the Rust and Fluxheim versions as positional arguments:
 
 ```bash
-scripts/publish_verified_release.sh \
-  "$VERSION" "$RELEASE_COMMIT" "$GITHUB_WORKFLOW_RUN_ID" \
-  "$WINDOWS_DISPOSABLE_OUTPUT" "$WINDOWS_GITHUB_OUTPUT"
+scripts/release_helper.sh 1.98.1 1.8.2
 ```
 
-Create the matching GitHub release as a draft without Windows assets first.
-The repository-owned entrypoint runs the authenticated independent-build gate,
-verifies a private read-only snapshot, checks the remote tag and draft state,
-and only then uploads the seven Windows ZIPs from that same snapshot. Do not
-upload those ZIPs directly or use `--clobber`.
+For unattended use, set `FLUXHEIM_AARCH64_LINUX_HOST`,
+`FLUXHEIM_LINUX_SSH_KEY`, `FLUXHEIM_WINDOWS_X64_HOST`, and
+`FLUXHEIM_WINDOWS_SSH_KEY`. The corresponding user variables default to
+`ubuntu` and `fluxheim-build`. No machine address, account, or key path is
+stored in the repository.
 
-Destroy the disposable host after the evidence and archives are collected.
+Destroy both disposable cloud builders after the evidence and archives are
+collected.
 
 The native matrix must also execute
 `scripts/smoke_wasm_policy_examples_binary.sh` against the staged `wasm`

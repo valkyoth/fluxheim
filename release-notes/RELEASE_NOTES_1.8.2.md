@@ -92,10 +92,8 @@ native build and test infrastructure is available.
   administrator token.
 - Move the Windows release compiler into an Administrator-provisioned,
   recursively read-only tree with a verified file inventory. Official evidence
-  now requires a builder provisioned within 24 hours, a fresh per-run Cargo
-  home, allowlisted build environment, protected Cargo working directory, and
-  byte-identical archives with authenticated GitHub/Sigstore provenance from
-  the independent GitHub-hosted Windows builder domain.
+  requires a builder provisioned within 24 hours, a fresh per-run Cargo home,
+  allowlisted build environment, and protected Cargo working directory.
 - Authenticate admin HTTP requests before they can trigger or observe an
   expired self-healing rollback.
 - Return failed expired-validation rollbacks directly to authenticated admin
@@ -110,10 +108,13 @@ native build and test infrastructure is available.
   the native compiler host without colliding with PowerShell's reserved
   `$Host` variable.
 - Stage privileged bootstrap scripts only in a newly created directory inside
-  the protected Administrator profile. Provisioning rejects any
-  pre-existing object instead of attempting to repair its ACL. Official
-  evidence remains limited to fresh, single-tenant disposable hosts and must be
-  matched byte-for-byte against the independently attested GitHub-hosted build.
+  the protected Administrator profile. Provisioning rejects any pre-existing
+  object instead of attempting to repair its ACL. Official evidence remains
+  limited to fresh, single-tenant disposable hosts.
+- Align Windows release production with Linux ARM and macOS: reproduce the
+  default release binary in two clean target directories, build each of the
+  seven profile archives once, and aggregate native test evidence and checksums
+  through the repository-owned Linux helper.
 
 ## Remaining Release Blocks
 
@@ -122,10 +123,9 @@ native build and test infrastructure is available.
   Windows edition and build, and every executable in all seven ZIP profiles
   must launch and report the expected version. Planning-only output and the
   normal x86_64 CI result are not substitutes for exact-tag release evidence.
-- Verify two clean archive builds are byte-identical on the dedicated builder
-  before publishing the x86_64 archives.
-- Compare those archives byte-for-byte with the exact-commit artifact produced
-  by the GitHub-hosted Windows builder, then destroy the disposable builder.
+- Verify the default release binary is reproducible across two clean target
+  directories, collect the seven checked ZIP profiles, and destroy the
+  disposable builder.
 
 The Unix/OpenSSL FIPS support shim remains excluded as an independent Windows
 workspace package while staying covered by the dedicated Linux OpenSSL-FIPS

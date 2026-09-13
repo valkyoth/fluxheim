@@ -62,20 +62,17 @@ behavior when the change improves security or project direction.
 
 - Stage Windows provisioning scripts inside the protected Administrator profile,
   reject every pre-existing bootstrap object before upload, and document the
-  fresh single-tenant disposable-host boundary and mandatory independent build
-  comparison.
+  fresh single-tenant disposable-host boundary.
 - Keep build-account-writable Rust tools out of the Windows machine `PATH`,
   remove obsolete machine-wide Rust environment entries during builder setup,
   and reject elevated release-runner sessions.
 - Install the pinned Windows Rust toolchain as Administrator, lock its complete
   inventory read-only with recorded hashes, isolate Cargo state per run, use a
-  protected Cargo working directory and allowlisted environment, reject
-  stale/reused official builders, and require authenticated provenance plus
-  byte-identical archives from the independent GitHub-hosted Windows build.
-- Add a repository-owned Windows release publisher that authenticates the
-  independent build from a private read-only artifact snapshot before any
-  upload, requires an exact-tag mutable draft, and refuses to replace existing
-  archive assets.
+  protected Cargo working directory and allowlisted environment, and reject
+  stale/reused official builders.
+- Align Windows packaging with the Linux ARM and macOS release model: reproduce
+  the default release binary twice, build the seven public ZIP profiles once,
+  and aggregate exact-tag checksums and native test evidence from Linux.
 - Require admin authentication before an HTTP request can trigger an expired
   self-healing rollback or observe its resulting status.
 - Keep failed expired-validation rollbacks terminal for the authenticated admin

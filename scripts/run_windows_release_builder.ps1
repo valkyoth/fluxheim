@@ -625,6 +625,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "signed tag verification failed: $tag" }
     & git.exe checkout --detach $tag
     if ($LASTEXITCODE -ne 0) { throw "tag checkout failed: $tag" }
+    $env:SOURCE_DATE_EPOCH = (& git.exe log -1 --format=%ct).Trim()
+    if ($LASTEXITCODE -ne 0 -or $env:SOURCE_DATE_EPOCH -notmatch '^[0-9]+$') {
+        throw 'could not determine the release source timestamp'
+    }
     $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem
     $osCaption = ([string]$operatingSystem.Caption).Replace("`r", ' ').Replace("`n", ' ').Trim()
     $osVersion = ([string]$operatingSystem.Version).Trim()
@@ -645,6 +649,32 @@ try {
     }
     & pwsh.exe -NoProfile -File $nativeSmoke
     if ($LASTEXITCODE -ne 0) { throw 'native Windows live smoke failed' }
+
+    function Build-ReproducibleBinary {
+        param([Parameter(Mandatory = $true)][string]$Destination)
+
+        if (Test-Path -LiteralPath $Destination) {
+            Remove-Item -LiteralPath $Destination -Recurse -Force
+        }
+        $previousCargoTargetDir = $env:CARGO_TARGET_DIR
+        try {
+            $env:CARGO_TARGET_DIR = $Destination
+            Invoke-TrustedCargo -Arguments @('build', '--release', '--locked') | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw 'Windows reproducible release build failed' }
+        } finally {
+            if ($null -eq $previousCargoTargetDir) {
+                Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
+            } else {
+                $env:CARGO_TARGET_DIR = $previousCargoTargetDir
+            }
+        }
+
+        $binary = Join-Path $Destination 'release\fluxheim.exe'
+        if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
+            throw "Windows reproducible release binary is missing: $binary"
+        }
+        (Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
 
     function Build-ArchiveSet {
         param([Parameter(Mandatory = $true)][string]$Destination)
@@ -672,10 +702,16 @@ try {
         }
     }
 
-    $firstBuild = Join-Path $runRoot 'first'
-    $secondBuild = Join-Path $runRoot 'second'
-    Build-ArchiveSet -Destination $firstBuild
-    Build-ArchiveSet -Destination $secondBuild
+    $firstReproBuild = Join-Path $runRoot 'reproducible-a'
+    $secondReproBuild = Join-Path $runRoot 'reproducible-b'
+    $firstReproHash = Build-ReproducibleBinary -Destination $firstReproBuild
+    $secondReproHash = Build-ReproducibleBinary -Destination $secondReproBuild
+    if ($firstReproHash -ne $secondReproHash) {
+        throw 'Windows default release binary is not reproducible across two clean target directories'
+    }
+
+    $archiveBuild = Join-Path $runRoot 'archives'
+    Build-ArchiveSet -Destination $archiveBuild
     $archiveSmoke = Join-Path $sourceRoot 'scripts\smoke_windows_archive_profiles.ps1'
     if (-not (Test-Path -LiteralPath $archiveSmoke -PathType Leaf)) {
         throw 'all-profile Windows archive smoke is required before release evidence can be produced'
@@ -689,44 +725,28 @@ try {
     & pwsh.exe -NoProfile -File $wasmSmoke -Version $Version -Architecture $Architecture
     if ($LASTEXITCODE -ne 0) { throw 'archived Windows Wasm smoke failed' }
 
-    $firstHashes = @{}
-    Get-ChildItem -LiteralPath $firstBuild -Filter '*.zip' -File | ForEach-Object {
-        $firstHashes[$_.Name] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-    }
-    $secondHashes = @{}
-    Get-ChildItem -LiteralPath $secondBuild -Filter '*.zip' -File | ForEach-Object {
-        $secondHashes[$_.Name] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-    }
-    if ($firstHashes.Count -ne $secondHashes.Count) {
-        throw 'reproducible Windows builds produced different archive counts'
-    }
-    foreach ($name in $firstHashes.Keys) {
-        if (-not $secondHashes.ContainsKey($name) -or $firstHashes[$name] -ne $secondHashes[$name]) {
-            throw "Windows archive is not reproducible: $name"
-        }
+    $archiveHashes = @{}
+    Get-ChildItem -LiteralPath $archiveBuild -Filter '*.zip' -File | ForEach-Object {
+        $archiveHashes[$_.Name] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     }
 
     if (Test-Path -LiteralPath $outputRoot) {
         Remove-Item -LiteralPath $outputRoot -Recurse -Force
     }
     New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
-    Copy-Item -Path (Join-Path $secondBuild '*.zip') -Destination $outputRoot
+    Copy-Item -Path (Join-Path $archiveBuild '*.zip') -Destination $outputRoot
     Copy-Item -LiteralPath (Join-Path $runRoot 'tag-verification.txt') -Destination $outputRoot
     Copy-Item -LiteralPath $trustedRust.ManifestPath -Destination `
         (Join-Path $outputRoot "toolchain-provisioning-$targetLabel.json")
 
-    $checksumLines = @($secondHashes.GetEnumerator() | Sort-Object Name | ForEach-Object {
+    $checksumLines = @($archiveHashes.GetEnumerator() | Sort-Object Name | ForEach-Object {
         "$($_.Value)  $($_.Name)"
     })
     $checksumFile = Join-Path $outputRoot "SHA256SUMS-$targetLabel.txt"
     Set-Content -LiteralPath $checksumFile -Value $checksumLines -Encoding ascii
 
-    $manifestBytes = [Text.Encoding]::UTF8.GetBytes(($checksumLines -join "`n") + "`n")
-    $manifestHash = [Convert]::ToHexString(
-        [Security.Cryptography.SHA256]::HashData($manifestBytes)
-    ).ToLowerInvariant()
     Set-Content -LiteralPath (Join-Path $outputRoot "REPRODUCIBLE-BUILD-SHA256-$targetLabel.txt") `
-        -Value "$manifestHash  archive-set-manifest" -Encoding ascii
+        -Value $firstReproHash -Encoding ascii
 
     @(
         "version=$Version"
@@ -745,8 +765,8 @@ try {
         'cargo_home_scope=per-run'
         'cargo_config_scope=trusted-cwd'
         'environment_scope=allowlist'
-        'independent_windows_build_required=true'
         'test_scope=workspace-native-all-archives-and-wasm-smoke'
+        'reproducibility_scope=default-release-binary'
         'archive_count=7'
         'reproducible=true'
     ) | Set-Content -LiteralPath (Join-Path $outputRoot "release-evidence-$targetLabel.txt") -Encoding ascii

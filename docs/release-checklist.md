@@ -312,14 +312,10 @@ scripts/smoke_1_0_core.sh
 - Windows compiler provenance. Official Windows archives require a disposable
   builder provisioned within 24 hours, an Administrator-installed Rust
   toolchain whose complete file inventory is read-only to the build account,
-  and a fresh per-run Cargo home. Compare all seven archives byte-for-byte with
-  the exact-commit artifact from the independent GitHub-hosted Windows builder
-  through `scripts/publish_verified_release.sh`. This repository-owned
-  entrypoint must copy both evidence domains into a private read-only snapshot
-  and run the authenticated exact-tag GitHub/Sigstore gate before it can stage
-  Windows assets on a mutable draft release; same-host duplicate builds alone
-  are not sufficient. Do not upload or replace Windows ZIPs outside this
-  entrypoint.
+  and a fresh per-run Cargo home. Reproduce the default release binary in two
+  clean target directories, run the native workspace and live-smoke matrix,
+  then build and checksum all seven ZIP profiles once. Import that evidence
+  through `scripts/release_helper.sh`, matching the Linux ARM release flow.
 - Human dependency review. Track the `cargo-vet` adoption path in
   [Rust Supply-Chain Security](supply-chain-security.md). Do not make `cargo-vet`
   a blocking release gate until the initial exemption set and trusted audit
