@@ -22,11 +22,13 @@ REQUIREMENTS = dict(zip(
     [1, 2, 3, 3, 4, 4, 5, 6, 7, 7, 8, 8, 9, 10, 11, 12, 13, 14, 15, 16, 16, 17, 18, 19, 20, 21, 22, 23],
     strict=True,
 ))
-EXCLUDED = set("origin-http3 zero-rtt active-migration preferred-address multipath "
+EXCLUDED = set("origin-http3 zero-rtt cross-server-handoff preferred-address multipath "
                "quic-datagram connect-udp masque webtransport extended-connect server-push "
                "dynamic-qpack brynja-backend windows-arm64 macos-intel".split())
 FEATURES = {"profile-full", "http3", "php-fpm", "acme-client", "metrics", "metrics-otlp", "otel-tracing", "otel-otlp"}
 PLATFORMS = {"x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-pc-windows-msvc"}
+ADDRESS_REQUIREMENTS = set("nat-port nat-ip active-client-migration same-connection-stream-continuity "
+                           "validated-peer-policy bounded-prefix-accounting failed-path-recovery native-live-matrix".split())
 
 
 def require(condition: bool, message: str) -> None:
@@ -47,10 +49,12 @@ def validate_scope(data: dict, acceptance: bool = False) -> None:
         require(row["standard"] in {"local", "RFC8999", "RFC9000", "RFC9001", "RFC9002", "RFC9114", "RFC9204", "RFC9218"}, "unknown standard")
     for key, expected in (("excluded", EXCLUDED), ("artifact_features", FEATURES), ("platforms", PLATFORMS)):
         require(set(data[key]) == expected and len(data[key]) == len(expected), f"{key} scope drift")
-    require(data["proposed_address_policy"] == "reconnect-required", "address proposal changed")
-    require(data["address_policy"] in {"pending-approval", "reconnect-required"}, "unknown address policy")
+    require(data["address_policy"] == "seamless-validated-migration", "seamless address policy is required")
+    cases = data["address_change_requirements"]
+    require(set(cases) == ADDRESS_REQUIREMENTS and len(cases) == len(ADDRESS_REQUIREMENTS), "address-change coverage drift")
+    require(data["address_policy_evidence"] in {"pending-qualification", "source-qualified"}, "unknown address-policy evidence")
     if acceptance:
-        require(data["address_policy"] != "pending-approval", "address-policy approval is still required")
+        require(data["address_policy_evidence"] == "source-qualified", "address-policy source qualification is still required")
 
 
 def dependency_names(table: dict) -> set[str]:
@@ -97,7 +101,7 @@ def validate_sources(data: dict, manifest: dict, lock_bytes: bytes, production_n
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--acceptance", action="store_true", help="also require resolved scope approval; pentest/CI remain external gates")
+    parser.add_argument("--acceptance", action="store_true", help="also require recorded source qualification; evidence review and pentest/CI remain external gates")
     args = parser.parse_args()
     data = json.loads((ROOT / "docs/http3-source-lock.json").read_text())
     validate_scope(data, args.acceptance)
@@ -115,7 +119,7 @@ def main() -> int:
     require(tomllib.loads((ROOT / "rust-toolchain.toml").read_text())["toolchain"]["channel"] == data["rust"], "toolchain drift")
     manifest = tomllib.loads((PROBE / "Cargo.toml").read_text())
     validate_sources(data, manifest, (PROBE / "Cargo.lock").read_bytes(), production_names)
-    print(f"HTTP/3 source lock: ok; address policy={data['address_policy']}; no runtime admission")
+    print(f"HTTP/3 source lock: ok; address policy={data['address_policy']}; evidence={data['address_policy_evidence']}; no runtime admission")
     return 0
 
 

@@ -23,9 +23,11 @@ published archive, or production HTTP/3 listener yet.
 ## Qualification Still Required
 
 Follow the [HTTP/3 commit plan](../docs/http3-quic-commit-plan.md). Commit 1 is a
-candidate, not an accepted checkpoint: the proposed reconnect-required address
-policy still needs explicit approval, followed by pentest/retest and GitHub
-green. Later checkpoints implement the listener, shared request/response
+candidate, not an accepted checkpoint: seamless NAT rebinding and active client
+migration are selected requirements, but source qualification of safe path and
+policy hooks remains pending, followed by pentest/retest and GitHub green.
+Reconnect-only behavior is not an acceptable substitute. Later checkpoints
+implement the listener, shared request/response
 integration, packaging, and real-client/container/native-platform acceptance.
 
 Current source and local test evidence is in the

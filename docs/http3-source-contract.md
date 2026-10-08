@@ -1,8 +1,8 @@
 # HTTP/3 Commit 1 Source Contract
 
 Candidate reviewed on 2026-10-08. This is source admission evidence, not a
-claim that Fluxheim serves HTTP/3. Commit 2 requires scope acceptance, pentest,
-retest, and GitHub green. The [commit plan](http3-quic-commit-plan.md) remains
+claim that Fluxheim serves HTTP/3. Commit 2 requires revised source qualification,
+pentest, retest, and GitHub green. The [commit plan](http3-quic-commit-plan.md) remains
 the sequencing authority; [the JSON contract](http3-source-lock.json) assigns
 each finite requirement exactly one implementation owner.
 
@@ -108,9 +108,10 @@ explicit reviewed contract update, not a relaxed validator to hide a failure.
 
 ## Address Policy Decision
 
-**Pending user approval:** recommend `migration(false)` with a documented
-reconnect-required limitation for both source-port and source-IP changes.
-Do not advance to Commit 2 until this decision is accepted or replaced.
+**User-selected scope (2026-10-08):** seamless validated NAT rebinding and active
+client migration, preserving the existing connection and HTTP/3 streams.
+Reconnect-required behavior is not the release contract. Source qualification
+for this expanded requirement remains pending; do not advance to Commit 2.
 
 Source inspection of quinn-proto 0.11.19:
 `transport_parameters.rs` sets `disable_active_migration` when migration is
@@ -118,8 +119,9 @@ false; `connection/mod.rs` drops packets from changed remote socket addresses
 in that mode. The switch does not distinguish NAT rebinding from intentional
 migration. RFC 9000 section 9 distinguishes active migration from involuntary
 NAT changes, so disabling active migration must not be advertised as seamless
-NAT rebinding support. The current candidate has an availability limitation,
-not permission to weaken address validation or change trusted client identity.
+NAT rebinding support. This disabled configuration cannot satisfy the selected
+scope; it remains a negative characterization fixture, not a proposed runtime
+setting or permission to weaken address validation.
 
 The executable source-port and Linux source-IP probes establish TLS, transfer
 bytes and rebind the client socket. They prove no data is delivered on the old
@@ -130,10 +132,26 @@ new path. The IP fixture uses Linux's loopback routing for `127.0.0.2`, not a
 real NAT or multi-interface deployment. Deliberate endpoint rebinding and NAT
 rebinding present the same changed-peer-address input to this server switch;
 neither is separately admitted by `migration(false)`.
-Commit 7 must preserve original peer identity for the rejected path
-and reapply all admission/authorization to a fresh connection; Commit 21 must
-repeat source-IP and port-change cases under real network impairment. Do not
-replay application requests blindly after reconnecting.
+
+These probes do not establish ongoing HTTP/3 stream continuity, real network
+switching, or safe application authorization during path changes. Before
+recording `address_policy_evidence = source-qualified`, extend the source
+review and executable adapter-feasibility probes to demonstrate validated-path
+events, policy gating before new dispatch and continued sensitive delivery,
+and bounded atomic prefix-budget transfer without identity races. Reading
+`remote_address()` after the fact is insufficient. If the exact pinned stack
+cannot support the boundary, revise the dependency choice or obtain an upstream
+capability; do not silently downgrade to reconnect-only or add custom QUIC
+security. The current lock is a candidate, not a capability certification.
+
+Commit 4 owns the provider-neutral path-event/admission boundary; Commit 7
+implements original/current peer identity, IP/trusted-proxy re-evaluation,
+bounded validation/churn, budget transfer and failed-path recovery. Commits
+9/10/12 preserve streams and avoid origin replay. Commits 18-21 execute the
+[live continuity fixture](http3-quic-commit-plan.md#live-continuity-fixture)
+against actual Linux/container, macOS, and Windows artifacts, with independent
+clients and impairment. Long outages or denied new paths may fail closed; a
+reconnect or TCP fallback never counts as successful seamless migration.
 
 ## Crypto Replaceability And Brynja Gaps
 
@@ -222,12 +240,14 @@ sh scripts/smoke_wasm_policy_examples_binary.sh
 sh scripts/smoke_acme_mount_boundary.sh
 ```
 
-The structural gate permits a clearly marked pending scope decision during
-review. `python3 scripts/validate_http3_source_lock.py --acceptance` must reject
-it until approved; that option still does not replace external pentest/CI
-acceptance. No test result automatically authorizes Commit 2.
+The structural gate requires the selected seamless scope and its complete case
+inventory, but permits explicitly pending source qualification during review.
+`python3 scripts/validate_http3_source_lock.py --acceptance` must reject it until
+source qualification is recorded. That field is a reviewed evidence declaration,
+not automated proof: acceptance also requires review of the source/probe results
+and external pentest/CI gates. No test result automatically authorizes Commit 2.
 
-Local evidence: the full `scripts/checks.sh` gate passed with workspace version
+Local evidence at `ba3959f6`: the full `scripts/checks.sh` gate passed with workspace version
 1.9.0, all 21 workspace package versions matched, and the rebuilt executable
 reported 1.9.0. All nine fuzz targets compile with the refreshed lockfile.
 14 gate regression tests passed; 3 isolated tests for each provider
@@ -241,3 +261,13 @@ revision `550efd3d587a29b2e2c2b21b17a440da4fede999` (1,295 advisories); no known
 vulnerabilities reported for either lockfile. Yanked checks remain enabled in
 cargo-deny. New native Windows/macOS execution, final container builds, full
 fuzzing, independent HTTP/3 clients and pentest are not claimed by these probes.
+
+Scope/CI revision on 2026-10-08: 19 gate regression tests, both three-test
+provider suites, probe dependency policy, formatting, documentation links, and
+release metadata pass. The provider-rejection script now requests uncolored
+Cargo diagnostics: GitHub's `CARGO_TERM_COLOR=always` previously split the
+expected error text with ANSI escapes. The failure reproduced before the fix;
+the new forced-color regression passes afterward. Source acceptance still
+correctly rejects pending migration qualification. No production Rust or
+dependency changes were made in this revision; the full runtime suite above
+was not rerun for these documentation/gate changes.

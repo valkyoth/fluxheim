@@ -5,8 +5,10 @@ progress from `fc1b5983af97434786065c08cab2202cb544be6b`. The released `1.8.2`
 baseline is `6ed82b5a9ebd5b8f1bb4bc03f986edd9a33ae855`; no new `1.8.3` tag is
 required for the intervening documentation/build-helper changes. This records
 the user's start authorization, not a fresh cross-platform qualification claim.
-Commit 2 remains blocked on Commit 1 scope approval, pentest/retest, and green
-GitHub checks. The user also explicitly included a tooling/dependency refresh
+The user selected seamless NAT rebinding and active client migration on
+2026-10-08. Commit 2 remains blocked on qualification of that revised source
+contract, pentest/retest, and green GitHub checks. The user also explicitly
+included a tooling/dependency refresh
 in this checkpoint; review the entire diff from the baseline, not only probes.
 The development workspace is versioned `1.9.0` to distinguish `main` from the
 published `1.8.2`; this is not release acceptance or HTTP/3 availability.
@@ -169,11 +171,11 @@ environment-specific and are never inherited from this abstraction.
 6. UDP proxying and HTTP/3 are separate domains. Generic UDP routes must never
    receive QUIC packets or inherit HTTP/3 listener privileges.
 7. Zero-RTT is disabled. No route can opt in during `1.9.0`.
-8. Active connection migration, preferred addresses, multipath QUIC, QUIC
-   DATAGRAM, CONNECT-UDP, MASQUE, WebTransport, and generic tunnels are excluded.
-   NAT rebinding is a separate capability, not assumed to survive a library's
-   migration-disable switch. Its supported or reconnect-required behavior must
-   be selected and accepted at Commit 1 under the address-change contract below.
+8. Validated NAT rebinding and active client migration are required under the
+   address-change contract below. Reconnect-only behavior is not an acceptable
+   substitute. Server preferred addresses, cross-server/process connection
+   handoff, multipath QUIC, QUIC DATAGRAM, CONNECT-UDP, MASQUE, WebTransport,
+   and generic tunnels remain excluded.
 9. HTTP/3 WebSocket Extended CONNECT is deferred; clients continue to use the
    existing HTTP/1.1 WebSocket path. Do not advertise Extended CONNECT support
    or assume that rejecting an HTTP/3 request automatically retries it over TCP.
@@ -232,26 +234,67 @@ not an expanded test-only build.
 
 ## Address-Change Contract
 
-Commit 1 must probe the exact pinned Quinn configuration and freeze separate
-outcomes for source-port rebinding, source-IP changes, and deliberate active
-migration. Record whether the library switch controls acceptance of new paths,
-the `disable_active_migration` transport parameter, or both. The source lock
-cannot pass with an unspecified "test rebinding" requirement.
+The required `1.9.0` contract preserves the same QUIC connection, TLS session,
+and existing HTTP/3 streams across source-port NAT rebinding, source-IP NAT
+rebinding, and intentional client network changes such as Wi-Fi to mobile.
+A bounded pause for path validation is acceptable. A new handshake, reconnect,
+restarted download, automatic application replay, or TCP fallback is not proof
+of seamless support. This applies to reachable, authorized paths within the
+configured validation/idle deadlines; denied paths, prolonged outages, and
+clients without migration support may fail closed.
 
-The preferred contract permits validated NAT rebinding while excluding active
-migration. If the pinned stack cannot implement that distinction, stop at
-Commit 1 for an explicit scope decision: either accept a standards-reviewed,
-documented reconnect-required limitation, with bounded failure/reconnect tests,
-or revise the dependency/scope choice. Do not silently enable unrestricted
-migration, patch transport security ad hoc, or promise seamless rebinding.
+Commit 1 must qualify the exact pinned stack's path-validation hooks and
+policy integration, not just enable `migration(true)`. Record transport
+parameter behavior, when the remote address changes, and how new request
+dispatch and ongoing sensitive data delivery can be gated during a transition.
+Polling `remote_address()` alone is not evidence of a race-free authorization
+boundary. Existing loopback probes are preliminary transport evidence, not this
+qualification. If the stack lacks the required hooks, stop and revise the
+dependency choice or obtain an upstream capability; do not silently downgrade
+the contract or invent transport security. Source qualification remains pending
+until reviewed source references and executable adapter-feasibility evidence
+are recorded. The structural gate may pass during review; the acceptance gate
+must fail while this evidence is pending.
 
-For any admitted address change, Commit 7 must define original and current
-validated peer identities, re-evaluate IP access/trusted-proxy policy before
-dispatch from the new path, and transfer per-prefix accounting without evasion
-or leaked permits. Unvalidated packets cannot change application identity.
-The reconnect-only choice must instead prove that a new connection receives
-fresh admission and policy checks. Commit 21 executes the selected outcomes;
-it does not choose the policy for the first time.
+Commit 4 defines provider-neutral validated-path events and admission hooks.
+Commit 7 retains an immutable original peer and a current validated peer,
+re-evaluates IP access and trusted-proxy policy before new-path dispatch or
+continued sensitive stream delivery, and atomically reserves the new prefix
+budget before releasing the old charge. Already dispatched forwarding headers
+must not gain trust retroactively. Bound concurrent validation, path churn,
+retained state, and failed reservations. Unvalidated/spoofed packets must never
+change application identity or evade accounting. Failed validation must retain
+the previous authorized usable path or close within a bounded deadline, with
+permit cleanup. Use the upstream implementation for RFC 9000 sections 8.2 and 9
+path validation, anti-amplification, connection-ID and congestion behavior.
+
+Commits 9, 10, and 12 preserve body streams, backpressure, cancellation and
+exactly-once origin dispatch through migration. Commits 18-20 execute the live
+continuity fixture below on all supported native platforms and rootless
+containers; Commit 21 adds independent-client impairment and adversarial cases.
+Seamless migration cannot be reclassified as unsupported to pass a later gate
+without a new explicit scope decision.
+
+### Live Continuity Fixture
+
+Change the client path during a large upload/download and concurrent HTTP/3
+streams, including a POST with an origin execution counter. Cover port-only
+rebinding, IP rebinding, and deliberate network switching. Require checksum-
+complete transfers, one origin execution, no extra handshake, and continued
+stream identity on the same connection. Correlate client evidence with bounded
+test-only server connection identities; do not mistake legitimate QUIC
+connection-ID rotation for reconnection or expose these diagnostics publicly.
+Record validation pause/recovery time against an explicit fixture deadline.
+Exercise forbidden target addresses, exhausted target-prefix budgets, invalid
+path responses, and failed validation as negative cases, not successful moves.
+
+Run against the exact extracted Linux x86_64/aarch64, macOS Apple Silicon, and
+Windows x86_64 artifacts, plus mapped UDP on rootless Linux containers. A
+separate client-side Linux NAT/network harness may drive the real macOS or
+Windows server; it does not replace native server execution. Missing fixture
+capability blocks qualification rather than producing a skipped/pass result.
+Commit 21 must repeat continuity with at least two independent HTTP/3 client
+implementations and packet loss, delay, reordering, and MTU changes.
 
 ## Configuration Direction
 
@@ -310,9 +353,11 @@ support.
 Commit status: authorized candidate from
 `fc1b5983af97434786065c08cab2202cb544be6b`; not accepted. Implementation and
 verification are recorded in [the source contract](http3-source-contract.md)
-and [machine-readable source lock](http3-source-lock.json). Address-policy
-approval, pentest/retest, and GitHub-green evidence are still required before
-Commit 2. No production HTTP/3 listener or feature is enabled.
+and [machine-readable source lock](http3-source-lock.json). The user selected
+seamless migration; source qualification, pentest/retest, and GitHub-green
+evidence are still required before Commit 2. The reported clean pentest through
+`ba3959f6` predates this scope revision and does not accept it automatically.
+No production HTTP/3 listener or feature is enabled.
 
 Goal: freeze the standards, dependency, feature, and non-goal boundaries before
 network code exists.
@@ -323,7 +368,8 @@ review; supported-platform statement; a finite requirement-to-commit matrix;
 and a Brynja gap matrix covering every TLS 1.3 and QUIC cryptographic capability
 without adding a runtime or build dependency on Brynja.
 Include the existing TLS dependency allowlist, the shared-body refactor scope,
-the archive feature contract, and the accepted address-change decision.
+the archive feature contract, and the accepted address-change decision with
+qualified path-validation/policy integration hooks.
 
 Verification: dependency tree and duplicate-version checks, feature-unification
 fixtures, license and advisory gates, source-link validation, and a gate that
@@ -478,11 +524,15 @@ Deliverables: global/per-listener/per-prefix connection limits, handshake caps,
 address-validation retry policy, rotating authenticated token keys, idle and
 handshake timeouts, bounded connection IDs, and overload shedding.
 Implement the accepted Commit 1 address-change, peer-identity, and accounting
-contract, including the selected rebinding or reconnect behavior.
+contract, including seamless validated rebinding and active client migration.
 
 Verification: spoofed-source simulations, invalid/replayed/expired tokens,
 token rotation, retry amplification accounting, connection floods, per-prefix
 fairness, IPv4-mapped IPv6 handling, limit recovery, and clock-boundary tests.
+Add denied new addresses, exhausted target-prefix budgets, repeated path
+changes, concurrent migration/request dispatch, forged path responses, failed
+validation recovery, and cancellation cleanup. Assert ongoing streams cannot
+bypass the new-path authorization boundary.
 
 Exit criteria: unauthenticated input cannot create unbounded retained state or
 amplify more bytes than the admitted policy.
@@ -794,6 +844,8 @@ fixture, verify supported reload and load-balancer reload rejection in separate
 fixtures, stop and restart the container, and prove graceful and forced shutdown
 cleanup. Run Linux x86_64 and aarch64 native
 jobs; cross-compilation does not satisfy either row.
+Run the live continuity fixture for both native architectures and mapped
+rootless UDP; reconnection or TCP fallback cannot count as migration success.
 
 Exit criteria: a clean host can start the packaged binary and rootless image,
 receive an independently negotiated HTTP/3 response through mapped UDP, retain
@@ -827,6 +879,8 @@ background-load-balancer route reload without losing service, and exercise
 graceful and deadline-forced shutdown. The server and client must be different
 processes; Rust unit
 tests, cross-compilation, and a same-process QUIC peer do not satisfy this gate.
+Run the live continuity fixture against this native archive, including external
+client-driven IP/port changes and policy-denied paths.
 
 Exit criteria: the extracted unsigned macOS archive runs on a real supported
 Apple Silicon host and independently negotiates HTTP/3 across a UDP socket with
@@ -861,6 +915,8 @@ background-load-balancer route reload; stop/restart; enforce graceful and forced
 shutdown; and remove temporary services, processes, files, and firewall rules.
 Cross-compilation, Wine, WSL, or a Windows container does not satisfy this
 native gate.
+Run the live continuity fixture across the Windows firewall with external
+client-driven IP/port changes, continued streams, and policy-denied paths.
 
 Exit criteria: a fresh disposable Windows Server host can run the extracted
 release ZIP and serve independently verified HTTP/3 over external UDP while
@@ -880,16 +936,18 @@ Goal: prove behavior beyond platform-specific happy-path clients and networks.
 
 Deliverables: pinned independent client matrix, browser-compatible smoke,
 version negotiation, IPv4/IPv6, loss/reordering/duplication/delay scenarios,
-the accepted Commit 1 NAT rebinding/reconnect outcomes, MTU boundaries, and
-long-lived transfer tests.
+the required seamless NAT rebinding and active client migration, MTU
+boundaries, and long-lived transfer tests.
 
 Verification: at least two independent HTTP/3 implementations, malformed packet
 corpus, handshake loss, stream loss, reorder, duplicate packets, black-hole MTU,
 idle transitions, server overload, and mixed HTTP/1.1/HTTP/2/HTTP/3 traffic.
 Execute source-port and source-IP change cases with assertions for path
-validation, policy re-evaluation, and per-prefix admission or fresh-connection
-checks as selected at Commit 1. Exercise learned-Alt-Svc fallback with a pinned
-browser-family client as well as the platform fixtures; report actual TCP
+validation, policy re-evaluation, and per-prefix admission on the same
+connection using the live continuity fixture. Include deliberate network
+switching, concurrent streams, and interrupted uploads/downloads without
+reconnect, request replay, or fallback. Separately exercise learned-Alt-Svc
+fallback with a pinned browser-family client as well as the platform fixtures; report actual TCP
 negotiation after UDP failure, not only successful independent TCP requests.
 
 Exit criteria: success does not depend on Fluxheim's own test peer or a perfect
@@ -984,10 +1042,11 @@ tunneling.
 
 ### v1.9.3 - QUIC Edge Operations
 
-Candidate user value: deployments with mobile clients, NAT rebinding, multiple
-frontends, or frequent process replacement gain reviewed connection-migration
-and connection-ID routing behavior, plus platform-specific UDP activation and
-drain guidance where technically supportable.
+Candidate user value: deployments with multiple frontends or frequent process
+replacement gain reviewed cross-frontend connection-ID routing and handoff
+behavior, plus platform-specific UDP activation and drain guidance where
+technically supportable. Basic mobile-client migration and NAT rebinding are
+required in `1.9.0`, not deferred to this candidate.
 
 Do not claim seamless cross-process QUIC handoff unless cryptographic connection
 state and packet routing are genuinely preserved. A reconnecting client is not
@@ -1059,7 +1118,8 @@ The `1.9.0` release candidate must cover:
 - HTTP/1.1, HTTP/2, and HTTP/3 differential semantics;
 - independent command-line and browser-family clients;
 - learned-Alt-Svc fallback under blocked UDP and after disabling HTTP/3;
-- the accepted NAT rebinding/reconnect, peer-identity, and accounting cases;
+- seamless NAT rebinding/client migration with same-connection stream continuity,
+  no replay, validated peer policy, bounded accounting, and failed-path recovery;
 - loss, delay, reordering, duplication, MTU, cancellation, idle, and overload;
 - rootless containers with explicit UDP publication;
 - external Windows UDP reachability and real Apple Silicon HTTP/3 negotiation;

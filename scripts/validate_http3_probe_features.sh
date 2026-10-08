@@ -4,7 +4,8 @@ set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 expect_rejection() {
-    if output=$(cargo check --locked \
+    # Match diagnostics independently of CI's forced terminal colors.
+    if output=$(cargo check --color never --locked \
         --manifest-path "$ROOT_DIR/tools/http3-source-probe/Cargo.toml" \
         --no-default-features "$@" 2>&1); then
         echo 'HTTP/3 probe accepted an invalid crypto provider selection' >&2

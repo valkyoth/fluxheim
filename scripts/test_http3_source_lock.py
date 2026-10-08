@@ -3,6 +3,8 @@
 
 import copy
 import json
+import os
+import subprocess
 import tomllib
 import unittest
 
@@ -53,12 +55,46 @@ class SourceLockTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "platforms"):
             gate.validate_scope(self.scope)
 
-    def test_pending_approval_is_not_acceptance(self):
-        self.scope["address_policy"] = "pending-approval"
-        with self.assertRaisesRegex(ValueError, "approval"):
+    def test_pending_qualification_is_not_acceptance(self):
+        self.scope["address_policy_evidence"] = "pending-qualification"
+        with self.assertRaisesRegex(ValueError, "qualification"):
             gate.validate_scope(self.scope, acceptance=True)
-        self.scope["address_policy"] = "reconnect-required"
+        self.scope["address_policy_evidence"] = "source-qualified"
         gate.validate_scope(self.scope, acceptance=True)
+
+    def test_seamless_policy_cannot_be_downgraded(self):
+        for policy in ("reconnect-required", "pending-approval", "unknown"):
+            self.scope["address_policy"] = policy
+            with self.subTest(policy=policy), self.assertRaisesRegex(ValueError, "seamless"):
+                gate.validate_scope(self.scope)
+
+    def test_address_change_coverage_cannot_drift(self):
+        for case in gate.ADDRESS_REQUIREMENTS:
+            for replacement in ([], ["unknown"], [case, case]):
+                scope = copy.deepcopy(self.scope)
+                index = scope["address_change_requirements"].index(case)
+                scope["address_change_requirements"][index:index + 1] = replacement
+                with self.subTest(case=case, replacement=replacement), self.assertRaisesRegex(ValueError, "coverage"):
+                    gate.validate_scope(scope)
+
+    def test_active_migration_cannot_be_excluded(self):
+        self.scope["excluded"].append("active-migration")
+        with self.assertRaisesRegex(ValueError, "excluded"):
+            gate.validate_scope(self.scope)
+
+    def test_unknown_qualification_is_rejected(self):
+        self.scope["address_policy_evidence"] = "approved"
+        with self.assertRaisesRegex(ValueError, "evidence"):
+            gate.validate_scope(self.scope)
+
+    def test_provider_rejections_with_forced_color(self):
+        result = subprocess.run(
+            ["sh", str(gate.ROOT / "scripts/validate_http3_probe_features.sh")],
+            env={**os.environ, "CARGO_TERM_COLOR": "always"},
+            capture_output=True, text=True, check=False, timeout=300,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("provider rejection checks: ok", result.stdout)
 
     def test_transitive_lock_cannot_drift(self):
         with self.assertRaisesRegex(ValueError, "transitive lock"):
