@@ -1,7 +1,11 @@
 # Build And Rootless Podman
 
-Fluxheim pins Rust 1.98.1 in `rust-toolchain.toml` and `Cargo.toml`. The local
+Fluxheim pins Rust 1.99.0 in `rust-toolchain.toml` and `Cargo.toml`. The local
 toolchain and the container builder should stay on the same stable release.
+
+The current development tree reports **1.9.0 (unreleased)**. Published
+`v1.8.2` remains the stable baseline. The `v1.9.0` tag and release artifacts do
+not exist yet; building `main` does not imply HTTP/3 support is ready.
 
 ## Local Builds
 
@@ -164,7 +168,7 @@ scripts/validate-features.sh proxy,web,tls-rustls
 
 ## System Build Dependencies
 
-Fluxheim builds with Rust 1.98.1. Starting in `1.6.34`, the default feature set
+Fluxheim builds with Rust 1.99.0. Starting in `1.6.34`, the default feature set
 uses the Fluxheim-owned native runtime with rustls, cache support, and static
 file serving; normal profiles no longer compile Pingora crates. Native builds
 need a normal C/C++ toolchain plus a few build helpers for transitive native
@@ -172,7 +176,7 @@ code.
 
 Required for the default build:
 
-- Rust 1.98.1, usually through `rustup` or the distro Rust packages when they
+- Rust 1.99.0, usually through `rustup` or the distro Rust packages when they
   are new enough;
 - C and C++ compiler toolchain;
 - `make`;
@@ -223,9 +227,9 @@ New packaging and publishing work should use the explicit variant files under
 `containers/`.
 
 The Alpine, Wolfi, SUSE Micro, and PHP-only SUSE BCI variants build with the official Rust
-`1.98.1-alpine3.23` image to keep a musl-linked release binary portable across
+`1.99.0-alpine3.23` image to keep a musl-linked release binary portable across
 small runtime bases. The Debian variant builds with the official Rust
-`1.98.1-bookworm` image and runs on `debian:trixie-slim`.
+`1.99.0-bookworm` image and runs on `debian:trixie-slim`.
 
 The builder installs `cmake` for native TLS/compression transitives that may
 compile C code. The runtime runs as UID/GID `65532` and owns only:
@@ -535,7 +539,9 @@ Optional Quay repository secrets and variables:
 
 The workflow publishes OS-variant tags for the full/default image profile:
 
-The `1.8.2` release retains this naming contract.
+The published `1.8.2` examples below retain this naming contract. For `1.9.0`,
+the same tags are planned with the new version, but are not release artifacts
+until that tag is approved and published.
 
 - `v1.8.2-wolfi`, `v1.8.2-alpine`, `v1.8.2-suse-micro`, `v1.8.2-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.

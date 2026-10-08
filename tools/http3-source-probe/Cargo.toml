@@ -1,0 +1,28 @@
+[package]
+name = "fluxheim-http3-source-probe"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99.0"
+publish = false
+license = "EUPL-1.2"
+
+# Isolated feasibility workspace, never a Fluxheim runtime dependency.
+[workspace]
+
+[features]
+default = ["ring"]
+ring = ["quinn/rustls-ring", "rustls/ring", "rcgen/ring"]
+aws-lc = ["quinn/rustls-aws-lc-rs", "rustls/aws_lc_rs", "rcgen/aws_lc_rs"]
+
+[dependencies]
+bytes = "=1.12.1"
+h3 = { version = "=0.0.8", default-features = false }
+h3-quinn = { version = "=0.0.10", default-features = false }
+http = "=1.5.0"
+quinn = { version = "=0.11.12", default-features = false, features = ["runtime-tokio"] }
+rcgen = { version = "=0.14.10", default-features = false }
+rustls = { version = "=0.23.45", default-features = false, features = ["std"] }
+tokio = { version = "=1.53.2", default-features = false, features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
+
+[lints.rust]
+unsafe_code = "forbid"

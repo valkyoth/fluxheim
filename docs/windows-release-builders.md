@@ -1,6 +1,6 @@
 # Windows Release Builders
 
-Fluxheim `1.8.2` uses a native Windows x86_64 host for its unsigned portable
+Fluxheim uses a native Windows x86_64 host for its unsigned portable
 archive evidence. A Linux cross-build is not accepted as a substitute for the
 native Windows ACL, locking, shutdown, and live-runtime checks.
 
@@ -218,7 +218,7 @@ GitHub-hosted `windows-2025` job separately runs the native test and archive
 matrix. It does not need to reproduce the cloud builder's archive bytes.
 
 The script fails when `scripts/smoke_windows_native.ps1` is absent or any
-native runtime assertion fails. Every 1.8.2 release build therefore remains
+native runtime assertion fails. Every Windows release build therefore remains
 blocked unless the complete parity matrix passes on x86_64.
 
 Windows outputs are unsigned `.zip` previews. Do not disable SmartScreen or

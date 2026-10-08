@@ -1,15 +1,15 @@
 [package]
 name = "fluxheim-runtime"
-version = "1.8.2"
+version = "1.9.0"
 edition = "2024"
-rust-version = "1.98.1"
+rust-version = "1.99.0"
 license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim runtime task and shutdown boundaries."
 
 [dependencies]
 async-trait = "0.1.92"
-tokio = { version = "1.53.1", default-features = false, features = ["rt", "sync", "time"] }
+tokio = { version = "1.53.2", default-features = false, features = ["rt", "sync", "time"] }
 
 [dev-dependencies]
-tokio = { version = "1.53.1", default-features = false, features = ["macros", "rt", "sync", "time"] }
+tokio = { version = "1.53.2", default-features = false, features = ["macros", "rt", "sync", "time"] }

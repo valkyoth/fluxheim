@@ -1,5 +1,12 @@
 # Versioning Plan
 
+Current development: **1.9.0 (unreleased)**. The detailed
+[HTTP/3 and QUIC commit plan](http3-quic-commit-plan.md) supersedes the earlier
+`1.9.x` feature-release split below: implement and qualify numbered checkpoints
+before publishing 1.9.0, with later releases scoped as complete follow-up work.
+The latest published baseline remains 1.8.2. This version marker does not
+enable HTTP/3.
+
 Fluxheim should use SemVer, but with a conservative interpretation: a feature is
 not considered stable just because it compiles. A feature becomes stable only
 after it has docs, config validation, tests, release checks, and a clear

@@ -1,8 +1,8 @@
 [package]
 name = "fluxheim-server"
-version = "1.8.2"
+version = "1.9.0"
 edition = "2024"
-rust-version = "1.98.1"
+rust-version = "1.99.0"
 license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim listener and server boundary types."
@@ -54,7 +54,7 @@ getrandom = "0.4.3"
 # "unstable" is required for Builder::initial_stream_id(3): RFC 7540 h2c
 # upgrade assigns stream 1 to the HTTP/1.1 upgrade request, so new H2 streams
 # must start at 3. Revisit when h2 stabilizes initial_stream_id.
-h2 = { version = "0.4.19", features = ["unstable"] }
+h2 = { version = "0.4.20", features = ["unstable"] }
 http = "1.5.0"
 httpdate = "1.0.3"
 log = "0.4.34"
@@ -64,20 +64,20 @@ openssl = { version = "0.10.81", optional = true }
 percent-encoding = "2.3.2"
 regex = "1.13.1"
 ring = "0.17.14"
-rustls = { version = "0.23.44", optional = true, default-features = false, features = ["std", "tls12", "logging"] }
+rustls = { version = "0.23.45", optional = true, default-features = false, features = ["std", "tls12", "logging"] }
 rustls-native-certs = { version = "0.8.4", optional = true }
 sanitization = { version = "2.1.0", features = ["alloc"] }
 serde_json = { version = "1.0.151", optional = true }
 sha2 = "0.11.0"
 socket2 = { version = "0.6.5", features = ["all"] }
-tokio = { version = "1.53.1", default-features = false, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+tokio = { version = "1.53.2", default-features = false, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 tokio-openssl = { version = "0.6.5", optional = true }
-tokio-rustls = { version = "0.26.5", optional = true, default-features = false, features = ["logging", "tls12"] }
-ureq = { version = "3.4.1", default-features = false, features = ["rustls"], optional = true }
-zeroize = "1.9.0"
+tokio-rustls = { version = "0.26.6", optional = true, default-features = false, features = ["logging", "tls12"] }
+ureq = { version = "3.4.2", default-features = false, features = ["rustls"], optional = true }
+zeroize = "1.9.1"
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1.4", features = ["fs", "net", "process"] }
+rustix = { version = "1.1.5", features = ["fs", "net", "process"] }
 
 [target.'cfg(windows)'.dependencies]
 fluxheim-windows-security = { path = "../fluxheim-windows-security" }
@@ -90,7 +90,7 @@ fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }
 proptest = "1.11.0"
 rcgen = { version = "0.14.10", default-features = false, features = ["pem", "ring"] }
 tempfile = "3.27.0"
-wat = "1.259.0"
+wat = "1.261.0"
 
 [target.'cfg(windows)'.dev-dependencies]
 windows-permissions = "0.2.4"

@@ -1,8 +1,8 @@
 [package]
 name = "fluxheim-acme"
-version = "1.8.2"
+version = "1.9.0"
 edition = "2024"
-rust-version = "1.98.1"
+rust-version = "1.99.0"
 license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim ACME account, challenge, renewal, and certificate storage logic."
@@ -30,21 +30,21 @@ fluxheim-config = { path = "../fluxheim-config", features = ["acme"] }
 getrandom = "0.4.3"
 futures = { version = "0.3.34", optional = true }
 http = { version = "1.5.0", optional = true }
-http-body-util = { version = "0.1.4", optional = true }
-hyper = { version = "1.11.0", default-features = false, features = ["client", "http1", "http2"], optional = true }
-hyper-rustls = { version = "0.27.9", default-features = false, features = ["http1", "http2", "native-tokio", "ring", "tls12"], optional = true }
-hyper-util = { version = "0.1.20", default-features = false, features = ["client-legacy", "http1", "http2", "tokio"], optional = true }
+http-body-util = { version = "0.1.5", optional = true }
+hyper = { version = "1.12.0", default-features = false, features = ["client", "http1", "http2"], optional = true }
+hyper-rustls = { version = "0.27.10", default-features = false, features = ["http1", "http2", "native-tokio", "ring", "tls12"], optional = true }
+hyper-util = { version = "0.1.21", default-features = false, features = ["client-legacy", "http1", "http2", "tokio"], optional = true }
 instant-acme = { version = "0.8.5", default-features = false, features = ["ring", "time", "x509-parser"] }
 log = "0.4.34"
 rcgen = { version = "0.14.10", default-features = false, features = ["pem", "ring"] }
-rustix = { version = "1.1.4", features = ["fs", "process"] }
-rustls = { version = "0.23.44", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+rustix = { version = "1.1.5", features = ["fs", "process"] }
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 sanitization = { version = "2.1.0", features = ["alloc"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
-toml = "1.1.6"
-tokio = { version = "1.53.1", default-features = false, features = ["rt", "time"], optional = true }
+toml = "1.1.7"
+tokio = { version = "1.53.2", default-features = false, features = ["rt", "time"], optional = true }
 x509-parser = { version = "0.18.1", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
@@ -54,7 +54,7 @@ windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 [dev-dependencies]
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }
 proptest = "1.11.0"
-tokio = { version = "1.53.1", default-features = false, features = ["rt", "time"] }
+tokio = { version = "1.53.2", default-features = false, features = ["rt", "time"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-rustix = { version = "1.1.4", features = ["mount"] }
+rustix = { version = "1.1.5", features = ["mount"] }

@@ -21,6 +21,11 @@
 
 # Fluxheim
 
+`main` targets **1.9.0 (unreleased)**. The latest published release remains
+**v1.8.2**. HTTP/3 is being developed through the
+[HTTP/3 commit plan](docs/http3-quic-commit-plan.md); it is not enabled in
+Fluxheim yet. No `v1.9.0` release tag or release artifacts have been published.
+
 Fluxheim is a modular Rust edge gateway for static sites, reverse proxying,
 edge caching, PHP-FPM application serving, ACME automation, observability,
 FIPS/ISO-capable TLS build paths, GeoIP policy, TCP stream proxying, and
@@ -433,10 +438,19 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Current Release: 1.8.2 Windows Portable Parity
+## Development: 1.9.0 HTTP/3 And QUIC
 
-Fluxheim does not treat every planned idea as stable. Fluxheim is now on the
-`1.8` platform-parity line. Release `1.8.0` packages the completed Wasm
+The development version is `1.9.0`, ahead of the published `v1.8.2` release.
+Commit 1 qualifies dependency sources and future crypto replacement boundaries;
+it does not add an HTTP/3 runtime feature. Each checkpoint requires pentest,
+retest and green GitHub checks before the next begins. See the
+[draft release notes](release-notes/RELEASE_NOTES_1.9.0.md) for implemented work,
+not promises of completed protocol support.
+
+### Latest Release: 1.8.2 Windows Portable Parity
+
+Fluxheim does not treat every planned idea as stable. The released `1.8` line
+established platform parity. Release `1.8.0` packages the completed Wasm
 line as an explicit image/archive profile and establishes the shared portable
 archive contract. Release `1.8.1` completed the defined unsigned Apple Silicon
 macOS parity gate. Release `v1.8.2` completes native Windows x86_64 MSVC

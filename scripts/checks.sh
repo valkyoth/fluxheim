@@ -126,6 +126,13 @@ scripts/validate-native-web-tls.sh check
 scripts/validate-native-runtime-cutover.sh
 scripts/validate-runtime-fixtures.sh check
 perl scripts/check-doc-links.pl
+python3 scripts/validate_http3_source_lock.py
+python3 scripts/test_http3_source_lock.py
+cargo fmt --manifest-path tools/http3-source-probe/Cargo.toml --check
+cargo test --locked --manifest-path tools/http3-source-probe/Cargo.toml
+cargo test --locked --manifest-path tools/http3-source-probe/Cargo.toml --no-default-features --features aws-lc
+sh scripts/validate_http3_probe_features.sh
+cargo deny --manifest-path tools/http3-source-probe/Cargo.toml --config tools/http3-source-probe/deny.toml --locked check
 cargo clippy --all-targets -- -D warnings
 cargo clippy --no-default-features --features tls-rustls --all-targets -- -D warnings
 cargo clippy --no-default-features --features profile-full --all-targets -- -D warnings

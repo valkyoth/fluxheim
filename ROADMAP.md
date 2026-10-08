@@ -8,15 +8,19 @@ That plan treats `0.5.x` as the basic-sites preview and `1.0.0` as the first
 gateway-ready release for Fluxheim's representative real multi-site configs.
 Larger modules still graduate through later minor releases.
 
-## Current Release Goal
+## Current Development Goal
 
-Fluxheim `1.6.x` is the Pingora-exit line. Its goal is to remove Pingora from
-every normal Fluxheim build by replacing the server/listener/TLS, cache,
-load-balancer, stream, HTTP type/error, upstream pooling, and HTTP proxy runtime
-boundaries with Fluxheim-owned crates and standard Rust protocol libraries,
-while preserving behavior with baseline evidence and parity fixtures.
+Fluxheim `1.9.0` is the unreleased HTTP/3 and QUIC development train. The
+[HTTP/3 commit plan](docs/http3-quic-commit-plan.md) governs its implementation
+checkpoints and acceptance gates. Commit 1 qualifies sources and scope; no
+production HTTP/3 listener is enabled yet. Brynja remains a future crypto
+replacement, not a current dependency. The latest published release is `1.8.2`.
 
 Historical milestones:
+
+Fluxheim `1.6.x` was the Pingora-exit line, replacing normal runtime boundaries
+with Fluxheim-owned crates and standard Rust protocol libraries while retaining
+baseline evidence and parity fixtures.
 
 Fluxheim `1.0.0` was the first gateway-ready baseline: static sites,
 SNI-backed TLS vhosts, route redirects, location-style proxying,
@@ -167,7 +171,7 @@ Store publication only if the Store model fits Fluxheim's server/service
 behavior; otherwise use a signed MSI or signed zip plus documented Windows
 service installation. HTTP/3 and QUIC become the following `1.9` line after
 cross-platform release evidence is stable.
-The active `1.8.2` Windows release target is x86_64 MSVC only. Windows ARM64
+The Windows release target remains x86_64 MSVC only. Windows ARM64
 remains future work and must not receive public artifacts or support claims
 until the project has sustainable native ARM64 Windows build infrastructure,
 live runtime coverage, and repeatable release evidence equivalent to x86_64.

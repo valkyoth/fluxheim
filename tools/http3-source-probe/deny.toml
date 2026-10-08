@@ -1,0 +1,28 @@
+[graph]
+all-features = true
+
+[licenses]
+confidence-threshold = 0.95
+include-dev = true
+include-build = true
+unused-allowed-license = "allow"
+unused-license-exception = "deny"
+allow = ["Apache-2.0", "BSD-3-Clause", "EUPL-1.2", "ISC", "MIT", "Unicode-3.0", "Zlib"]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+
+[advisories]
+db-path = "../../.cargo-deny-advisory-dbs"
+yanked = "deny"
+unmaintained = "all"
+unsound = "all"
+unused-ignored-advisory = "deny"
+ignore = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

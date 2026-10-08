@@ -47,6 +47,16 @@ jobs:
       - name: Check Markdown links
         run: perl scripts/check-doc-links.pl
 
+      - name: Validate isolated HTTP3 source contract
+        run: |
+          python3 scripts/validate_http3_source_lock.py
+          python3 scripts/test_http3_source_lock.py
+          cargo fmt --manifest-path tools/http3-source-probe/Cargo.toml --check
+          cargo test --locked --manifest-path tools/http3-source-probe/Cargo.toml
+          cargo test --locked --manifest-path tools/http3-source-probe/Cargo.toml --no-default-features --features aws-lc
+          sh scripts/validate_http3_probe_features.sh
+          cargo deny --manifest-path tools/http3-source-probe/Cargo.toml --config tools/http3-source-probe/deny.toml --locked check
+
       - name: Validate feature policy
         run: |
           scripts/validate-features.sh default

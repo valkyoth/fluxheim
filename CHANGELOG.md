@@ -7,6 +7,18 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.9.0 - Unreleased
+
+### Changed
+
+- Refresh Rust to 1.99.0, published stable Cargo dependencies, Rust builder
+  image digests, and pinned Docker GitHub Actions. The development workspace
+  now reports 1.9.0; published releases and runtime feature profiles remain
+  unchanged.
+- Start HTTP/3 Commit 1 with an isolated source-locked feasibility workspace,
+  machine-checked scope and provider contracts, and a future-only Brynja gap
+  inventory. This does not enable HTTP/3 or add QUIC to Fluxheim's runtime graph.
+
 ## 1.8.2 - 2026-09-13
 
 ### Added

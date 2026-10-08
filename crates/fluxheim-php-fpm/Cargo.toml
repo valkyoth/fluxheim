@@ -1,8 +1,8 @@
 [package]
 name = "fluxheim-php-fpm"
-version = "1.8.2"
+version = "1.9.0"
 edition = "2024"
-rust-version = "1.98.1"
+rust-version = "1.99.0"
 license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim PHP-FPM protocol and runtime boundary."
@@ -14,9 +14,9 @@ fluxheim-protocol = { path = "../fluxheim-protocol" }
 getrandom = "0.4.3"
 log = "0.4.34"
 percent-encoding = "2.3.2"
-rustix = { version = "1.1.4", features = ["fs", "net", "process"] }
+rustix = { version = "1.1.5", features = ["fs", "net", "process"] }
 sanitization = { version = "2.1.0", features = ["alloc"] }
-tokio = { version = "1.53.1", default-features = false, features = ["fs", "io-util", "net", "rt", "time"] }
+tokio = { version = "1.53.2", default-features = false, features = ["fs", "io-util", "net", "rt", "time"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }

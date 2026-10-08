@@ -25,8 +25,8 @@ RELEASE_VERSION="${2:-}"
 if [[ -n "$WINDOWS_HOST" && -z "$WINDOWS_SSH_KEY" ]]; then
     read -r -p "Enter Windows x86_64 SSH key path: " WINDOWS_SSH_KEY
 fi
-[[ -n "$RUST_VERSION" ]] || read -r -p "Enter Rust version (e.g., 1.98.1): " RUST_VERSION
-[[ -n "$RELEASE_VERSION" ]] || read -r -p "Enter release version (e.g., 1.8.2): " RELEASE_VERSION
+[[ -n "$RUST_VERSION" ]] || read -r -p "Enter Rust version (e.g., 1.99.0): " RUST_VERSION
+[[ -n "$RELEASE_VERSION" ]] || read -r -p "Enter release version (e.g., 1.9.0): " RELEASE_VERSION
 
 case "$RUST_VERSION" in "" | *[!0-9A-Za-z._+-]*) echo "error: unsafe Rust version" >&2; exit 2;; esac
 case "$RELEASE_VERSION" in "" | .* | *..* | *[!0-9A-Za-z._+-]*) echo "error: unsafe release version" >&2; exit 2;; esac

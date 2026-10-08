@@ -1,8 +1,8 @@
 [package]
 name = "fluxheim-common"
-version = "1.8.2"
+version = "1.9.0"
 edition = "2024"
-rust-version = "1.98.1"
+rust-version = "1.99.0"
 license = "EUPL-1.2"
 publish = false
 description = "Shared internal Fluxheim primitives."
@@ -11,7 +11,7 @@ description = "Shared internal Fluxheim primitives."
 test-support = ["dep:windows-permissions"]
 
 [dependencies]
-thiserror = "2.0.20"
+thiserror = "2.0.21"
 
 [target.'cfg(windows)'.dependencies]
 windows-permissions = { version = "0.2.4", optional = true }

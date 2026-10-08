@@ -216,7 +216,7 @@ scripts/validate_portable_release_plan.py
 
 Build the seven portable profiles on a matching supported host. Native CI
 builds every public archive profile on Apple Silicon. Intel macOS is not a
-supported release target. During `1.8.2`, Windows archives additionally require
+supported release target. Windows archives additionally require
 native x86_64 builder evidence; do not publish them when that gate is
 incomplete:
 
@@ -244,8 +244,11 @@ its output directory to the Linux release machine. Set
 Linux helper accepts the Rust and Fluxheim versions as positional arguments:
 
 ```bash
-scripts/release_helper.sh 1.98.1 1.8.2
+scripts/release_helper.sh 1.99.0 1.9.0
 ```
+
+This example targets the upcoming 1.9.0 release. Do not run the exact-tag
+packaging step until the release is approved and its signed tag exists.
 
 For unattended use, set `FLUXHEIM_AARCH64_LINUX_HOST`,
 `FLUXHEIM_LINUX_SSH_KEY`, `FLUXHEIM_WINDOWS_X64_HOST`, and

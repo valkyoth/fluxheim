@@ -1,9 +1,15 @@
 # HTTP/3 And QUIC Commit Plan
 
-Status: planned `1.9.0` implementation train. Commit 1 is not authorized yet.
-Do not begin protocol code until the `1.8` cross-platform parity closeout is
-accepted at an exact commit hash. That closeout does not require a `1.8.3`
-release tag unless it contains an end-user fix or feature worth publishing.
+Status: Commit 1 authorized on 2026-10-08; candidate source/scope work is in
+progress from `fc1b5983af97434786065c08cab2202cb544be6b`. The released `1.8.2`
+baseline is `6ed82b5a9ebd5b8f1bb4bc03f986edd9a33ae855`; no new `1.8.3` tag is
+required for the intervening documentation/build-helper changes. This records
+the user's start authorization, not a fresh cross-platform qualification claim.
+Commit 2 remains blocked on Commit 1 scope approval, pentest/retest, and green
+GitHub checks. The user also explicitly included a tooling/dependency refresh
+in this checkpoint; review the entire diff from the baseline, not only probes.
+The development workspace is versioned `1.9.0` to distinguish `main` from the
+published `1.8.2`; this is not release acceptance or HTTP/3 availability.
 
 ## Decision Summary
 
@@ -301,8 +307,12 @@ support.
 
 ## Commit 1 - Finite Scope And Source Lock
 
-Commit status: planned; do not begin until the `1.8` closeout baseline is
-recorded and the user authorizes Commit 1.
+Commit status: authorized candidate from
+`fc1b5983af97434786065c08cab2202cb544be6b`; not accepted. Implementation and
+verification are recorded in [the source contract](http3-source-contract.md)
+and [machine-readable source lock](http3-source-lock.json). Address-policy
+approval, pentest/retest, and GitHub-green evidence are still required before
+Commit 2. No production HTTP/3 listener or feature is enabled.
 
 Goal: freeze the standards, dependency, feature, and non-goal boundaries before
 network code exists.
@@ -491,6 +501,10 @@ Goal: establish bounded HTTP/3 protocol state before application dispatch.
 Deliverables: settings validation, required unidirectional streams, QPACK
 capacity and blocked-stream limits, stream-type handling, GOAWAY primitives,
 priority parsing policy, and protocol error mapping.
+The Commit 1 source lock selects static/literal QPACK: local dynamic-table
+capacity and blocked-stream allowance stay zero. Do not invent dynamic-QPACK
+support absent from the admitted library API; peer attempts beyond these
+settings require protocol-correct rejection tests, not a new decompressor.
 
 Verification: duplicate/invalid settings, missing control streams, forbidden
 stream closure, unknown stream types, oversized fields, QPACK blocking and
