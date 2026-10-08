@@ -35,6 +35,8 @@ request path for static content, redirects, reverse proxying to existing
 HTTP/1.1 or HTTP/2 origins, PHP/FastCGI dispatch, cache, load balancing, header
 and access policy, Wasm policy when separately compiled, metrics, tracing,
 configuration reload, certificate reload, and graceful process shutdown.
+Reload support retains the existing background-load-balancer restriction;
+Commit 16 defines the exact supported and rejected cases across all protocols.
 
 The release adds a dedicated precompiled HTTP/3 profile so operators can use
 the feature without maintaining a custom Rust build. The existing `full`
@@ -85,9 +87,12 @@ The required boundary is:
 
 1. `fluxheim-http3` owns provider-neutral endpoint, certificate-generation,
    connection, request, response, error, readiness, and shutdown types.
-2. A private QUIC TLS adapter owns all `quinn`, `h3`, rustls, ring, and AWS-LC
-   types. Those dependency types cannot cross into routing, cache, proxy,
-   configuration, observability, or runtime ownership APIs.
+2. Private transport and HTTP/3 adapters own new `quinn`, `h3`, and `h3-quinn`
+   types; the private QUIC TLS adapter owns their concrete cryptographic types.
+   None may escape through the new shared HTTP or public HTTP/3 interfaces into
+   routing, cache, proxy, configuration, observability, or runtime ownership APIs.
+   Existing reviewed TCP TLS/provider modules may retain their rustls, ring,
+   and AWS-LC dependencies. This is not a mandate to rewrite all existing TLS.
 3. Provider selection is represented by a bounded Fluxheim-owned capability
    identity. Application code must not branch on ring-specific or AWS-LC-
    specific algorithms, concrete key types, error strings, or global provider
@@ -97,9 +102,10 @@ The required boundary is:
    classes. Secret-bearing intermediate state stays inside the selected
    provider adapter.
 5. QUIC token, retry, reset, connection-ID, ticket, and packet-protection key
-   derivation must each have an explicit owner. No direct crypto dependency may
-   appear outside the approved TLS/QUIC adapter merely because the initial
-   stack exposes a convenient helper.
+   derivation must each have an explicit owner. No new QUIC crypto dependency
+   may appear outside the approved TLS/QUIC adapter merely because the initial
+   stack exposes a convenient helper. Existing TLS owners are inventoried at
+   Commit 1; exceptions cannot silently expand during implementation.
 6. Tests use protocol vectors and behavior at the provider boundary rather than
    concrete rustls, ring, or AWS-LC object layout. Provider-specific tests
    remain in the adapter.
@@ -159,11 +165,16 @@ environment-specific and are never inherited from this abstraction.
 7. Zero-RTT is disabled. No route can opt in during `1.9.0`.
 8. Active connection migration, preferred addresses, multipath QUIC, QUIC
    DATAGRAM, CONNECT-UDP, MASQUE, WebTransport, and generic tunnels are excluded.
+   NAT rebinding is a separate capability, not assumed to survive a library's
+   migration-disable switch. Its supported or reconnect-required behavior must
+   be selected and accepted at Commit 1 under the address-change contract below.
 9. HTTP/3 WebSocket Extended CONNECT is deferred; clients continue to use the
-   existing HTTP/1.1 or HTTP/2 path for WebSockets.
+   existing HTTP/1.1 WebSocket path. Do not advertise Extended CONNECT support
+   or assume that rejecting an HTTP/3 request automatically retries it over TCP.
 10. Server push is not implemented.
 11. `Alt-Svc` is emitted only when the configured QUIC listener is ready. It is
-    never a decorative static promise.
+    never a decorative static promise. Readiness is local, not proof that an
+    external firewall, NAT, or client network permits UDP.
 12. SNI, `:authority`, vhost selection, Host policy, request limits, and access
     policy must produce the same decisions as HTTP/1.1 and HTTP/2.
 13. Protocol and transport errors use bounded, low-cardinality public and metric
@@ -176,6 +187,65 @@ environment-specific and are never inherited from this abstraction.
 16. No protocol-neutral module may import or name the selected QUIC
     cryptographic implementation. Future Brynja substitution must remain
     possible without rewriting routing, cache, proxy, policy, or observability.
+
+## Shared Body And Artifact Contracts
+
+The existing shared request/response path includes buffered bodies; writing a
+`Vec<u8>` in chunks is not end-to-end streaming. Commit 2 records current
+behavior without claiming it streams. Commit 4 owns the shared body contract,
+its implementation, and migration of HTTP/1.1 and HTTP/2 consumers before the
+HTTP/3 adapters in Commits 9 and 10 use it. It must define bounded buffered and
+streaming bodies, ownership, trailers, cancellation, backpressure, and retained
+resource lifetimes without exposing a protocol library type. Freeze an acyclic
+crate dependency graph; shared types must not require server and HTTP/3 crates
+to depend on each other.
+
+Commit 12 connects proxy/PHP producers to that contract; Commit 14 verifies
+cache, compression, digest, and Wasm interactions. Paths that inherently need
+buffering or spooling must have explicit admission limits and documented
+behavior. Streaming acceptance requires first-byte delivery before producer
+completion and bounded memory as total body size grows, not just a successful
+large response. Existing HTTP/1.1 and HTTP/2 tests must remain green through
+each shared change.
+
+The new `profile-http3` explicitly includes `profile-full`, `http3`, `php-fpm`,
+`acme-client`, `metrics`, `metrics-otlp`, `otel-tracing`, and `otel-otlp`.
+This does not change `profile-full` or add Wasm to either profile. Optional Wasm
+compatibility uses a separately declared feature-matrix build and is not
+claimed for the stock HTTP/3 archive.
+
+Commit 3 freezes this feature set in one packaging contract consumed by native
+archives, container builds, validators, and live tests. Archives include the
+Fluxheim and ACME companion binaries. PHP/FastCGI support is compiled in on
+every supported platform; a PHP runtime is external to the archive. Windows
+remains external FastCGI only. Container metadata must state whether PHP-FPM
+is bundled; when it is not, the live fixture supplies an external runtime.
+Required PHP tests may not skip because the fixture was not provisioned. ACME
+and observability capabilities are checked in the actual packaged binaries,
+not an expanded test-only build.
+
+## Address-Change Contract
+
+Commit 1 must probe the exact pinned Quinn configuration and freeze separate
+outcomes for source-port rebinding, source-IP changes, and deliberate active
+migration. Record whether the library switch controls acceptance of new paths,
+the `disable_active_migration` transport parameter, or both. The source lock
+cannot pass with an unspecified "test rebinding" requirement.
+
+The preferred contract permits validated NAT rebinding while excluding active
+migration. If the pinned stack cannot implement that distinction, stop at
+Commit 1 for an explicit scope decision: either accept a standards-reviewed,
+documented reconnect-required limitation, with bounded failure/reconnect tests,
+or revise the dependency/scope choice. Do not silently enable unrestricted
+migration, patch transport security ad hoc, or promise seamless rebinding.
+
+For any admitted address change, Commit 7 must define original and current
+validated peer identities, re-evaluate IP access/trusted-proxy policy before
+dispatch from the new path, and transfer per-prefix accounting without evasion
+or leaked permits. Unvalidated packets cannot change application identity.
+The reconnect-only choice must instead prove that a new connection receives
+fresh admission and policy checks. Commit 21 executes the selected outcomes;
+it does not choose the policy for the first time.
 
 ## Configuration Direction
 
@@ -237,15 +307,19 @@ recorded and the user authorizes Commit 1.
 Goal: freeze the standards, dependency, feature, and non-goal boundaries before
 network code exists.
 
-Deliverables: standards matrix; exact `quinn`, `h3`, rustls, Tokio, and HTTP
-crate compatibility record; dependency feature graph; unsafe-code and advisory
+Deliverables: standards matrix; exact `quinn`, `h3`, `h3-quinn`, rustls, Tokio,
+and HTTP crate compatibility record; dependency feature graph; unsafe-code and advisory
 review; supported-platform statement; a finite requirement-to-commit matrix;
 and a Brynja gap matrix covering every TLS 1.3 and QUIC cryptographic capability
 without adding a runtime or build dependency on Brynja.
+Include the existing TLS dependency allowlist, the shared-body refactor scope,
+the archive feature contract, and the accepted address-change decision.
 
 Verification: dependency tree and duplicate-version checks, feature-unification
 fixtures, license and advisory gates, source-link validation, and a gate that
-rejects unclassified requirements or forbidden extensions.
+rejects unclassified requirements or forbidden extensions. Use isolated
+feasibility probes for provider integration, QPACK/streaming APIs, and the
+address-change contract before promising capabilities of the selected stack.
 
 Exit criteria: every `1.9.0` requirement is assigned once, every exclusion is
 explicit, and no runtime dependency is enabled in existing profiles.
@@ -266,7 +340,9 @@ body limits, trailers, cancellation, informational responses, static files,
 redirects, proxy, PHP, cache, load balancing, errors, and policy hooks.
 
 Verification: run the fixtures through HTTP/1.1 and HTTP/2 and record expected
-status, headers, body, cache state, metrics, and cancellation behavior.
+status, headers, body, cache state, metrics, and cancellation behavior. Record
+current buffering/spooling, first-byte timing, and memory behavior separately
+from the streaming acceptance cases Commit 4 must add.
 
 Exit criteria: HTTP/3 parity is measured against executable behavior rather
 than a separate interpretation of configuration.
@@ -281,15 +357,16 @@ GitHub checks.
 
 Goal: add an inert, fully validated operator contract.
 
-Deliverables: `http3` feature, dedicated
-`profile-http3 = ["profile-full", "http3"]`, typed bounded configuration,
+Deliverables: `http3` feature, dedicated `profile-http3` with the exact feature
+set in the shared body and artifact contracts, typed bounded configuration,
 listener collision checks, rustls/TLS 1.3 requirements, OpenSSL-only rejection,
 platform validation, config-tester output, examples, and redacted diagnostics.
 
 Verification: default-off dependency graph, all valid and invalid combinations,
 duplicate/broad/zero/overflowing limits, IPv4/IPv6 listener conflicts, unknown
 fields, profile compile checks, and proof that existing configurations are
-unchanged.
+unchanged. Assert PHP, ACME, and observability capabilities in the packaging
+feature graph, plus absent Wasm and absent QUIC in unchanged profiles.
 
 Exit criteria: configuration can be reviewed independently and cannot start a
 listener yet.
@@ -298,28 +375,40 @@ Pentest stop: pentest the exact Commit 3 feature, profile, configuration, and
 provider-selection boundary. Remediate, retest, and wait for green GitHub checks
 before authorizing Commit 4.
 
-## Commit 4 - Fluxheim HTTP/3 Crate Boundary
+## Commit 4 - Shared Streaming And HTTP/3 Crate Boundary
 
 Commit status: planned; blocked on accepted Commit 3 pentest, retest, and
 GitHub checks.
 
-Goal: isolate external QUIC and HTTP/3 APIs behind Fluxheim-owned types.
+Goal: establish shared streaming and isolate external QUIC and HTTP/3 APIs
+behind Fluxheim-owned types before protocol adaptation starts.
 
 Deliverables: `crates/fluxheim-http3`; endpoint, connection, request, response,
 error, readiness, and shutdown interfaces; a private QUIC TLS provider adapter;
 dependency adapters; module-size and unsafe-code policy; and test-only in-memory
 boundaries. Freeze which owners create, rotate, expose, and destroy every
 secret-bearing TLS, packet-protection, token, ticket, and reset-key value.
+Implement the shared body contract above and migrate the HTTP/1.1 and HTTP/2
+handler/encoder interfaces, retaining bounded-buffer adapters where needed.
+This checkpoint may use multiple implementation commits, but its shared-model
+and regression evidence must be accepted before Commit 5 begins.
 
-Verification: forbidden dependency-direction checks, default/all-feature builds,
-public API inspection, mock transport and crypto-provider tests, and proof that
-other domain crates do not import or name `quinn`, `h3`, rustls, ring, AWS-LC,
-or Brynja directly.
+Verification: forbidden dependency-direction checks, default builds, explicit
+supported feature/provider combinations, and expected compile/config rejection
+of incompatible combinations. `--all-features` is not a success criterion.
+Inspect public APIs, test mock transport/crypto providers, and prohibit new
+QUIC/provider types outside approved adapters while preserving the Commit 1
+allowlist for existing TLS modules. Run the full HTTP/1.1/HTTP/2 parity suites,
+streamed producer/consumer tests, bounded-buffer compatibility, cancellation,
+trailer, retained-resource, and slow-reader memory tests.
 
-Exit criteria: protocol dependencies have one reviewable ownership boundary.
+Exit criteria: protocol dependencies have one reviewable ownership boundary,
+shared streaming has an executable contract, and no HTTP/3 adapter needs to
+invent a separate body model or bypass existing resource admission.
 
-Pentest stop: pentest the exact Commit 4 crate, dependency, unsafe-code,
-secret-owner, and replaceable-provider boundary. Remediate, retest, and wait for
+Pentest stop: pentest the exact Commit 4 shared-body, HTTP/1.1/HTTP/2, crate,
+dependency, unsafe-code, secret-owner, and replaceable-provider boundary.
+Remediate, retest, and wait for
 green GitHub checks before authorizing Commit 5.
 
 ## Commit 5 - QUIC TLS And Certificate Generations
@@ -378,6 +467,8 @@ Goal: bound pre-authentication CPU, memory, bandwidth, and state.
 Deliverables: global/per-listener/per-prefix connection limits, handshake caps,
 address-validation retry policy, rotating authenticated token keys, idle and
 handshake timeouts, bounded connection IDs, and overload shedding.
+Implement the accepted Commit 1 address-change, peer-identity, and accounting
+contract, including the selected rebinding or reconnect behavior.
 
 Verification: spoofed-source simulations, invalid/replayed/expired tokens,
 token rotation, retry amplification accounting, connection floods, per-prefix
@@ -440,7 +531,8 @@ green GitHub checks before authorizing Commit 10.
 Commit status: planned; blocked on accepted Commit 9 pentest, retest, and
 GitHub checks.
 
-Goal: send shared Fluxheim responses without buffering or cancellation leaks.
+Goal: send Commit 4 shared streaming responses without whole-body materialization
+in the HTTP/3 adapter or cancellation leaks; preserve admitted buffered paths.
 
 Deliverables: status/header encoding, informational-response policy, streaming
 body writes, trailers, HEAD/no-body handling, flow-control backpressure,
@@ -449,6 +541,8 @@ response timeout, reset propagation, and completion accounting.
 Verification: empty/large/streamed bodies, HEAD, 1xx, 204, 304, trailers,
 client cancellation, blocked writers, partial writes, handler failure, shutdown,
 and memory bounds under many slow readers.
+Measure first-byte delivery before producer completion and memory as transfer
+size grows; chunking an already buffered response does not pass streaming proof.
 
 Exit criteria: request and response streams have symmetric bounded lifecycle
 and existing handlers do not depend on an HTTP/3 type.
@@ -494,9 +588,13 @@ PHP external/managed platform rules, and generated 502/503 behavior.
 Verification: verified TLS and mTLS origins, chunking removal, trailers,
 Expect/continue policy, slow/failed origins, retry boundaries, upload spooling,
 FastCGI errors, cancellation, and no accidental HTTP/3 origin attempt.
+Prove end-to-end first-byte/backpressure behavior for streaming paths and
+explicit limits/cleanup for paths requiring buffering or upload spooling.
 
 Exit criteria: normal proxy and PHP applications work over downstream HTTP/3;
-WebSocket upgrade receives an explicit fallback-compatible response.
+unsupported Extended CONNECT is not advertised and is rejected deterministically.
+Separately prove the existing HTTP/1.1 WebSocket path with a compatible client;
+an HTTP/3 rejection alone is not evidence of automatic fallback.
 
 Pentest stop: pentest the exact Commit 12 proxy, upstream TLS, retry, FastCGI,
 upload, cancellation, and protocol-downgrade boundary. Remediate, retest, and
@@ -537,6 +635,9 @@ queue behavior, and separately enabled Wasm access/header/route/cache hooks.
 Verification: hit/miss/stale parity, credential bypass, coalescing, encrypted
 disk cache, backend retry/cancellation, queue timeout, affinity, Wasm deny/trap/
 timeout, and no QUIC identifiers in cache or persistence keys.
+Exercise the Commit 4 streaming contract through cache fills, compression,
+digest generation, and Wasm hooks. Verify bounded buffering/spooling where
+required, cancellation cleanup, and unchanged HTTP/1.1/HTTP/2 behavior.
 
 Exit criteria: application state is protocol-neutral and HTTP/3 adds no cache
 poisoning or backend-selection dimension.
@@ -574,18 +675,51 @@ GitHub checks.
 
 Goal: define safe lifecycle and client discovery semantics.
 
-Deliverables: atomic route and certificate reload, listener readiness state,
+Deliverables: generation-safe route and certificate reload, listener readiness state,
 readiness-gated `Alt-Svc`, bounded advertisement lifetime, GOAWAY drain, stop-new-
 connection behavior, stream completion deadline, forced close code, and stale
 advertisement guidance.
 
-Verification: failed reload rollback, certificate generation rollover, no
+Reload contract: retain the existing rejection of in-process route reload when
+background load-balancer services are active. Test that rejection across TCP
+and QUIC without losing the active generation; use the documented restart path
+for such configuration changes. Removing this restriction is not hidden scope
+of HTTP/3. Live suites use separate fixtures for supported route reload and
+load-balancer reload rejection.
+
+For supported route reload, build and validate the replacement before one
+shared generation publication used by HTTP/1.1, HTTP/2, and HTTP/3. Each request
+pins one generation. Certificate reload is a separate transaction: prepare
+both TCP and QUIC material before publishing the certificate generation for
+new handshakes; established connections may retain the old generation. Do not
+claim a transaction combining arbitrary route and certificate changes.
+
+Inject failure in TCP preparation, QUIC preparation, and before publication.
+Neither protocol may observe a partially prepared generation; retain the prior
+generation and advertise only capabilities consistent with the active state.
+Test concurrent handshakes/requests and distinguish admitted old-generation
+work from new work after publication.
+
+Verification: failed reload retention, certificate generation rollover, no
 advertisement before readiness, disabled-listener suppression, TCP/UDP port
 translation, graceful active requests, drain timeout, repeated signals, and
-restart behavior for clients with cached `Alt-Svc`.
+restart behavior for clients with cached `Alt-Svc`. Restrict advertisements to
+eligible authorities with matching TLS and routing policy. Local readiness
+does not prove external UDP reachability.
 
-Exit criteria: enabling advertisement cannot point clients at an unavailable
-listener, and shutdown has deterministic bounded behavior.
+Define a fallback fixture used by Commits 18-21: a pinned fallback-capable
+client learns and retains `Alt-Svc`, proves HTTP/3 use, then encounters a
+deliberate UDP black hole while TCP remains available. Within a recorded
+client-specific deadline, a safe request must complete over HTTP/1.1 or HTTP/2
+with the same authority, TLS verification, and response marker. Repeat after
+disabling HTTP/3 with the advertisement still cached. Retain protocol, timing,
+and failure-injection evidence. Never force TCP manually and call it automatic
+fallback, or infer that arbitrary non-idempotent requests can be replayed.
+
+Exit criteria: no advertisement is emitted for a locally unavailable/ineligible
+listener, supported clients recover from externally blocked UDP and stale
+advertisements within the tested deadlines, reload obeys the declared generation
+and load-balancer restrictions, and shutdown has deterministic bounded behavior.
 
 Pentest stop: pentest the exact Commit 16 reload, readiness, discovery, GOAWAY,
 drain, shutdown, and stale-advertisement boundary. Remediate, retest, and wait
@@ -603,6 +737,10 @@ Deliverables: `http3` archives for Linux x86_64/aarch64, macOS Apple Silicon,
 and Windows x86_64; matching container variants; UDP port documentation;
 rootless Podman guidance; checksums, SBOM, and reproducibility evidence; and
 platform test-starter entries.
+Use the exact Commit 3 feature contract for every HTTP/3 artifact; validate
+PHP/FastCGI, ACME companion, and observability capabilities in extracted
+binaries. Record container PHP runtime presence and provision external PHP
+where absent. Do not add test-only features to make the live matrix pass.
 
 Verification: native archive binary inspection, container UDP exposure,
 read-only configuration and certificate mounts, archive profile validation,
@@ -629,7 +767,7 @@ architectures and through the production rootless container boundary.
 Deliverables: a live script that starts the extracted Linux `profile-http3`
 binary and a separate script that starts the release-shape rootless Podman
 image with the same numeric TCP and UDP ports published; ephemeral TLS material;
-static, proxy, cache, load-balancer, PHP/external FastCGI where available, and
+static, proxy, cache, load-balancer, provisioned PHP/external FastCGI, and
 generated-error routes; and retained bounded evidence containing artifact/image
 identity, config, client version, negotiated protocol, response markers, logs,
 metrics, reload, drain, and exit status.
@@ -637,9 +775,10 @@ metrics, reload, drain, and exit status.
 Verification: use a pinned independent client process with an explicit HTTP/3-
 only mode and prove `HTTP/3` negotiation from client evidence, not merely a 200
 response. Exercise at least one request across the container network and host
-UDP publication boundary, verify TCP HTTP/1.1 or HTTP/2 fallback on the same
-service, reload certificates/configuration, stop and restart the container, and
-prove graceful and forced shutdown cleanup. Run Linux x86_64 and aarch64 native
+UDP publication boundary, run the Commit 16 learned-Alt-Svc/blocked-UDP fallback
+fixture, verify supported reload and load-balancer reload rejection in separate
+fixtures, stop and restart the container, and prove graceful and forced shutdown
+cleanup. Run Linux x86_64 and aarch64 native
 jobs; cross-compilation does not satisfy either row.
 
 Exit criteria: a clean host can start the packaged binary and rootless image,
@@ -667,10 +806,12 @@ version, negotiated protocol, response, log, reload, drain, and exit evidence.
 
 Verification: prove the binary is Mach-O arm64, verify ad-hoc signature state
 without treating it as publisher trust, perform HTTP/3-only static, proxy,
-cache, load-balancer, and representative body-stream requests, confirm TCP
-HTTP/1.1/HTTP/2 fallback, reload configuration and certificates, reject an
-invalid reload without losing service, and exercise graceful and deadline-
-forced shutdown. The server and client must be different processes; Rust unit
+cache, load-balancer, provisioned external PHP/FastCGI, and representative
+body-stream requests, run the Commit 16 learned-Alt-Svc/blocked-UDP fallback
+fixture, reload supported configuration and certificates, reject invalid and
+background-load-balancer route reload without losing service, and exercise
+graceful and deadline-forced shutdown. The server and client must be different
+processes; Rust unit
 tests, cross-compilation, and a same-process QUIC peer do not satisfy this gate.
 
 Exit criteria: the extracted unsigned macOS archive runs on a real supported
@@ -699,9 +840,10 @@ HTTP/3 client against an explicitly provided test hostname or address.
 
 Verification: prove native MSVC execution, HTTP/3-only static, proxy, cache,
 load-balancer, external FastCGI/PHP, request-body, and generated-error paths;
-verify TCP HTTP/1.1/HTTP/2 fallback; confirm UDP is externally reachable rather
-than inferring success from a local request; reload configuration and
-certificates; reject invalid reload; stop/restart; enforce graceful and forced
+run the Commit 16 learned-Alt-Svc/blocked-UDP fallback fixture; confirm UDP is
+externally reachable rather than inferring success from a local request;
+reload supported configuration and certificates; reject invalid and
+background-load-balancer route reload; stop/restart; enforce graceful and forced
 shutdown; and remove temporary services, processes, files, and firewall rules.
 Cross-compilation, Wine, WSL, or a Windows container does not satisfy this
 native gate.
@@ -724,18 +866,23 @@ Goal: prove behavior beyond platform-specific happy-path clients and networks.
 
 Deliverables: pinned independent client matrix, browser-compatible smoke,
 version negotiation, IPv4/IPv6, loss/reordering/duplication/delay scenarios,
-NAT rebinding behavior with migration disabled, MTU boundaries, and long-lived
-transfer tests.
+the accepted Commit 1 NAT rebinding/reconnect outcomes, MTU boundaries, and
+long-lived transfer tests.
 
 Verification: at least two independent HTTP/3 implementations, malformed packet
 corpus, handshake loss, stream loss, reorder, duplicate packets, black-hole MTU,
 idle transitions, server overload, and mixed HTTP/1.1/HTTP/2/HTTP/3 traffic.
+Execute source-port and source-IP change cases with assertions for path
+validation, policy re-evaluation, and per-prefix admission or fresh-connection
+checks as selected at Commit 1. Exercise learned-Alt-Svc fallback with a pinned
+browser-family client as well as the platform fixtures; report actual TCP
+negotiation after UDP failure, not only successful independent TCP requests.
 
 Exit criteria: success does not depend on Fluxheim's own test peer or a perfect
 loopback network.
 
 Pentest stop: pentest the exact Commit 21 independent-client, malformed-packet,
-loss, reordering, MTU, overload, migration-disabled, and mixed-traffic
+loss, reordering, MTU, overload, address-change, fallback, and mixed-traffic
 boundary. Remediate, retest, and wait for green GitHub checks before authorizing
 Commit 22.
 
@@ -796,8 +943,9 @@ value.
 
 User value: clients can reach static, proxy, PHP, cache, and load-balanced
 Fluxheim applications over standards-based QUIC/HTTP/3 using an explicit
-precompiled profile, with automatic readiness-gated discovery and fallback to
-HTTP/1.1 or HTTP/2.
+precompiled profile, with readiness-gated discovery and tested client fallback
+to HTTP/1.1 or HTTP/2. External UDP availability and recovery timing depend on
+the deployment and client; supported clients and measured deadlines are published.
 
 ### v1.9.1 - HTTP/3 Origins
 
@@ -859,9 +1007,12 @@ from compile and unit-test evidence:
    marker, status, selected vhost, security headers, access-log protocol, and
    low-cardinality metrics. A response from another process or stale server
    must not pass.
-5. TCP and UDP use the documented deployment ports concurrently. Tests prove
-   HTTP/1.1 or HTTP/2 fallback separately and prove HTTP/3 over UDP rather than
-   inferring UDP availability from configuration or `Alt-Svc`.
+5. TCP and UDP use the documented deployment ports concurrently. Prove HTTP/3
+   in HTTP/3-only mode, then use a fallback-capable client for the Commit 16
+   learned-Alt-Svc/blocked-UDP and disabled-listener cases. Record the cached
+   advertisement, injection boundary, negotiated TCP protocol, and deadline.
+   Restore network state during cleanup. A separate forced-TCP request is a
+   coexistence check, not fallback evidence.
 6. Every live run has bounded startup, request, reload, drain, shutdown, and
    cleanup deadlines. Failure retains bounded diagnostics; success removes
    temporary processes, containers, firewall rules, certificates, and files.
@@ -874,6 +1025,10 @@ from compile and unit-test evidence:
 9. The release candidate reruns the Linux/container, macOS, and Windows live
    scripts against final artifacts. Evidence from an earlier implementation
    commit cannot substitute for final-candidate execution.
+10. Use the Commit 3 artifact feature contract unchanged. Provision real external
+    PHP/FastCGI where needed and distinguish supported reload from required
+    background-load-balancer reload rejection. Neither test-only features nor
+    omitted runtime prerequisites can satisfy an advertised capability.
 
 ## Required Test Matrix
 
@@ -889,13 +1044,18 @@ The `1.9.0` release candidate must cover:
 - valid, expired, malformed, reloaded, SNI-selected, and client-auth TLS;
 - HTTP/1.1, HTTP/2, and HTTP/3 differential semantics;
 - independent command-line and browser-family clients;
+- learned-Alt-Svc fallback under blocked UDP and after disabling HTTP/3;
+- the accepted NAT rebinding/reconnect, peer-identity, and accounting cases;
 - loss, delay, reordering, duplication, MTU, cancellation, idle, and overload;
 - rootless containers with explicit UDP publication;
 - external Windows UDP reachability and real Apple Silicon HTTP/3 negotiation;
-- configuration reload, certificate reload, drain, shutdown, and restart; and
+- supported generation-safe configuration/certificate reload, load-balancer
+  reload rejection without service loss, drain, shutdown, and restart; and
 - malformed protocol, fuzz, memory-bound, descriptor/handle, logging-redaction,
   and metric-cardinality checks.
 
-Any matrix row that cannot run on a platform must be rejected by configuration
-or documented as an intentional limitation before release. It must never be
-silently skipped while the artifact remains advertised as supported.
+An unsupported behavior requires an explicit scope decision, documented
+limitation, and a rejection/recovery test where applicable; update the support
+matrix before acceptance. Missing test infrastructure is not an unsupported
+behavior and blocks the required row. It must never be silently skipped while
+the artifact remains advertised as supported.
