@@ -52,9 +52,10 @@ def validate_scope(data: dict, acceptance: bool = False) -> None:
     require(data["address_policy"] == "seamless-validated-migration", "seamless address policy is required")
     cases = data["address_change_requirements"]
     require(set(cases) == ADDRESS_REQUIREMENTS and len(cases) == len(ADDRESS_REQUIREMENTS), "address-change coverage drift")
-    require(data["address_policy_evidence"] in {"pending-qualification", "source-qualified"}, "unknown address-policy evidence")
+    require(data["address_policy_evidence"] in {"pending-qualification", "blocked-api-gap", "source-qualified"}, "unknown address-policy evidence")
     if acceptance:
-        require(data["address_policy_evidence"] == "source-qualified", "address-policy source qualification is still required")
+        require(data["address_policy_evidence"] == "source-qualified",
+                f"address-policy source qualification is still required ({data['address_policy_evidence']})")
 
 
 def dependency_names(table: dict) -> set[str]:

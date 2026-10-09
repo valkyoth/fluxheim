@@ -25,7 +25,10 @@ published archive, or production HTTP/3 listener yet.
 Follow the [HTTP/3 commit plan](../docs/http3-quic-commit-plan.md). Commit 1 is a
 candidate, not an accepted checkpoint: seamless NAT rebinding and active client
 migration are selected requirements, but source qualification of safe path and
-policy hooks remains pending, followed by pentest/retest and GitHub green.
+policy hooks is blocked by an identified API gap. Resolving it still requires
+pentest/retest and GitHub green. Additional loopback probes demonstrate same-stream transfer
+continuity, but not the required authorization/admission boundary; see the
+[feasibility result](../docs/http3-migration-feasibility.md).
 Reconnect-only behavior is not an acceptable substitute. Later checkpoints
 implement the listener, shared request/response
 integration, packaging, and real-client/container/native-platform acceptance.

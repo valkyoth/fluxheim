@@ -14,6 +14,8 @@ mod tests {
     use rustls::pki_types::PrivatePkcs8KeyDer;
     use tokio::time::timeout;
 
+    mod migration;
+
     fn provider() -> Arc<rustls::crypto::CryptoProvider> {
         #[cfg(feature = "aws-lc")]
         let provider = rustls::crypto::aws_lc_rs::default_provider();

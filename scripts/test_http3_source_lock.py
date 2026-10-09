@@ -68,6 +68,12 @@ class SourceLockTests(unittest.TestCase):
             with self.subTest(policy=policy), self.assertRaisesRegex(ValueError, "seamless"):
                 gate.validate_scope(self.scope)
 
+    def test_known_api_gap_is_not_acceptance(self):
+        self.scope["address_policy_evidence"] = "blocked-api-gap"
+        gate.validate_scope(self.scope)
+        with self.assertRaisesRegex(ValueError, "blocked-api-gap"):
+            gate.validate_scope(self.scope, acceptance=True)
+
     def test_address_change_coverage_cannot_drift(self):
         for case in gate.ADDRESS_REQUIREMENTS:
             for replacement in ([], ["unknown"], [case, case]):

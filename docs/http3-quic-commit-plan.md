@@ -12,6 +12,10 @@ included a tooling/dependency refresh
 in this checkpoint; review the entire diff from the baseline, not only probes.
 The development workspace is versioned `1.9.0` to distinguish `main` from the
 published `1.8.2`; this is not release acceptance or HTTP/3 availability.
+The [2026-10-09 migration investigation](http3-migration-feasibility.md) proves
+loopback stream continuity but identifies a policy-integration API gap in the
+pinned candidate. The acceptance gate remains closed; green structural CI is
+not source qualification.
 
 ## Decision Summary
 
@@ -358,6 +362,10 @@ seamless migration; source qualification, pentest/retest, and GitHub-green
 evidence are still required before Commit 2. The reported clean pentest through
 `ba3959f6` predates this scope revision and does not accept it automatically.
 No production HTTP/3 listener or feature is enabled.
+At the user's request, additional qualification probes demonstrate unchanged
+H3 streams across IP/port changes and application-visible peer/data changes
+before path validation. The machine evidence state is `blocked-api-gap`, not
+`source-qualified`; see the investigation above before accepting this checkpoint.
 
 Goal: freeze the standards, dependency, feature, and non-goal boundaries before
 network code exists.

@@ -111,7 +111,11 @@ explicit reviewed contract update, not a relaxed validator to hide a failure.
 **User-selected scope (2026-10-08):** seamless validated NAT rebinding and active
 client migration, preserving the existing connection and HTTP/3 streams.
 Reconnect-required behavior is not the release contract. Source qualification
-for this expanded requirement remains pending; do not advance to Commit 2.
+for this expanded requirement is blocked by an API gap; do not advance to
+Commit 2. The [2026-10-09 feasibility investigation](http3-migration-feasibility.md)
+proves ongoing loopback HTTP/3 stream continuity but also demonstrates that
+current peer identity and stream bytes are exposed before path validation.
+It does not qualify IP-policy re-admission or prefix-budget transfer.
 
 Source inspection of quinn-proto 0.11.19:
 `transport_parameters.rs` sets `disable_active_migration` when migration is
@@ -241,7 +245,8 @@ sh scripts/smoke_acme_mount_boundary.sh
 ```
 
 The structural gate requires the selected seamless scope and its complete case
-inventory, but permits explicitly pending source qualification during review.
+inventory, but permits explicitly pending or API-blocked source qualification
+during review.
 `python3 scripts/validate_http3_source_lock.py --acceptance` must reject it until
 source qualification is recorded. That field is a reviewed evidence declaration,
 not automated proof: acceptance also requires review of the source/probe results
@@ -271,3 +276,7 @@ the new forced-color regression passes afterward. Source acceptance still
 correctly rejects pending migration qualification. No production Rust or
 dependency changes were made in this revision; the full runtime suite above
 was not rerun for these documentation/gate changes.
+
+The subsequent migration investigation and its evidence are recorded separately
+in [HTTP/3 migration feasibility](http3-migration-feasibility.md). Earlier green
+CI and pentest results do not clear that API qualification gap.
