@@ -20,6 +20,14 @@ published archive, or production HTTP/3 listener yet.
 - Use Rust 1.99's replacement atomic update API for UDP session admission,
   preserving the existing ordering and session-limit behavior.
 
+## Independent Container Maintenance
+
+The [runtime refresh workflow](../docs/container-runtime-refresh.md) can refresh
+the latest published release's OS and PHP packages without waiting for 1.9.0.
+It uses the stable release's application sources and tests each image before
+promoting versioned aliases. Unique rebuild tags and digests identify the new
+runtime; application versions and signed Git tags do not change.
+
 ## Qualification Still Required
 
 Follow the [HTTP/3 commit plan](../docs/http3-quic-commit-plan.md). Commit 1 is a

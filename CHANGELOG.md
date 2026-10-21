@@ -11,6 +11,10 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- Add weekly and manual runtime-only refreshes for the latest published release's
+  container matrix, with fresh vendor bases/packages, live smoke gates, unique
+  rebuild tags, and versioned-alias promotion only after all builds pass.
+  Fluxheim's version, signed source tag, archives, and RPMs remain unchanged.
 - Refresh Rust to 1.99.0, published stable Cargo dependencies, Rust builder
   image digests, and pinned Docker GitHub Actions. The development workspace
   now reports 1.9.0; published releases and runtime feature profiles remain

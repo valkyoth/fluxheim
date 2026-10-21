@@ -364,6 +364,12 @@ image line adds a dedicated Wasm profile. Tags include `v1.8.2-wolfi`,
 `v1.8.2-load-balancer-wolfi`, and `v1.8.2-php-wolfi`. Wasm is not included in
 the unsuffixed full image.
 
+Released containers can receive OS/PHP security refreshes without changing the
+Fluxheim version. The weekly/manual refresh workflow tests every image before
+moving versioned aliases; digest-pinned deployments remain opt-in. See
+[container runtime refreshes](docs/container-runtime-refresh.md) for triggering
+a refresh, image identity, rollback, and deployment instructions.
+
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
 tag. The GitHub Release page is published under `v1.5.15-release` because the
 original immutable GitHub Release object for `v1.5.15` was accidentally

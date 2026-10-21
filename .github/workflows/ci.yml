@@ -18,6 +18,15 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  container-refresh-policy:
+    name: Container refresh policy regressions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 -m pip install PyYAML==6.0.3
+      - run: python3 scripts/test_container_refresh.py
+      - run: bash -n scripts/promote_container_refresh.sh
+
   checks:
     name: Format, lint, test, and audit
     runs-on: ubuntu-latest
