@@ -1,0 +1,20 @@
+name: Deferred HTTP3 research (manual only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install historical probe toolchain
+        run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt
+      - name: Install advisory checker
+        run: cargo install --locked cargo-deny --version 0.20.2
+      - name: Recheck preserved research (not production acceptance)
+        run: sh scripts/check_http3_research.sh

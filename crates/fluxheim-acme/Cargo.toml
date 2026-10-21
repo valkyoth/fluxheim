@@ -2,7 +2,7 @@
 name = "fluxheim-acme"
 version = "1.9.0"
 edition = "2024"
-rust-version = "1.99.0"
+rust-version = "1.99.1"
 license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim ACME account, challenge, renewal, and certificate storage logic."
@@ -24,7 +24,7 @@ acme-client = [
 ]
 
 [dependencies]
-base64-ng = { version = "2.0.4", optional = true }
+base64-ng = { version = "2.1.0", optional = true }
 bytes = { version = "1.12.1", optional = true }
 fluxheim-config = { path = "../fluxheim-config", features = ["acme"] }
 getrandom = "0.4.3"
@@ -38,13 +38,13 @@ instant-acme = { version = "0.8.5", default-features = false, features = ["ring"
 log = "0.4.34"
 rcgen = { version = "0.14.10", default-features = false, features = ["pem", "ring"] }
 rustix = { version = "1.1.5", features = ["fs", "process"] }
-rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"], optional = true }
-sanitization = { version = "2.1.0", features = ["alloc"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+sanitization = { version = "2.1.1", features = ["alloc"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
-sha2 = "0.11.0"
-toml = "1.1.7"
-tokio = { version = "1.53.2", default-features = false, features = ["rt", "time"], optional = true }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+toml = "1.1.8"
+tokio = { version = "1.54.0", default-features = false, features = ["rt", "time"], optional = true }
 x509-parser = { version = "0.18.1", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
@@ -53,8 +53,8 @@ windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }
-proptest = "1.11.0"
-tokio = { version = "1.53.2", default-features = false, features = ["rt", "time"] }
+proptest = "1.12.0"
+tokio = { version = "1.54.0", default-features = false, features = ["rt", "time"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rustix = { version = "1.1.5", features = ["mount"] }

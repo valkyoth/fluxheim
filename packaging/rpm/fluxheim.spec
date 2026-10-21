@@ -157,9 +157,9 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
-* Thu Oct 08 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.9.0-1
-- Start the unreleased 1.9.0 development train with isolated HTTP/3 source
-  qualification; no production HTTP/3 feature is enabled at this checkpoint.
+* Wed Oct 21 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.9.0-1
+- Focus the unreleased 1.9.0 plan on logging, metrics and operational visibility.
+  Preserve HTTP/3 qualification as deferred, manually invoked research.
 - Refresh stable dependencies, require Rust 1.99, and update pinned build tools.
 
 * Sun Sep 13 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.8.2-1

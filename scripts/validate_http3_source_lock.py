@@ -117,7 +117,7 @@ def main() -> int:
         if crypto:
             owners[path.relative_to(ROOT).as_posix()] = crypto
     require(owners == data["existing_crypto_owners"], "existing crypto-owner allowlist drift")
-    require(tomllib.loads((ROOT / "rust-toolchain.toml").read_text())["toolchain"]["channel"] == data["rust"], "toolchain drift")
+    require(tomllib.loads((PROBE / "rust-toolchain.toml").read_text())["toolchain"]["channel"] == data["rust"], "probe toolchain drift")
     manifest = tomllib.loads((PROBE / "Cargo.toml").read_text())
     validate_sources(data, manifest, (PROBE / "Cargo.lock").read_bytes(), production_names)
     print(f"HTTP/3 source lock: ok; address policy={data['address_policy']}; evidence={data['address_policy_evidence']}; no runtime admission")

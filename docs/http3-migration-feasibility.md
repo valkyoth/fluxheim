@@ -1,5 +1,9 @@
 # HTTP/3 Migration Feasibility
 
+**Deferred research as of 2026-10-21**, retained for future Brynja/Vef and
+transport evaluation. This is not an active 1.9.0 gate. The API gap remains
+unresolved; see the [resumption conditions](http3-quic-commit-plan.md).
+
 Investigation date: 2026-10-09. Comparison baseline: `d53388e5`.
 This is a Commit 1 source-qualification result, not Commit 2, production
 HTTP/3 support, or a vulnerability report against deployed Fluxheim.

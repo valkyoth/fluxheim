@@ -1,24 +1,28 @@
 # Fluxheim 1.9.0 Release Notes
 
 **Status: unreleased development draft.** `main` reports 1.9.0 to distinguish
-it from the latest published release, v1.8.2. There is no 1.9.0 release tag,
-published archive, or production HTTP/3 listener yet.
+it from the latest published release, v1.8.2. No 1.9.0 release tag or published
+archives exist yet.
 
-## Implemented In Commit 1
+## Planned Outcome
 
-- Source-lock an isolated Quinn/rustls/h3 feasibility workspace. Exercise
-  verified loopback HTTP/3 streaming and trailers, explicit crypto-provider
-  selection, and address-change/reconnect behavior without adding QUIC to
-  Fluxheim's runtime dependency graph.
-- Add machine-checked scope, dependency, feature and implementation-ownership
-  contracts, with negative regression coverage and CI integration.
-- Record future Brynja replacement interfaces and capability gaps. Brynja
-  remains future-only and is not a dependency or selectable backend.
-- Refresh Rust to 1.99.0, stable Cargo dependencies, digest-pinned Rust builder
-  images and Docker GitHub Actions. Update workspace and RPM development
-  versions together. Existing runtime feature profiles remain unchanged.
+The [observability commit plan](../docs/observability-commit-plan.md) defines
+logging, metrics and operational visibility as this release's scope:
+actionable diagnostics, bounded logging/export, request correlation,
+low-cardinality metrics and authenticated status. These implementation
+checkpoints have not started. New telemetry must preserve privacy and existing
+configuration; collectors are not mandatory to run Fluxheim.
+
+## Implemented Maintenance
+
+- Update Rust to 1.99.1, workspace dependencies and the fuzz lockfile, including
+  Wasmtime/WASI 50.0.0, sanitization 2.1.1 and base64-ng 2.1.0. Refresh pinned
+  container bases; current GitHub Actions remain pinned to immutable commits.
+- Keep workspace and RPM development metadata synchronized at 1.9.0.
 - Use Rust 1.99's replacement atomic update API for UDP session admission,
-  preserving the existing ordering and session-limit behavior.
+  preserving existing ordering and session-limit behavior.
+- Windows release-builder host metadata uses read-only HKLM information
+  instead of requiring WMI permissions for the build account.
 
 ## Independent Container Maintenance
 
@@ -28,19 +32,24 @@ It uses the stable release's application sources and tests each image before
 promoting versioned aliases. Unique rebuild tags and digests identify the new
 runtime; application versions and signed Git tags do not change.
 
+## Deferred HTTP/3 Research
+
+The [HTTP/3 plan](../docs/http3-quic-commit-plan.md), isolated source-locked
+Quinn/rustls/h3 probes and [API-gap evidence](../docs/http3-migration-feasibility.md)
+are retained for future evaluation when Brynja/Vef are more mature. Neither is
+a production dependency or an approved solution to the gap today. No production
+HTTP/3 listener or QUIC dependency was added. Reconnect-only behavior is not a
+substitute for the preserved seamless migration/security contract.
+
+Research runs only through the manual GitHub workflow or
+`sh scripts/check_http3_research.sh`, not normal CI or local release checks.
+Historical probe pins are intentionally frozen; requalification must refresh
+them and review current advisories before any production admission.
+
 ## Qualification Still Required
 
-Follow the [HTTP/3 commit plan](../docs/http3-quic-commit-plan.md). Commit 1 is a
-candidate, not an accepted checkpoint: seamless NAT rebinding and active client
-migration are selected requirements, but source qualification of safe path and
-policy hooks is blocked by an identified API gap. Resolving it still requires
-pentest/retest and GitHub green. Additional loopback probes demonstrate same-stream transfer
-continuity, but not the required authorization/admission boundary; see the
-[feasibility result](../docs/http3-migration-feasibility.md).
-Reconnect-only behavior is not an acceptable substitute. Later checkpoints
-implement the listener, shared request/response
-integration, packaging, and real-client/container/native-platform acceptance.
-
-Current source and local test evidence is in the
-[source contract](../docs/http3-source-contract.md). Successful dependency
-probes are not evidence that a packaged Fluxheim binary serves HTTP/3.
+Each observability checkpoint needs focused regressions, incremental pentest,
+retest and green GitHub checks. Final acceptance additionally requires real
+container/collector and native Linux, Apple Silicon macOS and Windows x86_64
+archive tests on the final candidate. A skipped collector, successful
+cross-compilation or historical platform run is not current runtime evidence.

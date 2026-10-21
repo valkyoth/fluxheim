@@ -244,7 +244,7 @@ its output directory to the Linux release machine. Set
 Linux helper accepts the Rust and Fluxheim versions as positional arguments:
 
 ```bash
-scripts/release_helper.sh 1.99.0 1.9.0
+scripts/release_helper.sh 1.99.1 1.9.0
 ```
 
 This example targets the upcoming 1.9.0 release. Do not run the exact-tag

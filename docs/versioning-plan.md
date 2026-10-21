@@ -1,11 +1,13 @@
 # Versioning Plan
 
-Current development: **1.9.0 (unreleased)**. The detailed
-[HTTP/3 and QUIC commit plan](http3-quic-commit-plan.md) supersedes the earlier
-`1.9.x` feature-release split below: implement and qualify numbered checkpoints
-before publishing 1.9.0, with later releases scoped as complete follow-up work.
-The latest published baseline remains 1.8.2. This version marker does not
-enable HTTP/3.
+Current development: **1.9.0 (unreleased)**, focused on logging, metrics and
+operational visibility through the [observability commit plan](observability-commit-plan.md).
+It supersedes older assignments of HTTP/3 to 1.9 and observability to 1.10/1.13.
+The [HTTP/3 plan](http3-quic-commit-plan.md) is deferred research for future
+Brynja/Vef capability review; its original version numbers are historical.
+The latest published baseline remains 1.8.2. Later exploratory version numbers
+below are provisional, not promises to deliver every idea or to renumber the
+management API/UI proposal automatically.
 
 Fluxheim should use SemVer, but with a conservative interpretation: a feature is
 not considered stable just because it compiles. A feature becomes stable only
@@ -1130,7 +1132,7 @@ Reference parity map:
 | mTLS/client auth | NGINX `ssl_verify_client`, HAProxy `verify required`, Envoy TLS validation context | Listener-level required/optional client cert verification, CA bundle validation, identity variables, and route/admin policy use |
 | PROXY protocol | NGINX/HAProxy/Envoy listener and upstream support | Accept v1/v2 only from trusted peers; optionally send v1/v2 upstream |
 | gRPC | Envoy first-class gRPC/trailers, NGINX `grpc_pass` | Preserve HTTP/2 trailers/status/body limits/timeouts; no transcoding in 1.4 |
-| HTTP/3/QUIC | NGINX/Caddy/Envoy support | Track as Fluxheim-owned `1.9` protocol milestone using Rust `quinn`/`h3` after the `1.8` macOS/Windows production-parity line is stable |
+| HTTP/3/QUIC | NGINX/Caddy/Envoy support | Deferred; requalify transport and crypto capabilities when Brynja/Vef are more mature, with no release number assigned |
 | Traffic mirroring | NGINX `mirror`, Envoy shadowing | First slice: safe bodyless shadow requests with deterministic sampling, timeout budgets, allow-listed headers, and no effect on primary response; body mirroring/redaction later |
 | Dynamic discovery | Envoy xDS, Caddy dynamic upstreams, DNS/service integrations | DNS refresh and file-watched upstream lists first; xDS/Kubernetes/Consul later |
 | Regex routing and rewrites | NGINX `location ~`, named captures, `rewrite`; HAProxy regex ACLs | Rust `regex`-based route matchers, capture variables, and bounded rewrite/header templates |
@@ -1666,10 +1668,9 @@ Out of scope for `1.4`:
   constraints are documented.
 - Full Envoy-style global rate-limit service, xDS control plane, Kubernetes
   controller, Consul integration, gRPC-Web transcoding, gRPC-JSON transcoding,
-  and HTTP/3/QUIC are tracked as later work. HTTP/3/QUIC is now planned as a
-  Fluxheim-owned `1.8` protocol milestone after the `1.6` Pingora-free runtime
-  is stable, using reviewed Rust QUIC/HTTP3 ecosystem crates rather than
-  waiting on a proxy-framework API.
+  and HTTP/3/QUIC are tracked as later work. HTTP/3/QUIC is deferred pending
+  renewed transport/crypto qualification; preserve the source contract for
+  future Brynja/Vef evaluation rather than assigning an implementation date.
 - Arbitrary Lua/Wasm script execution. `1.4` should define typed hook points and
   bounded policy surfaces; the shared Wasm runtime moves to a separate `1.7`
   line. NGINX rewrite-module-style `if` conditions should be evaluated there
@@ -1850,7 +1851,7 @@ Stable scope:
   - xDS/Kubernetes/Consul discovery only after local DNS/file discovery and
     runtime backend mutation are stable. Treat this as a control-plane feature,
     not a quick stream-proxy add-on;
-  - HTTP/3/QUIC remains a later protocol milestone targeted at `1.9`, after
+  - HTTP/3/QUIC remains a deferred protocol milestone, not part of `1.9`, after
     the Fluxheim-owned Pingora-free server/listener/TLS and HTTP runtime
     boundaries and the `1.8` macOS/Windows production-parity line are stable.
 - Multiple upstreams per pool with safe address validation and per-upstream
@@ -3270,20 +3271,10 @@ Stable scope:
   service model is proven. Verify install, service start, upgrade, rollback,
   and uninstall. Keep Store publication a separate policy decision and do not
   make FIPS claims without platform-specific provider evidence.
-- `v1.9.0`: Fluxheim-owned HTTP/3 and QUIC line. Stop at an opt-in
-  `http3`/`http3-experimental` feature using Rust `quinn` for QUIC transport
-  and the Rust `h3` stack for HTTP/3 framing behind Fluxheim-owned listener,
-  TLS, routing, access-policy, cache/proxy, metrics, logging, and graceful
-  shutdown boundaries after the cross-platform production line is stable.
-  Preserve HTTP/1.1 and HTTP/2 behavior, advertise `Alt-Svc` only for healthy
-  configured QUIC listeners, keep 0-RTT disabled unless explicit replay-safe
-  route policy exists, and require interop, malformed-input, packet-loss,
-  anti-amplification, timeout, container-network, and mixed-protocol boundary
-  tests. Do not add generic UDP proxying, DNS/GSLB, WAF, VPN/firewall
-  appliance behavior, or new Wasm ABI scope in this release. Implement this as
-  pentested commit checkpoints rather than partial public versions; the
-  complete scope and post-`1.9.0` vertical releases are defined in
-  [HTTP/3 And QUIC Commit Plan](http3-quic-commit-plan.md).
+- `v1.9.0`: logging, metrics and operational visibility. Follow the numbered
+  [observability commit plan](observability-commit-plan.md), including bounded
+  telemetry, privacy, failure/recovery and real container/native-platform
+  gates. HTTP/3 is deferred; retain its plan for future source qualification.
 
 Scope rules:
 
@@ -3453,7 +3444,20 @@ Exit criteria:
   format, dimensions, quality, and `Accept` bucket.
 - `privacy-mode` rejects incompatible transform/cache combinations.
 
-### 1.9 - HTTP/3 And QUIC
+### 1.9 - Logging, Metrics, And Operational Visibility
+
+Goal: actionable diagnostics, bounded logging/export, request correlation,
+low-cardinality metrics and authenticated operational status. Follow the
+[observability commit plan](observability-commit-plan.md) for ten review
+checkpoints and required real container, Linux, macOS and Windows tests.
+New telemetry remains opt-in where sensitive or expensive; preserve existing
+configuration and privacy behavior. No full management API or UI in this scope.
+
+### Future - HTTP/3 And QUIC (Deferred)
+
+No release number is assigned. The requirements below remain a backlog,
+not 1.9.0 scope. Re-evaluate Brynja/Vef and candidate transport capabilities
+against the [preserved contract](http3-quic-commit-plan.md) before resuming.
 
 Goal: add opt-in HTTP/3 ingress with Fluxheim-owned UDP listener, QUIC, ALPN,
 certificate, routing, policy, and observability integration.
@@ -3610,6 +3614,10 @@ Exit criteria:
   no-retention design is implemented.
 
 ### 1.13 - Advanced Metrics And Logging
+
+Historical release assignment: consolidated into the active
+[1.9.0 observability plan](observability-commit-plan.md). The following ideas
+are backlog input, not a commitment to ship every proposed sink in 1.9.0.
 
 Goal: add richer observability without hurting the request path.
 
@@ -4908,19 +4916,10 @@ circular dependencies.
 - `v1.8.5`: notarized macOS and signed Windows installer delivery, including
   install/start/upgrade/rollback/uninstall proof; Microsoft Store publication
   remains a separate compatibility and policy decision.
-- `v1.9.0`: Fluxheim-owned HTTP/3 and QUIC line. Stop at an opt-in
-  `http3`/`http3-experimental` feature using Rust `quinn` for QUIC transport
-  and the Rust `h3` stack for HTTP/3 framing behind Fluxheim-owned listener,
-  TLS, routing, access-policy, cache/proxy, metrics, logging, and graceful
-  shutdown boundaries after the cross-platform production line is stable.
-  Preserve HTTP/1.1 and HTTP/2 behavior, advertise `Alt-Svc` only for healthy
-  configured QUIC listeners, keep 0-RTT disabled unless explicit replay-safe
-  route policy exists, and require interop, malformed-input, packet-loss,
-  anti-amplification, timeout, container-network, and mixed-protocol boundary
-  tests. Do not add generic UDP proxying, DNS/GSLB, WAF, VPN/firewall
-  appliance behavior, or new Wasm ABI scope in this release. Use the
-  [HTTP/3 And QUIC Commit Plan](http3-quic-commit-plan.md) for the numbered
-  implementation checkpoints and user-facing `1.9.x` release boundaries.
+- `v1.9.0`: logging, metrics and operational visibility. Follow the numbered
+  [observability commit plan](observability-commit-plan.md), including bounded
+  telemetry, privacy, failure/recovery and real container/native-platform
+  gates. HTTP/3 is deferred; retain its plan for future source qualification.
 
 ## Long-Term Ecosystem
 

@@ -1,5 +1,12 @@
 # HTTP/3 Commit 1 Source Contract
 
+**Historical research, deferred 2026-10-21.** This contract is not a 1.9.0
+release gate. Its dependency and toolchain pins preserve the investigation;
+they must be requalified before production admission. Normal CI does not run
+these probes. See the [deferred plan](http3-quic-commit-plan.md) for manual
+checks and resumption conditions, and the [active plan](observability-commit-plan.md)
+for 1.9.0. Statements of freshness below refer to the original review date.
+
 Candidate reviewed on 2026-10-08. This is source admission evidence, not a
 claim that Fluxheim serves HTTP/3. Commit 2 requires revised source qualification,
 pentest, retest, and GitHub green. The [commit plan](http3-quic-commit-plan.md) remains

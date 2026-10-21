@@ -1,7 +1,30 @@
 # HTTP/3 And QUIC Commit Plan
 
-Status: Commit 1 authorized on 2026-10-08; candidate source/scope work is in
-progress from `fc1b5983af97434786065c08cab2202cb544be6b`. The released `1.8.2`
+Status: **deferred on 2026-10-21; no implementation checkpoint is active.**
+The [observability commit plan](observability-commit-plan.md) now governs
+1.9.0. All HTTP/3 release numbers below describe the original proposal, not
+current release commitments. A future HTTP/3 release number is unassigned.
+
+Keep the plan, isolated probes and source evidence for reconsideration when
+Brynja/Vef are more mature. Neither project is a production dependency or
+an approved replacement today. Maturity alone does not establish suitability:
+review their actual TLS/QUIC/HTTP/3 capabilities, crypto adapter contracts,
+validated-path policy hooks, resource accounting and platform evidence first.
+Refresh dependency/advisory qualification before resuming. Seamless migration,
+authorization before delivery, and queued-response ownership requirements must
+not be relaxed to bypass the recorded API gap.
+
+Research checks are absent from normal CI and local release checks. Run the
+manual `Deferred HTTP3 research` GitHub workflow or
+`sh scripts/check_http3_research.sh` explicitly. Green research is not source
+acceptance; `--acceptance` remains fail-closed while the API gap is unresolved.
+Resumption requires a reviewed source contract, explicit authorization,
+pentest/retest and green platform gates before moving to Commit 2.
+
+## Historical Checkpoint Status
+
+Commit 1 was authorized on 2026-10-08; source/scope work began
+from `fc1b5983af97434786065c08cab2202cb544be6b`. The released `1.8.2`
 baseline is `6ed82b5a9ebd5b8f1bb4bc03f986edd9a33ae855`; no new `1.8.3` tag is
 required for the intervening documentation/build-helper changes. This records
 the user's start authorization, not a fresh cross-platform qualification claim.

@@ -22,9 +22,13 @@
 # Fluxheim
 
 `main` targets **1.9.0 (unreleased)**. The latest published release remains
-**v1.8.2**. HTTP/3 is being developed through the
-[HTTP/3 commit plan](docs/http3-quic-commit-plan.md); it is not enabled in
-Fluxheim yet. No `v1.9.0` release tag or release artifacts have been published.
+**v1.8.2**. The [1.9.0 commit plan](docs/observability-commit-plan.md) focuses
+on logging, metrics and operational visibility. HTTP/3 is
+[deferred](docs/http3-quic-commit-plan.md), not enabled in Fluxheim. No
+`v1.9.0` release tag or release artifacts have been published.
+
+The separate [`1.8.x` maintenance line](docs/maintenance-releases.md) prepares
+1.8.3 dependency, runtime-image and build-tool updates for existing users.
 
 Fluxheim is a modular Rust edge gateway for static sites, reverse proxying,
 edge caching, PHP-FPM application serving, ACME automation, observability,
@@ -143,7 +147,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Windows portable builds | 🧪 | `1.8.2` completes unsigned native MSVC parity for x86_64. Native x86_64 CI passes the workspace, seven profiles, live runtime, archives, and packaged Wasm; release ZIPs come from an exact-tag disposable native builder using the same default-binary reproducibility and checksum model as Linux ARM. Windows ARM64 is deferred until sustainable native build and test infrastructure is available. |
 | GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional bounded local MMDB support with trusted-file enforcement for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. The [GeoIP guide](docs/geoip.md) includes a pinned real CIRCL database proof for static, proxy, and load-balancer paths. |
 | Pingora-free runtime | ✅ | `1.6.34`; normal Fluxheim builds no longer compile Pingora crates. Server/listener/TLS, HTTP/1, HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and background-service paths run through Fluxheim-owned Rust crates. |
-| HTTP/3/QUIC | ❌ | Planned as a Fluxheim-owned `1.9` protocol milestone using the Rust `quinn`/`h3` stack after the `1.8` macOS/Windows production parity line. |
+| HTTP/3/QUIC | ❌ | Deferred research; revisit transport and crypto qualification when Brynja/Vef are more mature. No release version assigned. |
 | WASM extensibility | 🧪 | The `1.7.0` through `1.7.10` line added the optional bounded Wasmtime runtime, typed access/header/route/cache policy hooks, isolated module identities, proxy-ABI and WASI previews, and runnable migration examples for F5 iRules-style, nginx Lua/OpenResty-style, HAProxy Lua/SPOE-style, and VCL-like policy. `1.7.10` stabilized the line with independently selectable family smokes, release-gate enforcement, and arbitrary guest-ID decoder property coverage. Direct backend choice, plugin-provided persistence keys, and dynamic mirror/shadow target choice remain constrained follow-up work. |
 | Zero-downtime upgrades | ✅ | `1.7.11`; bounded native drain, strict systemd listener inheritance, readiness notification after all configured background services report ready, live old/new process handoff coverage, and a tested Podman blue/green pattern behind a stable fronting listener. Directly replacing a container that owns published host ports is explicitly not gap-free. |
 
@@ -444,12 +448,14 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Development: 1.9.0 HTTP/3 And QUIC
+## Development: 1.9.0 Operational Visibility
 
 The development version is `1.9.0`, ahead of the published `v1.8.2` release.
-Commit 1 qualifies dependency sources and future crypto replacement boundaries;
-it does not add an HTTP/3 runtime feature. Each checkpoint requires pentest,
-retest and green GitHub checks before the next begins. See the
+The [observability plan](docs/observability-commit-plan.md) covers actionable
+diagnostics, bounded logging, metrics, tracing and live cross-platform proof.
+Implementation checkpoints have not started. Each requires pentest, retest
+and green GitHub checks before the next begins. HTTP/3 plans and probes remain
+available as manually invoked research, pending renewed qualification. See the
 [draft release notes](release-notes/RELEASE_NOTES_1.9.0.md) for implemented work,
 not promises of completed protocol support.
 
@@ -550,9 +556,9 @@ coverage are documented in [Cache Backends](docs/cache-backends.md),
 [Config Reference](docs/config-reference.md), and
 [Production Readiness](docs/production-readiness.md).
 
-The `1.8` line is the macOS/Windows production-parity line, and HTTP/3/QUIC
-moves to the following Fluxheim-owned `1.9` protocol line based on the Rust
-`quinn`/`h3` stack. See [Versioning Plan](docs/versioning-plan.md) and
+The `1.8` line establishes macOS/Windows portable parity. The `1.9` line focuses
+on logging, metrics and operational visibility; HTTP/3/QUIC is deferred.
+See [Versioning Plan](docs/versioning-plan.md) and
 [Roadmap](ROADMAP.md) for the full release ladder.
 
 ## Documentation
@@ -588,7 +594,8 @@ moves to the following Fluxheim-owned `1.9` protocol line based on the Rust
 - [WASM Extensibility](docs/wasm-extensibility.md)
 - [Wasm Policy Example Parity](docs/wasm-policy-example-parity.md)
 - [Portable Releases](docs/portable-releases.md)
-- [HTTP/3 And QUIC Commit Plan](docs/http3-quic-commit-plan.md)
+- [1.9.0 Observability Commit Plan](docs/observability-commit-plan.md)
+- [Deferred HTTP/3 And QUIC Commit Plan](docs/http3-quic-commit-plan.md)
 - [Windows Release Builders](docs/windows-release-builders.md)
 - [Zero-Downtime Upgrades](docs/zero-downtime-upgrades.md)
 - [Crypto RPC Edge](docs/crypto-rpc-edge.md)

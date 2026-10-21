@@ -2,10 +2,10 @@
 name = "fluxheim-protocol"
 version = "1.9.0"
 edition = "2024"
-rust-version = "1.99.0"
+rust-version = "1.99.1"
 license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim protocol framing helpers."
 
 [dependencies]
-sanitization = { version = "2.1.0", features = ["alloc"] }
+sanitization = { version = "2.1.1", features = ["alloc"] }

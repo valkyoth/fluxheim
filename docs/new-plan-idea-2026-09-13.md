@@ -4,6 +4,12 @@ Status: discussion draft. This document records a possible product direction
 and does not replace the active versioning plan, authorize implementation, or
 promise release dates or version numbers.
 
+Decision update (2026-10-21): logging, metrics and operational visibility have
+been brought forward into the [1.9.0 commit plan](observability-commit-plan.md).
+HTTP/3 is [deferred](http3-quic-commit-plan.md) for later Brynja/Vef evaluation.
+The management API and UI remain proposals without newly assigned release
+numbers. The original sequence below is retained as discussion history.
+
 ## Motivation
 
 Fluxheim's existing versioning plan contains a mixture of concrete production

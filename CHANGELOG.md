@@ -11,6 +11,15 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- Focus 1.9.0 on logging, metrics and operational visibility through numbered
+  pentest/CI checkpoints and real container/native-platform acceptance.
+  Preserve HTTP/3 plans and probes as deferred research for future Brynja/Vef
+  evaluation; remove source probes from mandatory CI/local checks and keep
+  a manual research workflow. No new observability runtime feature ships yet.
+- Refresh the active workspace to Rust 1.99.1, Wasmtime/WASI 50.0.0,
+  sanitization 2.1.1, base64-ng 2.1.0 and current stable dependencies, including
+  fuzz dependencies and immutable container base digests. Historical HTTP/3
+  research pins remain unchanged and require requalification before use.
 - Add weekly and manual runtime-only refreshes for the latest published release's
   container matrix, with fresh vendor bases/packages, live smoke gates, unique
   rebuild tags, and versioned-alias promotion only after all builds pass.

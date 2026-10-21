@@ -10,11 +10,12 @@ Larger modules still graduate through later minor releases.
 
 ## Current Development Goal
 
-Fluxheim `1.9.0` is the unreleased HTTP/3 and QUIC development train. The
-[HTTP/3 commit plan](docs/http3-quic-commit-plan.md) governs its implementation
-checkpoints and acceptance gates. Commit 1 qualifies sources and scope; no
-production HTTP/3 listener is enabled yet. Brynja remains a future crypto
-replacement, not a current dependency. The latest published release is `1.8.2`.
+Fluxheim `1.9.0` is the unreleased logging, metrics and operational visibility
+train. The [observability commit plan](docs/observability-commit-plan.md)
+governs its checkpoints, pentest/retest and native/container acceptance gates.
+HTTP/3 is [deferred](docs/http3-quic-commit-plan.md); retain its source probes
+and policy-gap evidence for future Brynja/Vef evaluation. Neither is a current
+dependency or an approved solution to that gap. The latest release is `1.8.2`.
 
 Historical milestones:
 
@@ -169,8 +170,8 @@ path, or both. Windows production support should target Authenticode-signed
 artifacts and a real installer path: prefer MSIX/App Installer or Microsoft
 Store publication only if the Store model fits Fluxheim's server/service
 behavior; otherwise use a signed MSI or signed zip plus documented Windows
-service installation. HTTP/3 and QUIC become the following `1.9` line after
-cross-platform release evidence is stable.
+service installation. Logging, metrics and operational visibility become the
+`1.9` line; HTTP/3 and QUIC remain deferred without an assigned release.
 The Windows release target remains x86_64 MSVC only. Windows ARM64
 remains future work and must not receive public artifacts or support claims
 until the project has sustainable native ARM64 Windows build infrastructure,
@@ -1371,14 +1372,16 @@ without parsing text fixtures for every module.
 15. **Future HTTP/3 And QUIC**
    - HTTP/3 is the modern protocol direction, not a legacy-compatibility
      feature.
-   - Execute the work through the numbered, pentested checkpoints in the
+   - Preserve the numbered, pentested checkpoints in the
      [HTTP/3 And QUIC Commit Plan](docs/http3-quic-commit-plan.md), followed by
-     one complete public `1.9.0` release rather than partial protocol releases.
-   - Track it as Fluxheim-owned `1.9` work, after server bootstrap/listener/TLS
+     one complete future release rather than partial protocol releases.
+     Work is deferred pending renewed source qualification and Brynja/Vef
+     capability review, not scheduled for 1.9.0.
+   - Track it as future Fluxheim-owned work, after server bootstrap/listener/TLS
      ownership and the HTTP proxy runtime are stable. The intended ecosystem
      path is Rust `quinn` for QUIC transport plus the `h3` stack for HTTP/3
      framing, behind Fluxheim-owned listener, TLS, routing, and policy
-     boundaries.
+     boundaries. The candidate stack must be re-evaluated before resuming.
    - HTTP/3 changes Fluxheim's listener model from TCP/TLS-only ingress to a
      dual TCP plus UDP service. It should land first as an opt-in `http3` or
      `http3-experimental` compile feature. The milestone must cover TLS/ALPN
