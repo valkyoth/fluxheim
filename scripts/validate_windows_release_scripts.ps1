@@ -657,8 +657,8 @@ foreach ($required in @(
     "Install-WinGetPackage -Id 'Kitware.CMake'",
     "Install-WinGetPackage -Id 'Microsoft.VisualStudio.2022.BuildTools'",
     'Microsoft.VisualStudio.Workload.VCTools',
-    "`$rustupVersion = '1.29.1'",
-    "`$rustupSha256 = '6f4bef66261261fcb43131be8720bab817d403a09edec7455c371974b90bdb7e'",
+    "`$rustupVersion = '1.29.2'",
+    "`$rustupSha256 = '00f139da614dced87d3c3d4121c43eebdac3c1bf8a5ee86b9d80dfd71c8d70fd'",
     '[Environment+SpecialFolder]::ProgramFiles',
     "Join-Path `$programFiles 'FluxheimRustTrusted'",
     "`$cargoWorkRoot = Join-Path `$rustRoot 'cargo-work'",
@@ -885,7 +885,8 @@ foreach ($required in @(
     'smoke_windows_archive_profiles.ps1',
     'smoke_windows_wasm_archive.ps1',
     'SOURCE_DATE_EPOCH',
-    'Get-CimInstance -ClassName Win32_OperatingSystem',
+    'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion',
+    '[Environment]::OSVersion.Version',
     'windows_os_caption=',
     'windows_os_version=',
     'windows_os_build=',
@@ -912,7 +913,9 @@ foreach ($forbidden in @(
     'rustup.exe override set',
     "`$env:RUSTUP_HOME =",
     "`$env:CARGO_HOME = Join-Path `$rustRoot 'cargo'",
-    '$host = ($rustcVersionOutput'
+    '$host = ($rustcVersionOutput',
+    'Get-CimInstance',
+    'Invoke-WmiMethod'
 )) {
     if ($release.Contains($forbidden)) {
         throw "Windows release runner must not use a build-account-writable Rust toolchain: $forbidden"

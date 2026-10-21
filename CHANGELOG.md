@@ -7,6 +7,24 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.8.3 - Unreleased
+
+### Changed
+
+- Establish the `1.8.x` maintenance branch from v1.8.2; keep 1.9.0 feature
+  development on main. No HTTP/3 source probes or new observability features
+  are included in this maintenance release.
+- Refresh Rust to 1.99.1, Wasmtime/WASI to 50.0.0, sanitization to 2.1.1,
+  base64-ng to 2.1.0, and other stable direct/transitive and fuzz dependencies.
+  Preserve existing profiles and sandbox limits; `full` remains Wasm-free.
+- Update the UDP admission counter to Rust 1.99's equivalent atomic API.
+- Refresh digest-pinned Rust/runtime container bases and Docker Actions;
+  update checksum-verified Rustup installers to 1.29.2.
+- Simplify Windows builder startup/evidence handling and use read-only HKLM
+  host metadata instead of requiring WMI permissions for the build account.
+- Add tested weekly/manual runtime-only container refreshes for the latest
+  published release, with promotion only after the full image matrix passes.
+
 ## 1.8.2 - 2026-09-13
 
 ### Added

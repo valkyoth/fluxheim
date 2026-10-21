@@ -1,5 +1,11 @@
 # Versioning Plan
 
+Branch scope (2026-10-21): `1.8.x` prepares 1.8.3 maintenance from v1.8.2.
+See [maintenance releases](maintenance-releases.md). The historical feature
+ladder below is retained for context, not authorization to implement it here.
+Main's 1.9.0 focus is now observability; HTTP/3 is deferred and its research
+plan remains on main. Signing/installers remain future work.
+
 Fluxheim should use SemVer, but with a conservative interpretation: a feature is
 not considered stable just because it compiles. A feature becomes stable only
 after it has docs, config validation, tests, release checks, and a clear
@@ -3242,16 +3248,13 @@ Stable scope:
   extension contract. Publish the SUSE PHP profile as `php-suse-bci` because
   the dedicated BCI PHP base supplies an official PHP repository; retain SUSE
   Micro for the non-PHP profiles.
-- `v1.8.3`: cross-platform parity hardening. Compare Linux, macOS, and Windows
-  behavior profile by profile, close practical gaps, document intentional
-  differences, add `scripts/test_starter.py` platform entries, and require
-  stable/deep gates to prove every published portable artifact. Evaluate a
-  capability-style storage-bin lifecycle that retains validated root,
-  data-directory, shard, manifest, and index descriptors instead of reopening
-  assembled paths for each operation; retain the documented dedicated-UID/root
-  boundary unless that redesign lands. Unsigned archives must be clearly
-  labeled and accompanied by checksums and provenance; users remain responsible
-  for local trust-policy exceptions.
+- `v1.8.3`: maintenance on `1.8.x`: Rust/dependency/tooling and container-base
+  refresh, Wasmtime/WASI 50 qualification, and Windows release-helper fixes.
+  Require runtime/sandbox regression tests and native archive evidence; keep
+  existing configuration and feature profiles. The previously proposed
+  storage-bin lifecycle redesign remains future defense-in-depth work, not
+  part of this maintenance candidate. Unsigned archives retain the existing
+  checksums, provenance and local trust-policy documentation.
 - `v1.8.4`: company-backed signing foundation, conditional on Fluxheim having
   the required legal publisher identity and credentials. Add Apple Developer
   ID signing/notarization and Windows Authenticode without making unavailable
@@ -4885,10 +4888,10 @@ circular dependencies.
 - `v1.8.2`: unsigned Windows MSVC portable parity with the same supported
   profile/archive contract and explicit replacements or limitations for
   Unix-only behavior.
-- `v1.8.3`: cross-platform parity hardening, platform test-starter entries,
-  documented intentional differences, and stable/deep release-gate evidence
-  for every published archive. Evaluate lifetime-retained storage-bin
-  descriptors as defense in depth against a hostile same-UID/root local actor.
+- `v1.8.3`: dependency/tooling/container maintenance, Wasmtime/WASI 50 and
+  Windows release-helper fixes on `1.8.x`. See the
+  [draft release notes](../release-notes/RELEASE_NOTES_1.8.3.md) and
+  [maintenance gates](maintenance-releases.md). Storage-bin redesign is deferred.
 - `v1.8.4`: company-backed Apple Developer ID and Windows Authenticode signing
   foundation once the legal publisher identity and credentials exist.
 - `v1.8.5`: notarized macOS and signed Windows installer delivery, including

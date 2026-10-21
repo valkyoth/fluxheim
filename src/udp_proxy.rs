@@ -135,11 +135,11 @@ impl UdpProxyApp {
         let route_counter = if self.max_sessions == 0 {
             None
         } else {
-            match self.active_sessions.fetch_update(
-                Ordering::AcqRel,
-                Ordering::Acquire,
-                |current| (current < self.max_sessions).then_some(current + 1),
-            ) {
+            match self
+                .active_sessions
+                .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                    (current < self.max_sessions).then_some(current + 1)
+                }) {
                 Ok(_) => Some(self.active_sessions.clone()),
                 Err(_) => return Err(UdpAcquireError::RouteLimit),
             }

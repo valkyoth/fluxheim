@@ -1,5 +1,5 @@
 %global fluxheim_features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
-%global rust_min_version 1.98
+%global rust_min_version 1.99
 %bcond_without tests
 
 %{!?_tmpfilesdir:%global _tmpfilesdir %{_prefix}/lib/tmpfiles.d}
@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.8.2
+Version:        1.8.3
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -157,6 +157,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Wed Oct 21 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.8.3-1
+- Prepare the 1.8.x maintenance line with Rust 1.99.1 and refreshed dependencies.
+- Update Wasmtime/WASI to 50.0.0 without enabling Wasm in the full profile.
+- Refresh pinned container bases and release-builder tooling.
+
 * Sun Sep 13 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.8.2-1
 - Complete native unsigned Windows portable parity for x86_64 MSVC hosts and
   add fail-closed exact-tag release-builder automation; defer Windows ARM64.

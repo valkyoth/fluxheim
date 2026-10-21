@@ -21,6 +21,21 @@
 
 # Fluxheim
 
+This is the `1.8.x` maintenance branch, preparing **v1.8.3 (unreleased)** from
+the published v1.8.2 baseline. It contains dependency, container-runtime and
+release-tooling updates, including Wasmtime/WASI 50.0.0 in the opt-in Wasm
+profile. No new tag or release artifacts have been published. See the
+[maintenance policy](docs/maintenance-releases.md) and
+[draft notes](release-notes/RELEASE_NOTES_1.8.3.md).
+
+`main` remains the 1.9.0 observability development line. HTTP/3 is deferred;
+the old future-version assignments below are not this maintenance release's
+scope. Production HTTP/3 and Brynja/Vef integration are not enabled.
+
+Published containers can receive tested OS/PHP updates through the
+[runtime refresh workflow](docs/container-runtime-refresh.md) without changing
+the Fluxheim version or source tag.
+
 Fluxheim is a modular Rust edge gateway for static sites, reverse proxying,
 edge caching, PHP-FPM application serving, ACME automation, observability,
 FIPS/ISO-capable TLS build paths, GeoIP policy, TCP stream proxying, and
@@ -138,7 +153,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Windows portable builds | 🧪 | `1.8.2` completes unsigned native MSVC parity for x86_64. Native x86_64 CI passes the workspace, seven profiles, live runtime, archives, and packaged Wasm; release ZIPs come from an exact-tag disposable native builder using the same default-binary reproducibility and checksum model as Linux ARM. Windows ARM64 is deferred until sustainable native build and test infrastructure is available. |
 | GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional bounded local MMDB support with trusted-file enforcement for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. The [GeoIP guide](docs/geoip.md) includes a pinned real CIRCL database proof for static, proxy, and load-balancer paths. |
 | Pingora-free runtime | ✅ | `1.6.34`; normal Fluxheim builds no longer compile Pingora crates. Server/listener/TLS, HTTP/1, HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and background-service paths run through Fluxheim-owned Rust crates. |
-| HTTP/3/QUIC | ❌ | Planned as a Fluxheim-owned `1.9` protocol milestone using the Rust `quinn`/`h3` stack after the `1.8` macOS/Windows production parity line. |
+| HTTP/3/QUIC | ❌ | Deferred research on main; no release number assigned and no support in the maintenance line. |
 | WASM extensibility | 🧪 | The `1.7.0` through `1.7.10` line added the optional bounded Wasmtime runtime, typed access/header/route/cache policy hooks, isolated module identities, proxy-ABI and WASI previews, and runnable migration examples for F5 iRules-style, nginx Lua/OpenResty-style, HAProxy Lua/SPOE-style, and VCL-like policy. `1.7.10` stabilized the line with independently selectable family smokes, release-gate enforcement, and arbitrary guest-ID decoder property coverage. Direct backend choice, plugin-provided persistence keys, and dynamic mirror/shadow target choice remain constrained follow-up work. |
 | Zero-downtime upgrades | ✅ | `1.7.11`; bounded native drain, strict systemd listener inheritance, readiness notification after all configured background services report ready, live old/new process handoff coverage, and a tested Podman blue/green pattern behind a stable fronting listener. Directly replacing a container that owns published host ports is explicitly not gap-free. |
 
@@ -530,9 +545,9 @@ coverage are documented in [Cache Backends](docs/cache-backends.md),
 [Config Reference](docs/config-reference.md), and
 [Production Readiness](docs/production-readiness.md).
 
-The `1.8` line is the macOS/Windows production-parity line, and HTTP/3/QUIC
-moves to the following Fluxheim-owned `1.9` protocol line based on the Rust
-`quinn`/`h3` stack. See [Versioning Plan](docs/versioning-plan.md) and
+The `1.8.x` line maintains the released runtime and portable packages.
+Main's `1.9` line focuses on observability; HTTP/3/QUIC is deferred.
+See [Versioning Plan](docs/versioning-plan.md) and
 [Roadmap](ROADMAP.md) for the full release ladder.
 
 ## Documentation

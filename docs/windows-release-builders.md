@@ -1,6 +1,6 @@
 # Windows Release Builders
 
-Fluxheim `1.8.2` uses a native Windows x86_64 host for its unsigned portable
+Fluxheim uses a native Windows x86_64 host for its unsigned portable
 archive evidence. A Linux cross-build is not accepted as a substitute for the
 native Windows ACL, locking, shutdown, and live-runtime checks.
 
@@ -45,6 +45,31 @@ For a disposable Windows Server 2025 Desktop Experience host, first start
 `sshd` and authorize the release machine's key for the initial Administrator
 connection. Then run this from the trusted Linux release machine:
 
+```powershell
+# Run once in an elevated PowerShell session on the fresh host.
+Start-Service sshd
+Set-Service -Name sshd -StartupType Automatic
+
+$authorizedKeys = Join-Path $env:ProgramData 'ssh\administrators_authorized_keys'
+Set-Content -LiteralPath $authorizedKeys -Value 'ssh-ed25519 REPLACE_WITH_RELEASE_HOST_KEY' `
+  -Encoding ascii -NoNewline
+& icacls.exe $authorizedKeys /inheritance:r /grant:r `
+  'Administrators:F' 'SYSTEM:F' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'failed to secure the bootstrap SSH key' }
+
+$sshRule = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue
+if ($null -eq $sshRule) {
+  New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' `
+    -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
+} else {
+  $sshRule | Set-NetFirewallRule -Enabled True -Profile Any
+}
+```
+
+Use the public key derived from the same private key passed to the Linux
+bootstrap. This initial rule is temporary; the bootstrap replaces it with a
+TCP/22 rule restricted to the supplied source CIDR.
+
 ```bash
 scripts/bootstrap_windows_release_builder.sh \
   WINDOWS_HOST ~/.ssh/windows-release-key PUBLIC_IP/32
@@ -61,6 +86,13 @@ release runner in `-ValidateBuilderOnly` mode to verify every compiler file,
 directory, hash, ACL, and sanitized compiler selection without requiring a
 release tag. Verify the SSH host-key fingerprint out of band before treating a
 newly created builder as trusted.
+
+Do not create `fluxheim-build` or grant it WMI permissions manually. The tools
+installer creates the account before the policy script uses it, and the release
+runner reads operating-system evidence from the standard read-only Windows
+version registry key. TCP/80 and TCP/443 are not required for provisioning or
+packaging; open them only when intentionally running the separate public-network
+HTTP, HTTPS, PHP, or ACME smoke tests, then destroy the disposable host.
 
 Administrator bootstrap files are staged at
 `C:\Users\Administrator\FluxheimBootstrap`, inside the protected profile of
@@ -186,7 +218,7 @@ GitHub-hosted `windows-2025` job separately runs the native test and archive
 matrix. It does not need to reproduce the cloud builder's archive bytes.
 
 The script fails when `scripts/smoke_windows_native.ps1` is absent or any
-native runtime assertion fails. Every 1.8.2 release build therefore remains
+native runtime assertion fails. Every Windows release build therefore remains
 blocked unless the complete parity matrix passes on x86_64.
 
 Windows outputs are unsigned `.zip` previews. Do not disable SmartScreen or

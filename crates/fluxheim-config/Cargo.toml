@@ -1,8 +1,8 @@
 [package]
 name = "fluxheim-config"
-version = "1.8.2"
+version = "1.8.3"
 edition = "2024"
-rust-version = "1.98.1"
+rust-version = "1.99.1"
 license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim configuration schema, parsing, and validation."
@@ -36,9 +36,9 @@ fluxheim-protocol = { path = "../fluxheim-protocol" }
 fluxheim-wasm = { path = "../fluxheim-wasm", optional = true }
 log = "0.4.34"
 regex = "1.13.1"
-rustix = { version = "1.1.4", features = ["fs", "process"] }
+rustix = { version = "1.1.5", features = ["fs", "process"] }
 serde = { version = "1.0.229", features = ["derive"] }
-toml = "1.1.6"
+toml = "1.1.8"
 
 [target.'cfg(windows)'.dependencies]
 dunce = "1.0.5"
@@ -49,5 +49,5 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Stora
 
 [dev-dependencies]
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }
-proptest = "1.11.0"
+proptest = "1.12.0"
 tempfile = "3.27.0"

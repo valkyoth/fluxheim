@@ -1,5 +1,10 @@
 # Fluxheim Roadmap
 
+Maintenance branch note (2026-10-21): this branch prepares 1.8.3 from v1.8.2;
+see [maintenance releases](docs/maintenance-releases.md). The future feature
+ladder below is historical context, not active scope here. Main now focuses
+1.9.0 on observability and preserves HTTP/3 research as deferred work.
+
 This roadmap is the working implementation plan. Keep it current as features
 move from design to code.
 
@@ -165,8 +170,8 @@ path, or both. Windows production support should target Authenticode-signed
 artifacts and a real installer path: prefer MSIX/App Installer or Microsoft
 Store publication only if the Store model fits Fluxheim's server/service
 behavior; otherwise use a signed MSI or signed zip plus documented Windows
-service installation. HTTP/3 and QUIC become the following `1.9` line after
-cross-platform release evidence is stable.
+service installation. Main's `1.9` line now focuses on observability;
+HTTP/3 and QUIC are deferred without an assigned release number.
 The active `1.8.2` Windows release target is x86_64 MSVC only. Windows ARM64
 remains future work and must not receive public artifacts or support claims
 until the project has sustainable native ARM64 Windows build infrastructure,

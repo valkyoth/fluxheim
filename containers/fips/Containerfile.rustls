@@ -1,9 +1,9 @@
-ARG UBI_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal:9.8@sha256:d235f607e1d6d833f031db107dc42206e4dd4d5aa9142c43d3771fb7f9bea76a
+ARG UBI_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal:9.8@sha256:c4c285d42941ebb2bd4da878479008e1e4536bb599aad1dbe568f89de9053661
 
 FROM ${UBI_IMAGE} AS builder
 
-ARG RUST_TOOLCHAIN=1.98.1
-ARG RUSTUP_INIT_SHA256=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
+ARG RUST_TOOLCHAIN=1.99.1
+ARG RUSTUP_INIT_SHA256=5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4
 
 ENV CARGO_HOME=/opt/rust/cargo
 ENV RUSTUP_HOME=/opt/rust/rustup
@@ -25,7 +25,7 @@ RUN microdnf install -y \
         tar \
     && microdnf clean all \
     && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/rustup-init \
-        https://static.rust-lang.org/rustup/archive/1.29.0/x86_64-unknown-linux-gnu/rustup-init \
+        https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-unknown-linux-gnu/rustup-init \
     && printf '%s  %s\n' "${RUSTUP_INIT_SHA256}" /tmp/rustup-init | sha256sum -c - \
     && chmod 0755 /tmp/rustup-init \
     && /tmp/rustup-init -y --profile minimal --default-toolchain "${RUST_TOOLCHAIN}" \

@@ -1,8 +1,8 @@
 [package]
 name = "fluxheim-wasm"
-version = "1.8.2"
+version = "1.8.3"
 edition = "2024"
-rust-version = "1.98.1"
+rust-version = "1.99.1"
 license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim sandboxed WebAssembly extension runtime boundary."
@@ -21,15 +21,15 @@ required-features = ["runtime"]
 name = "build_policy_examples"
 
 [dependencies]
-sha2 = "0.11.0"
-thiserror = "2.0.20"
-tokio = { version = "1.53.1", default-features = false, features = ["rt", "sync", "time"], optional = true }
-wasmtime = { version = "48.0.2", default-features = false, features = ["cranelift", "runtime", "std"], optional = true }
-wasmtime-wasi = { version = "48.0.2", default-features = false, features = ["p1"], optional = true }
+sha2 = "0.11.1"
+thiserror = "2.0.21"
+tokio = { version = "1.54.0", default-features = false, features = ["rt", "sync", "time"], optional = true }
+wasmtime = { version = "50.0.0", default-features = false, features = ["cranelift", "runtime", "std"], optional = true }
+wasmtime-wasi = { version = "50.0.0", default-features = false, features = ["p1"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1.4", features = ["fs"] }
+rustix = { version = "1.1.5", features = ["fs"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
-wat = "1.259.0"
+wat = "1.262.0"

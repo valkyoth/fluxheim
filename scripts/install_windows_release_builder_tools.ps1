@@ -117,8 +117,8 @@ $excludedCargoBins = @(
         [Environment+SpecialFolder]::CommonApplicationData)) `
         'FluxheimRust\cargo\bin').TrimEnd('\')
 )
-$rustupVersion = '1.29.1'
-$rustupSha256 = '6f4bef66261261fcb43131be8720bab817d403a09edec7455c371974b90bdb7e'
+$rustupVersion = '1.29.2'
+$rustupSha256 = '00f139da614dced87d3c3d4121c43eebdac3c1bf8a5ee86b9d80dfd71c8d70fd'
 $rustupUrl = "https://static.rust-lang.org/rustup/archive/$rustupVersion/x86_64-pc-windows-msvc/rustup-init.exe"
 $rustupInstaller = Join-Path $env:TEMP "rustup-init-$rustupVersion.exe"
 
