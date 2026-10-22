@@ -15,7 +15,11 @@ train. The [observability commit plan](docs/observability-commit-plan.md)
 governs its checkpoints, pentest/retest and native/container acceptance gates.
 HTTP/3 is [deferred](docs/http3-quic-commit-plan.md); retain its source probes
 and policy-gap evidence for future Brynja/Vef evaluation. Neither is a current
-dependency or an approved solution to that gap. The latest release is `1.8.2`.
+dependency or an approved solution to that gap. The latest release is `1.8.3`.
+Its shared maintenance fixes are carried forward to main. A complete management
+API is [proposed separately](docs/management-api-direction.md), provisionally
+for 1.10.0 if approved; 1.9.0 adds only read-only operational contracts for a
+future independently released UI.
 
 Historical milestones:
 

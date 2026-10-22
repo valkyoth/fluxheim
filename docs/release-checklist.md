@@ -118,9 +118,11 @@ and release modes, plus the `scripts/smoke_1_0_core.sh` localhost smoke.
   at least one vhost-specific SNI certificate per TLS listener.
 - The core smoke generates temporary static certificates and proves static,
   proxied, and SNI-selected vhosts over a TLS listener.
-- ACME config and renewal queue planning are implemented, but account/order and
-  challenge runtime work is not release-ready yet. Do not document automated
-  ACME issuance as operational until that runtime is implemented and tested.
+- ACME issuance and renewal are supported by the `acme-client` release builds.
+  Cover certificate storage, renewal/reload and the isolated mount-boundary
+  regression. If ACME behavior changes, collect staging-CA issuance and
+  off-host certificate-presentation evidence; local tests alone do not prove
+  public challenge reachability. Never use production issuance for a smoke test.
 - Validate production-like TLS storage before startup:
 
 ```bash
@@ -540,10 +542,10 @@ The smoke builds the image, validates the packaged config, and checks that the
 runtime process does not run as root.
 
 Fluxheim publishes variant images from the explicit Containerfiles under
-`containers/`: `wolfi`, `alpine`, `suse-micro`, and `debian`. Each OS variant
-is published for the full/default, cache, proxy, PHP, and, starting with the
-`1.5` line, load-balancer image profiles. Pre-`1.5` tags can include the
-load-balancer profile only through manual workflow dispatch. GitHub Container
+`containers/`: `wolfi`, `alpine`, `suse-micro`, `suse-bci`, and `debian`.
+Full, Wasm, cache, proxy and load-balancer use Wolfi, Alpine, SUSE Micro and
+Debian. PHP uses Wolfi, Alpine, Debian and SUSE BCI, not SUSE Micro. This is
+24 image combinations; the full profile intentionally excludes Wasm. GitHub Container
 Registry publishing uses the repository `GITHUB_TOKEN`; Docker Hub publishing
 requires `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets.
 

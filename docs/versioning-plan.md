@@ -5,7 +5,10 @@ operational visibility through the [observability commit plan](observability-com
 It supersedes older assignments of HTTP/3 to 1.9 and observability to 1.10/1.13.
 The [HTTP/3 plan](http3-quic-commit-plan.md) is deferred research for future
 Brynja/Vef capability review; its original version numbers are historical.
-The latest published baseline remains 1.8.2. Later exploratory version numbers
+The latest published baseline is 1.8.3. Shared maintenance fixes remain on main.
+The [management API/UI direction](management-api-direction.md) recommends a
+separate minor after 1.9.0, provisionally 1.10.0 only if approved.
+Later exploratory version numbers
 below are provisional, not promises to deliver every idea or to renumber the
 management API/UI proposal automatically.
 
@@ -3250,18 +3253,11 @@ Stable scope:
   extension contract. Publish the SUSE PHP profile as `php-suse-bci` because
   the dedicated BCI PHP base supplies an official PHP repository; retain SUSE
   Micro for the non-PHP profiles.
-- `v1.8.3` candidate: cross-platform parity hardening. Compare Linux, macOS,
-  and Windows behavior profile by profile, close practical gaps, document
-  intentional differences, add `scripts/test_starter.py` platform entries, and require
-  stable/deep gates to prove every published portable artifact. Evaluate a
-  capability-style storage-bin lifecycle that retains validated root,
-  data-directory, shard, manifest, and index descriptors instead of reopening
-  assembled paths for each operation; retain the documented dedicated-UID/root
-  boundary unless that redesign lands. Unsigned archives must be clearly
-  labeled and accompanied by checksums and provenance; users remain responsible
-  for local trust-policy exceptions. Land internal parity polish as ordinary
-  commits; create a public `v1.8.3` only if the accepted closeout includes an
-  operator-visible fix or deliverable worth publishing.
+- `v1.8.3` released: dependency/toolchain and container maintenance, opt-in
+  Wasmtime/WASI 50, portable qualification and release-tooling fixes. See
+  [qualification](maintenance-1.8.3-qualification.md). The older parity-polish
+  and lifetime-retained storage-bin descriptor ideas remain backlog where not
+  implemented; this release does not claim to have delivered every old idea.
 - `v1.8.4`: company-backed signing foundation, conditional on Fluxheim having
   the required legal publisher identity and credentials. Add Apple Developer
   ID signing/notarization and Windows Authenticode without making unavailable
@@ -3448,10 +3444,13 @@ Exit criteria:
 
 Goal: actionable diagnostics, bounded logging/export, request correlation,
 low-cardinality metrics and authenticated operational status. Follow the
-[observability commit plan](observability-commit-plan.md) for ten review
+[observability commit plan](observability-commit-plan.md) for twelve review
 checkpoints and required real container, Linux, macOS and Windows tests.
 New telemetry remains opt-in where sensitive or expensive; preserve existing
 configuration and privacy behavior. No full management API or UI in this scope.
+Read-only operational contracts prepare for a future UI; the separate
+[management proposal](management-api-direction.md) defines what complete
+Fluxheim-owned API coverage would mean before that later release is approved.
 
 ### Future - HTTP/3 And QUIC (Deferred)
 
@@ -4905,12 +4904,10 @@ circular dependencies.
 - `v1.8.2`: unsigned Windows MSVC portable parity with the same supported
   profile/archive contract and explicit replacements or limitations for
   Unix-only behavior.
-- `v1.8.3` candidate: cross-platform parity hardening, platform test-starter
-  entries, documented intentional differences, and stable/deep release-gate
-  evidence for every published archive. Evaluate lifetime-retained storage-bin
-  descriptors as defense in depth against a hostile same-UID/root local actor.
-  Keep this as a commit-only closeout unless it contains an operator-visible
-  fix or deliverable that justifies a public tag.
+- `v1.8.3` released: dependency/toolchain/container maintenance and native
+  portable qualification; see the [release record](maintenance-1.8.3-qualification.md).
+  Unimplemented parity-polish/storage descriptor ideas remain backlog rather
+  than implied completed work.
 - `v1.8.4`: company-backed Apple Developer ID and Windows Authenticode signing
   foundation once the legal publisher identity and credentials exist.
 - `v1.8.5`: notarized macOS and signed Windows installer delivery, including

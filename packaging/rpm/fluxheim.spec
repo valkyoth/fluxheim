@@ -157,10 +157,16 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
-* Wed Oct 21 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.9.0-1
+* Thu Oct 22 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.9.0-1
 - Focus the unreleased 1.9.0 plan on logging, metrics and operational visibility.
   Preserve HTTP/3 qualification as deferred, manually invoked research.
-- Refresh stable dependencies, require Rust 1.99, and update pinned build tools.
+- Retain the released maintenance fixes, exact Rust 1.99.1 requirement and
+  updated build tools while preparing observability.
+
+* Thu Oct 22 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.8.3-1
+- Refresh dependencies and Wasmtime/WASI 50 without enabling Wasm in full.
+- Update container bases and release tooling; fix standalone systemd builds
+  and preserve the exact patch-level RPM Rust build requirement.
 
 * Sun Sep 13 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.8.2-1
 - Complete native unsigned Windows portable parity for x86_64 MSVC hosts and

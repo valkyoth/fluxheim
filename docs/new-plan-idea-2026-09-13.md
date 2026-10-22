@@ -4,6 +4,14 @@ Status: discussion draft. This document records a possible product direction
 and does not replace the active versioning plan, authorize implementation, or
 promise release dates or version numbers.
 
+Discussion update (2026-10-22): v1.8.3 is released. The expanded
+[1.9.0 plan](observability-commit-plan.md) keeps observability and read-only
+operational contracts together. The [management API/UI proposal](management-api-direction.md)
+recommends a separate full-management minor, provisionally 1.10.0 subject to
+approval, followed by an independently released fluxheim-ui. This supersedes
+the old numbered sequence below as a recommendation, not an implementation
+authorization.
+
 Decision update (2026-10-21): logging, metrics and operational visibility have
 been brought forward into the [1.9.0 commit plan](observability-commit-plan.md).
 HTTP/3 is [deferred](http3-quic-commit-plan.md) for later Brynja/Vef evaluation.

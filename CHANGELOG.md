@@ -11,6 +11,9 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- Carry forward the released 1.8.3 systemd/RPM fixes, release regressions and
+  remote macOS helper improvements. Expand observability into twelve review
+  checkpoints, retaining full management API/UI work as a separate proposal.
 - Focus 1.9.0 on logging, metrics and operational visibility through numbered
   pentest/CI checkpoints and real container/native-platform acceptance.
   Preserve HTTP/3 plans and probes as deferred research for future Brynja/Vef
@@ -18,8 +21,9 @@ behavior when the change improves security or project direction.
   a manual research workflow. No new observability runtime feature ships yet.
 - Refresh the active workspace to Rust 1.99.1, Wasmtime/WASI 50.0.0,
   sanitization 2.1.1, base64-ng 2.1.0 and current stable dependencies, including
-  fuzz dependencies and immutable container base digests. Historical HTTP/3
-  research pins remain unchanged and require requalification before use.
+  fuzz dependencies and immutable container base digests. Deferred HTTP/3
+  research security pins are maintained separately and require requalification
+  before production use.
 - Add weekly and manual runtime-only refreshes for the latest published release's
   container matrix, with fresh vendor bases/packages, live smoke gates, unique
   rebuild tags, and versioned-alias promotion only after all builds pass.
@@ -31,6 +35,42 @@ behavior when the change improves security or project direction.
 - Start HTTP/3 Commit 1 with an isolated source-locked feasibility workspace,
   machine-checked scope and provider contracts, and a future-only Brynja gap
   inventory. This does not enable HTTP/3 or add QUIC to Fluxheim's runtime graph.
+
+## 1.8.3 - 2026-10-22
+
+### Changed
+
+- Establish the `1.8.x` maintenance branch from v1.8.2; keep 1.9.0 feature
+  development on main. No HTTP/3 source probes or new observability features
+  are included in this maintenance release.
+- Refresh Rust to 1.99.1, Wasmtime/WASI to 50.0.0, sanitization to 2.1.1,
+  base64-ng to 2.1.0, and other stable direct/transitive and fuzz dependencies.
+  Preserve existing profiles and sandbox limits; `full` remains Wasm-free.
+- Update the UDP admission counter to Rust 1.99's equivalent atomic API.
+- Refresh digest-pinned Rust/runtime container bases and Docker Actions;
+  update checksum-verified Rustup installers to 1.29.2.
+- Simplify Windows builder startup/evidence handling and use read-only HKLM
+  host metadata instead of requiring WMI permissions for the build account.
+- Add tested weekly/manual runtime-only container refreshes for the latest
+  published release, with promotion only after the full image matrix passes.
+
+### Fixed
+
+- Declare the time feature needed by rustix 1.1.5's socket timeout code when
+  the systemd boundary builds independently, and test that build in CI.
+- Preserve Cargo's patch-level Rust minimum in the RPM build requirement and
+  reject understated RPM requirements during release metadata validation.
+
+### Security
+
+- Authenticate refresh source with annotated SSH-signed release tags and an
+  independently configured authorized-signer allowlist. Missing trust
+  configuration blocks publication.
+- Bind container promotion to the digest recorded when publishing the tested
+  image, carried in same-run, attempt-specific evidence. Mutable candidate
+  tags cannot substitute untested images into stable aliases.
+- Restrict refresh filesystem inputs and executable selection, and bound
+  version/revision parsing, with adversarial regression tests.
 
 ## 1.8.2 - 2026-09-13
 

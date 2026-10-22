@@ -1,7 +1,7 @@
 # Fluxheim 1.9.0 Release Notes
 
 **Status: unreleased development draft.** `main` reports 1.9.0 to distinguish
-it from the latest published release, v1.8.2. No 1.9.0 release tag or published
+it from the latest published release, v1.8.3. No 1.9.0 release tag or published
 archives exist yet.
 
 ## Planned Outcome
@@ -13,7 +13,16 @@ low-cardinality metrics and authenticated status. These implementation
 checkpoints have not started. New telemetry must preserve privacy and existing
 configuration; collectors are not mandatory to run Fluxheim.
 
+The twelve checkpoints include a documented read-only operational API contract.
+A full transactional management API and separate UI are
+[proposed for later work](../docs/management-api-direction.md), not promised
+or implemented in this release.
+
 ## Implemented Maintenance
+
+The shared 1.8.3 maintenance is retained, not a new 1.9 observability feature.
+Production runtime sources and normalized dependency manifests were compared
+with the maintenance branch before starting this implementation train.
 
 - Update Rust to 1.99.1, workspace dependencies and the fuzz lockfile, including
   Wasmtime/WASI 50.0.0, sanitization 2.1.1 and base64-ng 2.1.0. Refresh pinned
@@ -23,6 +32,10 @@ configuration; collectors are not mandatory to run Fluxheim.
   preserving existing ordering and session-limit behavior.
 - Windows release-builder host metadata uses read-only HKLM information
   instead of requiring WMI permissions for the build account.
+- Carry forward the standalone systemd rustix feature fix and exact RPM Rust
+  minimum, with their CI regressions.
+- Carry forward remote macOS release coordination, early builder preflight,
+  output preservation and all fourteen release-helper regression tests.
 
 ## Independent Container Maintenance
 
@@ -43,8 +56,8 @@ substitute for the preserved seamless migration/security contract.
 
 Research runs only through the manual GitHub workflow or
 `sh scripts/check_http3_research.sh`, not normal CI or local release checks.
-Historical probe pins are intentionally frozen; requalification must refresh
-them and review current advisories before any production admission.
+Probe security pins are maintained separately; requalification must review
+their capabilities and current advisories before any production admission.
 
 ## Qualification Still Required
 

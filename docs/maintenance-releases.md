@@ -1,8 +1,10 @@
 # Maintenance Releases
 
 `main` is the unreleased 1.9.0 logging, metrics and operational visibility
-development line. `1.8.x` starts from the signed v1.8.2 release and prepares
-1.8.3 without waiting for 1.9.0 implementation.
+development line. `1.8.x` started from the signed v1.8.2 release and delivered
+v1.8.3 at `14d7b6cfc9b16c39a8dc0d4770f59290c8feea48`. Keep it available for
+reviewed maintenance while 1.9.0 develops. See the
+[1.8.3 qualification record](maintenance-1.8.3-qualification.md).
 
 ## Scope
 
@@ -34,11 +36,12 @@ Version markers and draft notes do not constitute release approval.
 ## Containers
 
 The runtime refresh workflow follows the latest published stable release, not
-the unreleased branch HEAD. Until 1.8.3 is published it refreshes v1.8.2; after
-publication it selects the new release. It does not automatically maintain
+the unreleased branch HEAD. With 1.8.3 published it selects that stable release,
+subject to its independent trust/protected-environment prerequisites.
+It does not automatically maintain
 multiple old release lines after a newer stable line exists. Separate support
 policy and explicit selection would be needed for that behavior.
 
 OS/PHP refreshes do not change Fluxheim's application version. A new Rust
 dependency/toolchain build does change the application build and belongs in
-1.8.3, not a runtime-only rebuild of 1.8.2.
+a new maintenance release, not a runtime-only rebuild of an existing tag.

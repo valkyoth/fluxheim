@@ -21,14 +21,15 @@
 
 # Fluxheim
 
-`main` targets **1.9.0 (unreleased)**. The latest published release remains
-**v1.8.2**. The [1.9.0 commit plan](docs/observability-commit-plan.md) focuses
+`main` targets **1.9.0 (unreleased)**. The latest published release is
+**v1.8.3**. The [1.9.0 commit plan](docs/observability-commit-plan.md) focuses
 on logging, metrics and operational visibility. HTTP/3 is
 [deferred](docs/http3-quic-commit-plan.md), not enabled in Fluxheim. No
 `v1.9.0` release tag or release artifacts have been published.
 
-The separate [`1.8.x` maintenance line](docs/maintenance-releases.md) prepares
-1.8.3 dependency, runtime-image and build-tool updates for existing users.
+The separate [`1.8.x` maintenance line](docs/maintenance-releases.md) delivered
+[1.8.3](release-notes/RELEASE_NOTES_1.8.3.md) dependency, runtime-image and
+build-tool updates. Shared fixes are carried forward to main.
 
 Fluxheim is a modular Rust edge gateway for static sites, reverse proxying,
 edge caching, PHP-FPM application serving, ACME automation, observability,
@@ -363,9 +364,9 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries. The `1.8.x`
-image line adds a dedicated Wasm profile. Tags include `v1.8.2-wolfi`,
-`v1.8.2-wasm-wolfi`, `v1.8.2-cache-wolfi`, `v1.8.2-proxy-wolfi`,
-`v1.8.2-load-balancer-wolfi`, and `v1.8.2-php-wolfi`. Wasm is not included in
+image line adds a dedicated Wasm profile. Tags include `v1.8.3-wolfi`,
+`v1.8.3-wasm-wolfi`, `v1.8.3-cache-wolfi`, `v1.8.3-proxy-wolfi`,
+`v1.8.3-load-balancer-wolfi`, and `v1.8.3-php-wolfi`. Wasm is not included in
 the unsuffixed full image.
 
 Released containers can receive OS/PHP security refreshes without changing the
@@ -450,7 +451,7 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 ## Development: 1.9.0 Operational Visibility
 
-The development version is `1.9.0`, ahead of the published `v1.8.2` release.
+The development version is `1.9.0`, ahead of the published `v1.8.3` release.
 The [observability plan](docs/observability-commit-plan.md) covers actionable
 diagnostics, bounded logging, metrics, tracing and live cross-platform proof.
 Implementation checkpoints have not started. Each requires pentest, retest
@@ -459,7 +460,19 @@ available as manually invoked research, pending renewed qualification. See the
 [draft release notes](release-notes/RELEASE_NOTES_1.9.0.md) for implemented work,
 not promises of completed protocol support.
 
-### Latest Release: 1.8.2 Windows Portable Parity
+The twelve checkpoints include UI-ready read-only operational contracts, not
+complete remote configuration management. A separate management release and
+`fluxheim-ui` repository are [proposed](docs/management-api-direction.md);
+they are not implemented features or release commitments.
+
+### Latest Release: 1.8.3 Maintenance
+
+Release `v1.8.3` updates Rust/dependencies, the opt-in Wasm runtime, container
+bases and release tooling while retaining the portable profile matrix. See
+the [release notes](release-notes/RELEASE_NOTES_1.8.3.md) and
+[qualification record](docs/maintenance-1.8.3-qualification.md).
+
+### Platform Baseline: 1.8.2 Windows Portable Parity
 
 Fluxheim does not treat every planned idea as stable. The released `1.8` line
 established platform parity. Release `1.8.0` packages the completed Wasm
@@ -595,6 +608,7 @@ See [Versioning Plan](docs/versioning-plan.md) and
 - [Wasm Policy Example Parity](docs/wasm-policy-example-parity.md)
 - [Portable Releases](docs/portable-releases.md)
 - [1.9.0 Observability Commit Plan](docs/observability-commit-plan.md)
+- [Management API And UI Direction](docs/management-api-direction.md)
 - [Deferred HTTP/3 And QUIC Commit Plan](docs/http3-quic-commit-plan.md)
 - [Windows Release Builders](docs/windows-release-builders.md)
 - [Zero-Downtime Upgrades](docs/zero-downtime-upgrades.md)

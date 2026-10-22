@@ -4,7 +4,7 @@ Fluxheim pins Rust 1.99.1 in `rust-toolchain.toml` and `Cargo.toml`. The local
 toolchain and the container builder should stay on the same stable release.
 
 The current development tree reports **1.9.0 (unreleased)**. Published
-`v1.8.2` remains the stable baseline. The `v1.9.0` tag and release artifacts do
+`v1.8.3` is the stable baseline. The `v1.9.0` tag and release artifacts do
 not exist yet; building `main` does not imply HTTP/3 support is ready.
 
 ## Local Builds
@@ -539,19 +539,19 @@ Optional Quay repository secrets and variables:
 
 The workflow publishes OS-variant tags for the full/default image profile:
 
-The published `1.8.2` examples below retain this naming contract. For `1.9.0`,
+The published `1.8.3` examples below retain this naming contract. For `1.9.0`,
 the same tags are planned with the new version, but are not release artifacts
 until that tag is approved and published.
 
-- `v1.8.2-wolfi`, `v1.8.2-alpine`, `v1.8.2-suse-micro`, `v1.8.2-debian`
+- `v1.8.3-wolfi`, `v1.8.3-alpine`, `v1.8.3-suse-micro`, `v1.8.3-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
 For the recommended Wolfi runtime, the full/default profile also gets short
 aliases:
 
-- `v1.8.2`
-- `v1.8.2-base`
+- `v1.8.3`
+- `v1.8.3-base`
 - `latest`
 - `latest-base`
 
@@ -560,23 +560,23 @@ automation. They point at the full/default image profile.
 
 The focused image profiles publish tags with a profile segment:
 
-- `v1.8.2-wasm-wolfi`, `v1.8.2-wasm-alpine`,
-  `v1.8.2-wasm-suse-micro`, `v1.8.2-wasm-debian`
-- `v1.8.2-cache-wolfi`, `v1.8.2-cache-alpine`,
-  `v1.8.2-cache-suse-micro`, `v1.8.2-cache-debian`
-- `v1.8.2-proxy-wolfi`, `v1.8.2-proxy-alpine`,
-  `v1.8.2-proxy-suse-micro`, `v1.8.2-proxy-debian`
-- `v1.8.2-load-balancer-wolfi`, `v1.8.2-load-balancer-alpine`,
-  `v1.8.2-load-balancer-suse-micro`, `v1.8.2-load-balancer-debian`
-- `v1.8.2-php-wolfi`, `v1.8.2-php-alpine`,
-  `v1.8.2-php-debian`, `v1.8.2-php-suse-bci`
+- `v1.8.3-wasm-wolfi`, `v1.8.3-wasm-alpine`,
+  `v1.8.3-wasm-suse-micro`, `v1.8.3-wasm-debian`
+- `v1.8.3-cache-wolfi`, `v1.8.3-cache-alpine`,
+  `v1.8.3-cache-suse-micro`, `v1.8.3-cache-debian`
+- `v1.8.3-proxy-wolfi`, `v1.8.3-proxy-alpine`,
+  `v1.8.3-proxy-suse-micro`, `v1.8.3-proxy-debian`
+- `v1.8.3-load-balancer-wolfi`, `v1.8.3-load-balancer-alpine`,
+  `v1.8.3-load-balancer-suse-micro`, `v1.8.3-load-balancer-debian`
+- `v1.8.3-php-wolfi`, `v1.8.3-php-alpine`,
+  `v1.8.3-php-debian`, `v1.8.3-php-suse-bci`
 - `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`,
   `sha-<short-sha>-load-balancer-wolfi`, `sha-<short-sha>-php-wolfi`, etc.
 - `latest-cache-wolfi`, `latest-proxy-wolfi`,
   `latest-load-balancer-wolfi`, `latest-php-wolfi`, etc. when run from the
   default branch
-- Wolfi short aliases: `v1.8.2-wasm`, `v1.8.2-cache`, `v1.8.2-proxy`,
-  `v1.8.2-load-balancer`, `v1.8.2-php`, `latest-wasm`, `latest-cache`,
+- Wolfi short aliases: `v1.8.3-wasm`, `v1.8.3-cache`, `v1.8.3-proxy`,
+  `v1.8.3-load-balancer`, `v1.8.3-php`, `latest-wasm`, `latest-cache`,
   `latest-proxy`, `latest-load-balancer`, and `latest-php`
 
 Starting with `v1.5.0`, the load-balancer image profile is part of normal tag
