@@ -4,6 +4,9 @@
 
 set -euo pipefail
 umask 077
+HELPER_DIR="$(cd "$(dirname "$0")" && pwd)"
+STAGE=initialization
+trap 'echo "error: release helper stopped during $STAGE (line $LINENO); existing output was retained" >&2' ERR
 
 REPO_URL="${FLUXHEIM_REPO_URL:-https://github.com/valkyoth/fluxheim.git}"
 REPO_SLUG="${FLUXHEIM_REPO_SLUG:-valkyoth/fluxheim}"
@@ -16,6 +19,14 @@ LINUX_HOST="${FLUXHEIM_AARCH64_LINUX_HOST:-}"
 LINUX_SSH_KEY="${FLUXHEIM_LINUX_SSH_KEY:-}"
 WINDOWS_HOST="${FLUXHEIM_WINDOWS_X64_HOST:-}"
 WINDOWS_SSH_KEY="${FLUXHEIM_WINDOWS_SSH_KEY:-}"
+MACOS_HOST="${FLUXHEIM_MACOS_HOST:-}"
+MACOS_SSH_CONFIG="${FLUXHEIM_MACOS_SSH_CONFIG:-$HOME/.ssh/config}"
+if [[ -n "${FLUXHEIM_MACOS_SSH_CONFIG:-}" && ! -r "$MACOS_SSH_CONFIG" ]]; then
+    echo 'error: macOS SSH config is not readable' >&2
+    exit 2
+fi
+[[ -f "$MACOS_SSH_CONFIG" ]] || MACOS_SSH_CONFIG=/dev/null
+MACOS_SSH=( -F "$MACOS_SSH_CONFIG" -o BatchMode=yes -o ConnectTimeout=15 )
 RUST_VERSION="${1:-}"
 RELEASE_VERSION="${2:-}"
 
@@ -25,6 +36,9 @@ RELEASE_VERSION="${2:-}"
 if [[ -n "$WINDOWS_HOST" && -z "$WINDOWS_SSH_KEY" ]]; then
     read -r -p "Enter Windows x86_64 SSH key path: " WINDOWS_SSH_KEY
 fi
+if [[ -z "$MACOS_HOST" && -z "${FLUXHEIM_MACOS_ASSET_DIR:-}" ]]; then
+    read -r -p "Enter macOS SSH alias/host, or leave blank to import: " MACOS_HOST
+fi
 [[ -n "$RUST_VERSION" ]] || read -r -p "Enter Rust version (e.g., 1.99.1): " RUST_VERSION
 [[ -n "$RELEASE_VERSION" ]] || read -r -p "Enter release version (e.g., 1.8.3): " RELEASE_VERSION
 
@@ -33,6 +47,7 @@ case "$RELEASE_VERSION" in "" | .* | *..* | *[!0-9A-Za-z._+-]*) echo "error: uns
 for host in "$LINUX_HOST" "$WINDOWS_HOST"; do
     case "$host" in "") ;; *[!0-9A-Za-z:._-]*) echo "error: unsafe builder host: $host" >&2; exit 2;; esac
 done
+case "$MACOS_HOST" in -* | *[!0-9A-Za-z@._-]*) echo 'error: unsafe macOS SSH destination' >&2; exit 2;; esac
 for user in "$LINUX_USER" "$WINDOWS_USER"; do
     case "$user" in "" | *[!0-9A-Za-z._-]*) echo "error: unsafe builder user: $user" >&2; exit 2;; esac
 done
@@ -46,6 +61,47 @@ if [[ -n "$WINDOWS_HOST" && ! -f "$WINDOWS_SSH_KEY" ]]; then
     exit 2
 fi
 
+# SSH command arguments are joined by OpenSSH, not transported as an argv array.
+macos_bash() {
+    local remote_command
+    printf -v remote_command '%q ' bash -s -- "$@"
+    ssh "${MACOS_SSH[@]}" "$MACOS_HOST" "$remote_command"
+}
+
+STAGE='remote builder preflight'
+ssh -F "$SSH_CONFIG" -o BatchMode=yes -o ConnectTimeout=15 -i "$LINUX_SSH_KEY" \
+    "$LINUX_USER@$LINUX_HOST" bash -s <<'PREFLIGHT_LINUX'
+set -eu
+export PATH="$HOME/.cargo/bin:$PATH"
+test "$(uname -sm)" = 'Linux aarch64' || { echo 'error: ARM builder must be native Linux aarch64' >&2; exit 1; }
+for tool in cargo rustup rustc git python3 sha256sum tar cc pkg-config; do
+    command -v "$tool" >/dev/null || { echo "error: ARM builder missing $tool; provision the builder before packaging" >&2; exit 1; }
+done
+PREFLIGHT_LINUX
+if [[ -n "$WINDOWS_HOST" ]]; then
+    ssh -F "$SSH_CONFIG" -o BatchMode=yes -o ConnectTimeout=15 -i "$WINDOWS_SSH_KEY" \
+        "$WINDOWS_USER@$WINDOWS_HOST" pwsh.exe -NoProfile -NonInteractive -Command \
+        "\"if (-not (Test-Path (Join-Path \$env:ProgramFiles 'FluxheimRustTrusted'))) { throw 'Trusted Windows toolchain missing; run builder provisioning first' }; Write-Output 'Windows builder login: ok'\""
+fi
+if [[ -n "$MACOS_HOST" ]]; then
+    [[ -f "$HELPER_DIR/release_helper_macos.sh" ]] || { echo 'error: release_helper_macos.sh must be beside release_helper.sh' >&2; exit 1; }
+    macos_bash <<'PREFLIGHT_MACOS'
+set -eu
+export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+test "$(uname -sm)" = 'Darwin arm64' || { echo 'error: macOS builder must be Apple Silicon' >&2; exit 1; }
+for tool in cargo rustup git python3 shasum tar unzip xcode-select; do
+    command -v "$tool" >/dev/null || { echo "error: macOS builder missing $tool" >&2; exit 1; }
+done
+xcode-select -p >/dev/null
+signers="$(git config --path --get gpg.ssh.allowedSignersFile || true)"
+test -n "$signers" && test -r "$signers" || { echo 'error: configure a readable gpg.ssh.allowedSignersFile on the Mac before packaging' >&2; exit 1; }
+PREFLIGHT_MACOS
+fi
+if [[ "${FLUXHEIM_RELEASE_PREFLIGHT_ONLY:-0}" == 1 ]]; then
+    echo 'release builder preflight: ok'
+    exit 0
+fi
+
 TAG="v${RELEASE_VERSION}"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-release.XXXXXX")"
 REPO_DIR="$WORK_DIR/source"
@@ -56,6 +112,12 @@ REPORT="$OUTPUT_DIR/release-report.md"
 cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT INT TERM
 
+if [[ -e "$OUTPUT_DIR" ]]; then
+    echo "error: output already exists: $OUTPUT_DIR; use a new FLUXHEIM_RELEASE_OUTPUT_DIR or move the previous run aside" >&2
+    exit 1
+fi
+
+STAGE='signed release checkout'
 echo "--- Checking out and verifying exact tag $TAG ---"
 git clone --branch "$TAG" --depth 1 "$REPO_URL" "$REPO_DIR"
 cd "$REPO_DIR"
@@ -76,7 +138,6 @@ rustup override set "$RUST_VERSION"
     exit 1
 }
 
-rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"/{source,evidence,macos} "$OUTPUT_DIR"/linux/{x86_64,aarch64} \
     "$OUTPUT_DIR/windows/x86_64"
 
@@ -96,6 +157,7 @@ unzip -tq "$OUTPUT_DIR/source/fluxheim-${RELEASE_VERSION}.zip" >/dev/null
 )
 
 echo "--- Building Linux x86_64 archives ---"
+STAGE='Linux x86_64 build'
 scripts/validate_portable_release_plan.py
 LOCAL_REPRO_HASH="$(scripts/reproducible_build_check.sh | tail -n 1 | awk '{print $1}')"
 [[ "$LOCAL_REPRO_HASH" =~ ^[0-9a-f]{64}$ ]] || { echo "error: invalid local reproducible hash" >&2; exit 1; }
@@ -114,14 +176,18 @@ done
 printf '%s\n' "$LOCAL_REPRO_HASH" > "$OUTPUT_DIR/linux/x86_64/REPRODUCIBLE-BUILD-SHA256-x86_64-linux.txt"
 
 echo "--- Building Linux aarch64 archives on $LINUX_HOST ---"
+STAGE='Linux aarch64 build and retrieval'
 ssh -F "$SSH_CONFIG" -i "$LINUX_SSH_KEY" "$LINUX_USER@$LINUX_HOST" bash -s -- \
     "$RELEASE_VERSION" "$RUST_VERSION" "$COMMIT_HASH" "$REPO_URL" <<'REMOTE_LINUX'
 set -euo pipefail
 umask 077
+export PATH="$HOME/.cargo/bin:$PATH"
 version="$1"; rust_version="$2"; expected_commit="$3"; repo_url="$4"
 case "$version$rust_version$expected_commit" in *[!0-9A-Za-z._+-]*) exit 2;; esac
 [[ "$(uname -m)" == "aarch64" ]] || { echo "not an aarch64 host" >&2; exit 1; }
-for command in cargo git python3 rustc rustup sha256sum tar; do command -v "$command" >/dev/null; done
+for command in cargo git python3 rustc rustup sha256sum tar; do
+    command -v "$command" >/dev/null || { echo "error: ARM builder missing $command" >&2; exit 1; }
+done
 tag="v${version}"; root="$HOME/fluxheim-release-${version}"; source="$root/source"; output="$root/output"
 rm -rf "$root"; mkdir -p "$root"
 git clone --branch "$tag" --depth 1 "$repo_url" "$source"
@@ -177,6 +243,7 @@ normalize_windows_text_evidence() {
     done
 }
 
+STAGE='Windows build or import'
 if [[ -n "$WINDOWS_HOST" ]]; then
     echo "--- Building Windows x86_64 archives on $WINDOWS_HOST ---"
     scp -F "$SSH_CONFIG" -i "$WINDOWS_SSH_KEY" scripts/run_windows_release_builder.ps1 \
@@ -203,7 +270,34 @@ normalize_windows_text_evidence "$OUTPUT_DIR/windows/x86_64"
     grep -Fx 'reproducibility_scope=default-release-binary' release-evidence-x86_64-windows.txt >/dev/null
 )
 
-MACOS_INPUT="${FLUXHEIM_MACOS_ASSET_DIR:-$INPUT_DIR/macos}"
+STAGE='macOS build or import'
+if [[ -n "$MACOS_HOST" ]]; then
+    echo "--- Building macOS Apple Silicon archives on $MACOS_HOST ---"
+    MACOS_RUN="$(macos_bash <<'MACOS_DIRECTORY'
+set -eu
+umask 077
+mkdir -p "$HOME/.fhr"
+cd "$HOME"
+mktemp -d .fhr/job.XXXXXX
+MACOS_DIRECTORY
+)"
+    [[ "$MACOS_RUN" =~ ^\.fhr/job\.[A-Za-z0-9]{6}$ ]] || { echo 'error: unexpected macOS staging path' >&2; exit 1; }
+    scp "${MACOS_SSH[@]}" "$HELPER_DIR/release_helper_macos.sh" "$MACOS_HOST:$MACOS_RUN/"
+    macos_bash "$MACOS_RUN" "$RUST_VERSION" "$RELEASE_VERSION" "$COMMIT_HASH" "$REPO_URL" <<'REMOTE_MACOS'
+set -euo pipefail
+export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+cd "$HOME/$1"
+export FLUXHEIM_RELEASE_OUTPUT_DIR="$PWD"
+export FLUXHEIM_EXPECTED_RELEASE_COMMIT="$4"
+export FLUXHEIM_REPO_URL="$5"
+bash release_helper_macos.sh "$2" "$3"
+REMOTE_MACOS
+    MACOS_INPUT="$WORK_DIR/macos"
+    mkdir -p "$MACOS_INPUT"
+    scp "${MACOS_SSH[@]}" "$MACOS_HOST:$MACOS_RUN/fluxheim-${RELEASE_VERSION}-macos-assets/*" "$MACOS_INPUT/"
+else
+    MACOS_INPUT="${FLUXHEIM_MACOS_ASSET_DIR:-$INPUT_DIR/macos}"
+fi
 if [[ ! -d "$MACOS_INPUT" ]]; then
     default_macos="$OUTPUT_BASE/fluxheim-${RELEASE_VERSION}-macos-assets"
     read -r -p "Enter macOS asset directory [$default_macos]: " MACOS_INPUT
@@ -215,6 +309,7 @@ grep -F -- "- Commit: \`$COMMIT_HASH\`" "$OUTPUT_DIR/macos/release-report-macos.
 }
 
 echo "--- Generating SBOM evidence ---"
+STAGE='SBOM generation'
 FLUXHEIM_SBOM_DIR="$OUTPUT_DIR/evidence" scripts/generate-sbom.sh
 (
     cd "$OUTPUT_DIR/evidence"
@@ -223,6 +318,7 @@ FLUXHEIM_SBOM_DIR="$OUTPUT_DIR/evidence" scripts/generate-sbom.sh
 cp "$WORK_DIR/tag-verification.txt" "$OUTPUT_DIR/evidence/"
 
 echo "--- Pulling release images and recording immutable digests ---"
+STAGE='container image retrieval'
 CONTAINER_DIGESTS="$OUTPUT_DIR/evidence/container-digests.txt"
 : > "$CONTAINER_DIGESTS"
 for profile in full wasm cache proxy load-balancer php; do

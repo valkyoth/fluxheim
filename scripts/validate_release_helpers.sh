@@ -6,6 +6,7 @@ linux_helper="$root/scripts/release_helper.sh"
 macos_helper="$root/scripts/release_helper_macos.sh"
 
 bash -n "$linux_helper" "$macos_helper"
+python3 "$root/scripts/test_release_helpers.py"
 
 for required in \
     'Enter Linux aarch64 SSH key path:' \
