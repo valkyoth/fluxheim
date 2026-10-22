@@ -234,8 +234,8 @@ The official Windows builder must be a fresh disposable host with the
 Administrator-provisioned read-only Rust toolchain. Run
 `scripts/release_helper.sh` from the Linux release machine and provide the
 Linux ARM and Windows hosts and SSH keys when prompted. The helper invokes the
-exact-tag Windows build, verifies its seven ZIP checksums and evidence, imports
-the separately produced macOS evidence, and creates the complete Markdown
+exact-tag Windows build, verifies its seven ZIP checksums and evidence, builds
+macOS over SSH or imports its evidence, and creates the complete Markdown
 checksum report used for the GitHub release.
 
 Build the macOS set first with `scripts/release_helper_macos.sh`, then transfer
@@ -246,6 +246,33 @@ Linux helper accepts the Rust and Fluxheim versions as positional arguments:
 ```bash
 scripts/release_helper.sh 1.99.1 1.9.0
 ```
+
+Alternatively, set `FLUXHEIM_MACOS_HOST` to an SSH alias such as
+`macosbuilder` (or enter it at the prompt). Keep `release_helper_macos.sh`
+beside `release_helper.sh`. The coordinator copies that helper to a unique
+directory on the Mac, checks the same signed tag and exact commit, runs native
+parity and packaged Wasm tests, builds all seven profiles, and downloads the
+archives and evidence automatically. The final Markdown report is unchanged.
+Remote macOS artifacts remain under `~/.fhr/job.*/` for recovery.
+
+macOS connections use `~/.ssh/config`, including the alias's user and key.
+Use `FLUXHEIM_MACOS_SSH_CONFIG` to select another SSH config. This is separate
+from the Linux/Windows `FLUXHEIM_RELEASE_SSH_CONFIG` setting. Configure the
+trusted `gpg.ssh.allowedSignersFile` on the Mac first; the helper does not
+copy private signing keys or bypass tag verification. Install Rust and Xcode
+command-line tools on the Mac, provision the Windows build account/toolchain,
+and install Rust, a C compiler and pkg-config on the ARM builder first.
+
+Use `FLUXHEIM_RELEASE_PREFLIGHT_ONLY=1` with the same arguments and environment
+to check remote access and basic prerequisites without building. Establish SSH
+host trust beforehand; preflight uses noninteractive authentication. Remote
+Rust commands include `~/.cargo/bin` even when SSH does not load a login profile.
+These checks are not substitutes for the native build and test gates.
+
+The helper refuses an existing release-output directory instead of deleting
+completed or imported packages. Preserve a partial run and select a new
+`FLUXHEIM_RELEASE_OUTPUT_DIR` for a fresh build. Automatic resume is not yet
+supported; do not assume partial archives constitute a completed release.
 
 This example targets the upcoming 1.9.0 release. Do not run the exact-tag
 packaging step until the release is approved and its signed tag exists.

@@ -3,6 +3,7 @@
 # Build and verify Fluxheim Apple Silicon release assets for Linux aggregation.
 
 set -euo pipefail
+umask 077
 
 REPO_URL="${FLUXHEIM_REPO_URL:-https://github.com/valkyoth/fluxheim.git}"
 OUTPUT_BASE="${FLUXHEIM_RELEASE_OUTPUT_DIR:-$PWD}"
@@ -39,6 +40,10 @@ git clone --branch "$TAG" --depth 1 "$REPO_URL" "$REPO_DIR"
 cd "$REPO_DIR"
 TAG_COMMIT="$(git rev-parse "${TAG}^{commit}")"
 [[ "$(git rev-parse HEAD)" == "$TAG_COMMIT" ]] || { echo 'error: tag checkout mismatch' >&2; exit 1; }
+if [[ -n "${FLUXHEIM_EXPECTED_RELEASE_COMMIT:-}" && "$TAG_COMMIT" != "$FLUXHEIM_EXPECTED_RELEASE_COMMIT" ]]; then
+    echo 'error: macOS tag does not match the release coordinator commit' >&2
+    exit 1
+fi
 git tag -v "$TAG" > "$WORK_DIR/tag-verification.txt" 2>&1 || {
     cat "$WORK_DIR/tag-verification.txt" >&2
     echo 'error: signed tag verification failed' >&2
