@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This file is downloaded by exact artifact name from this workflow attempt.
+# Never derive the expected digest from the mutable registry candidate tag.
+expected="$(cat tested-digest/tested.digest)"
+[[ "$expected" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'invalid tested digest' >&2; exit 1; }
+
 printf '%s' "$GH_TOKEN" | skopeo login --username "$GITHUB_ACTOR" --password-stdin ghcr.io
 registries=("ghcr.io/${GITHUB_REPOSITORY}")
 if [[ -n "${QUAY_USERNAME:-}" && -n "${QUAY_TOKEN:-}" ]]; then
@@ -12,9 +17,10 @@ if [[ -n "${DOCKERHUB_USERNAME:-}" && -n "${DOCKERHUB_TOKEN:-}" ]]; then
     registries+=("docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim")
 fi
 
-# Pin the already-tested candidate before copying it anywhere else.
+# Reject substitution and address every copy by the recorded immutable digest,
+# including if the registry tag changes again after this comparison.
 digest="$(skopeo inspect --format '{{.Digest}}' "docker://ghcr.io/${GITHUB_REPOSITORY}:${CANDIDATE}")"
-[[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+[[ "$digest" == "$expected" ]] || { echo 'candidate substitution detected' >&2; exit 1; }
 source="docker://ghcr.io/${GITHUB_REPOSITORY}@${digest}"
 read -r -a aliases <<< "$ALIASES"
 

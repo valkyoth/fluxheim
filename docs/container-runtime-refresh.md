@@ -21,6 +21,34 @@ workflow commit; application sources, Cargo.lock, Rust builder image, feature
 profiles, package manifests and default configurations come from the release.
 No Git tag, Cargo version, archive or RPM is changed.
 
+### Required Release Trust Setup
+
+Before enabling refresh publication, create the GitHub Actions environment
+`container-refresh-release`. Restrict its deployment branches to `main` and
+configure its approval policy for your release process. Add the environment
+secret `FLUXHEIM_RELEASE_ALLOWED_SIGNERS` containing the SSH allowed-signers
+entries for authorized release signers, for example:
+
+```text
+release-maintainer@example.invalid namespaces="git" ssh-ed25519 AAAA...authorized-public-key...
+```
+
+Use the actual maintainer identity and public key verified through an independent
+trusted channel. Never populate this secret from a key shipped in the selected
+release, from its tag message, or automatically from the account being verified.
+Only public signing keys belong here, never private keys. Restrict who may change
+this environment and secret, and rotate/revoke entries when authorization changes.
+Required reviewers pause scheduled runs until approved; choose that policy
+deliberately rather than assuming scheduled publication is unattended.
+
+The resolver fails closed if the secret is missing. It fetches the release tag,
+requires an annotated SSH-signed tag whose signed name matches the selected
+release, verifies it against this separate trust anchor, then builds only its
+signed commit. Lightweight, unsigned, renamed, tampered or unauthorized tags
+cannot reach the build jobs. GitHub's latest-release flag is selection metadata,
+not authentication. Workflow code and the protected trust configuration remain
+trusted; this gate does not defend against compromise of both.
+
 All 24 supported profile/distribution combinations are refreshed: full, Wasm,
 cache, proxy, load-balancer and PHP, across Wolfi, Alpine, Debian and SUSE.
 PHP uses SUSE BCI; other SUSE profiles use Micro. The existing distribution
@@ -46,8 +74,14 @@ still need review during an incident.
 Passing images are first published under unique candidate tags such as
 `v1.8.2-rebuild-123456-1-php-wolfi` (workflow run ID and attempt). Only after
 the entire matrix succeeds are the existing versioned aliases updated, including
-Wolfi's short aliases. Promotion copies the tested candidate by digest; it does
-not rebuild it. GHCR and configured Quay/Docker Hub mirrors receive the images.
+Wolfi's short aliases. Publishing records the digest directly from the copy of
+the locally tested image, not by subsequently resolving its mutable registry tag.
+Each matrix job uploads that digest in an immutable Actions artifact identified
+by profile, distribution and run attempt. Promotion downloads only that exact
+artifact from the same run; missing evidence, evidence from a previous attempt,
+or a candidate tag pointing at another digest blocks promotion. Every registry
+copy uses the recorded digest, including if the tag changes after comparison.
+Promotion does not rebuild the image. GHCR and configured Quay/Docker Hub mirrors receive the images.
 `sha-*`, `dev-*` and `latest*` aliases are not rewritten by this workflow.
 
 The current refresh platform is `linux/amd64`, matching the existing image
