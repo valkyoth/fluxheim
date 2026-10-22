@@ -27,7 +27,7 @@ fi
 case "$cargo_rust_version" in
     *.*.*)
         expected_toolchain_version="$cargo_rust_version"
-        expected_rpm_rust_version="$(printf '%s\n' "$cargo_rust_version" | cut -d. -f1,2)"
+        expected_rpm_rust_version="$cargo_rust_version"
         ;;
     *.*)
         expected_toolchain_version="$cargo_rust_version.0"

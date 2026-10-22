@@ -53,7 +53,9 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Validate release metadata
-        run: scripts/validate-release-metadata.sh
+        run: |
+          scripts/validate-release-metadata.sh
+          python3 scripts/test_release_metadata.py
 
       - name: Check Markdown links
         run: perl scripts/check-doc-links.pl
@@ -137,6 +139,11 @@ jobs:
 
       - name: Run default tests
         run: cargo test
+
+      - name: Test standalone systemd boundary without workspace feature unification
+        run: |
+          cargo test --locked -p fluxheim-systemd --all-targets
+          cargo build --locked -p fluxheim-systemd --example activation_ownership_probe
 
       - name: Run isolated ACME mount-boundary regression
         run: FLUXHEIM_ACME_MOUNT_TEST_MODE=container FLUXHEIM_ACME_MOUNT_TEST_RUNTIME=docker scripts/smoke_acme_mount_boundary.sh
