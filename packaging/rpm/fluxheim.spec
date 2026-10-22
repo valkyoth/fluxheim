@@ -1,5 +1,5 @@
 %global fluxheim_features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
-%global rust_min_version 1.99
+%global rust_min_version 1.99.1
 %bcond_without tests
 
 %{!?_tmpfilesdir:%global _tmpfilesdir %{_prefix}/lib/tmpfiles.d}

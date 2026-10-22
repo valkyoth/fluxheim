@@ -9,4 +9,5 @@ description = "Audited Fluxheim systemd descriptor-adoption boundary."
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libsystemd = "0.7.2"
-rustix = { version = "1.1.5", features = ["net"] }
+# rustix 1.1.5 socket timeout conversion needs timespec even in net-only builds.
+rustix = { version = "1.1.5", features = ["net", "time"] }
