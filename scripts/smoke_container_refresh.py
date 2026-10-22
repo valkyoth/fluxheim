@@ -14,6 +14,22 @@ import urllib.error
 import urllib.request
 import uuid
 
+from container_refresh import PROFILES, VARIANTS, release_text, stable_tag
+
+
+def engine_command(engine, *command, check=True):
+    # Literal executables, not CLI-provided program paths. All calls use argv,
+    # never a shell; cleanup uses the same boundary as normal execution.
+    if engine == "docker":
+        result = subprocess.run(["docker", *command], check=check, text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    elif engine == "podman":
+        result = subprocess.run(["podman", *command], check=check, text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    else:
+        raise ValueError("unsupported container engine")
+    return result.stdout.strip()
+
 
 def check_php(output, modules, required, variant):
     if re.search(r"PHP (Startup|Warning)|Unable to load dynamic library|undefined symbol", modules, re.I):
@@ -30,8 +46,14 @@ def check_php(output, modules, required, variant):
 
 
 def smoke(args):
+    stable_tag({"tag_name": args.version})
+    if args.profile not in PROFILES or args.variant not in VARIANTS:
+        raise ValueError("unsupported image profile or variant")
+    if (len(args.image) > 256 or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9./:@_-]*", args.image)):
+        raise ValueError("invalid image reference")
+
     def run(*command):
-        return subprocess.check_output([args.engine, *command], text=True, stderr=subprocess.STDOUT).strip()
+        return engine_command(args.engine, *command)
 
     version = run("run", "--rm", "--network", "none", args.image, "--version")
     if not re.search(rf"^fluxheim {re.escape(args.version.removeprefix('v'))}(?:\s|$)", version, re.M):
@@ -40,7 +62,7 @@ def smoke(args):
     if args.profile == "php":
         php = run("run", "--rm", "--network", "none", "--entrypoint", "/usr/bin/php-fpm", args.image, "-v")
         modules = run("run", "--rm", "--network", "none", "--entrypoint", "/usr/bin/php-fpm", args.image, "-m")
-        check_php(php, modules, (args.source / "packaging/container/php-required-modules.txt").read_text(), args.variant)
+        check_php(php, modules, release_text("php-modules"), args.variant)
         print(php, flush=True)
 
     marker = "fluxheim-refresh-" + uuid.uuid4().hex
@@ -80,7 +102,7 @@ def smoke(args):
                     config += '[vhosts.proxy.load_balance]\nselection = "round-robin"\n'
                 path = "/asset.png"
             elif args.profile == "php":
-                config = (args.source / "packaging/container/php-managed.toml").read_text().replace("0.0.0.0:8080", f"127.0.0.1:{port}")
+                config = release_text("php-config").replace("0.0.0.0:8080", f"127.0.0.1:{port}")
                 (root / "index.php").write_text(f"<?php echo '{marker}';")
                 path = "/index.php"
             else:
@@ -115,8 +137,8 @@ def smoke(args):
                         raise RuntimeError("second cache request was not a HIT")
             print(f"runtime refresh live smoke: {args.profile}/{args.variant} passed", flush=True)
     finally:
-        subprocess.run([args.engine, "logs", name], check=False)
-        subprocess.run([args.engine, "rm", "-f", name], check=False, stdout=subprocess.DEVNULL)
+        print(engine_command(args.engine, "logs", name, check=False), flush=True)
+        engine_command(args.engine, "rm", "-f", name, check=False)
         origin.shutdown()
         origin.server_close()
         thread.join()
@@ -126,7 +148,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--engine", choices=["docker", "podman"], default="docker")
     parser.add_argument("--image", required=True)
-    parser.add_argument("--source", type=Path, default=Path("source"))
     parser.add_argument("--version", required=True)
     parser.add_argument("--profile", choices=["full", "wasm", "cache", "proxy", "php", "load-balancer"], required=True)
     parser.add_argument("--variant", required=True)
