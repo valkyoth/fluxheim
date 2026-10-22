@@ -25,6 +25,24 @@ behavior when the change improves security or project direction.
 - Add tested weekly/manual runtime-only container refreshes for the latest
   published release, with promotion only after the full image matrix passes.
 
+### Fixed
+
+- Declare the time feature needed by rustix 1.1.5's socket timeout code when
+  the systemd boundary builds independently, and test that build in CI.
+- Preserve Cargo's patch-level Rust minimum in the RPM build requirement and
+  reject understated RPM requirements during release metadata validation.
+
+### Security
+
+- Authenticate refresh source with annotated SSH-signed release tags and an
+  independently configured authorized-signer allowlist. Missing trust
+  configuration blocks publication.
+- Bind container promotion to the digest recorded when publishing the tested
+  image, carried in same-run, attempt-specific evidence. Mutable candidate
+  tags cannot substitute untested images into stable aliases.
+- Restrict refresh filesystem inputs and executable selection, and bound
+  version/revision parsing, with adversarial regression tests.
+
 ## 1.8.2 - 2026-09-13
 
 ### Added

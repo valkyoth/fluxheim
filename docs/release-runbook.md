@@ -3,25 +3,29 @@
 This is the maintainer procedure for publishing a Fluxheim release. It is the
 step-by-step operational companion to the broader release checklist.
 
-Use this from a clean `main` checkout. Set the release variables once, then
-reuse them through the commands below:
+Use a clean checkout of the intended release branch: `1.8.x` for 1.8
+maintenance releases, or `main` for its next minor release. Never tag the
+development branch as a maintenance release. Update the clean checkout before
+deriving release variables, then reuse them through the commands below:
 
 ```bash
-RELEASE_VERSION=1.4.0
+RELEASE_BRANCH="$(git branch --show-current)"
+test -n "${RELEASE_BRANCH}"
+git status --short --branch
+test -z "$(git status --porcelain)"
+git pull --ff-only origin "${RELEASE_BRANCH}"
+RELEASE_VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
 TAG="v${RELEASE_VERSION}"
 TITLE="Fluxheim ${RELEASE_VERSION}"
 RELEASE_NOTES="release-notes/RELEASE_NOTES_${RELEASE_VERSION}.md"
 TARGET="$(rustc -vV | sed -n 's/^host: //p')"
 ```
 
-When starting a new release, use the version helper for the mechanical package
-and RPM fields, then update the human-facing release text that the metadata
-validator checks:
-
-```bash
-scripts/bump_version.py "${RELEASE_VERSION}"
-scripts/validate-release-metadata.sh
-```
+Prepare version changes before this final qualification procedure: use
+`scripts/bump_version.py` with the intended version for mechanical package and
+RPM fields, then update the human-facing release text. The metadata validator
+checks their consistency; do not change the version of an already tested
+candidate during tagging.
 
 ## 1. Preflight
 
@@ -29,8 +33,8 @@ Confirm you are on the release commit and the worktree is clean:
 
 ```bash
 git status --short --branch
-git pull --ff-only origin main
-git status --short --branch
+test "$(git branch --show-current)" = "${RELEASE_BRANCH}"
+test -z "$(git status --porcelain)"
 ```
 
 Run the local release checks that match the release scope:
@@ -96,7 +100,7 @@ Set `FLUXHEIM_GATE_LOAD_BALANCER_CONTAINER=1`, or use
 focused load-balancer image against two local origins before tagging.
 The deep gate also enables the smoke dependency image check, OpenBao cache
 encryption, database health checks, WordPress, Wasm sandbox execution, PHP
-Wolfi, RPM build, privacy mode, framing, and fuzz-target compile checks by
+image matrix, RPM build, privacy mode, framing, and fuzz-target compile checks by
 default. The observability smoke starts disposable Prometheus and Jaeger
 containers unless external URLs are configured; Prometheus scrape and OTLP
 metrics ingestion are required in that self-contained mode, while Jaeger trace
@@ -122,7 +126,7 @@ Commit any release-note, README, packaging, or metadata changes:
 ```bash
 git add .
 git commit -S -m "Prepare Fluxheim ${RELEASE_VERSION} release"
-git push origin main
+git push origin "${RELEASE_BRANCH}"
 ```
 
 If Git reports `nothing to commit`, continue from the current `HEAD`.
@@ -132,6 +136,12 @@ Record the commit:
 ```bash
 git rev-parse HEAD
 ```
+
+Wait for the exact commit's GitHub CI and security checks, plus the required
+pentest/retest and native-platform evidence. A green run for another branch or
+an earlier runtime revision is not release approval. Documentation-only final
+edits may reference the preceding identical-runtime candidate's native test
+evidence, but the final commit still needs its own CI run before tagging.
 
 ## 3. Create And Push The Signed Tag
 
