@@ -7,7 +7,7 @@
   "address_policy": "seamless-validated-migration",
   "address_policy_evidence": "blocked-api-gap",
   "address_change_requirements": ["nat-port", "nat-ip", "active-client-migration", "same-connection-stream-continuity", "validated-peer-policy", "bounded-prefix-accounting", "failed-path-recovery", "native-live-matrix"],
-  "probe_lock_sha256": "274c7614cf058a132343dbf08f20597e31ce5a054bd843f1fde738b95632f436",
+  "probe_lock_sha256": "d2d144a099d15bec0954cae76b214e2775aca4fffd250bc7be684f5cfdaad4c9",
   "pins": {
     "bytes": "1.12.1",
     "h3": "0.0.8",
@@ -17,7 +17,8 @@
     "quinn-proto": "0.11.19",
     "quinn-udp": "0.5.16",
     "rcgen": "0.14.10",
-    "rustls": "0.23.45",
+    "rustls": "0.23.46",
+    "rustls-webpki": "0.103.16",
     "tokio": "1.53.2"
   },
   "platforms": ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-pc-windows-msvc"],

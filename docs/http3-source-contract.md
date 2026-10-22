@@ -7,6 +7,13 @@ these probes. See the [deferred plan](http3-quic-commit-plan.md) for manual
 checks and resumption conditions, and the [active plan](observability-commit-plan.md)
 for 1.9.0. Statements of freshness below refer to the original review date.
 
+Security maintenance on 2026-10-22 updates only the isolated TLS pins to
+rustls 0.23.46 and rustls-webpki 0.103.16, with a new lockfile hash and an
+explicit transitive webpki pin. This addresses the research-only RustSec
+findings without enabling HTTP/3 or changing production dependencies. The
+manual research checks must pass; the address-policy acceptance gate remains
+blocked by the documented API gap.
+
 Candidate reviewed on 2026-10-08. This is source admission evidence, not a
 claim that Fluxheim serves HTTP/3. Commit 2 requires revised source qualification,
 pentest, retest, and GitHub green. The [commit plan](http3-quic-commit-plan.md) remains
@@ -52,7 +59,8 @@ or Brynja package. Cargo's existing feature profiles are unchanged.
 | quinn-udp | 0.5.16 | MIT OR Apache-2.0 | OS-specific datagram/ancillary-data handling |
 | h3 | 0.0.8 | MIT | HTTP/3 control, request streams and stateless QPACK |
 | h3-quinn | 0.0.10 | MIT | Quinn transport implementation of h3 traits |
-| rustls | 0.23.45 | Apache-2.0 OR ISC OR MIT | TLS 1.3 QUIC session integration |
+| rustls | 0.23.46 | Apache-2.0 OR ISC OR MIT | TLS 1.3 QUIC session integration |
+| rustls-webpki | 0.103.16 | ISC | Transitive certificate verification |
 | tokio | 1.53.2 | MIT | Runtime, sockets and cancellation |
 | http / bytes | 1.5.0 / 1.12.1 | MIT / MIT | HTTP fields and body buffers |
 | rcgen | 0.14.10 | MIT OR Apache-2.0 | Probe-only ephemeral certificate fixture |

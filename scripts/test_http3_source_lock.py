@@ -2,6 +2,7 @@
 """Negative regression tests for the Commit 1 admission gate."""
 
 import copy
+import hashlib
 import json
 import os
 import subprocess
@@ -105,6 +106,17 @@ class SourceLockTests(unittest.TestCase):
     def test_transitive_lock_cannot_drift(self):
         with self.assertRaisesRegex(ValueError, "transitive lock"):
             gate.validate_sources(self.scope, self.manifest, self.lock + b"\n", set())
+
+    def test_tls_pin_drift_is_rejected_even_with_recomputed_hash(self):
+        for name in ("rustls", "rustls-webpki"):
+            scope = copy.deepcopy(self.scope)
+            version = scope["pins"][name]
+            marker = f'name = "{name}"\nversion = "{version}"'.encode()
+            modified = self.lock.replace(marker, f'name = "{name}"\nversion = "0.0.0"'.encode(), 1)
+            self.assertNotEqual(modified, self.lock)
+            scope["probe_lock_sha256"] = hashlib.sha256(modified).hexdigest()
+            with self.subTest(package=name), self.assertRaisesRegex(ValueError, f"pin drift: {name}"):
+                gate.validate_sources(scope, self.manifest, modified, set())
 
     def test_direct_versions_are_exact(self):
         self.manifest["dependencies"]["quinn"]["version"] = "0.11"
