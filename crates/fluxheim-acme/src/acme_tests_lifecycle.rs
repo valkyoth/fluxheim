@@ -113,10 +113,22 @@ fn revocation_reads_quarantined_identity_while_renewal_waits() {
     );
 
     let (certificate_b, key_b) = issued_material_for(&["example.test"]);
+    let expected_certificate = certificate_b.clone();
+    let expected_key = key_b.clone();
     let (attempting_tx, attempting_rx) = std::sync::mpsc::channel();
     let (completed_tx, completed_rx) = std::sync::mpsc::channel();
     let renewal_storage = storage.clone();
+    let renewal_directory = paths.cert_path.parent().unwrap().to_path_buf();
+    // ACL checks and durable filesystem writes can exceed two seconds on Windows CI.
+    // This is a liveness deadline, not the assertion that proves lock exclusion.
+    let completion_timeout = std::time::Duration::from_secs(30);
     let renewal = std::thread::spawn(move || {
+        assert!(
+            crate::acme_transaction::AcmeMutationLock::try_acquire(&renewal_directory)
+                .unwrap()
+                .is_none(),
+            "revocation must hold the mutation lock before renewal starts"
+        );
         attempting_tx.send(()).unwrap();
         completed_tx
             .send(install_managed_certificate(
@@ -130,19 +142,31 @@ fn revocation_reads_quarantined_identity_while_renewal_waits() {
     });
 
     attempting_rx
-        .recv_timeout(std::time::Duration::from_secs(2))
-        .unwrap();
-    assert!(
-        completed_rx
-            .recv_timeout(std::time::Duration::from_millis(100))
-            .is_err()
+        .recv_timeout(completion_timeout)
+        .expect("renewal worker must confirm lock contention");
+    assert!(matches!(
+        completed_rx.recv_timeout(std::time::Duration::from_millis(100)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+    ));
+    assert_eq!(
+        quarantine.read_quarantined_certificate().unwrap(),
+        certificate_a.as_bytes(),
+        "revocation must still read the original identity while renewal waits"
     );
     quarantine.rollback().unwrap();
-    completed_rx
-        .recv_timeout(std::time::Duration::from_secs(2))
-        .unwrap()
-        .unwrap();
+    let renewed = completed_rx
+        .recv_timeout(completion_timeout)
+        .expect("renewal must finish after rollback releases the mutation lock")
+        .expect("renewal must install successfully after rollback");
     renewal.join().unwrap();
+    assert_eq!(
+        std::fs::read(renewed.cert_path).unwrap(),
+        expected_certificate.as_bytes()
+    );
+    assert_eq!(
+        std::fs::read(renewed.key_path).unwrap(),
+        expected_key.as_bytes()
+    );
 }
 
 fn installed_revocation_test_pair(label: &str) -> (std::path::PathBuf, AcmeCertificatePaths) {
