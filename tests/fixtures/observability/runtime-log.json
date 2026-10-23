@@ -1,0 +1,6 @@
+{
+  "timestamp": "2026-10-23T00:00:00.000Z",
+  "level": "WARN",
+  "target": "fluxheim::security",
+  "message": "denied\n\"quoted\"\t\\path"
+}

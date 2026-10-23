@@ -51,7 +51,7 @@ The following are intentional 1.5.0 boundaries, not hidden shipped behavior:
 
 - Existing 1.4.x proxy, cache, PHP, stream, GeoIP, and compression
   configuration remains compatible.
-- Use `docs/load-balancer-migration.md` and
+- Use `docs/guides/load-balancer-migration.md` and
   `examples/load-balancer-enterprise.toml` as the starting point for
   load-balancer migrations.
 - The full profile includes the load-balancer module; the focused

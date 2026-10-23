@@ -13,7 +13,7 @@ case "$mode" in
 esac
 
 limit="${FLUXHEIM_MODULARITY_LINE_LIMIT:-500}"
-exceptions="docs/modularity-exceptions.md"
+exceptions="docs/evidence/modularity-exceptions.md"
 
 if [ ! -f "$exceptions" ]; then
     echo "modularity policy: missing $exceptions" >&2

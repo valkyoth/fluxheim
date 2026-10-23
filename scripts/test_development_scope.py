@@ -62,7 +62,7 @@ class DevelopmentScopeTests(unittest.TestCase):
         self.assertNotIn("tools/http3-source-probe", root["workspace"]["members"])
 
     def test_historical_toolchain_and_unresolved_gate_are_preserved(self):
-        contract = json.loads((ROOT / "docs/http3-source-lock.json").read_text())
+        contract = json.loads((ROOT / "docs/evidence/http3-source-lock.json").read_text())
         probe = ROOT / "tools/http3-source-probe"
         toolchain = tomllib.loads((probe / "rust-toolchain.toml").read_text())
         self.assertEqual(toolchain["toolchain"]["channel"], contract["rust"])
@@ -75,7 +75,7 @@ class DevelopmentScopeTests(unittest.TestCase):
     def test_active_plan_and_release_metadata_agree(self):
         manifest = tomllib.loads((ROOT / "Cargo.toml").read_text())
         self.assertEqual(manifest["package"]["version"], "1.9.0")
-        for relative in ("README.md", "ROADMAP.md", "docs/versioning-plan.md",
+        for relative in ("README.md", "ROADMAP.md", "docs/roadmap/versioning-plan.md",
                          "release-notes/RELEASE_NOTES_1.9.0.md"):
             with self.subTest(path=relative):
                 text = (ROOT / relative).read_text()

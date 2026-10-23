@@ -1,0 +1,14 @@
+# HELP fluxheim_test_counter_total test counter
+# TYPE fluxheim_test_counter_total counter
+fluxheim_test_counter_total{vhost="example"} 1
+# HELP fluxheim_test_duration_seconds test duration
+# TYPE fluxheim_test_duration_seconds histogram
+fluxheim_test_duration_seconds_bucket{operation="lookup",le="0.01"} 0
+fluxheim_test_duration_seconds_bucket{operation="lookup",le="0.1"} 1
+fluxheim_test_duration_seconds_bucket{operation="lookup",le="1"} 1
+fluxheim_test_duration_seconds_bucket{operation="lookup",le="+Inf"} 1
+fluxheim_test_duration_seconds_sum{operation="lookup"} 0.05
+fluxheim_test_duration_seconds_count{operation="lookup"} 1
+# HELP fluxheim_test_gauge test gauge
+# TYPE fluxheim_test_gauge gauge
+fluxheim_test_gauge 7

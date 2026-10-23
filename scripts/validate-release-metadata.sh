@@ -84,8 +84,8 @@ if ! grep -q "v$cargo_version" README.md; then
     exit 1
 fi
 
-if ! grep -q "v$cargo_version" docs/build-and-podman.md; then
-    echo "release metadata: docs/build-and-podman.md does not reference v$cargo_version" >&2
+if ! grep -q "v$cargo_version" docs/guides/build-and-podman.md; then
+    echo "release metadata: docs/guides/build-and-podman.md does not reference v$cargo_version" >&2
     exit 1
 fi
 

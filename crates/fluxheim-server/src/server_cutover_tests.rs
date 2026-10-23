@@ -116,7 +116,7 @@ fn native_runtime_cutover_summary_exports_stable_tsv() {
 
 #[test]
 fn native_runtime_cutover_targets_cover_every_blocker() {
-    let targets = include_str!("../../../docs/native-runtime-cutover-targets.tsv");
+    let targets = include_str!("../../../docs/evidence/native-runtime-cutover-targets.tsv");
     let mut rows = BTreeMap::new();
     for line in targets.lines() {
         if line.starts_with('#') || line.is_empty() {

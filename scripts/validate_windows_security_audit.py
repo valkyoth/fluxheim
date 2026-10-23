@@ -13,7 +13,7 @@ SOURCE_FILES = (
     Path("crates/fluxheim-windows-security/src/path_handles.rs"),
     Path("crates/fluxheim-windows-security/src/relative_open.rs"),
 )
-AUDIT = Path("docs/dependency-audits/windows-filesystem-security.md")
+AUDIT = Path("docs/evidence/dependency-audits/windows-filesystem-security.md")
 
 
 def fail(message: str) -> None:

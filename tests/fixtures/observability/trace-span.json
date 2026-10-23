@@ -1,0 +1,26 @@
+{
+  "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "spanId": "00f067aa0ba902b7",
+  "name": "HTTP GET",
+  "kind": "SPAN_KIND_SERVER",
+  "startTimeUnixNano": "1",
+  "endTimeUnixNano": "2",
+  "status": {"code": "STATUS_CODE_OK"},
+  "attributes": [
+    {"key": "http.request.method", "value": {"stringValue": "GET"}},
+    {"key": "fluxheim.vhost", "value": {"stringValue": "example.test"}},
+    {"key": "error", "value": {"boolValue": false}},
+    {"key": "http.request.body.size", "value": {"intValue": "0"}},
+    {"key": "http.response.body.size", "value": {"intValue": "42"}},
+    {"key": "http.response.status_code", "value": {"intValue": "200"}},
+    {"key": "fluxheim.route", "value": {"stringValue": "root"}},
+    {"key": "fluxheim.load_balancer.upstream", "value": {"stringValue": "origin-a"}},
+    {"key": "fluxheim.load_balancer.retries", "value": {"intValue": "2"}},
+    {"key": "fluxheim.cache.phase", "value": {"stringValue": "hit"}},
+    {"key": "fluxheim.cache.lookup.duration_ms", "value": {"doubleValue": 1.5}},
+    {"key": "fluxheim.cache.lock_wait.duration_ms", "value": {"doubleValue": 0.25}},
+    {"key": "fluxheim.compression.encoding", "value": {"stringValue": "gzip"}},
+    {"key": "fluxheim.php.runtime", "value": {"stringValue": "php-fpm"}},
+    {"key": "fluxheim.php.outcome", "value": {"stringValue": "response"}}
+  ]
+}

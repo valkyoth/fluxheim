@@ -81,7 +81,7 @@ def main() -> int:
     if not release_notes.exists():
         print(f"missing {release_notes.relative_to(root)}")
 
-    print("next: update CHANGELOG.md, README.md, docs/build-and-podman.md,")
+    print("next: update CHANGELOG.md, README.md, docs/guides/build-and-podman.md,")
     print("      release notes, and RPM changelog, then run")
     print("      scripts/validate-release-metadata.sh")
     return 0

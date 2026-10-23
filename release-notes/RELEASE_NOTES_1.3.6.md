@@ -36,7 +36,7 @@ reviews.
 - Request IDs and temporary object names are documented as non-secret
   operational identifiers rather than authentication tokens, key material, or
   SSPs.
-- Added `docs/compliance-evidence-template.md` with release metadata, candidate
+- Added `docs/evidence/compliance-evidence-template.md` with release metadata, candidate
   TOE boundary, Security Target-style draft fields, operational-environment
   assumptions, cryptographic module evidence, validation-script identifiers,
   scanner output checklist, and vulnerability-analysis records.
@@ -96,7 +96,7 @@ OpenSSL FIPS or rustls/AWS-LC FIPS build, use no cache encryption or OpenBao
 Transit with evidence, and send OTLP only to a numeric local collector until
 outbound TLS evidence is added.
 
-Use `docs/compliance-evidence-template.md` with `scripts/release_evidence.sh`
+Use `docs/evidence/compliance-evidence-template.md` with `scripts/release_evidence.sh`
 for the release evidence package. The Common Criteria-aligned sections are
 evidence organization only; they are not a Protection Profile, evaluated
 Security Target, EAL, or certification claim.

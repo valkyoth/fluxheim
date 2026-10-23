@@ -51,4 +51,4 @@ cargo clippy --locked --no-default-features --features profile-development --all
 ```
 
 For package validation, run the RPM build/smoke flow from
-`docs/build-and-podman.md`.
+`docs/guides/build-and-podman.md`.

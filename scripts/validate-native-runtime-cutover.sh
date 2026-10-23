@@ -2,7 +2,7 @@
 set -eu
 
 out_dir="${FLUXHEIM_NATIVE_RUNTIME_CUTOVER_DIR:-target/release-evidence/native-runtime-cutover}"
-targets="docs/native-runtime-cutover-targets.tsv"
+targets="docs/evidence/native-runtime-cutover-targets.tsv"
 mkdir -p "$out_dir"
 
 if [ ! -f "$targets" ]; then

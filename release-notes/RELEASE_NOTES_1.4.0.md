@@ -92,4 +92,4 @@ cargo clippy --locked --no-default-features --features profile-full,acme-client,
 ```
 
 For image and package validation, also run the relevant Podman and RPM smoke
-tests from `docs/build-and-podman.md`.
+tests from `docs/guides/build-and-podman.md`.

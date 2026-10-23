@@ -64,6 +64,33 @@ mod tests {
     }
 
     #[test]
+    fn observability_baseline_all_status_codes_have_finite_buckets() {
+        let buckets: std::collections::BTreeSet<_> =
+            (0..=u16::MAX).map(access_log_status_class).collect();
+        assert_eq!(buckets, ["1xx", "2xx", "3xx", "4xx", "5xx", "other"].into());
+        assert_eq!(metrics_status_class(None), "unknown");
+        for status in [None, Some(200), Some(503), Some(u16::MAX)] {
+            assert_eq!(metrics_outcome_class(status, true), "proxy_error");
+        }
+    }
+
+    #[test]
+    fn observability_baseline_untrusted_methods_cannot_create_series() {
+        for index in 0..10_000 {
+            let method = format!("SECRET-CANARY-{index}");
+            assert_eq!(metrics_method_bucket(&method), "OTHER");
+        }
+        for method in [
+            "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "CONNECT",
+        ] {
+            assert_eq!(metrics_method_bucket(method), method);
+        }
+        for method in ["get", "GET\r\nforged", "", "Bearer secret"] {
+            assert_eq!(metrics_method_bucket(method), "OTHER");
+        }
+    }
+
+    #[test]
     fn json_escape_escapes_log_fields() {
         assert_eq!(json_escape("line\n\"x\""), "line\\n\\\"x\\\"");
         assert_eq!(json_escape("a\u{0001}b"), "a\\u0001b");

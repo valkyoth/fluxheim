@@ -25,7 +25,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 "CHANGELOG.md": "## 1.8.3 (unreleased)\n",
                 "release-notes/RELEASE_NOTES_1.8.3.md": "# Fluxheim 1.8.3 Release Notes\n",
                 "README.md": "v1.8.3\n",
-                "docs/build-and-podman.md": "v1.8.3\n",
+                "docs/guides/build-and-podman.md": "v1.8.3\n",
                 "packaging/rpm/fluxheim.spec": f"Version: 1.8.3\n%global rust_min_version {rpm_rust}\n",
                 "Cargo.lock": "",
                 "deny.toml": "",

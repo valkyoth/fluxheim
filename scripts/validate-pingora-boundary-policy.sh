@@ -12,7 +12,7 @@ case "$mode" in
         ;;
 esac
 
-exceptions="docs/pingora-http-error-boundary-exceptions.tsv"
+exceptions="docs/evidence/pingora-http-error-boundary-exceptions.tsv"
 
 if [ ! -f "$exceptions" ]; then
     echo "pingora boundary policy: missing $exceptions" >&2

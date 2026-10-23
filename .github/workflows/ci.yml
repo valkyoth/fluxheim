@@ -28,6 +28,8 @@ jobs:
       - run: python3 -m pip install PyYAML==6.0.3
       - run: python3 scripts/test_container_refresh.py
       - run: python3 scripts/test_development_scope.py
+      - run: python3 scripts/test_documentation_layout.py
+      - run: python3 scripts/test_observability_baseline.py
       - run: bash -n scripts/promote_container_refresh.sh
 
   checks:
@@ -140,6 +142,14 @@ jobs:
 
       - name: Run default tests
         run: cargo test
+
+      - name: Freeze observability baseline contracts
+        run: |
+          cargo test --locked -p fluxheim-observability --all-features
+          cargo test --locked -p fluxheim-config --no-default-features observability
+          cargo test --locked -p fluxheim-config --no-default-features --features metrics-otlp,otel-tracing,otel-otlp observability
+          cargo test --locked -p fluxheim-config --no-default-features --features privacy-mode observability
+          cargo test --locked -p fluxheim --lib --no-default-features --features profile-observability
 
       - name: Test standalone systemd boundary without workspace feature unification
         run: |

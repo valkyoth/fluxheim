@@ -183,8 +183,8 @@ scripts/smoke_admin_listener.sh
   alternative, and an in-container verification command.
 - Existing authenticated snapshot stores created before generation witnesses
   upgrade automatically on their next locked snapshot creation only when every
-  retained legacy manifest verifies. See `docs/config-snapshots.md` for the
+  retained legacy manifest verifies. See `docs/guides/config-snapshots.md` for the
   fail-closed mixed-store and external anti-rollback requirements.
-- CIRCL Geo Open users should follow `docs/geoip.md` for dataset attribution,
+- CIRCL Geo Open users should follow `docs/guides/geoip.md` for dataset attribution,
   trusted installation, pinned checksums, schema details, and the opt-in live
   database proof. The large network download remains outside normal CI gates.

@@ -13,8 +13,8 @@ remove Pingora safely in later 1.6.x releases.
   list can shrink across the Pingora-exit line.
 - Added `scripts/validate-modularity-policy.sh` to report and validate the
   current oversized Rust-file inventory against
-  `docs/modularity-exceptions.md`.
-- Added `docs/runtime-baseline.md` and
+  `docs/evidence/modularity-exceptions.md`.
+- Added `docs/evidence/runtime-baseline.md` and
   `scripts/capture-runtime-baseline.sh` to record locked dependency trees,
   per-profile Pingora dependency presence, release metadata, and default
   release-binary size before the runtime cutover work begins.
@@ -23,11 +23,11 @@ remove Pingora safely in later 1.6.x releases.
   RSS/file descriptors, static HTTP latency, cache MISS/HIT latency,
   load-balancer route timing, keep-alive throughput, and fresh TLS connection
   timing.
-- Added `docs/pingora-dependency-exceptions.tsv` and
+- Added `docs/evidence/pingora-dependency-exceptions.tsv` and
   `scripts/validate-pingora-dependency-policy.sh` so the 1.6 line has a
   release-gated inventory of allowed Pingora crates per official profile.
-- Added `docs/runtime-parity-fixtures.md`,
-  `docs/runtime-parity-fixtures.tsv`, and
+- Added `docs/evidence/runtime-parity-fixtures.md`,
+  `docs/evidence/runtime-parity-fixtures.tsv`, and
   `scripts/validate-runtime-fixtures.sh` to pin the smoke scripts, examples,
   and TLS fixtures that define runtime parity before HTTP/cache/LB/TLS
   cutovers begin.
@@ -37,7 +37,7 @@ remove Pingora safely in later 1.6.x releases.
 - Added typed `PolicyEpoch`, `PolicyProof`, `RuntimeFact`, decision, reason,
   and visibility primitives in `fluxheim-runtime` for later policy-proof
   adoption. They are not wired into request handling in this release.
-- Added `docs/extraction-dependency-graph.md` to record the intended split
+- Added `docs/evidence/extraction-dependency-graph.md` to record the intended split
   order for `snapshot`, protocol, tracing/observability, headers, ACME,
   runtime/server, cache, proxy, and admin modules before the Pingora cutover.
 - Added the runtime-facts and policy-proofs planning model. The goal is typed,

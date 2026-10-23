@@ -7,7 +7,7 @@ on Linux x86_64/aarch64, Apple Silicon macOS and Windows x86_64.
 The operator confirmed publication and successful PHP-container deployment
 on 2026-10-22. This record does not certify future 1.9.0 changes.
 
-See the [qualification record](../docs/maintenance-1.8.3-qualification.md)
+See the [qualification record](../docs/evidence/maintenance-1.8.3-qualification.md)
 for completed checks and explicit limitations.
 
 ## Maintenance Scope
@@ -30,7 +30,7 @@ for completed checks and explicit limitations.
 
 ## Container Maintenance
 
-The [runtime refresh workflow](../docs/container-runtime-refresh.md) rebuilds
+The [runtime refresh workflow](../docs/guides/container-runtime-refresh.md) rebuilds
 the latest published release's containers with refreshed OS/PHP packages and
 requires live smoke checks before promoting versioned image aliases. Unique
 rebuild tags/digests identify each runtime. It does not rewrite source tags,
@@ -56,7 +56,7 @@ the earlier 1.8.2 release. Linux Wasm archives and live policy execution,
 container smokes, PHP image parity and ARM64 profile archives passed too.
 Detailed evidence, limitations and publication closeout are tracked in the
 qualification record. See the
-[maintenance policy](../docs/maintenance-releases.md).
+[maintenance policy](../docs/guides/maintenance-releases.md).
 
 Main stays at 1.9.0 for logging, metrics and operational visibility. HTTP/3
 research is deferred there; it is absent from this release's dependency graph

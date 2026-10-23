@@ -433,10 +433,10 @@ impl TlsComplianceMode {
     fn missing_feature_reason(self) -> &'static str {
         match self {
             Self::Iso19790 => {
-                "ISO/IEC 19790-required mode requires a FIPS/ISO-capable TLS backend feature such as tls-rustls-fips, tls-openssl-fips, or tls-openssl-iso19790; see docs/fips.md"
+                "ISO/IEC 19790-required mode requires a FIPS/ISO-capable TLS backend feature such as tls-rustls-fips, tls-openssl-fips, or tls-openssl-iso19790; see docs/guides/fips.md"
             }
             Self::None | Self::Fips1403 | Self::Fips1403AndIso19790 => {
-                "FIPS-required mode requires a FIPS-capable TLS backend feature such as tls-rustls-fips or tls-openssl-fips; see docs/fips.md"
+                "FIPS-required mode requires a FIPS-capable TLS backend feature such as tls-rustls-fips or tls-openssl-fips; see docs/guides/fips.md"
             }
         }
     }

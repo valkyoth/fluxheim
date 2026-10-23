@@ -190,6 +190,45 @@ mod tests {
 
         let payload = build_metrics_payload(registry.gather(), "fluxheim-test");
 
+        let decoded: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        let metrics = decoded["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]
+            .as_array()
+            .unwrap();
+        assert_eq!(metrics.len(), 3);
+        let histogram = metrics
+            .iter()
+            .find(|metric| metric["name"] == "fluxheim_test_duration_seconds")
+            .unwrap();
+        assert_eq!(histogram["unit"], "s");
+        assert_eq!(
+            histogram["histogram"]["aggregationTemporality"],
+            "AGGREGATION_TEMPORALITY_CUMULATIVE"
+        );
+        let point = &histogram["histogram"]["dataPoints"][0];
+        assert_eq!(point["bucketCounts"], serde_json::json!([0, 1, 0, 0]));
+        assert_eq!(point["explicitBounds"], serde_json::json!([0.01, 0.1, 1.0]));
+        assert_eq!(point["count"], 1);
+        assert_eq!(point["sum"], 0.05);
+        assert!(
+            point["timeUnixNano"]
+                .as_str()
+                .unwrap()
+                .parse::<u128>()
+                .unwrap()
+                > 0
+        );
+        let counter = metrics
+            .iter()
+            .find(|metric| metric["name"] == "fluxheim_test_counter_total")
+            .unwrap();
+        assert_eq!(counter["sum"]["isMonotonic"], true);
+        assert_eq!(counter["sum"]["dataPoints"][0]["asDouble"], 1.0);
+        let gauge = metrics
+            .iter()
+            .find(|metric| metric["name"] == "fluxheim_test_gauge")
+            .unwrap();
+        assert_eq!(gauge["gauge"]["dataPoints"][0]["asDouble"], 7.0);
+
         assert!(payload.contains(r#""resourceMetrics""#));
         assert!(payload.contains(r#""service.name""#));
         assert!(payload.contains(r#""fluxheim-test""#));
@@ -208,10 +247,9 @@ mod tests {
         prometheus::TextEncoder::new()
             .encode(&registry.gather(), &mut text)
             .expect("text encode should work");
-        assert!(
-            String::from_utf8(text)
-                .expect("prometheus text should be utf-8")
-                .contains("fluxheim_test_counter_total")
+        assert_eq!(
+            String::from_utf8(text).unwrap(),
+            include_str!("../../../tests/fixtures/observability/metrics.prom")
         );
     }
 }

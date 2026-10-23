@@ -39,6 +39,22 @@ fn access_target_json_cannot_inject_fields_or_lines() {
 }
 
 #[test]
+fn observability_baseline_runtime_json_schema() {
+    let actual: serde_json::Value = serde_json::from_str(&log_record_json(
+        "2026-10-23T00:00:00.000Z",
+        "WARN",
+        "fluxheim::security",
+        "denied\n\"quoted\"\t\\path",
+    ))
+    .unwrap();
+    let expected: serde_json::Value = serde_json::from_str(include_str!(
+        "../tests/fixtures/observability/runtime-log.json"
+    ))
+    .unwrap();
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn native_runtime_manifest_preview_reports_ready_service_graph() {
     let mut config = crate::config::Config::default();
     config.server.listen = vec!["127.0.0.1:18080".to_owned()];

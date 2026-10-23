@@ -415,6 +415,13 @@ mod tests {
         assert!(payload.contains(r#""key":"fluxheim.php.runtime""#));
         assert!(payload.contains(r#""key":"fluxheim.php.outcome""#));
         assert!(payload.contains(r#""intValue":"200""#));
+        let decoded: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        let span = &decoded["resourceSpans"][0]["scopeSpans"][0]["spans"][0];
+        let expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/observability/trace-span.json"
+        ))
+        .unwrap();
+        assert_eq!(span, &expected);
     }
 
     #[test]
@@ -434,7 +441,9 @@ mod tests {
                 end_time_unix_nanos: 2,
                 request_body_bytes: 0,
                 response_body_bytes: 42,
-                load_balancer_upstream_alias: Some("http://10.0.0.5:8080".to_owned()),
+                load_balancer_upstream_alias: Some(
+                    "http://secret-canary:password@10.0.0.5:8080".to_owned(),
+                ),
                 load_balancer_retries: Some(0),
                 cache_phase: None,
                 cache_lookup_duration_ms: None,
@@ -447,6 +456,8 @@ mod tests {
         );
 
         assert!(!payload.contains("http://10.0.0.5:8080"));
+        assert!(!payload.contains("secret-canary"));
+        assert!(!payload.contains("password"));
         assert!(!payload.contains(r#""key":"fluxheim.load_balancer.upstream""#));
         assert!(payload.contains(r#""key":"fluxheim.load_balancer.retries""#));
     }

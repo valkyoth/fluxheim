@@ -190,7 +190,7 @@ fn parses_tls_fips_config_and_requires_fips_capable_build() {
         config.validate(),
         Err(ConfigError::InvalidTlsPolicy {
             field: "tls.fips.required",
-            reason: "FIPS-required mode requires a FIPS-capable TLS backend feature such as tls-rustls-fips or tls-openssl-fips; see docs/fips.md",
+            reason: "FIPS-required mode requires a FIPS-capable TLS backend feature such as tls-rustls-fips or tls-openssl-fips; see docs/guides/fips.md",
         })
     );
 
@@ -235,7 +235,7 @@ fn parses_tls_iso19790_config_as_required_compliance_alias() {
         config.validate(),
         Err(ConfigError::InvalidTlsPolicy {
             field: "tls.iso19790.required",
-            reason: "ISO/IEC 19790-required mode requires a FIPS/ISO-capable TLS backend feature such as tls-rustls-fips, tls-openssl-fips, or tls-openssl-iso19790; see docs/fips.md",
+            reason: "ISO/IEC 19790-required mode requires a FIPS/ISO-capable TLS backend feature such as tls-rustls-fips, tls-openssl-fips, or tls-openssl-iso19790; see docs/guides/fips.md",
         })
     );
 

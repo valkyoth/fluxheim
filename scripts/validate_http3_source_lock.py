@@ -104,7 +104,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--acceptance", action="store_true", help="also require recorded source qualification; evidence review and pentest/CI remain external gates")
     args = parser.parse_args()
-    data = json.loads((ROOT / "docs/http3-source-lock.json").read_text())
+    data = json.loads((ROOT / "docs/evidence/http3-source-lock.json").read_text())
     validate_scope(data, args.acceptance)
     manifests = [ROOT / "Cargo.toml", *sorted((ROOT / "crates").glob("*/Cargo.toml"))]
     owners = {}

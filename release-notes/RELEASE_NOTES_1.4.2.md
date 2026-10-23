@@ -72,4 +72,4 @@ cargo clippy --locked --no-default-features --features profile-development --all
 ```
 
 For image and package validation, also run the relevant Podman and RPM smoke
-tests from `docs/build-and-podman.md`.
+tests from `docs/guides/build-and-podman.md`.

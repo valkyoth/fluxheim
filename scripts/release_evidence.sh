@@ -188,7 +188,7 @@ ${fips_rustls_output}
 ${owasp_output}
 \`\`\`
 - Compliance evidence package:
-  - Template: \`docs/compliance-evidence-template.md\`
+  - Template: \`docs/evidence/compliance-evidence-template.md\`
   - Evidence script ID: \`FH-RELEASE-EVID-001\`
   - Candidate TOE boundary: \`fill in: gateway binary / RPM profile / container image / FIPS-ISO profile\`
   - Security Target-style draft: \`fill in security problem, objectives, and security-relevant interfaces from the template\`

@@ -18,7 +18,7 @@ focused tests.
 - Added downstream HTTP/1.0 socket tests for missing `Host`, default
   connection close, and explicit `Connection: keep-alive`.
 - Added `scripts/smoke_native_http2_preview.sh` and registered it in
-  `docs/runtime-parity-fixtures.tsv`.
+  `docs/evidence/runtime-parity-fixtures.tsv`.
 
 ## Hardened
 

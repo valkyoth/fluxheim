@@ -72,7 +72,7 @@ pub fn print_crypto_diagnostics(config: Option<&Config>, config_path: Option<&st
     println!(
         "    FIPS/ISO-required mode fails closed unless a configured backend can prove provider status."
     );
-    println!("    See docs/fips.md for the validated-module and operator-evidence model.");
+    println!("    See docs/guides/fips.md for the validated-module and operator-evidence model.");
 
     if let Some(config) = config {
         println!("  config:");

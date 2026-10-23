@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 fn pingora_dependency_exceptions_have_enforced_targets() {
     let current_version = env!("CARGO_PKG_VERSION");
     let packages = cargo_lock_packages(include_str!("../Cargo.lock"));
-    let exceptions = include_str!("../docs/pingora-dependency-exceptions.tsv");
+    let exceptions = include_str!("../docs/evidence/pingora-dependency-exceptions.tsv");
     let mut expired = BTreeSet::new();
 
     for (line_number, line) in exceptions.lines().enumerate() {

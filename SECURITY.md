@@ -23,10 +23,10 @@ GitHub rejects SARIF uploads when default setup and an advanced workflow both
 try to analyze the same repository.
 
 The full release gate is documented in
-[Release Checklist](docs/release-checklist.md). Use it before publishing
+[Release Checklist](docs/guides/release-checklist.md). Use it before publishing
 artifacts, changing dependency versions, or changing TLS/cache/proxy behavior.
 The Rust dependency threat model and review rules are documented in
-[Rust Supply-Chain Security](docs/supply-chain-security.md).
+[Rust Supply-Chain Security](docs/guides/supply-chain-security.md).
 
 ## Dependency Policy
 

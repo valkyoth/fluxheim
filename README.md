@@ -6,9 +6,9 @@
 <div align="center">
   <a href="https://fluxheim.eu">Home Page</a>
   ·
-  <a href="docs/config-reference.md">Config Reference</a>
+  <a href="docs/reference/config-reference.md">Config Reference</a>
   ·
-  <a href="docs/versioning-plan.md">Versioning Plan</a>
+  <a href="docs/roadmap/versioning-plan.md">Versioning Plan</a>
   ·
   <a href="SECURITY.md">Security</a>
 </div>
@@ -21,13 +21,15 @@
 
 # Fluxheim
 
+Documentation: [guides, reference, architecture, roadmap, ideas and evidence](docs/README.md).
+
 `main` targets **1.9.0 (unreleased)**. The latest published release is
-**v1.8.3**. The [1.9.0 commit plan](docs/observability-commit-plan.md) focuses
+**v1.8.3**. The [1.9.0 commit plan](docs/roadmap/observability-commit-plan.md) focuses
 on logging, metrics and operational visibility. HTTP/3 is
-[deferred](docs/http3-quic-commit-plan.md), not enabled in Fluxheim. No
+[deferred](docs/roadmap/http3-quic-commit-plan.md), not enabled in Fluxheim. No
 `v1.9.0` release tag or release artifacts have been published.
 
-The separate [`1.8.x` maintenance line](docs/maintenance-releases.md) delivered
+The separate [`1.8.x` maintenance line](docs/guides/maintenance-releases.md) delivered
 [1.8.3](release-notes/RELEASE_NOTES_1.8.3.md) dependency, runtime-image and
 build-tool updates. Shared fixes are carried forward to main.
 
@@ -146,15 +148,15 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Load-balancer module split | ✅ | `1.5.0`; health checks, backend state, persistence, selection algorithms, backend policy/status, and file/DNS discovery are split into focused `load_balancer/*` modules while keeping `crate::load_balancer::*` stable. |
 | macOS portable builds | 🧪 | `1.4.4` established Apple Silicon development support; `1.8.0` added the shared unsigned archive contract, and `1.8.1` builds all seven public profiles and runs the native subsystem parity suite on Apple Silicon. Archives remain unsigned previews. Intel macOS is not a supported release target. |
 | Windows portable builds | 🧪 | `1.8.2` completes unsigned native MSVC parity for x86_64. Native x86_64 CI passes the workspace, seven profiles, live runtime, archives, and packaged Wasm; release ZIPs come from an exact-tag disposable native builder using the same default-binary reproducibility and checksum model as Linux ARM. Windows ARM64 is deferred until sustainable native build and test infrastructure is available. |
-| GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional bounded local MMDB support with trusted-file enforcement for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. The [GeoIP guide](docs/geoip.md) includes a pinned real CIRCL database proof for static, proxy, and load-balancer paths. |
+| GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional bounded local MMDB support with trusted-file enforcement for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. The [GeoIP guide](docs/guides/geoip.md) includes a pinned real CIRCL database proof for static, proxy, and load-balancer paths. |
 | Pingora-free runtime | ✅ | `1.6.34`; normal Fluxheim builds no longer compile Pingora crates. Server/listener/TLS, HTTP/1, HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and background-service paths run through Fluxheim-owned Rust crates. |
 | HTTP/3/QUIC | ❌ | Deferred research; revisit transport and crypto qualification when Brynja/Vef are more mature. No release version assigned. |
 | WASM extensibility | 🧪 | The `1.7.0` through `1.7.10` line added the optional bounded Wasmtime runtime, typed access/header/route/cache policy hooks, isolated module identities, proxy-ABI and WASI previews, and runnable migration examples for F5 iRules-style, nginx Lua/OpenResty-style, HAProxy Lua/SPOE-style, and VCL-like policy. `1.7.10` stabilized the line with independently selectable family smokes, release-gate enforcement, and arbitrary guest-ID decoder property coverage. Direct backend choice, plugin-provided persistence keys, and dynamic mirror/shadow target choice remain constrained follow-up work. |
 | Zero-downtime upgrades | ✅ | `1.7.11`; bounded native drain, strict systemd listener inheritance, readiness notification after all configured background services report ready, live old/new process handoff coverage, and a tested Podman blue/green pattern behind a stable fronting listener. Directly replacing a container that owns published host ports is explicitly not gap-free. |
 
-See [Production Readiness](docs/production-readiness.md) for the precise
+See [Production Readiness](docs/guides/production-readiness.md) for the precise
 stable-core promise and deployment checks. See
-[macOS Development Support](docs/macos-development.md) for the Level 1
+[macOS Development Support](docs/guides/macos-development.md) for the Level 1
 Apple Silicon developer workflow.
 
 ## Why Fluxheim
@@ -233,11 +235,11 @@ listens on port `80` under the hardened systemd unit with
 [packaging/container/fluxheim.toml](packaging/container/fluxheim.toml), which
 keeps rootless-friendly internal ports `8080` and `8443`. For the `[[vhosts]]`
 syntax and the recommended one-vhost-per-file layout, see
-[Vhost Config Guide](docs/vhost-config.md). For common multi-site proxy
-patterns, see [Gateway Recipes](docs/gateway-recipes.md).
+[Vhost Config Guide](docs/guides/vhost-config.md). For common multi-site proxy
+patterns, see [Gateway Recipes](docs/guides/gateway-recipes.md).
 
 Native/manual binary deployments can use the provided hardened systemd unit;
-see [systemd Deployment](docs/systemd.md).
+see [systemd Deployment](docs/guides/systemd.md).
 
 <details>
 <summary><b>Feature Builds</b></summary>
@@ -336,7 +338,7 @@ Both require `backend = "openssl"` and an operator-installed OpenSSL 3
 validated provider path. Use the `profile-fips-openssl` or
 `profile-iso19790-openssl` alias for local validation, run `fluxheim crypto` to
 inspect provider availability and OpenSSL default FIPS property status, and read
-[FIPS / ISO-Capable Deployments](docs/fips.md) before treating a deployment as
+[FIPS / ISO-Capable Deployments](docs/guides/fips.md) before treating a deployment as
 regulated evidence.
 
 The `1.3.5` release line added a rustls/AWS-LC candidate path with
@@ -372,7 +374,7 @@ the unsuffixed full image.
 Released containers can receive OS/PHP security refreshes without changing the
 Fluxheim version. The weekly/manual refresh workflow tests every image before
 moving versioned aliases; digest-pinned deployments remain opt-in. See
-[container runtime refreshes](docs/container-runtime-refresh.md) for triggering
+[container runtime refreshes](docs/guides/container-runtime-refresh.md) for triggering
 a refresh, image identity, rollback, and deployment instructions.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
@@ -390,8 +392,8 @@ cargo build --no-default-features --features proxy,web,tls-rustls,load-balancer
 PHP support starts in `1.3.1` with an explicit `php-fpm` module. A PHP build
 can serve normal static assets from the same root while routing missing paths
 and explicit `.php` scripts to php-fpm. See
-[`docs/php-runtime-support.md`](docs/php-runtime-support.md),
-[`docs/php-fpm-app-recipes.md`](docs/php-fpm-app-recipes.md), and
+[`docs/guides/php-runtime-support.md`](docs/guides/php-runtime-support.md),
+[`docs/guides/php-fpm-app-recipes.md`](docs/guides/php-fpm-app-recipes.md), and
 [`examples/php-fpm.toml`](examples/php-fpm.toml).
 Fluxheim `1.3.7` completed the production PHP-FPM line with managed php-fpm
 supervision as an opt-in runtime mode. The focused Wolfi, Alpine, Debian, and
@@ -452,9 +454,9 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 ## Development: 1.9.0 Operational Visibility
 
 The development version is `1.9.0`, ahead of the published `v1.8.3` release.
-The [observability plan](docs/observability-commit-plan.md) covers actionable
+The [observability plan](docs/roadmap/observability-commit-plan.md) covers actionable
 diagnostics, bounded logging, metrics, tracing and live cross-platform proof.
-Implementation checkpoints have not started. Each requires pentest, retest
+Commit 01 inventory and baseline work is underway. Each checkpoint requires pentest, retest
 and green GitHub checks before the next begins. HTTP/3 plans and probes remain
 available as manually invoked research, pending renewed qualification. See the
 [draft release notes](release-notes/RELEASE_NOTES_1.9.0.md) for implemented work,
@@ -462,7 +464,7 @@ not promises of completed protocol support.
 
 The twelve checkpoints include UI-ready read-only operational contracts, not
 complete remote configuration management. A separate management release and
-`fluxheim-ui` repository are [proposed](docs/management-api-direction.md);
+`fluxheim-ui` repository are [proposed](docs/ideas/management-api-direction.md);
 they are not implemented features or release commitments.
 
 ### Latest Release: 1.8.3 Maintenance
@@ -470,7 +472,7 @@ they are not implemented features or release commitments.
 Release `v1.8.3` updates Rust/dependencies, the opt-in Wasm runtime, container
 bases and release tooling while retaining the portable profile matrix. See
 the [release notes](release-notes/RELEASE_NOTES_1.8.3.md) and
-[qualification record](docs/maintenance-1.8.3-qualification.md).
+[qualification record](docs/evidence/maintenance-1.8.3-qualification.md).
 
 ### Platform Baseline: 1.8.2 Windows Portable Parity
 
@@ -486,7 +488,7 @@ work follows platform parity. The unsigned macOS CLI preview publishes
 gate passes. Windows ARM64 is deferred until equivalent native build and test
 infrastructure is sustainable.
 See
-[Portable Releases](docs/portable-releases.md) for the shared archive contract,
+[Portable Releases](docs/guides/portable-releases.md) for the shared archive contract,
 current platform support level, and unsigned-preview policy.
 
 - `1.0` is the gateway foundation: vhosts, routes, redirects, static serving,
@@ -527,7 +529,7 @@ current platform support level, and unsigned-preview policy.
   config, load-balancer, cache, web, PHP-FPM, and future extension crates. It
   is not a production WAF, full GSLB/DNS appliance, generic UDP proxy, or
   iRules-compatible scripting release. See
-  [Load Balancer Migration Notes](docs/load-balancer-migration.md) for HAProxy,
+  [Load Balancer Migration Notes](docs/guides/load-balancer-migration.md) for HAProxy,
   nginx, and F5 pool mappings.
 - `1.6.x` is the Pingora-exit line. It starts with baseline evidence,
   modularity gates, runtime-fact/policy-proof planning, and crate-boundary
@@ -564,64 +566,64 @@ current platform support level, and unsigned-preview policy.
   fail-closed counter state, and the one-time legacy cold migration.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
-coverage are documented in [Cache Backends](docs/cache-backends.md),
-[Cache Encryption](docs/cache-encryption.md),
-[Config Reference](docs/config-reference.md), and
-[Production Readiness](docs/production-readiness.md).
+coverage are documented in [Cache Backends](docs/guides/cache-backends.md),
+[Cache Encryption](docs/guides/cache-encryption.md),
+[Config Reference](docs/reference/config-reference.md), and
+[Production Readiness](docs/guides/production-readiness.md).
 
 The `1.8` line establishes macOS/Windows portable parity. The `1.9` line focuses
 on logging, metrics and operational visibility; HTTP/3/QUIC is deferred.
-See [Versioning Plan](docs/versioning-plan.md) and
+See [Versioning Plan](docs/roadmap/versioning-plan.md) and
 [Roadmap](ROADMAP.md) for the full release ladder.
 
 ## Documentation
 
 - [Roadmap](ROADMAP.md)
 - [Changelog](CHANGELOG.md)
-- [Versioning Plan](docs/versioning-plan.md)
-- [Modularity Policy](docs/modularity-policy.md)
-- [Runtime Baseline](docs/runtime-baseline.md)
-- [Runtime Parity Fixtures](docs/runtime-parity-fixtures.md)
-- [Extraction Dependency Graph](docs/extraction-dependency-graph.md)
-- [Runtime Facts And Policy Proofs](docs/runtime-facts-and-policy-proofs.md)
-- [Release Runbook](docs/release-runbook.md)
-- [Release Checklist](docs/release-checklist.md)
-- [Build, Containers, And Rootless Podman](docs/build-and-podman.md)
-- [Production Readiness](docs/production-readiness.md)
-- [Feature Matrix](docs/features.md)
-- [OWASP Top 10 2025 Baseline](docs/owasp-top10-2025-baseline.md)
-- [FIPS-Capable Deployments](docs/fips.md)
-- [Config Reference](docs/config-reference.md)
-- [Load Balancer Migration Notes](docs/load-balancer-migration.md)
-- [Gateway Recipes](docs/gateway-recipes.md)
-- [GitHub Repository Setup](docs/github-setup.md)
-- [Cache Backends](docs/cache-backends.md)
-- [Cache Encryption](docs/cache-encryption.md)
-- [Image Filter](docs/image-filter.md)
-- [Programmable Media Edge](docs/programmable-media-edge.md)
-- [Certificate Renewal And Reload](docs/certificate-renewal.md)
-- [Config Snapshots And Rollback](docs/config-snapshots.md)
-- [Logging Architecture](docs/logging-architecture.md)
-- [Metrics Architecture](docs/metrics-architecture.md)
-- [OpenTelemetry Tracing](docs/opentelemetry-tracing.md)
-- [WASM Extensibility](docs/wasm-extensibility.md)
-- [Wasm Policy Example Parity](docs/wasm-policy-example-parity.md)
-- [Portable Releases](docs/portable-releases.md)
-- [1.9.0 Observability Commit Plan](docs/observability-commit-plan.md)
-- [Management API And UI Direction](docs/management-api-direction.md)
-- [Deferred HTTP/3 And QUIC Commit Plan](docs/http3-quic-commit-plan.md)
-- [Windows Release Builders](docs/windows-release-builders.md)
-- [Zero-Downtime Upgrades](docs/zero-downtime-upgrades.md)
-- [Crypto RPC Edge](docs/crypto-rpc-edge.md)
-- [External Authorization Request](docs/auth-request.md)
-- [Zero-Retention Privacy Mode](docs/zero-retention-privacy-mode.md)
-- [WAF Architecture](docs/waf-architecture.md)
-- [Rust Supply-Chain Security](docs/supply-chain-security.md)
-- [Cloudflare Origin Support](docs/cloudflare-origin-support.md)
-- [PHP Runtime Support](docs/php-runtime-support.md)
-- [Perl CGI Support](docs/perl-cgi-support.md)
-- [Legacy Static HTTP Support](docs/legacy-static-http.md)
-- [Sentinel Mesh](docs/sentinel-mesh.md)
+- [Versioning Plan](docs/roadmap/versioning-plan.md)
+- [Modularity Policy](docs/architecture/modularity-policy.md)
+- [Runtime Baseline](docs/evidence/runtime-baseline.md)
+- [Runtime Parity Fixtures](docs/evidence/runtime-parity-fixtures.md)
+- [Extraction Dependency Graph](docs/evidence/extraction-dependency-graph.md)
+- [Runtime Facts And Policy Proofs](docs/architecture/runtime-facts-and-policy-proofs.md)
+- [Release Runbook](docs/guides/release-runbook.md)
+- [Release Checklist](docs/guides/release-checklist.md)
+- [Build, Containers, And Rootless Podman](docs/guides/build-and-podman.md)
+- [Production Readiness](docs/guides/production-readiness.md)
+- [Feature Matrix](docs/reference/features.md)
+- [OWASP Top 10 2025 Baseline](docs/evidence/owasp-top10-2025-baseline.md)
+- [FIPS-Capable Deployments](docs/guides/fips.md)
+- [Config Reference](docs/reference/config-reference.md)
+- [Load Balancer Migration Notes](docs/guides/load-balancer-migration.md)
+- [Gateway Recipes](docs/guides/gateway-recipes.md)
+- [GitHub Repository Setup](docs/guides/github-setup.md)
+- [Cache Backends](docs/guides/cache-backends.md)
+- [Cache Encryption](docs/guides/cache-encryption.md)
+- [Image Filter](docs/ideas/image-filter.md)
+- [Programmable Media Edge](docs/ideas/programmable-media-edge.md)
+- [Certificate Renewal And Reload](docs/guides/certificate-renewal.md)
+- [Config Snapshots And Rollback](docs/guides/config-snapshots.md)
+- [Logging Architecture](docs/architecture/logging-architecture.md)
+- [Metrics Architecture](docs/architecture/metrics-architecture.md)
+- [OpenTelemetry Tracing](docs/guides/opentelemetry-tracing.md)
+- [WASM Extensibility](docs/guides/wasm-extensibility.md)
+- [Wasm Policy Example Parity](docs/evidence/wasm-policy-example-parity.md)
+- [Portable Releases](docs/guides/portable-releases.md)
+- [1.9.0 Observability Commit Plan](docs/roadmap/observability-commit-plan.md)
+- [Management API And UI Direction](docs/ideas/management-api-direction.md)
+- [Deferred HTTP/3 And QUIC Commit Plan](docs/roadmap/http3-quic-commit-plan.md)
+- [Windows Release Builders](docs/guides/windows-release-builders.md)
+- [Zero-Downtime Upgrades](docs/guides/zero-downtime-upgrades.md)
+- [Crypto RPC Edge](docs/ideas/crypto-rpc-edge.md)
+- [External Authorization Request](docs/ideas/auth-request.md)
+- [Zero-Retention Privacy Mode](docs/guides/zero-retention-privacy-mode.md)
+- [WAF Architecture](docs/ideas/waf-architecture.md)
+- [Rust Supply-Chain Security](docs/guides/supply-chain-security.md)
+- [Cloudflare Origin Support](docs/guides/cloudflare-origin-support.md)
+- [PHP Runtime Support](docs/guides/php-runtime-support.md)
+- [Perl CGI Support](docs/ideas/perl-cgi-support.md)
+- [Legacy Static HTTP Support](docs/ideas/legacy-static-http.md)
+- [Sentinel Mesh](docs/ideas/sentinel-mesh.md)
 
 ## Security And Dependency Policy
 
@@ -659,7 +661,7 @@ scripts/test_starter.py --run wasm
 ```
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting and
-[Rust Supply-Chain Security](docs/supply-chain-security.md) for dependency
+[Rust Supply-Chain Security](docs/guides/supply-chain-security.md) for dependency
 review policy.
 
 ## License

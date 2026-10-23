@@ -13,7 +13,7 @@
 #
 # This file is an evidence/diagnostic fixture. Real deployments still need
 # vhosts, certificates, a validated OpenSSL FIPS/ISO provider path, and the
-# module Security Policy evidence described in docs/fips.md.
+# module Security Policy evidence described in docs/guides/fips.md.
 
 [server]
 listen = ["127.0.0.1:8080"]

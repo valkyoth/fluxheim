@@ -3795,7 +3795,7 @@ behavior when the change improves security or project direction.
 - Add regression coverage proving memory and tiered cache backends can
   round-trip objects through the native cache interface.
 - Add a Rust integration test that enforces
-  `docs/pingora-dependency-exceptions.tsv` removal targets against
+  `docs/evidence/pingora-dependency-exceptions.tsv` removal targets against
   `Cargo.lock`, so expired Pingora dependency exceptions fail in normal
   `cargo test` runs as well as release gates.
 - Keep final `pingora-cache` compile removal scheduled for the native HTTP
@@ -3842,11 +3842,11 @@ behavior when the change improves security or project direction.
 - Start the 1.6 Pingora-exit foundation line. Runtime behavior is intended to
   remain unchanged in this first 1.6 release while the project records baseline
   evidence and guardrails for staged dependency removal.
-- Add `docs/modularity-exceptions.md` and
+- Add `docs/evidence/modularity-exceptions.md` and
   `scripts/validate-modularity-policy.sh` to make the 500-line modularity
   policy measurable at release time. Existing oversized Rust files are listed
   as legacy exceptions with split targets instead of hidden as normal debt.
-- Add `docs/runtime-baseline.md` and
+- Add `docs/evidence/runtime-baseline.md` and
   `scripts/capture-runtime-baseline.sh` to record locked dependency trees,
   per-profile Pingora dependency presence, release metadata, and default
   release-binary size before the runtime cutover work begins.
@@ -3855,10 +3855,10 @@ behavior when the change improves security or project direction.
   RSS/file descriptors, static HTTP latency, cache MISS/HIT latency,
   load-balancer route timing, keep-alive throughput, and fresh TLS connection
   timing.
-- Add `docs/pingora-dependency-exceptions.tsv` and
+- Add `docs/evidence/pingora-dependency-exceptions.tsv` and
   `scripts/validate-pingora-dependency-policy.sh` so the 1.6 line has a
   release-gated inventory of allowed Pingora crates per official profile.
-- Add `docs/runtime-parity-fixtures.md`, `docs/runtime-parity-fixtures.tsv`,
+- Add `docs/evidence/runtime-parity-fixtures.md`, `docs/evidence/runtime-parity-fixtures.tsv`,
   and `scripts/validate-runtime-fixtures.sh` to pin the smoke scripts,
   examples, and TLS fixtures that define runtime parity before
   HTTP/cache/LB/TLS cutovers begin.
@@ -3868,10 +3868,10 @@ behavior when the change improves security or project direction.
 - Add typed `PolicyEpoch`, `PolicyProof`, `RuntimeFact`, decision, reason, and
   visibility primitives in `fluxheim-runtime` for later policy-proof adoption.
   They are not wired into request handling in this release.
-- Add `docs/extraction-dependency-graph.md` to record the intended split order
+- Add `docs/evidence/extraction-dependency-graph.md` to record the intended split order
   for `snapshot`, protocol, tracing/observability, headers, ACME,
   runtime/server, cache, proxy, and admin modules before the Pingora cutover.
-- Add `docs/runtime-facts-and-policy-proofs.md` to guide typed, bounded,
+- Add `docs/architecture/runtime-facts-and-policy-proofs.md` to guide typed, bounded,
   redacted decision evidence for route policy, cache admission,
   load-balancer selection, admin mutation, config promotion, and future Wasm
   host calls.
@@ -5036,7 +5036,7 @@ behavior when the change improves security or project direction.
   in-flight affinity cookies.
 - Add managed-cookie validation for path/domain/max-age/SameSite attributes
   and keep persistence rejected in `privacy-mode` builds.
-- Add `docs/load-balancer-ha.md` to pin the future active-active
+- Add `docs/ideas/load-balancer-ha.md` to pin the future active-active
   cookie-mirroring and persistence-state replication design boundaries.
 - Harden managed-cookie pentest findings: enforce ASCII-only cookie
   domain/path attributes, bind the HMAC tag to the configured cookie name,
@@ -5218,7 +5218,7 @@ behavior when the change improves security or project direction.
 - Add a validated `examples/load-balancer-enterprise.toml` migration fixture
   for HAProxy/F5-style weighted pools, priority groups, health policy,
   persistence, retry budgets, and all-down behavior.
-- Add `docs/load-balancer-migration.md` with nginx, HAProxy, and F5 LTM pool
+- Add `docs/guides/load-balancer-migration.md` with nginx, HAProxy, and F5 LTM pool
   mappings plus explicit boundaries for UDP, GSLB, WAF, VPN, and scripting
   roadmap items.
 - Document the `1.5.0` load-balancer boundaries clearly: no managed affinity

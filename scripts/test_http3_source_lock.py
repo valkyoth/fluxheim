@@ -14,7 +14,7 @@ import validate_http3_source_lock as gate
 
 class SourceLockTests(unittest.TestCase):
     def setUp(self):
-        self.scope = json.loads((gate.ROOT / "docs/http3-source-lock.json").read_text())
+        self.scope = json.loads((gate.ROOT / "docs/evidence/http3-source-lock.json").read_text())
         self.manifest = tomllib.loads((gate.PROBE / "Cargo.toml").read_text())
         self.lock = (gate.PROBE / "Cargo.lock").read_bytes()
 

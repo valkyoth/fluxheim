@@ -12,7 +12,7 @@ case "$mode" in
         ;;
 esac
 
-inventory="docs/runtime-parity-fixtures.tsv"
+inventory="docs/evidence/runtime-parity-fixtures.tsv"
 
 if [ ! -f "$inventory" ]; then
     echo "runtime fixtures: missing $inventory" >&2

@@ -26,7 +26,7 @@ rather than a behavior change for operators.
 - Added regression tests proving memory and tiered memory-plus-disk cache
   storage can round-trip cached objects through the native interface.
 - Added a Rust integration test that enforces
-  `docs/pingora-dependency-exceptions.tsv` removal targets against
+  `docs/evidence/pingora-dependency-exceptions.tsv` removal targets against
   `Cargo.lock`, so expired Pingora dependency exceptions fail during normal
   `cargo test`.
 - Updated workspace, RPM, README, build documentation, and release notes to

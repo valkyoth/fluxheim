@@ -6,17 +6,28 @@ archives exist yet.
 
 ## Planned Outcome
 
-The [observability commit plan](../docs/observability-commit-plan.md) defines
+The [observability commit plan](../docs/roadmap/observability-commit-plan.md) defines
 logging, metrics and operational visibility as this release's scope:
 actionable diagnostics, bounded logging/export, request correlation,
 low-cardinality metrics and authenticated status. These implementation
-checkpoints have not started. New telemetry must preserve privacy and existing
+checkpoints begin with the Commit 01 inventory and baseline. New telemetry must preserve privacy and existing
 configuration; collectors are not mandatory to run Fluxheim.
 
 The twelve checkpoints include a documented read-only operational API contract.
 A full transactional management API and separate UI are
-[proposed for later work](../docs/management-api-direction.md), not promised
+[proposed for later work](../docs/ideas/management-api-direction.md), not promised
 or implemented in this release.
+
+## Commit 01 Preparation
+
+- Organize documentation into indexed guides, reference, architecture, roadmap,
+  ideas and evidence; update packaging/tooling references without deleting history.
+- Freeze runtime JSON, Prometheus and OTLP encoder contracts with regression tests.
+- Add a repeatable loopback baseline and record native observability wiring gaps.
+  Native access-log completion and request-span export still need implementation;
+  propagation and an exporter library alone are not proof of delivered traces.
+- Plan importable Grafana and SigNoz dashboards and real backend tests using
+  vendor-neutral telemetry. These integrations are not implemented yet.
 
 ## Implemented Maintenance
 
@@ -39,7 +50,7 @@ with the maintenance branch before starting this implementation train.
 
 ## Independent Container Maintenance
 
-The [runtime refresh workflow](../docs/container-runtime-refresh.md) can refresh
+The [runtime refresh workflow](../docs/guides/container-runtime-refresh.md) can refresh
 the latest published release's OS and PHP packages without waiting for 1.9.0.
 It uses the stable release's application sources and tests each image before
 promoting versioned aliases. Unique rebuild tags and digests identify the new
@@ -47,8 +58,8 @@ runtime; application versions and signed Git tags do not change.
 
 ## Deferred HTTP/3 Research
 
-The [HTTP/3 plan](../docs/http3-quic-commit-plan.md), isolated source-locked
-Quinn/rustls/h3 probes and [API-gap evidence](../docs/http3-migration-feasibility.md)
+The [HTTP/3 plan](../docs/roadmap/http3-quic-commit-plan.md), isolated source-locked
+Quinn/rustls/h3 probes and [API-gap evidence](../docs/evidence/http3-migration-feasibility.md)
 are retained for future evaluation when Brynja/Vef are more mature. Neither is
 a production dependency or an approved solution to the gap today. No production
 HTTP/3 listener or QUIC dependency was added. Reconnect-only behavior is not a

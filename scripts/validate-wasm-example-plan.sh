@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
-plan="docs/versioning-plan.md"
-examples="docs/wasm-policy-example-parity.md"
+plan="docs/roadmap/versioning-plan.md"
+examples="docs/evidence/wasm-policy-example-parity.md"
 
 for file in "$plan" "$examples"; do
     if [ ! -f "$file" ]; then

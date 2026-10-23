@@ -22,7 +22,7 @@ evidence for operators.
 
 ## Highlights
 
-- Added `docs/fips.md`, a standalone FIPS-capable deployment guide covering
+- Added `docs/guides/fips.md`, a standalone FIPS-capable deployment guide covering
   NIST/CMVP references, compliance boundaries, OpenSSL and rustls/AWS-LC paths,
   internal cryptography blockers, and post-`1.3.4` roadmap work.
 - Added `[tls.fips] required = true` as a fail-closed guard for FIPS-required

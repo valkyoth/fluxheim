@@ -64,7 +64,7 @@ def main() -> int:
     )
     require(
         contains(
-            "docs/build-and-podman.md",
+            "docs/guides/build-and-podman.md",
             "/srv/infra/fluxheim/plugins:/etc/fluxheim/plugins:ro,Z",
         ),
         "container documentation must include the read-only plugin mount",
@@ -82,19 +82,19 @@ def main() -> int:
     )
     require(
         contains(
-            "docs/wasm-extensibility.md",
+            "docs/guides/wasm-extensibility.md",
             "### Container Plugin Trust Models",
         )
         and contains(
-            "docs/wasm-extensibility.md",
+            "docs/guides/wasm-extensibility.md",
             "A `:ro` bind mount is read-only from inside the container",
         )
         and contains(
-            "docs/wasm-extensibility.md",
+            "docs/guides/wasm-extensibility.md",
             "High-assurance deployments should build a derivative image",
         )
         and contains(
-            "docs/wasm-extensibility.md",
+            "docs/guides/wasm-extensibility.md",
             "Do not bake private keys, admin tokens, ACME EAB keys",
         ),
         "Wasm container docs must preserve the host-mount threat model",

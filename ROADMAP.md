@@ -3,7 +3,7 @@
 This roadmap is the working implementation plan. Keep it current as features
 move from design to code.
 
-Release sequencing is defined in [Versioning Plan](docs/versioning-plan.md).
+Release sequencing is defined in [Versioning Plan](docs/roadmap/versioning-plan.md).
 That plan treats `0.5.x` as the basic-sites preview and `1.0.0` as the first
 gateway-ready release for Fluxheim's representative real multi-site configs.
 Larger modules still graduate through later minor releases.
@@ -11,13 +11,13 @@ Larger modules still graduate through later minor releases.
 ## Current Development Goal
 
 Fluxheim `1.9.0` is the unreleased logging, metrics and operational visibility
-train. The [observability commit plan](docs/observability-commit-plan.md)
+train. The [observability commit plan](docs/roadmap/observability-commit-plan.md)
 governs its checkpoints, pentest/retest and native/container acceptance gates.
-HTTP/3 is [deferred](docs/http3-quic-commit-plan.md); retain its source probes
+HTTP/3 is [deferred](docs/roadmap/http3-quic-commit-plan.md); retain its source probes
 and policy-gap evidence for future Brynja/Vef evaluation. Neither is a current
 dependency or an approved solution to that gap. The latest release is `1.8.3`.
 Its shared maintenance fixes are carried forward to main. A complete management
-API is [proposed separately](docs/management-api-direction.md), provisionally
+API is [proposed separately](docs/ideas/management-api-direction.md), provisionally
 for 1.10.0 if approved; 1.9.0 adds only read-only operational contracts for a
 future independently released UI.
 
@@ -354,7 +354,7 @@ These are realistic additions to implement across the stable core and early
      Implemented for stderr/stdout plus `[logging.file]`; async/remote sinks
      remain future work.
    - Implement the staged structured logging plan in
-     [Logging Architecture](docs/logging-architecture.md).
+     [Logging Architecture](docs/architecture/logging-architecture.md).
    - Use `tracing` as the core event system, with JSON output for production
      and `log` compatibility while legacy modules still use `log`.
    - Split log classes into access, error, security, and audit events.
@@ -369,7 +369,7 @@ These are realistic additions to implement across the stable core and early
      ACME/EAB secrets, and configured sensitive fields.
    - Add optional OpenTelemetry tracing as a separate observability module.
      Architecture and security plan documented in
-     [OpenTelemetry Tracing](docs/opentelemetry-tracing.md).
+     [OpenTelemetry Tracing](docs/guides/opentelemetry-tracing.md).
    - Tracing must be compile-time gated and disabled by default. Planned
      features:
      - `otel-tracing`: W3C Trace Context propagation, trace-log correlation,
@@ -492,7 +492,7 @@ These are realistic additions to implement across the stable core and early
    - Add a concise GitHub-facing project goals document.
    - Add one “production checklist” that states what is MVP-ready and what is
      still experimental. Implemented in
-     [Production Readiness](docs/production-readiness.md).
+     [Production Readiness](docs/guides/production-readiness.md).
    - Keep example configs in sync with every new global section.
    - Improve config diagnostics for real multi-file deployments: `conf.d`
      parse errors should include the source file path, validation errors should
@@ -528,7 +528,7 @@ These are realistic additions to implement across the stable core and early
      `privacy-mode` feature is implemented and covered by the release check
      script.
    - Architecture and security plan documented in
-     [Zero-Retention Privacy Mode](docs/zero-retention-privacy-mode.md).
+     [Zero-Retention Privacy Mode](docs/guides/zero-retention-privacy-mode.md).
    - Intended build shape:
      `cargo build --no-default-features --features proxy,web,tls-rustls,privacy-mode`.
    - Privacy mode must disable access logs, remote logs, file logs, per-client
@@ -702,7 +702,7 @@ without parsing text fixtures for every module.
    - Pingora background service registration for periodic load-balancer health
      checks. Implemented.
    - Smart telemetry load balancer over WireGuard. Future design documented in
-     [Sentinel Mesh](docs/sentinel-mesh.md).
+     [Sentinel Mesh](docs/ideas/sentinel-mesh.md).
 
 2. **Static Web**
    - Secure static file resolution.
@@ -780,10 +780,10 @@ without parsing text fixtures for every module.
      operations on validated backends; operators remain responsible for the
      validated module installation, OS/container boundary, and Security Policy
      operating procedure.
-     See `docs/fips.md` for the detailed post-`1.3.4` FIPS implementation
+     See `docs/guides/fips.md` for the detailed post-`1.3.4` FIPS implementation
      ladder and operator evidence model.
    - Future Common Criteria evidence alignment should turn
-     `docs/common-criteria-roadmap.md` into actionable release artifacts:
+     `docs/roadmap/common-criteria-roadmap.md` into actionable release artifacts:
      define a candidate TOE boundary, record security-relevant interfaces,
      maintain a Security Target-style draft, map Fluxheim controls to
      Common Criteria-style functional areas, and attach validation scripts to
@@ -796,7 +796,7 @@ without parsing text fixtures for every module.
      explicit `supply-chain/` policy, require review for new build scripts,
      procedural macros, `*-sys` crates, and native dependencies, and evaluate
      `cargo-auditable` or native embedded SBOM metadata for release binaries.
-     See `docs/supply-chain-security.md` for the staged adoption plan.
+     See `docs/guides/supply-chain-security.md` for the staged adoption plan.
   - ACME account/order/challenge runtime. Implemented as one-shot and
     background `acme-client` paths for HTTP-01.
   - Background renewal queue service. Implemented for due-only checks on the
@@ -1038,7 +1038,7 @@ without parsing text fixtures for every module.
 
 6a. **1.4 Optional Compression**
    - Architecture and security plan documented in
-     [Compression](docs/compression.md).
+     [Compression](docs/guides/compression.md).
    - Compression is pulled into the `1.4` production proxy parity line because
      NGINX, HAProxy, Envoy, and Caddy operators expect it from a reverse proxy.
    - Compression must be optional, compile-time gated, and disabled by default
@@ -1066,7 +1066,7 @@ without parsing text fixtures for every module.
 
 7. **Future Optional Image Filter**
    - Architecture and security plan documented in
-     [Image Filter](docs/image-filter.md).
+     [Image Filter](docs/ideas/image-filter.md).
    - Image filtering must be optional, compile-time gated, and disabled by
      default. Planned features:
      - `image-filter`: shared config, eligibility checks, metadata reporting,
@@ -1119,7 +1119,7 @@ without parsing text fixtures for every module.
      totals, load-balancer health transitions, ACME renewal results, and
      self-healing rollback actions.
    - Advanced metrics architecture documented in
-     [Metrics Architecture](docs/metrics-architecture.md).
+     [Metrics Architecture](docs/architecture/metrics-architecture.md).
    - Keep Prometheus pull as the safe baseline. Advanced per-vhost buckets,
      remote push, and OTLP export must remain optional add-ons.
    - Planned features:
@@ -1141,7 +1141,7 @@ without parsing text fixtures for every module.
 
 9. **Future Optional WAF Support**
    - Architecture and security plan documented in
-     [WAF Architecture](docs/waf-architecture.md).
+     [WAF Architecture](docs/ideas/waf-architecture.md).
    - WAF support must be optional, compile-time gated, and disabled by default.
    - Long-term target: cover the web-application security jobs operators
      associate with F5 BIG-IP ASM/Advanced WAF, but as Fluxheim optional
@@ -1201,7 +1201,7 @@ without parsing text fixtures for every module.
 
 11. **Future Optional Cloudflare Origin Support**
    - Architecture and security plan documented in
-     [Cloudflare Origin Support](docs/cloudflare-origin-support.md).
+     [Cloudflare Origin Support](docs/guides/cloudflare-origin-support.md).
    - Cloudflare support must be optional, compile-time gated, and disabled by
      default. Planned features:
      - `cloudflare`: shared config, trusted IP ranges, header restoration, and
@@ -1258,7 +1258,7 @@ without parsing text fixtures for every module.
 
 11. **Zero-Retention Privacy Mode Compatibility**
    - Architecture and security plan documented in
-     [Zero-Retention Privacy Mode](docs/zero-retention-privacy-mode.md).
+     [Zero-Retention Privacy Mode](docs/guides/zero-retention-privacy-mode.md).
    - Privacy mode is not a normal runtime toggle. It should be a compile-time
      profile so logging/metrics/exporter code paths can be excluded from the
      binary.
@@ -1283,7 +1283,7 @@ without parsing text fixtures for every module.
 
 12. **Future PHP Runtime Support**
    - Architecture and security plan documented in
-     [PHP Runtime Support](docs/php-runtime-support.md).
+     [PHP Runtime Support](docs/guides/php-runtime-support.md).
    - PHP must be optional and compile-time gated. Production PHP uses
      `php-fpm`: the backwards-compatible FastCGI bridge to php-fpm over Unix or
      TCP sockets.
@@ -1316,7 +1316,7 @@ without parsing text fixtures for every module.
 
 13. **Future Perl CGI Support**
    - Architecture and security plan documented in
-     [Perl CGI Support](docs/perl-cgi-support.md).
+     [Perl CGI Support](docs/ideas/perl-cgi-support.md).
    - Perl CGI must be optional and compile-time gated. Planned features:
      `perl-cgi` for the module, `perl-cgi-cegla` for the `cegla`/Tokio CGI
      implementation, and optional Linux-only sandbox hardening features such as
@@ -1347,7 +1347,7 @@ without parsing text fixtures for every module.
 
 14. **Future Legacy Static HTTP Support**
    - Architecture and security plan documented in
-     [Legacy Static HTTP Support](docs/legacy-static-http.md).
+     [Legacy Static HTTP Support](docs/ideas/legacy-static-http.md).
    - Legacy protocol support must be compile-time gated, disabled by default,
      and separate from normal listeners. Planned features:
      `legacy-http-static`, `legacy-http10-static`, and
@@ -1377,7 +1377,7 @@ without parsing text fixtures for every module.
    - HTTP/3 is the modern protocol direction, not a legacy-compatibility
      feature.
    - Preserve the numbered, pentested checkpoints in the
-     [HTTP/3 And QUIC Commit Plan](docs/http3-quic-commit-plan.md), followed by
+     [HTTP/3 And QUIC Commit Plan](docs/roadmap/http3-quic-commit-plan.md), followed by
      one complete future release rather than partial protocol releases.
      Work is deferred pending renewed source qualification and Brynja/Vef
      capability review, not scheduled for 1.9.0.
@@ -1500,9 +1500,9 @@ without parsing text fixtures for every module.
 
 18. **Future External Authorization And Identity-Aware Routing**
    - Architecture and security plan for external authorization requests is
-     documented in [External Authorization Request](docs/auth-request.md).
+     documented in [External Authorization Request](docs/ideas/auth-request.md).
    - Architecture and security plan for signed URL grants is documented in
-     [Secure Links](docs/secure-links.md).
+     [Secure Links](docs/ideas/secure-links.md).
    - Plan as optional `auth-request` and `identity` module families after
      stable admin, logging redaction, TLS, and header policy are mature.
    - Goal: let Fluxheim ask a trusted authorization service for an access
@@ -1690,7 +1690,7 @@ without parsing text fixtures for every module.
 
 23. **Future Programmable Media Edge**
    - Architecture and security plan documented in
-     [Programmable Media Edge](docs/programmable-media-edge.md).
+     [Programmable Media Edge](docs/ideas/programmable-media-edge.md).
    - Video-aware delivery must be optional, compile-time gated, and disabled by
      default. Planned features:
      - `media-edge`: shared media config, policy model, parser limits, route
@@ -1735,7 +1735,7 @@ without parsing text fixtures for every module.
 
 24. **Future WASM Extensibility**
    - Architecture and security plan documented in
-     [WASM Extensibility](docs/wasm-extensibility.md).
+     [WASM Extensibility](docs/guides/wasm-extensibility.md).
    - Target release: `1.7` as one shared extension runtime, not a partial
      cache-only `1.2.x` implementation.
    - WASM support must be optional, compile-time gated, and disabled by
@@ -1784,7 +1784,7 @@ without parsing text fixtures for every module.
      validation, so native deployments have offline command/config
      documentation.
    - Release/security checklist. Implemented in
-     [Release Checklist](docs/release-checklist.md), with a wrapper script for
+     [Release Checklist](docs/guides/release-checklist.md), with a wrapper script for
      local release gates.
    - Hardware-specific local build documentation. Implemented with
      `target-cpu=native` guidance.

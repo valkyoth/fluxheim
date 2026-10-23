@@ -71,9 +71,9 @@ require_file_contains examples/fluxheim.toml 'referrer_policy = "no-referrer"' "
 require_file_contains examples/fluxheim.toml 'deny_dotfiles = true' "example dotfile denial"
 require_file_contains examples/fluxheim.toml '\[admin\]' "admin config example"
 require_file_contains examples/admin.toml 'token_env = "FLUXHEIM_ADMIN_TOKEN"' "admin token source"
-require_file_contains docs/fips.md 'FIPS PUB 140-3' "FIPS documentation"
-require_file_contains docs/production-readiness.md 'FLUXHEIM_GATE_FIPS_OPENSSL=1' "release FIPS gate documentation"
-require_file_contains docs/production-readiness.md 'profile-fips-rustls' "rustls/AWS-LC FIPS documentation"
+require_file_contains docs/guides/fips.md 'FIPS PUB 140-3' "FIPS documentation"
+require_file_contains docs/guides/production-readiness.md 'FLUXHEIM_GATE_FIPS_OPENSSL=1' "release FIPS gate documentation"
+require_file_contains docs/guides/production-readiness.md 'profile-fips-rustls' "rustls/AWS-LC FIPS documentation"
 require_pinned_supply_chain_inputs
 
 echo "owasp baseline: collecting test inventory"

@@ -12,7 +12,7 @@ case "$mode" in
         ;;
 esac
 
-exceptions="docs/pingora-dependency-exceptions.tsv"
+exceptions="docs/evidence/pingora-dependency-exceptions.tsv"
 out_dir="${FLUXHEIM_PINGORA_POLICY_DIR:-target/release-evidence/pingora-dependency-policy}"
 current_version="${FLUXHEIM_PINGORA_POLICY_VERSION:-$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | sed -n '1p')}"
 

@@ -52,7 +52,7 @@ pure header rewrite and forwarded-client-IP helpers now live in
 - Preserved the existing root proxy header-policy tests across the new crate
   boundary.
 - Added `scripts/validate-pingora-boundary-policy.sh` and
-  `docs/pingora-http-error-boundary-exceptions.tsv` to keep the remaining
+  `docs/evidence/pingora-http-error-boundary-exceptions.tsv` to keep the remaining
   Pingora HTTP/error bridge surface explicit during the `1.6.x` removal line.
 - Added direct `fluxheim-headers` unit coverage for hop-by-hop request header
   policy extraction and chunked body framing preservation.
