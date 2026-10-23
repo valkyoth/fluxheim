@@ -13,7 +13,7 @@ and authenticated status describe the same outcome, remain bounded, and expose
 telemetry failures without stopping healthy application traffic.
 
 Ship one coherent 1.9.0 after the numbered checkpoints. The checkpoints are
-reviewable Git commits, not twelve public releases. Use 1.9.x for maintenance
+reviewable Git commits, not thirteen public releases. Use 1.9.x for maintenance
 and compatible follow-ups. Existing configuration and privacy defaults remain
 valid. New sensitive or expensive detail is opt-in; no public diagnostic
 headers or management listener are silently enabled.
@@ -130,6 +130,8 @@ native producer interoperability to 11 and operator instructions to 12. Heavy
 backend tests run in a dedicated required integration gate, not every unit test.
 Native producers may use remote disposable backends; installing the entire
 backend stack on every supported OS is not required.
+Commit 13 then reviews documentation for the entire product, including these
+integrations, and makes the operator guides discoverable on fluxheim.eu.
 
 ### Runtime Contracts
 
@@ -504,7 +506,7 @@ commands and artifacts. Cross-compilation is supplemental only.
 Exit: all platform/profile rows have evidence or an explicit release-blocking
 gap. The 1.8.3 runs are reference baselines, not substitutes.
 
-## Commit 12 - Operator Docs And Final Release Qualification
+## Commit 12 - Observability Docs And Release Candidate Qualification
 
 Suggested subject: `Observability commit 12: qualify Fluxheim 1.9.0`.
 
@@ -533,9 +535,121 @@ Release gate:
   commit. Earlier incremental green is not final acceptance.
 - Record immutable candidate, toolchain, artifact checksums, source/tag trust,
   default-binary reproducibility scope and explicit release authorization.
-- Only then sign/tag/build/publish 1.9.0. Source changes after qualification
+- Do not authorize publication here: Commit 13 is required before release.
+  Source changes after qualification
   require affected tests again; documentation-only changes must prove identical
   runtime inputs and obtain their own CI result.
+
+## Commit 13 - Documentation
+
+Suggested subject: `Observability commit 13: document all supported functionality`.
+
+Operator value: a customer can understand, configure, operate and troubleshoot
+every supported Fluxheim capability without reading Rust or guessing settings.
+This is a whole-product documentation checkpoint, not only an observability
+guide or a cosmetic website update. It is required before publishing 1.9.0.
+
+### Work Feature By Feature
+
+- Create a coverage matrix from the actual configuration types/validators,
+  runtime call sites, CLI commands, admin routes, compile-time features and
+  shipping profiles. Record each supported option, mode and operation, its code
+  references, guide section, example/test and review status. No undocumented
+  public option may disappear behind a generic "advanced settings" link.
+- Complete one feature at a time: read its code and existing tests, identify
+  supported behavior and gaps, write the guide, execute examples, and review it
+  before moving to the next feature. Start with GeoIP, then load balancing,
+  cache and ACME; continue until the matrix has no unexplained coverage gaps.
+- Reuse or consolidate existing guides rather than create competing copies.
+  Give each feature a clear canonical page and link it from the documentation
+  index and configuration reference. Preserve historical evidence and keep
+  future ideas separate from shipped functionality.
+- Audit what the native runtime actually executes, not only accepted config
+  fields or library APIs. Mark unsupported, ignored, incomplete, deprecated or
+  platform-restricted behavior explicitly. Do not invent options to make an
+  example work or present future plans as supported features.
+
+### Coverage And Guide Format
+
+The inventory, not this illustrative list, defines completeness. Include
+installation/profiles/containers/services; configuration/includes/vhosts/routes;
+static files; reverse proxy/upstream TLS; load balancing/health/state; memory,
+disk and encrypted caching; GeoIP; TLS/mTLS/FIPS and ACME issuance/renewal/recovery;
+headers/CORS/hardening; compression; limits and abuse protection; PHP/FastCGI;
+Wasm; HTTP/1.1, HTTP/2, WebSocket, stream and UDP; logging/metrics/tracing/APM;
+privacy; admin API/local operations; snapshots/reload/rollback; diagnostics and
+all supported CLI operations. Include enabled-feature and platform restrictions.
+
+Every feature guide must provide:
+
+1. A plain-language explanation, when to use it and when not to use it, with
+   technical terms explained before use.
+2. Prerequisites: package/profile/features, supported OS, external services,
+   data files, permissions, mounts and networking. Explain which component
+   supplies each prerequisite and avoid implying it ships inside every image.
+3. A minimal complete working configuration, startup/validation commands and
+   a request or command with its expected observable result.
+4. An option reference derived from the code: exact key/type, units, defaults,
+   valid values/ranges, scope/inheritance/precedence, interactions and whether
+   restart or reload is required. Distinguish defaults from recommendations.
+5. Copy-ready examples for every supported mode and meaningful option/use case,
+   including disabling or overriding it. Map every public option to an example;
+   group related options where useful rather than enumerate an impractical
+   Cartesian product. Provide complete base files for explicitly marked fragments.
+6. Realistic deployment recipes, operational lifecycle, common errors and
+   troubleshooting with safe diagnostics and expected outcomes. Document
+   resource costs, security/privacy tradeoffs, failure behavior and limitations.
+
+Use safe placeholders for credentials and domains, explicit secret-file
+permissions and private administrative endpoints. Never require disabling TLS
+verification, weakening filesystem trust or exposing FastCGI/admin publicly
+just to make a tutorial pass. Destructive examples must be clearly labelled
+and tested only with disposable resources.
+
+### Examples And Website Proof
+
+- Keep executable configurations in repository examples/fixtures and reference
+  them from the guides. Validate every complete example with the matching
+  compiled profile; assemble and validate documented fragments with their base.
+  Add negative tests for stated incompatible settings and missing features.
+- Parsing alone is not proof. Run each distinct documented workflow against
+  live Fluxheim and assert its advertised result, including relevant failure,
+  reload and recovery paths. Reuse existing smokes where they prove the recipe;
+  add missing coverage. Record exact commands, candidate SHA and results in the
+  matrix. Platform-specific instructions require native platform evidence;
+  missing environments are a gap, not a pass.
+- Identify the fluxheim.eu source repository and publishing workflow. Use the
+  repository guides as the canonical content source with a reproducible site
+  import/build, avoiding manually maintained divergent copies. Provide a clear
+  getting-started path, feature navigation, search and cross-links between
+  guides, reference, examples and troubleshooting.
+- Separate released documentation from unreleased main and show applicability
+  and platform/profile restrictions. Keep routine instructions version-neutral
+  where possible; do not hide real compatibility differences. Preserve old
+  public URLs with redirects where supported and check internal links/anchors.
+- Preview the actual site on desktop and mobile: check readable code blocks,
+  navigation/search, example links and representative end-to-end operator
+  journeys. Arrange access/approval for the website repository and deployment;
+  record its revision and deployment evidence. A local Markdown edit alone
+  does not complete the fluxheim.eu deliverable. Do not advertise 1.9 as released
+  before release authorization.
+
+Exit and final release gate:
+- Every supported capability/option has reviewed code-to-guide-to-example/test
+  coverage. No unexplained omissions, untested copy-ready recipes or misleading
+  claims. Have an operator follow representative recipes without source-code
+  assistance, and resolve the confusing steps they encounter.
+- Run documentation/example/site checks and the normal incremental pentest,
+  retest and exact-SHA green GitHub/CodeQL cycle. Track progress per feature;
+  this large checkpoint may have reviewable documentation/remediation commits.
+- Reconcile Commit 12 qualification with the final candidate. Any runtime,
+  dependency, packaging or build-input change requires affected gates again;
+  documentation-only changes require evidence of unchanged runtime inputs and
+  fresh CI, not relabelled old binaries as final-candidate tests.
+- Obtain explicit user acceptance of documentation, website and final release
+  evidence. Only then authorize signing/tagging/building/publishing 1.9.0 through
+  the existing release workflow. Do not begin a new feature project here to
+  conceal a documentation-discovered limitation.
 
 ## Command Baseline
 
@@ -577,7 +691,8 @@ collector behavior is not the new required-collector acceptance contract.
 | 09 - Read-only API | Not started | Pending |
 | 10 - Live containers/collectors | Not started | Pending |
 | 11 - Native archives | Not started | Pending |
-| 12 - Release | Not started | Pending |
+| 12 - Observability docs / candidate qualification | Not started | Pending |
+| 13 - Documentation / final release acceptance | Not started | Pending |
 
 The next authorized implementation task is Commit 01, after this plan is
 reviewed. Do not start it automatically while the user is discussing scope.

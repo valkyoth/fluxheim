@@ -29,6 +29,16 @@ class DocumentationLayoutTests(unittest.TestCase):
                             "Commit 12", "actual running products"):
             self.assertIn(requirement, plan)
 
+    def test_final_documentation_checkpoint_precedes_release(self):
+        plan = (DOCS / "roadmap/observability-commit-plan.md").read_text()
+        checkpoints = re.findall(r"^## Commit (\d+) -", plan, re.MULTILINE)
+        self.assertEqual(checkpoints, [f"{number:02d}" for number in range(1, 14)])
+        candidate, final = plan.split("## Commit 13 - Documentation", 1)
+        self.assertIn("Do not authorize publication here: Commit 13 is required", candidate)
+        for requirement in ("code-to-guide-to-example/test", "fluxheim.eu",
+                            "native platform evidence", "explicit user acceptance"):
+            self.assertIn(requirement, final)
+
 
 if __name__ == "__main__":
     unittest.main()

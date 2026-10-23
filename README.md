@@ -462,7 +462,8 @@ available as manually invoked research, pending renewed qualification. See the
 [draft release notes](release-notes/RELEASE_NOTES_1.9.0.md) for implemented work,
 not promises of completed protocol support.
 
-The twelve checkpoints include UI-ready read-only operational contracts, not
+The thirteen checkpoints include a final whole-product documentation and
+fluxheim.eu review, plus UI-ready read-only operational contracts, not
 complete remote configuration management. A separate management release and
 `fluxheim-ui` repository are [proposed](docs/ideas/management-api-direction.md);
 they are not implemented features or release commitments.

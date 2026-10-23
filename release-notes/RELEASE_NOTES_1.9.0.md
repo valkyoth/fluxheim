@@ -13,7 +13,10 @@ low-cardinality metrics and authenticated status. These implementation
 checkpoints begin with the Commit 01 inventory and baseline. New telemetry must preserve privacy and existing
 configuration; collectors are not mandatory to run Fluxheim.
 
-The twelve checkpoints include a documented read-only operational API contract.
+The thirteen checkpoints include a documented read-only operational API contract
+and a final whole-product documentation review with tested configuration recipes
+and publication on fluxheim.eu. These documentation deliverables are planned,
+not yet completed.
 A full transactional management API and separate UI are
 [proposed for later work](../docs/ideas/management-api-direction.md), not promised
 or implemented in this release.

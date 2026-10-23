@@ -3444,8 +3444,10 @@ Exit criteria:
 
 Goal: actionable diagnostics, bounded logging/export, request correlation,
 low-cardinality metrics and authenticated operational status. Follow the
-[observability commit plan](observability-commit-plan.md) for twelve review
+[observability commit plan](observability-commit-plan.md) for thirteen review
 checkpoints and required real container, Linux, macOS and Windows tests.
+The final checkpoint reviews all supported functionality against code, supplies
+tested user-friendly examples and publishes navigable documentation on fluxheim.eu.
 New telemetry remains opt-in where sensitive or expensive; preserve existing
 configuration and privacy behavior. No full management API or UI in this scope.
 Read-only operational contracts prepare for a future UI; the separate
