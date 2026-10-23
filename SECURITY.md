@@ -86,10 +86,16 @@ dump; disabling that option does not disable OS crash collection.
 On Linux, all three shipped executables (`fluxheim`, `fluxheim-acme` and
 `fluxheim-config-tester`) set `PR_SET_DUMPABLE=0` and verify it at the start of
 `main`, before parsing arguments, loading configuration/secrets or starting
-application threads. Failure rejects startup, including `--version`. This
-prevents kernel-generated process memory dumps, including delivery to piped
-collectors, without requiring a host-wide collector change. There is no runtime
-configuration opt-out. See [Linux's dumpable policy](https://man7.org/linux/man-pages/man2/PR_SET_DUMPABLE.2const.html).
+application threads. This prevents kernel-generated process memory dumps,
+including delivery to piped collectors, without requiring a host-wide collector
+change. There is no runtime configuration opt-out. See
+[Linux's dumpable policy](https://man7.org/linux/man-pages/man2/PR_SET_DUMPABLE.2const.html).
+
+Failure rejects startup, including `--version`, with status 1 and no
+stdout/stderr output: a full diagnostic pipe must not hold a potentially dumpable
+process alive. Diagnose a
+suspected blocked `prctl` through launcher policy or an external syscall tracer
+using a non-secret invocation such as `--version`.
 
 This also restricts ordinary same-user debugger attachment and access to some
 `/proc/<pid>` files. It does not stop privileged inspection or compromised

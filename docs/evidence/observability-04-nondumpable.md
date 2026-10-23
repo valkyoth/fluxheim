@@ -27,12 +27,13 @@ introduced. Launcher soft/hard core limits remain in place.
 - All eight fatal watchdog subprocess scenarios now run with the same guard.
 - `scripts/smoke_linux_dump_policy.py` traces all three real executables. Normal
   startup must set and read back zero. Injected set failure, readback failure and
-  unexpected readback must each fail before even `--version` can run: twelve
-  executable cases. Linux CI builds all binaries and runs this regression.
+  unexpected readback must each fail before even `--version` can run. Nine
+  additional full-stderr cases require bounded, silent failure: twenty-one
+  executable cases total. Linux CI builds all binaries and runs this regression.
 - Existing deployment-limit, confidential sink, privacy, saturation, listener
   exit and audit-admission regressions remain enabled.
 
-## Local Validation
+## Original Local Validation
 
 On 2026-10-23:
 
@@ -56,6 +57,33 @@ On 2026-10-23:
   cargo-deny, deployment/refresh policy regressions and documentation checks passed.
 - Windows common-crate and test cross-compilation passed. Native Windows/macOS
   execution remains a GitHub gate; no claim of native tests is made here.
+
+## Follow-up: Silent Security-Control Failure
+
+Review base: `b9f774d1`. The error diagnostic itself could block on a full stderr
+pipe before reaching `exit(1)`, while the process could still be dumpable. All
+three entrypoints now exit silently on guard failure. The guard, readback and
+runtime fatal diagnostics are unchanged; no watchdog or abort is introduced into
+the potentially dumpable startup failure path.
+
+The regression fills a real pipe until even a one-byte nonblocking write fails,
+restores blocking mode and attaches its writer as the child's actual stderr.
+It injects each of the three `prctl` failure outcomes into each executable.
+The parent never drains stderr while the child is running. A five-second timeout
+fails the test and kills/reaps the tracer and tracee process group; successful
+termination must have status 1, no stdout, and the original pipe contents intact.
+Normal captured-stderr cases also require no diagnostic output.
+
+Red/green validation reproduced the old hang against the unmodified server
+entrypoint, then passed all twenty-one cases after removing the output. The
+existing Linux CI smoke automatically includes these new cases.
+
+Follow-up validation passed: full locked workspace (1,838 passing executions,
+one existing privileged ACME test ignored), eight common tests including the
+eight-scenario watchdog regression, three fatal-listener cases, seven operational
+event cases, four backpressure scenarios, workspace/all-target Clippy with
+warnings denied, formatting and documentation checks. No dependencies or
+platform policies changed. Native Windows/macOS execution remains for GitHub CI.
 
 ## Boundaries
 

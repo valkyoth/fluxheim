@@ -5,8 +5,8 @@
 )]
 
 fn main() {
-    if let Err(error) = fluxheim_common::fatal::disable_memory_dumps() {
-        eprintln!("fluxheim: unable to disable memory dumps: {error}");
+    if fluxheim_common::fatal::disable_memory_dumps().is_err() {
+        // Still potentially dumpable: never block on diagnostics before exit.
         std::process::exit(1);
     }
     if let Err(error) = fluxheim::run() {

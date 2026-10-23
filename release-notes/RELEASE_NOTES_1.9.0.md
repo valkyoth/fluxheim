@@ -12,7 +12,8 @@ recreate containers with the updated settings; pulling an image alone does not
 apply them. Linux server, ACME and config-tester executables additionally mark
 themselves non-dumpable before loading configuration and reject startup if the
 kernel policy cannot be set or verified. This also prevents kernel-piped dumps;
-external children and other platforms still need separate operator controls. See
+policy failure exits silently with status 1 so blocked stderr cannot stall it.
+External children and other platforms still need separate operator controls. See
 [memory-dump security guidance](../SECURITY.md#fatal-termination-and-memory-dumps).
 
 The [observability commit plan](../docs/roadmap/observability-commit-plan.md) defines
