@@ -97,6 +97,7 @@ a guide explicitly says otherwise.
 - [Observability Commit 03 security remediation](evidence/observability-03-security.md)
 - [Observability Commit 03 pre-mutation audit admission](evidence/observability-03-audit-admission.md)
 - [Observability Commit 04 bounded logging dispatcher](evidence/observability-04.md)
+- [Observability Commit 04 fatal-abort remediation](evidence/observability-04-fatal.md)
 - [Observability Commit 04 Linux performance samples](evidence/observability-04-linux.json)
 - [1.8.3 qualification](evidence/maintenance-1.8.3-qualification.md)
 - [Windows filesystem audit](evidence/dependency-audits/windows-filesystem-security.md)

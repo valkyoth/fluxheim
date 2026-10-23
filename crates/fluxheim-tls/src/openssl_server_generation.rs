@@ -246,17 +246,17 @@ fn prune_released_generations(live: &mut Vec<Weak<OpenSslGenerationLease>>) {
 
 fn abort_generation_waker_poison() -> ! {
     log::error!(target: "fluxheim::tls", "OpenSSL generation drain waker lock poisoned");
-    std::process::abort()
+    fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::TlsGenerationWakerPoisoned)
 }
 
 fn abort_generation_connection_id_exhausted() -> ! {
     log::error!(target: "fluxheim::tls", "OpenSSL generation connection ID space exhausted");
-    std::process::abort()
+    fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::TlsConnectionIdExhausted)
 }
 
 fn abort_generation_lease_attachment_failure() -> ! {
     log::error!(target: "fluxheim::tls", "OpenSSL connection generation lease attachment failed");
-    std::process::abort()
+    fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::TlsLeaseAttachmentFailed)
 }
 
 #[cfg(test)]

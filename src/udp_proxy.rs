@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
-use std::process;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -400,7 +399,7 @@ impl UdpProxyApp {
                     "UDP route {} source session lock poisoned; aborting to avoid inconsistent per-source accounting",
                     self.name
                 );
-                process::abort();
+                fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::UdpSessionsPoisoned);
             }
         }
     }
@@ -416,7 +415,9 @@ impl UdpProxyApp {
                     "UDP route {} response-rate lock poisoned; aborting to avoid inconsistent UDP rate limiting",
                     self.name
                 );
-                process::abort();
+                fluxheim_common::fatal::abort(
+                    fluxheim_common::fatal::Reason::UdpResponseRatePoisoned,
+                );
             }
         }
     }

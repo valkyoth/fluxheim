@@ -44,7 +44,7 @@ pub fn admin_hmac_sha256_or_abort(
                 "fatal: {context} HMAC failed through {}: {error}",
                 provider.label()
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::AdminHmacFailed);
         }
     }
 }

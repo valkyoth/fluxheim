@@ -110,7 +110,7 @@ fn managed_cookie_tag_with_key(
 ) -> [u8; MANAGED_COOKIE_TAG_BYTES] {
     let cookie_name_len = u16::try_from(cookie_name.len()).unwrap_or_else(|_| {
         log::error!("fatal: managed load-balancer cookie name exceeds HMAC context limit");
-        std::process::abort();
+        fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::CookieNameOverflow);
     });
     let mut message = Vec::with_capacity(2 + cookie_name.len() + key.len());
     message.extend_from_slice(&cookie_name_len.to_le_bytes());
@@ -210,7 +210,7 @@ fn random_managed_cookie_hmac_key() -> [u8; 32] {
     let mut key = [0_u8; 32];
     if let Err(error) = getrandom::fill(&mut key) {
         log::error!("fatal: managed load-balancer cookie HMAC key generation failed: {error}");
-        std::process::abort();
+        fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::CookieHmacEntropyFailed);
     }
     key
 }

@@ -5,6 +5,7 @@
 )]
 
 pub mod error;
+pub mod fatal;
 pub mod path_safety;
 #[cfg(feature = "test-support")]
 pub mod test_support;

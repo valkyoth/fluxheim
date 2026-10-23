@@ -5,6 +5,11 @@ documented durability limitation, reported GitHub green and authorized this
 checkpoint. This implementation still requires incremental pentest, exact-SHA
 GitHub/CodeQL and explicit approval before Commit 05.
 
+The follow-up [fatal-abort remediation](observability-04-fatal.md) restores a
+synchronous diagnostic attempt for explicit invariant aborts. Those calls are
+outside the ordinary dispatcher contract below; the worker limits and accepted
+non-durable admin-audit contract are unchanged.
+
 ## Runtime Contract
 
 All runtime/library calls through `log` now reach a bounded adapter, not

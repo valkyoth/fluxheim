@@ -415,7 +415,9 @@ impl AdminApp {
                     target: "fluxheim::security",
                     "admin validation deadline lock poisoned; aborting to avoid inconsistent self-healing state"
                 );
-                std::process::abort();
+                fluxheim_common::fatal::abort(
+                    fluxheim_common::fatal::Reason::AdminDeadlinePoisoned,
+                );
             }
         }
     }
@@ -428,7 +430,7 @@ impl AdminApp {
                     target: "fluxheim::security",
                     "admin runtime state lock poisoned; aborting to avoid using inconsistent management state"
                 );
-                std::process::abort();
+                fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::AdminStatePoisoned);
             }
         }
     }

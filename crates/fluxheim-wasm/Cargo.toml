@@ -21,6 +21,7 @@ required-features = ["runtime"]
 name = "build_policy_examples"
 
 [dependencies]
+fluxheim-common = { path = "../fluxheim-common" }
 sha2 = "0.11.1"
 thiserror = "2.0.21"
 tokio = { version = "1.54.0", default-features = false, features = ["rt", "sync", "time"], optional = true }

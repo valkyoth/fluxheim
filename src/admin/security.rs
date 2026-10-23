@@ -124,7 +124,9 @@ impl AdminAuthThrottle {
                     target: "fluxheim::security",
                     "admin auth throttle lock poisoned; aborting to avoid using inconsistent security state"
                 );
-                std::process::abort();
+                fluxheim_common::fatal::abort(
+                    fluxheim_common::fatal::Reason::AdminAuthThrottlePoisoned,
+                );
             }
         }
     }
@@ -438,8 +440,12 @@ fn token_mac_key() -> &'static [u8; 32] {
             log::error!(
                 "fatal: admin token MAC key generation failed; cannot continue without entropy: {error}"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::AdminTokenEntropyFailed);
         }
         Zeroizing::new(key)
     })
 }
+
+#[cfg(test)]
+#[path = "tests/admin_tests_fatal.rs"]
+mod fatal_tests;

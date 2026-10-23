@@ -320,7 +320,7 @@ pub(crate) fn apply_native_auth_request_headers(
                 target: "fluxheim::auth_request",
                 "auth_request response header application failed; internal secret lock poisoned, aborting to avoid inconsistent forwarded identity state: {error}"
             );
-                std::process::abort();
+                fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::ForwardedIdentityPoisoned);
             });
     }
 }

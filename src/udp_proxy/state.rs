@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::process;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -82,7 +81,9 @@ impl Drop for UdpSessionSlot {
                         "UDP route {} source session lock poisoned during release; aborting to avoid inconsistent per-source accounting",
                         self.route_name
                     );
-                    process::abort();
+                    fluxheim_common::fatal::abort(
+                        fluxheim_common::fatal::Reason::UdpSessionsPoisoned,
+                    );
                 }
             };
             match sessions.get_mut(source) {

@@ -285,7 +285,7 @@ impl LoadBalancerPersistenceState {
         let mut key = vec![0_u8; MANAGED_COOKIE_KEY_BYTES];
         if let Err(error) = getrandom::fill(&mut key) {
             log::error!("fatal: managed load-balancer cookie key generation failed: {error}");
-            std::process::abort();
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::CookieKeyEntropyFailed);
         }
         let token = managed_cookie_token(config.name.as_bytes(), &key)?;
         Some((

@@ -59,7 +59,9 @@ pub fn native_cache_runtime_totals() -> NativeCacheRuntimeTotals {
                 target: "fluxheim::security",
                 "native cache stats registry mutex poisoned: {error}"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(
+                fluxheim_common::fatal::Reason::CacheStatsRegistryPoisoned,
+            );
         }
     };
     let mut totals = NativeCacheRuntimeTotals::default();
@@ -136,7 +138,9 @@ pub fn purge_native_memory_cache_primary(
                 target: "fluxheim::native_http1",
                 "native memory cache purge registry mutex poisoned: {error}"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(
+                fluxheim_common::fatal::Reason::CachePurgeRegistryPoisoned,
+            );
         }
     };
     let mut purged = false;
@@ -261,7 +265,9 @@ fn purge_native_memory_cache_indexed(
                 target: "fluxheim::native_http1",
                 "native memory cache purge registry mutex poisoned: {error}"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(
+                fluxheim_common::fatal::Reason::CachePurgeRegistryPoisoned,
+            );
         }
     };
     let mut result = CacheIndexedPurgeResult::default();
@@ -297,7 +303,9 @@ fn purge_native_memory_cache_stale_indexed(
                 target: "fluxheim::native_http1",
                 "native memory cache purge registry mutex poisoned: {error}"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(
+                fluxheim_common::fatal::Reason::CachePurgeRegistryPoisoned,
+            );
         }
     };
     let mut result = CacheStalePurgeResult::default();
@@ -399,7 +407,9 @@ pub(crate) fn register_native_memory_cache_purge_handle(
                 target: "fluxheim::native_http1",
                 "native memory cache purge registry mutex poisoned: {error}"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(
+                fluxheim_common::fatal::Reason::CachePurgeRegistryPoisoned,
+            );
         }
     };
     registry.push(NativeMemoryCachePurgeHandle {
@@ -423,7 +433,9 @@ pub(crate) fn register_native_cache_stats_handle(
                 target: "fluxheim::native_http1",
                 "native cache stats registry mutex poisoned: {error}"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(
+                fluxheim_common::fatal::Reason::CacheStatsRegistryPoisoned,
+            );
         }
     };
     registry.push(NativeCacheStatsHandle {

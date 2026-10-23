@@ -323,7 +323,7 @@ pub(super) fn unix_secs() -> u64 {
                 target: "fluxheim::security",
                 "system clock is before Unix epoch; aborting because admin time-based controls are unreliable: {error}"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::AdminClockInvalid);
         }
     }
 }

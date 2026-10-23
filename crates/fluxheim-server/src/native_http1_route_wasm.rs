@@ -1741,7 +1741,7 @@ fn locked_wasm_cache_key_components(
                 target: "fluxheim::security",
                 "wasm cache key component lock poisoned: {error}"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::WasmCacheKeyPoisoned);
         }
     }
 }
@@ -1806,7 +1806,7 @@ fn locked_wasm_cache_store_metadata(
                 target: "fluxheim::security",
                 "wasm cache store metadata lock poisoned: {error}"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::WasmCacheStorePoisoned);
         }
     }
 }

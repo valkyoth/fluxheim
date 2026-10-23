@@ -17,12 +17,20 @@ pub struct LoggingConfig {
     pub target: LoggingTarget,
     #[serde(default)]
     pub file: LoggingFileConfig,
+    /// Optional dedicated synchronous fatal-invariant diagnostics (restart only).
+    #[serde(default)]
+    pub crash_file: Option<PathBuf>,
     #[serde(default)]
     pub access: AccessLoggingConfig,
 }
 
 impl LoggingConfig {
     pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(path) = &mut self.crash_file
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
         if let Some(path) = &mut self.file.path
             && path.is_relative()
         {
@@ -31,6 +39,14 @@ impl LoggingConfig {
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
+        #[cfg(feature = "privacy-mode")]
+        if self.crash_file.is_some() {
+            return Err(ConfigError::PrivacyModeFileLogging);
+        }
+        crate::config_path::validate_optional_process_path(
+            "logging.crash_file",
+            self.crash_file.as_deref(),
+        )?;
         self.file.validate()?;
         self.access.validate()
     }

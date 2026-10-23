@@ -168,7 +168,9 @@ fn acquire_cache_fill_concurrency_permit(
             Ok(guard) => guard,
             Err(_) => {
                 log::error!(target: "fluxheim::security", "{poison_message}");
-                std::process::abort();
+                fluxheim_common::fatal::abort(
+                    fluxheim_common::fatal::Reason::CacheFillRegistryPoisoned,
+                );
             }
         };
         prune_inactive_cache_fill_counters(&mut counters, max_keys);

@@ -56,7 +56,9 @@ impl NativeHttp1RequestBody {
                 target: "fluxheim::security",
                 "request body admission was attached more than once"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(
+                fluxheim_common::fatal::Reason::RequestAdmissionDuplicated,
+            );
         }
         self.admission = Some(admission);
     }

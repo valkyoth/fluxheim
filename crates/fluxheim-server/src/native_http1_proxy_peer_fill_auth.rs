@@ -112,7 +112,7 @@ pub(crate) fn native_peer_fill_nonce() -> String {
             target: "fluxheim::security",
             "native peer-fill nonce generation failed: {error}; aborting"
         );
-        std::process::abort();
+        fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::PeerFillEntropyFailed);
     }
     base64_ng::URL_SAFE_NO_PAD.encode_string_infallible(&nonce)
 }

@@ -230,7 +230,9 @@ pub(crate) fn register_native_disk_cache_purge_handle(
                 target: "fluxheim::native_http1",
                 "native disk cache purge registry mutex poisoned: {error}"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(
+                fluxheim_common::fatal::Reason::CachePurgeRegistryPoisoned,
+            );
         }
     };
     registry.push(NativeDiskCachePurgeHandle {
@@ -441,7 +443,9 @@ fn native_disk_cache_purge_targets() -> Vec<NativeDiskCachePurgeTarget> {
                 target: "fluxheim::native_http1",
                 "native disk cache purge registry mutex poisoned: {error}"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(
+                fluxheim_common::fatal::Reason::CachePurgeRegistryPoisoned,
+            );
         }
     };
     #[cfg(test)]

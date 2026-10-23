@@ -21,6 +21,7 @@ tls-openssl-fips = [
 ]
 
 [dependencies]
+fluxheim-common = { path = "../fluxheim-common" }
 arc-swap = "1.9.3"
 base64-ng = { version = "2.1.0", optional = true }
 fluxheim-config = { path = "../fluxheim-config" }

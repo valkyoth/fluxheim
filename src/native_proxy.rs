@@ -88,7 +88,7 @@ impl FluxProxy {
                 target: "fluxheim::native_proxy",
                 "native proxy configuration mutex poisoned during {context}: {error}"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::ProxyConfigPoisoned);
         })
     }
 

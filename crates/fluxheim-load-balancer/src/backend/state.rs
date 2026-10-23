@@ -1,5 +1,4 @@
 use std::collections::{BTreeSet, HashMap};
-use std::process;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::SystemTime;
@@ -34,7 +33,9 @@ impl Default for FluxBackendHealth {
 
 impl FluxBackendHealth {
     fn lock(&self) -> std::sync::MutexGuard<'_, FluxBackendHealthInner> {
-        self.0.lock().unwrap_or_else(|_| process::abort())
+        self.0.lock().unwrap_or_else(|_| {
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::BackendHealthPoisoned)
+        })
     }
 
     pub(super) fn ready(&self) -> bool {

@@ -133,6 +133,7 @@ pub fn classify_reload(old: &Config, new: &Config) -> ReloadImpact {
         || old.logging.format != new.logging.format
         || old.logging.target != new.logging.target
         || old.logging.file != new.logging.file
+        || old.logging.crash_file != new.logging.crash_file
     {
         reasons.push(ReloadReason::LoggingRuntimeChanged);
     }
@@ -287,6 +288,7 @@ fn copy_snapshot_safe_logging_fields(
         format: _,
         target: _,
         file: _,
+        crash_file: _,
         access,
     } = new;
     candidate.access = access.clone();

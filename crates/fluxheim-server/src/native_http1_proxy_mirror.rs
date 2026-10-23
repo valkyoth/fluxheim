@@ -126,7 +126,7 @@ fn acquire_native_traffic_mirror_slot(
                 target: "fluxheim::security",
                 "native traffic mirror in-flight lock poisoned; aborting"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::MirrorInflightPoisoned);
         });
     if map.len() >= NATIVE_TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS && !map.contains_key(key) {
         map.retain(|_, counter| counter.load(Ordering::Acquire) > 0);
@@ -188,7 +188,9 @@ fn native_traffic_mirror_sample_selected(
                 target: "fluxheim::security",
                 "native traffic mirror sampling salt generation failed: {error}; aborting"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(
+                fluxheim_common::fatal::Reason::MirrorSampleEntropyFailed,
+            );
         }
         salt
     });
@@ -289,7 +291,9 @@ fn native_traffic_mirror_marker_signature() -> &'static str {
                 target: "fluxheim::security",
                 "native traffic mirror marker secret generation failed: {error}; aborting"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(
+                fluxheim_common::fatal::Reason::MirrorMarkerEntropyFailed,
+            );
         }
         let mut hasher = Sha256::new();
         hasher.update(secret);

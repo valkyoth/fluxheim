@@ -321,7 +321,7 @@ fn native_random_multipart_boundary() -> String {
             target: "fluxheim::security",
             "native slice multipart boundary generation failed: {error}; aborting"
         );
-        std::process::abort();
+        fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::SliceBoundaryEntropyFailed);
     }
     let mut boundary = String::with_capacity("fluxheim-".len() + raw.len() * 2);
     boundary.push_str("fluxheim-");

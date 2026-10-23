@@ -1496,6 +1496,7 @@ dependencies = [
  "arc-swap",
  "base64-ng",
  "fluxheim-acme",
+ "fluxheim-common",
  "fluxheim-config",
  "fluxheim-openssl-fips-support",
  "log",
@@ -1511,6 +1512,7 @@ dependencies = [
 name = "fluxheim-wasm"
 version = "1.9.0"
 dependencies = [
+ "fluxheim-common",
  "rustix",
  "sha2 0.11.1",
  "tempfile",

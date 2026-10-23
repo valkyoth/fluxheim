@@ -1025,6 +1025,8 @@ alone for an access audit trail. The 1.9 plan includes that missing integration.
 level = "info"
 format = "json"
 target = "stderr"
+# Optional independent fatal-invariant diagnostics; see below.
+# crash_file = "/var/log/fluxheim/fatal.log"
 
 [logging.file]
 enabled = false
@@ -1059,6 +1061,43 @@ not owned by root or the service user, or is group- or world-writable, such as
 In `privacy-mode` builds, access logging and file logging must stay disabled.
 Fluxheim rejects `logging.access.enabled = true` and
 `logging.file.enabled = true`.
+
+### Fatal Invariant Diagnostics
+
+Explicit security-invariant aborts bypass asynchronous queues and `RUST_LOG`,
+including `off`. They synchronously attempt one fixed line such as
+`FATAL_SECURITY reason=AdminAuthThrottlePoisoned` before aborting. Reason codes
+come from a closed enum; this path cannot include request data or arbitrary error
+messages. They are not ordinary JSON/text log records and are not counted in
+`legacy_logging`. Without `logging.crash_file`, the destination is stderr,
+regardless of `logging.target` or `logging.file`.
+
+For better isolation from blocked container stdout/stderr, set
+`logging.crash_file` to a dedicated regular file. Relative paths resolve against
+the configuration directory. Startup securely opens and retains this handle,
+rejecting symlinks/reparse points, untrusted or writable parent components and
+non-private file permissions. Unix creation uses mode 0600; Windows uses the
+existing confidential-file ACL helpers. The parent directory must already exist
+and be trusted. Startup rejects aliasing the configured ordinary file log, even
+through a hard link. Do not separately redirect stdout/stderr to the crash file.
+An unsafe/unavailable configured sink fails startup; it is never
+silently downgraded to stderr at startup. Contents are preserved across restarts.
+
+The fatal path appends synchronously and requests `sync_data()` before aborting;
+file errors cause a direct stderr attempt. There is no queue, filtering, retry,
+raw-error formatting, or dependency on a logging worker. Changing this path
+requires a process upgrade. The file stays open until exit, so external rotation
+must retain the old file until restart; do not rotate it like an ordinary log.
+Monitor its size and errors through the host, and preserve stderr as fallback.
+Privacy builds reject this file option but still emit finite fatal codes to stderr.
+
+This restores a write-before-abort attempt, **not guaranteed forensic persistence**.
+Blocked stderr can delay abort when no working crash file is configured. A hung
+filesystem can likewise stall a synchronous file write or sync; the normal 500 ms
+logging shutdown deadline does not cover fatal diagnostics. Disk exhaustion,
+power loss, external kills, and same-UID/root process compromise remain outside
+this guarantee. High-assurance deployments need a separately supervised durable
+audit system; neither this file nor ordinary audit admission implements one.
 
 ### Historical Access Field Semantics
 

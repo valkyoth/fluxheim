@@ -1,6 +1,42 @@
 use super::*;
 
 #[test]
+fn crash_file_change_requires_process_upgrade() {
+    use crate::reload::{ReloadImpact, ReloadReason, classify_reload};
+    let old = Config::default();
+    let mut new = old.clone();
+    new.logging.crash_file = Some("fatal.log".into());
+    assert_eq!(
+        classify_reload(&old, &new),
+        ReloadImpact::ProcessUpgrade {
+            reasons: vec![ReloadReason::LoggingRuntimeChanged],
+        }
+    );
+}
+
+#[test]
+fn crash_file_defaults_to_none_and_resolves_relative_to_config() {
+    let mut config: Config = toml::from_str("[logging]\ncrash_file = 'fatal.log'").unwrap();
+    assert!(Config::default().logging.crash_file.is_none());
+    let base = unique_temp_path("crash-config");
+    config.logging.resolve_relative_paths(&base);
+    assert_eq!(config.logging.crash_file, Some(base.join("fatal.log")));
+    #[cfg(not(feature = "privacy-mode"))]
+    config.validate().unwrap();
+    #[cfg(feature = "privacy-mode")]
+    assert_eq!(config.validate(), Err(ConfigError::PrivacyModeFileLogging));
+}
+
+#[cfg(not(feature = "privacy-mode"))]
+#[test]
+fn crash_file_rejects_empty_and_traversal_paths() {
+    for path in ["", "../fatal.log"] {
+        let config: Config = toml::from_str(&format!("[logging]\ncrash_file = '{path}'")).unwrap();
+        assert!(config.validate().is_err());
+    }
+}
+
+#[test]
 fn parses_access_logging_config() {
     let config: Config = toml::from_str(
         r#"

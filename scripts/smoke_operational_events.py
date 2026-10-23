@@ -27,6 +27,8 @@ def run(binary, format_, filter_, expected, target="stderr", file_sink=False):
         directory = Path(temp).resolve()
         listen = port()
         sink_path = directory / "file-sink.log"
+        crash_path = directory / "fatal.log"
+        crash_config = f'crash_file = "{crash_path}"\n' if file_sink else ""
         file_config = (f'[logging.file]\nenabled = true\npath = "{sink_path}"\n'
                        if file_sink else "")
         # Reserved but not listening: repeatable connection refusal, no external DNS.
@@ -46,6 +48,7 @@ graceful_shutdown_timeout_seconds = 2
 level = "info"
 format = "{format_}"
 target = "{target}"
+{crash_config}
 {file_config}
 [logging.access]
 enabled = false
@@ -92,6 +95,9 @@ upstream_tls = false
             contents = log_path.read_text()
             if file_sink:
                 contents += sink_path.read_text()
+                assert crash_path.read_bytes() == b"", "ordinary traffic reached fatal sink"
+                if os.name == "posix":
+                    assert crash_path.stat().st_mode & 0o777 == 0o600
             assert CANARY not in contents, "private input leaked to logs"
             events = []
             for line in contents.splitlines():

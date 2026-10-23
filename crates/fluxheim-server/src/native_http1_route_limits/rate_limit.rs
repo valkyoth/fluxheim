@@ -144,7 +144,7 @@ impl NativeRateLimit {
                     target: "fluxheim::security",
                     "native rate-limit bucket lock poisoned; aborting to avoid inconsistent edge limits"
                 );
-                std::process::abort();
+                fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::RateLimitPoisoned);
             }
         };
         if !buckets.entries.contains_key(&key) && buckets.entries.len() >= max_entries {
@@ -182,7 +182,7 @@ impl NativeRateLimit {
                 target: "fluxheim::security",
                 "native rate-limit bucket vanished during locked update; aborting to avoid inconsistent edge limits"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::RateLimitBucketMissing);
         });
         let elapsed = now
             .saturating_duration_since(bucket.updated_at)
@@ -281,7 +281,7 @@ fn native_rate_limit_shard_seed() -> u64 {
                 target: "fluxheim::security",
                 "native rate-limit shard seed generation failed: {error}; aborting"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::RateLimitEntropyFailed);
         }
         u64::from_le_bytes(bytes) ^ NATIVE_RATE_LIMIT_SHARD_HASH_OFFSET
     })

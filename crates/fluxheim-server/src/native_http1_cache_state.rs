@@ -49,7 +49,7 @@ impl NativeDiskCache {
                     target: "fluxheim::native_http1",
                     "native disk cache mutex poisoned: {error}"
                 );
-                std::process::abort();
+                fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::DiskCachePoisoned);
             }
         }
     }
@@ -62,7 +62,7 @@ impl NativeDiskCache {
                     target: "fluxheim::native_http1",
                     "native disk cache mutex poisoned: {error}"
                 );
-                std::process::abort();
+                fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::DiskCachePoisoned);
             }
         }
     }
@@ -93,7 +93,9 @@ impl NativeDiskCache {
                     target: "fluxheim::native_http1",
                     "native disk cache mutation lock poisoned: {error}"
                 );
-                std::process::abort();
+                fluxheim_common::fatal::abort(
+                    fluxheim_common::fatal::Reason::DiskCacheMutationPoisoned,
+                );
             }
         }
     }

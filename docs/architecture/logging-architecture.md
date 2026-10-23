@@ -9,6 +9,11 @@ overrides the configured startup filter. env_logger supplies matching only; it
 does not write runtime records. The [Commit 04 contract](../evidence/observability-04.md)
 defines count/byte limits, overflow, shutdown and native qualification gaps.
 
+Explicit invariant aborts use a [separate synchronous fatal path](../evidence/observability-04-fatal.md),
+not those queues: finite reason codes go to stderr or an optional private
+`logging.crash_file`. This restores a write-before-abort attempt, not guaranteed
+durability; blocked OS I/O can delay fatal termination.
+
 Typed operational events now use independent bounded ordinary/security/audit
 queues with admission before encoding and worker-only sink I/O. Their envelope
 differs from legacy JSON. Authenticated admin status exposes per-lane losses and

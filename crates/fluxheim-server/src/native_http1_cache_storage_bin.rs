@@ -97,7 +97,9 @@ impl NativeStorageBinIndexService {
                 target: "fluxheim::security",
                 "native storage-bin index registry lock poisoned: {error}; aborting"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(
+                fluxheim_common::fatal::Reason::StorageBinRegistryPoisoned,
+            );
         });
         tasks.retain(|task| task.strong_count() > 0);
         tasks.push(Arc::downgrade(task));
@@ -116,7 +118,7 @@ impl NativeStorageBinIndexTask {
                 target: "fluxheim::security",
                 "native storage-bin index flush lock poisoned: {error}; aborting"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::StorageBinFlushPoisoned);
         });
         let was_dirty = self.dirty.swap(false, Ordering::AcqRel);
         if !force && !was_dirty {
@@ -129,7 +131,9 @@ impl NativeStorageBinIndexTask {
                     target: "fluxheim::security",
                     "native storage-bin index state lock poisoned: {error}; aborting"
                 );
-                std::process::abort();
+                fluxheim_common::fatal::abort(
+                    fluxheim_common::fatal::Reason::StorageBinStatePoisoned,
+                );
             }
         };
         if let Err(error) = write_storage_bin_index(&self.layout, &entries) {
@@ -165,7 +169,9 @@ fn native_storage_bin_index_flush_worker(
                     target: "fluxheim::security",
                     "native storage-bin index registry lock poisoned: {error}; aborting"
                 );
-                std::process::abort();
+                fluxheim_common::fatal::abort(
+                    fluxheim_common::fatal::Reason::StorageBinRegistryPoisoned,
+                );
             });
             let tasks = registry
                 .iter()

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::io;
-use std::process;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -132,10 +131,11 @@ impl FluxLoadBalancerRuntime {
     fn record_discovery_result(&self, result: &FluxResult<()>) {
         let now = unix_timestamp_secs();
         let event = {
-            let mut state = self
-                .discovery_state
-                .lock()
-                .unwrap_or_else(|_| process::abort());
+            let mut state = self.discovery_state.lock().unwrap_or_else(|_| {
+                fluxheim_common::fatal::abort(
+                    fluxheim_common::fatal::Reason::BackendDiscoveryPoisoned,
+                )
+            });
             match result {
                 Ok(()) => {
                     state.success_count = state.success_count.saturating_add(1);
@@ -169,10 +169,9 @@ impl FluxLoadBalancerRuntime {
     }
 
     pub(super) fn discovery_runtime_status(&self) -> FluxBackendDiscoveryRuntimeStatus {
-        let state = self
-            .discovery_state
-            .lock()
-            .unwrap_or_else(|_| process::abort());
+        let state = self.discovery_state.lock().unwrap_or_else(|_| {
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::BackendDiscoveryPoisoned)
+        });
         FluxBackendDiscoveryRuntimeStatus {
             refresh_enabled: self.update_frequency.is_some(),
             update_frequency_secs: self.update_frequency.map(|frequency| frequency.as_secs()),

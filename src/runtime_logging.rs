@@ -4,6 +4,8 @@ use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
+#[path = "runtime_crash_log.rs"]
+mod crash;
 #[path = "runtime_log_dispatch.rs"]
 mod dispatch;
 #[path = "runtime_log_record.rs"]
@@ -35,7 +37,21 @@ pub(super) fn init_logging(
     if LEGACY.get().is_some() {
         return Err(std::io::Error::other("runtime logging already initialized").into());
     }
+    #[cfg(feature = "privacy-mode")]
+    if config.logging.crash_file.is_some() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "privacy mode disallows crash-file logging",
+        )
+        .into());
+    }
     let format = config.logging.format;
+    let crash_file = config
+        .logging
+        .crash_file
+        .as_deref()
+        .map(crash::open)
+        .transpose()?;
 
     let writers: [Box<dyn Write + Send>; 4] = if config.logging.file.enabled {
         let path = config.logging.file.path.as_deref().ok_or_else(|| {
@@ -44,7 +60,15 @@ pub(super) fn init_logging(
                 "logging.file.enabled requires logging.file.path",
             )
         })?;
-        let file = open_log_file(path, config.logging.file.append)?;
+        // Detect aliases before a non-append ordinary sink could truncate the
+        // dedicated crash file. Compare handles, not just configured strings.
+        let file = open_log_file(path, true)?;
+        if let Some(crash) = &crash_file {
+            crash::require_distinct(crash, &file)?;
+        }
+        if !config.logging.file.append {
+            file.set_len(0)?;
+        }
         [
             Box::new(file.try_clone()?) as Box<dyn Write + Send>,
             Box::new(file.try_clone()?),
@@ -61,6 +85,9 @@ pub(super) fn init_logging(
             }
         })
     };
+    if let Some(file) = crash_file {
+        fluxheim_common::fatal::install(file)?;
+    }
     let [ordinary, security, audit, legacy_writer] = writers;
     let legacy = Arc::new(dispatch::Logger::new(
         env_logger::Builder::from_env(

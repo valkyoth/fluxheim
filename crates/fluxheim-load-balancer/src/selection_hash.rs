@@ -1,4 +1,3 @@
-use std::process;
 use std::sync::OnceLock;
 
 pub(super) const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
@@ -23,7 +22,9 @@ pub(super) fn random_u64() -> u64 {
             target: "fluxheim::security",
             "failed to generate load-balancer random candidate seed: {error}"
         );
-        process::abort();
+        fluxheim_common::fatal::abort(
+            fluxheim_common::fatal::Reason::BackendSelectionEntropyFailed,
+        );
     }
     u64::from_le_bytes(bytes)
 }
@@ -52,7 +53,9 @@ fn route_secret(secret: &'static OnceLock<u64>, label: &'static str) -> u64 {
                 target: "fluxheim::security",
                 "failed to seed {label} secret: {error}"
             );
-            process::abort();
+            fluxheim_common::fatal::abort(
+                fluxheim_common::fatal::Reason::BackendRoutingEntropyFailed,
+            );
         }
         u64::from_le_bytes(bytes)
     })

@@ -72,6 +72,11 @@ or implemented in this release.
 
 ## Commit 04 Bounded Logging
 
+- Preserve fatal security-invariant diagnostics outside asynchronous log queues.
+  Explicit aborts synchronously report a finite reason to stderr, or to a private
+  `logging.crash_file` opened at startup. The optional file is separate from
+  ordinary logs and requests data synchronization; failures fall back to stderr.
+  This is not a durable audit journal and blocked OS I/O can delay termination.
 - Route runtime/library `log` calls through a separate bounded worker. Slow or
   closed sinks no longer make those calls wait on file/pipe I/O. Preserve typed
   security/audit capacity and pre-mutation audit reservations.

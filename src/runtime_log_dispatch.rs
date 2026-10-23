@@ -309,3 +309,7 @@ fn worker(
 #[cfg(test)]
 #[path = "runtime_log_dispatch_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "runtime_log_fatal_tests.rs"]
+mod fatal_tests;

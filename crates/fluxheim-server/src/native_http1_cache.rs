@@ -236,7 +236,9 @@ impl NativeDiskCache {
                         target: "fluxheim::security",
                         "native disk cache storage-bin free-map mutex poisoned: {error}"
                     );
-                    std::process::abort();
+                    fluxheim_common::fatal::abort(
+                        fluxheim_common::fatal::Reason::StorageBinFreeMapPoisoned,
+                    );
                 }
             };
             stats.allocated_size_bytes = free_map.allocated_size_bytes();

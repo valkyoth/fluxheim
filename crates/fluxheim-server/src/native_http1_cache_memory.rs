@@ -94,7 +94,7 @@ pub(crate) fn lock_native_memory_cache<'a>(
                 target: "fluxheim::native_http1",
                 "{label} memory cache mutex poisoned: {error}"
             );
-            std::process::abort();
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::MemoryCachePoisoned);
         }
     }
 }

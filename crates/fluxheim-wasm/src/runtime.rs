@@ -325,7 +325,7 @@ impl Drop for CompileSlotPermit {
     fn drop(&mut self) {
         let mut active = self.pool.active.lock().unwrap_or_else(|poisoned| {
             let _ = poisoned;
-            std::process::abort();
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::WasmCompilePoolPoisoned);
         });
         *active = active.saturating_sub(1);
         self.pool.available.notify_one();
@@ -422,7 +422,7 @@ fn acquire_counter_permit_with_timeout(
     let started = Instant::now();
     let mut active = pool.active.lock().unwrap_or_else(|poisoned| {
         let _ = poisoned;
-        std::process::abort();
+        fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::WasmCompilePoolPoisoned);
     });
     loop {
         if *active < limit {
@@ -439,7 +439,9 @@ fn acquire_counter_permit_with_timeout(
             .available
             .wait_timeout(active, remaining)
             .unwrap_or_else(|_| {
-                std::process::abort();
+                fluxheim_common::fatal::abort(
+                    fluxheim_common::fatal::Reason::WasmCompilePoolPoisoned,
+                );
             });
         active = next_active;
         if wait.timed_out() && *active >= limit {
