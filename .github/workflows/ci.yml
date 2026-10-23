@@ -145,11 +145,14 @@ jobs:
 
       - name: Freeze observability baseline contracts
         run: |
+          cargo test --locked -p fluxheim-observability --no-default-features
+          cargo test --locked -p fluxheim-observability --no-default-features --features structured-events
           cargo test --locked -p fluxheim-observability --all-features
           cargo test --locked -p fluxheim-config --no-default-features observability
           cargo test --locked -p fluxheim-config --no-default-features --features metrics-otlp,otel-tracing,otel-otlp observability
           cargo test --locked -p fluxheim-config --no-default-features --features privacy-mode observability
           cargo test --locked -p fluxheim --lib --no-default-features --features profile-observability
+          cargo test --locked -p fluxheim --lib --no-default-features --features profile-privacy structured_event_
 
       - name: Test standalone systemd boundary without workspace feature unification
         run: |

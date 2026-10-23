@@ -1,7 +1,7 @@
 # 1.9.0 Observability Commit Plan
 
-Status: Commit 01 in progress, updated 2026-10-23 after the v1.8.3 release.
-No implementation checkpoint is accepted yet. Main stays at **1.9.0
+Status: Commit 01 accepted by the operator; Commit 02 implemented for review, 2026-10-23.
+Main stays at **1.9.0
 (unreleased)**. This document replaces the earlier ten-checkpoint outline;
 no previously accepted implementation checkpoint is being renumbered.
 
@@ -252,6 +252,13 @@ commands are committed. No new admin mutation or runtime backend migration.
 Suggested subject: `Observability commit 02: add safe structured event types`.
 
 Operator value: consistent machine-readable events without sensitive dumps.
+
+Review artifact: [structured event contract](../architecture/structured-events.md).
+Local tests and live compatibility evidence are recorded in the
+[Commit 02 evidence](../evidence/observability-02.md).
+This checkpoint introduces the capture/encoding boundary; runtime failure owners
+are connected in 03, dispatch in 04 and request completion in 06. It does not
+claim to sanitize all existing free-form logs or deliver new native access logs.
 
 Deliver:
 - Add typed access, error, security and audit envelopes, version identity,
@@ -680,8 +687,8 @@ collector behavior is not the new required-collector acceptance contract.
 | Checkpoint | State | Accepted SHA / pentest / CI / live evidence |
 | --- | --- | --- |
 | Preparation - 1.8.3 reconciliation and this plan | Prepared; review pending | Not an observability implementation acceptance |
-| 01 - Inventory, schemas, budgets | Not started | Pending |
-| 02 - Event model/redaction | Not started | Pending |
+| 01 - Inventory, schemas, budgets | Accepted for progression | Base implementation 74212e08; dependency remediation 4cc86fe1; plan a04459ae; test-only CI follow-up 29484229. User supplied clean pentest, reported GitHub green and authorized 02. Later queue/performance budgets still need implementation qualification. |
+| 02 - Event model/redaction | Implemented; review pending | Structured event contract, regressions and local evidence; pentest/CI acceptance pending |
 | 03 - Diagnostics/audit | Not started | Pending |
 | 04 - Bounded dispatcher | Not started | Pending |
 | 05 - File lifecycle | Not started | Pending |
@@ -694,5 +701,5 @@ collector behavior is not the new required-collector acceptance contract.
 | 12 - Observability docs / candidate qualification | Not started | Pending |
 | 13 - Documentation / final release acceptance | Not started | Pending |
 
-The next authorized implementation task is Commit 01, after this plan is
-reviewed. Do not start it automatically while the user is discussing scope.
+The current authorized implementation task is Commit 02. Stop for pentest,
+green GitHub checks and explicit approval before starting Commit 03.

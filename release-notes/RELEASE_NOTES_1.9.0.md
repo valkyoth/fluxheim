@@ -32,6 +32,19 @@ or implemented in this release.
 - Plan importable Grafana and SigNoz dashboards and real backend tests using
   vendor-neutral telemetry. These integrations are not implemented yet.
 
+## Commit 02 Event Contract
+
+- Add typed access, error, security and audit envelopes with finite reasons,
+  numeric configured-resource identities and opt-in validated correlation IDs.
+- Bound encoded JSON/text events to 8 KiB including framing, and use a closed
+  schema without raw errors, headers, URLs, bodies or arbitrary field maps.
+- Keep privacy restrictions and effective log filters authoritative; access-log
+  disablement does not disable otherwise permitted security/audit events.
+- This is a capture/encoding library, not native event emission, asynchronous
+  logging or collector delivery. Existing runtime formats remain unchanged;
+  later checkpoints connect owners and dispatch. See the
+  [contract](../docs/architecture/structured-events.md) for limits and caveats.
+
 ## Implemented Maintenance
 
 Post-1.8.3 security maintenance:

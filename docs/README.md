@@ -60,6 +60,7 @@ a guide explicitly says otherwise.
 - [Features](reference/features.md)
 - [Logging: current status and historical design](architecture/logging-architecture.md)
 - [Metrics: current status and historical design](architecture/metrics-architecture.md)
+- [Structured event capture, redaction and byte limits](architecture/structured-events.md)
 - [Modularity policy](architecture/modularity-policy.md)
 - [Runtime facts and policy proofs: 1.6 design](architecture/runtime-facts-and-policy-proofs.md)
 
@@ -90,6 +91,8 @@ a guide explicitly says otherwise.
 
 - [Observability Commit 01 inventory and proposed budgets](evidence/observability-baseline.md)
 - [Observability Commit 01 Linux raw measurements](evidence/observability-01-linux.json)
+- [Observability Commit 02 verification](evidence/observability-02.md)
+- [Observability Commit 02 Linux raw measurements](evidence/observability-02-linux.json)
 - [1.8.3 qualification](evidence/maintenance-1.8.3-qualification.md)
 - [Windows filesystem audit](evidence/dependency-audits/windows-filesystem-security.md)
 - [OWASP baseline](evidence/owasp-top10-2025-baseline.md)

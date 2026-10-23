@@ -55,6 +55,61 @@ fn observability_baseline_runtime_json_schema() {
 }
 
 #[test]
+fn structured_event_policy_preserves_effective_logger_filters() {
+    use fluxheim_observability::event::{CapturePolicy, EventData, SecurityReason};
+    let data = EventData::Security {
+        reason: SecurityReason::AuthenticationRejected,
+    };
+    let policy = CapturePolicy {
+        access_enabled: false,
+        ..CapturePolicy::default()
+    };
+    for (configured, override_filter, expected) in [
+        ("info", None, true),
+        ("off", None, false),
+        ("info", Some("off"), false),
+        ("off", Some("fluxheim::event::security=warn"), true),
+        ("info", Some("fluxheim::event::security=error"), false),
+        ("info", Some("info/does-not-match"), false),
+        ("off", Some("warn/Security policy decision"), true),
+    ] {
+        // from_env chooses the environment string instead of the configured default.
+        // Supply those strings directly to avoid process-global environment mutation.
+        let logger = env_logger::Builder::new()
+            .parse_filters(override_filter.unwrap_or(configured))
+            .build();
+        let enabled = logger.matches(
+            &log::Record::builder()
+                .level(data.level())
+                .target(data.target())
+                .args(format_args!("{}", data.message()))
+                .build(),
+        );
+        assert_eq!(policy.allows(data, enabled), expected);
+    }
+}
+
+#[cfg(feature = "privacy-mode")]
+#[test]
+fn structured_event_privacy_feature_is_forwarded_to_capture() {
+    use fluxheim_observability::event::{AccessOutcome, CapturePolicy, EventData, Method};
+    let data = EventData::Access {
+        outcome: AccessOutcome::Completed,
+        method: Method::GET,
+        status: None,
+        duration_micros: 0,
+        bytes_sent: 0,
+        attempts: 0,
+    };
+    let policy = CapturePolicy {
+        access_enabled: true,
+        privacy_mode: false,
+        ..CapturePolicy::default()
+    };
+    assert!(!policy.allows(data, true));
+}
+
+#[test]
 fn native_runtime_manifest_preview_reports_ready_service_graph() {
     let mut config = crate::config::Config::default();
     config.server.listen = vec!["127.0.0.1:18080".to_owned()];

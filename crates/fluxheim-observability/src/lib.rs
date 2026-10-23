@@ -37,6 +37,9 @@ mod access_log;
 mod metrics_labels;
 mod trace_context;
 
+#[cfg(feature = "structured-events")]
+pub mod event;
+
 #[cfg(feature = "otlp-http")]
 mod otlp_http;
 

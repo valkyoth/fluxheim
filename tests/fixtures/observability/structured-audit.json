@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "service_version": "PACKAGE_VERSION",
+  "timestamp_unix_nanos": 42,
+  "level": "ERROR",
+  "message": "Administrative operation outcome",
+  "data": {
+    "kind": "audit",
+    "operation": "rollback",
+    "outcome": "failed",
+    "actor": "automatic",
+    "revision": 7
+  },
+  "correlation": {},
+  "redacted": false,
+  "truncated": false
+}
