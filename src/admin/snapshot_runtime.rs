@@ -267,7 +267,17 @@ impl AdminApp {
             .lock_runtime_state()
             .rollback_required(expired, self.max_error_rate_per_mille)?;
 
-        Some(self.rollback_pending_validation(&rollback.0, rollback.1.as_str()))
+        let response = self.rollback_pending_validation(&rollback.0, rollback.1.as_str());
+        fluxheim_observability::operational::audit(
+            fluxheim_observability::event::AuditOperation::Rollback,
+            if response.status.is_success() {
+                fluxheim_observability::event::AuditOutcome::Succeeded
+            } else {
+                fluxheim_observability::event::AuditOutcome::Failed
+            },
+            fluxheim_observability::event::ActorClass::Automatic,
+        );
+        Some(response)
     }
 
     pub(super) fn watchdog_interval_secs(&self) -> u64 {
@@ -362,6 +372,9 @@ impl AdminApp {
     }
 
     fn record_failed_rollback(&self, pending: &PendingValidation) {
+        fluxheim_observability::operational::failure(
+            fluxheim_observability::event::FailureReason::Rollback,
+        );
         self.lock_runtime_state().rollback_failed(pending.clone());
         if let Err(error) = self.persist_runtime_state() {
             log::error!(

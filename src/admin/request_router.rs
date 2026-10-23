@@ -36,6 +36,9 @@ impl AdminApp {
         }
 
         if let Some(scope) = self.auth_throttle.pre_auth_check(source) {
+            fluxheim_observability::operational::security(
+                fluxheim_observability::event::SecurityReason::RateLimit,
+            );
             record_admin_auth_event("throttled", scope);
             log::warn!(
                 target: "fluxheim::security",
@@ -52,6 +55,9 @@ impl AdminApp {
         match self.client_certificate.allows(headers) {
             AdminClientCertificateDecision::Allowed => {}
             AdminClientCertificateDecision::Required => {
+                fluxheim_observability::operational::security(
+                    fluxheim_observability::event::SecurityReason::AuthenticationRejected,
+                );
                 let scope = self.auth_throttle.record_failure(source);
                 record_admin_auth_event("failure", scope.unwrap_or(AdminAuthThrottleScope::Source));
                 log::warn!(
@@ -76,6 +82,9 @@ impl AdminApp {
                 );
             }
             AdminClientCertificateDecision::Denied => {
+                fluxheim_observability::operational::security(
+                    fluxheim_observability::event::SecurityReason::AuthorizationRejected,
+                );
                 let scope = self.auth_throttle.record_failure(source);
                 record_admin_auth_event("failure", scope.unwrap_or(AdminAuthThrottleScope::Source));
                 log::warn!(
@@ -102,6 +111,9 @@ impl AdminApp {
         }
 
         if !authorized(authorization_header(headers), &self.token) {
+            fluxheim_observability::operational::security(
+                fluxheim_observability::event::SecurityReason::AuthenticationRejected,
+            );
             let scope = self.auth_throttle.record_failure(source);
             record_admin_auth_event("failure", scope.unwrap_or(AdminAuthThrottleScope::Source));
             log::warn!(
@@ -123,9 +135,17 @@ impl AdminApp {
             return json_response(StatusCode::UNAUTHORIZED, br#"{"error":"unauthorized"}"#);
         }
         self.auth_throttle.record_success(source);
+        let operation = operational_events::operation(method, path);
         if let Some(response) = self.enforce_self_healing_deadline()
             && !response.status.is_success()
         {
+            if let Some(operation) = operation {
+                fluxheim_observability::operational::audit(
+                    operation,
+                    fluxheim_observability::event::AuditOutcome::Failed,
+                    fluxheim_observability::event::ActorClass::AdminToken,
+                );
+            }
             return response;
         }
         if health_request {
@@ -138,10 +158,11 @@ impl AdminApp {
             return self.health_response();
         }
         if query.is_some_and(|query| query.len() > MAX_ADMIN_QUERY_BYTES) {
+            operational_events::authenticated_outcome(operation, StatusCode::URI_TOO_LONG);
             return json_response(StatusCode::URI_TOO_LONG, br#"{"error":"query_too_large"}"#);
         }
 
-        match (method, path) {
+        let response = match (method, path) {
             ("GET", "/_fluxheim/status") => self.status_response(),
             ("GET", "/_fluxheim/cache/status") => self.cache_status_response(),
             ("GET", "/_fluxheim/load-balancer/status") => self.load_balancer_status_response(),
@@ -369,7 +390,9 @@ impl AdminApp {
                 StatusCode::METHOD_NOT_ALLOWED,
                 br#"{"error":"method_not_allowed"}"#,
             ),
-        }
+        };
+        operational_events::authenticated_outcome(operation, response.status);
+        response
     }
 
     #[cfg(unix)]

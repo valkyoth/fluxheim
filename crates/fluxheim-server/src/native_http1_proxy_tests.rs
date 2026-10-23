@@ -23,6 +23,8 @@ mod header_policy_tests;
 #[cfg(feature = "load-balancer")]
 #[path = "native_http1_proxy_tests/load_balanced_cache.rs"]
 mod load_balanced_cache_tests;
+#[path = "native_http1_proxy_tests/operational_events.rs"]
+mod operational_event_tests;
 #[path = "native_http1_proxy_tests/response_features.rs"]
 mod response_features_tests;
 #[path = "native_http1_proxy_tests/runtime_behavior.rs"]

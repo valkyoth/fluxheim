@@ -90,6 +90,11 @@ impl NativeCacheFillWaitBudget {
         };
         tokio::time::timeout_at(deadline, waiter.notified)
             .await
+            .inspect_err(|_| {
+                fluxheim_observability::operational::security(
+                    fluxheim_observability::event::SecurityReason::AdmissionRejected,
+                )
+            })
             .is_ok()
     }
 }
@@ -179,6 +184,9 @@ fn acquire_cache_fill_concurrency_permit(
     let mut current = counter.load(Ordering::Acquire);
     loop {
         if current >= max_concurrent {
+            fluxheim_observability::operational::security(
+                fluxheim_observability::event::SecurityReason::AdmissionRejected,
+            );
             return None;
         }
         let Some(next) = current.checked_add(1) else {

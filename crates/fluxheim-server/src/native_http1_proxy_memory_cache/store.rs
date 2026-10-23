@@ -373,6 +373,9 @@ impl NativeProxyMemoryCache {
             let Ok(blocking_permit) = crate::blocking_work::try_acquire_request_blocking_work(
                 crate::blocking_work::NativeBlockingWorkClass::DiskCache,
             ) else {
+                fluxheim_observability::operational::security(
+                    fluxheim_observability::event::SecurityReason::AdmissionRejected,
+                );
                 return Ok(());
             };
             match tokio::task::spawn_blocking(move || {
@@ -389,6 +392,9 @@ impl NativeProxyMemoryCache {
                     );
                 }
                 Err(error) => {
+                    fluxheim_observability::operational::failure(
+                        fluxheim_observability::event::FailureReason::CacheWrite,
+                    );
                     log::debug!(
                         target: "fluxheim::native_http1",
                         "native disk cache store task failed: {error}"

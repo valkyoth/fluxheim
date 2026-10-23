@@ -89,6 +89,9 @@ fn disabled_disk_cache_does_not_require_a_path() {
     assert!(NativeDiskCache::from_config(&config).is_none());
 }
 
+#[path = "native_http1_cache_event_tests.rs"]
+mod events;
+
 #[test]
 fn native_peer_fill_cache_ttl_subtracts_upstream_age() {
     let cache = CacheConfig::default();

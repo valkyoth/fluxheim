@@ -17,6 +17,7 @@ use super::{
 
 #[tokio::test]
 async fn native_wasm_access_decision_denies_before_upstream() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let fixture = WasmRouteFixture::new(&[("deny", WasmPluginBody::Decision(2))]);
     let upstream = super::upstream_expect_path("/never", "unexpected").await;
     let router = NativeHttp1HostRouter::from_config(
@@ -31,6 +32,7 @@ async fn native_wasm_access_decision_denies_before_upstream() {
 
     assert!(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
     assert!(response.ends_with("wasm access denied\n"));
+    capture.assert_reason("wasm_denied", 1);
 }
 
 #[tokio::test]
@@ -122,6 +124,7 @@ async fn native_wasm_access_decision_cannot_override_builtin_route_acl() {
 
 #[tokio::test]
 async fn native_wasm_access_decision_fails_closed_on_invalid_output() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let fixture = WasmRouteFixture::new(&[("invalid", WasmPluginBody::Decision(9))]);
     let upstream = super::upstream_expect_path("/never", "unexpected").await;
     let router = NativeHttp1HostRouter::from_config(
@@ -136,10 +139,12 @@ async fn native_wasm_access_decision_fails_closed_on_invalid_output() {
 
     assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
     assert!(response.ends_with("wasm access decision error\n"));
+    capture.assert_reason("wasm_execution", 1);
 }
 
 #[tokio::test]
 async fn native_wasm_access_decision_fails_closed_on_trap() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let fixture = WasmRouteFixture::new(&[("trap", WasmPluginBody::Trap)]);
     let upstream = super::upstream_expect_path("/never", "unexpected").await;
     let router = NativeHttp1HostRouter::from_config(
@@ -154,6 +159,7 @@ async fn native_wasm_access_decision_fails_closed_on_trap() {
 
     assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
     assert!(response.ends_with("wasm access decision trap\n"));
+    capture.assert_reason("wasm_trap", 1);
 }
 
 #[cfg(feature = "wasm-proxy-abi")]
@@ -235,6 +241,7 @@ async fn native_wasm_wasi_stdio_import_remains_denied_with_other_grants() {
 
 #[tokio::test]
 async fn native_wasm_access_decision_fails_closed_on_timeout() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let fixture = WasmRouteFixture::new(&[("busy", WasmPluginBody::BusyLoop)]);
     let upstream = super::upstream_expect_path("/never", "unexpected").await;
     let mut config =
@@ -252,6 +259,7 @@ async fn native_wasm_access_decision_fails_closed_on_timeout() {
 
     assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
     assert!(response.ends_with("wasm access decision timeout\n"));
+    capture.assert_reason("wasm_timeout", 1);
 }
 
 #[tokio::test]

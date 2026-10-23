@@ -96,7 +96,12 @@ impl NativeProxyMemoryCache {
         let blocking_permit = crate::blocking_work::try_acquire_request_blocking_work(
             crate::blocking_work::NativeBlockingWorkClass::DiskCache,
         )
-        .map_err(|_| NativeDiskCacheLookupError::Saturated)?;
+        .map_err(|_| {
+            fluxheim_observability::operational::security(
+                fluxheim_observability::event::SecurityReason::AdmissionRejected,
+            );
+            NativeDiskCacheLookupError::Saturated
+        })?;
         match tokio::task::spawn_blocking(move || {
             let _blocking_permit = blocking_permit;
             disk.get(&key, |fields| native_vary_cache_key(&key, fields, &request))
@@ -105,6 +110,9 @@ impl NativeProxyMemoryCache {
         {
             Ok(entry) => Ok(entry),
             Err(error) => {
+                fluxheim_observability::operational::failure(
+                    fluxheim_observability::event::FailureReason::CacheRead,
+                );
                 log::debug!(
                     target: "fluxheim::native_http1",
                     "native disk cache lookup task failed: {error}"

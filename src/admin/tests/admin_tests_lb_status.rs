@@ -130,6 +130,7 @@ fn ops_socket_exposes_load_balancer_status_without_bearer_auth() {
 #[cfg(feature = "load-balancer")]
 #[test]
 fn load_balancer_member_state_endpoint_updates_runtime_status() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     #[cfg(feature = "tls-rustls-backend")]
     let _ = crate::tls::install_rustls_crypto_provider();
 
@@ -154,6 +155,7 @@ fn load_balancer_member_state_endpoint_updates_runtime_status() {
     assert_eq!(body["address"], Value::Null);
     assert_eq!(body["alias"], "app-a");
     assert_eq!(body["persistent"], false);
+    capture.assert_audit("load_balancer_update", "succeeded", "admin_token");
 
     let response = app.handle("GET", "/_fluxheim/status", None, &auth_headers());
     assert_eq!(response.status, StatusCode::OK);

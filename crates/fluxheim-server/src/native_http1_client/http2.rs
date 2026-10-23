@@ -146,7 +146,28 @@ fn native_http2_response_header_proxy_owned_or_hop_by_hop(name: &HeaderName) -> 
         )
 }
 
+pub(super) fn record_native_http2_failure(error: &NativeHttp2StackError) {
+    use fluxheim_observability::{
+        event::{FailureReason, SecurityReason},
+        operational::{failure, security},
+    };
+    match error {
+        NativeHttp2StackError::HandshakeTimeout | NativeHttp2StackError::RequestReadyTimeout => {
+            failure(FailureReason::ConnectionTimeout)
+        }
+        NativeHttp2StackError::BodyReadTimeout | NativeHttp2StackError::HandlerTimeout => {
+            failure(FailureReason::ReadTimeout)
+        }
+        NativeHttp2StackError::ResponseWriteTimeout => failure(FailureReason::WriteTimeout),
+        NativeHttp2StackError::BodyCapacityUnavailable => {
+            security(SecurityReason::AdmissionRejected)
+        }
+        _ => failure(FailureReason::UpstreamProtocol),
+    }
+}
+
 pub(super) fn native_http2_error(error: NativeHttp2StackError) -> NativeHttp1Error {
+    record_native_http2_failure(&error);
     let kind = match error {
         NativeHttp2StackError::BodyReadTimeout
         | NativeHttp2StackError::HandshakeTimeout

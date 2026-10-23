@@ -13,6 +13,7 @@ use super::{
 
 #[tokio::test]
 async fn native_proxy_fails_over_get_to_second_static_upstream() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let first = rejecting_upstream().await;
     let second = upstream(|request, mut stream| async move {
         let request = String::from_utf8(request).unwrap();
@@ -35,6 +36,7 @@ async fn native_proxy_fails_over_get_to_second_static_upstream() {
     );
     assert!(response.contains("x-origin: second\r\n"));
     assert!(response.ends_with("second upstream"));
+    capture.assert_reason("upstream_protocol", 1);
 }
 
 #[tokio::test]
@@ -121,6 +123,7 @@ async fn native_proxy_weighted_failover_skips_duplicate_slots() {
 
 #[tokio::test]
 async fn native_proxy_does_not_fail_over_unsafe_method() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let first = rejecting_upstream().await;
     let second = upstream(|_, mut stream| async move {
         stream
@@ -145,4 +148,5 @@ async fn native_proxy_does_not_fail_over_unsafe_method() {
         "unexpected response: {response:?}"
     );
     assert!(response.ends_with("bad gateway\n"));
+    capture.assert_reason("upstream_protocol", 1);
 }

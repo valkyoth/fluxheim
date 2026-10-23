@@ -362,6 +362,7 @@ fn cache_status_endpoint_reports_route_tiered_cache() {
 #[cfg(feature = "cache")]
 #[test]
 fn cache_activity_reset_endpoint_requires_auth_and_reports_tiers() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let cache_path = unique_temp_path("admin-cache-reset");
     let config = Config {
         vhosts: vec![VhostConfig {
@@ -432,6 +433,9 @@ fn cache_activity_reset_endpoint_requires_auth_and_reports_tiers() {
     assert!(body.contains(r#""tiered_route_ratio_per_mille":0"#));
     assert!(body.contains(r#""memory_tiers":2"#));
     assert!(body.contains(r#""disk_tiers":1"#));
+
+    capture.assert_reason("authentication_rejected", 1);
+    capture.assert_audit("cache_activity_reset", "succeeded", "admin_token");
 
     let _ = std::fs::remove_dir_all(cache_path);
 }

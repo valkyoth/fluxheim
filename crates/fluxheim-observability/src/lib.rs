@@ -40,6 +40,12 @@ mod trace_context;
 #[cfg(feature = "structured-events")]
 pub mod event;
 
+#[cfg(feature = "structured-events")]
+pub mod operational;
+
+#[cfg(feature = "test-support")]
+pub mod event_test_support;
+
 #[cfg(feature = "otlp-http")]
 mod otlp_http;
 

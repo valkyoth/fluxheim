@@ -158,6 +158,13 @@ pub(super) fn write_text_log_record(
     buf: &mut env_logger::fmt::Formatter,
     record: &log::Record<'_>,
 ) -> std::io::Result<()> {
+    if write_operational_record(
+        buf,
+        record,
+        fluxheim_observability::event::EventFormat::Text,
+    )? {
+        return Ok(());
+    }
     writeln!(
         buf,
         "{} {} {}: {}",
@@ -172,6 +179,13 @@ pub(super) fn write_json_log_record(
     buf: &mut env_logger::fmt::Formatter,
     record: &log::Record<'_>,
 ) -> std::io::Result<()> {
+    if write_operational_record(
+        buf,
+        record,
+        fluxheim_observability::event::EventFormat::Json,
+    )? {
+        return Ok(());
+    }
     writeln!(
         buf,
         "{}",
@@ -182,6 +196,25 @@ pub(super) fn write_json_log_record(
             &record.args().to_string(),
         )
     )
+}
+
+fn write_operational_record(
+    buf: &mut impl Write,
+    record: &log::Record<'_>,
+    format: fluxheim_observability::event::EventFormat,
+) -> std::io::Result<bool> {
+    use fluxheim_observability::operational::{EventBudget, record_payload};
+    static BUDGET: std::sync::OnceLock<EventBudget> = std::sync::OnceLock::new();
+    let Some((payload, class)) = record_payload(record, format) else {
+        return Ok(false);
+    };
+    if BUDGET
+        .get_or_init(EventBudget::default)
+        .admit(class, std::time::Instant::now())
+    {
+        buf.write_all(payload.as_bytes())?;
+    }
+    Ok(true)
 }
 
 pub(super) fn log_record_json(timestamp: &str, level: &str, target: &str, message: &str) -> String {

@@ -13,6 +13,46 @@ use crate::{
 };
 
 #[test]
+fn http2_retry_failure_and_final_failure_each_emit_once() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
+    let retryable = NativeHttp2StackError::RequestReadyTimeout;
+    assert!(super::http2::native_http2_error_retry_safe(&retryable));
+    super::http2::record_native_http2_failure(&retryable);
+    capture.assert_reason("connection_timeout", 1);
+    let error = native_http2_error(NativeHttp2StackError::BodyReadTimeout);
+    assert!(
+        matches!(error, NativeHttp1Error::Io(error) if error.kind() == std::io::ErrorKind::TimedOut)
+    );
+    capture.assert_reason("read_timeout", 1);
+    assert_eq!(capture.events().len(), 2);
+}
+
+#[test]
+fn operational_timeout_phases_keep_io_kind_without_raw_message() {
+    use fluxheim_observability::event::FailureReason;
+    let capture = fluxheim_observability::event_test_support::Capture::start();
+    for reason in [
+        FailureReason::ConnectionTimeout,
+        FailureReason::ReadTimeout,
+        FailureReason::WriteTimeout,
+    ] {
+        let error = super::timeout_error("SECRET-CANARY", reason);
+        assert!(
+            matches!(error, NativeHttp1Error::Io(error) if error.kind() == std::io::ErrorKind::TimedOut)
+        );
+    }
+    for reason in ["connection_timeout", "read_timeout", "write_timeout"] {
+        capture.assert_reason(reason, 1);
+    }
+    assert!(
+        capture
+            .events()
+            .iter()
+            .all(|event| !event.to_string().contains("SECRET-CANARY"))
+    );
+}
+
+#[test]
 fn h2c_settings_header_uses_url_safe_unpadded_base64() {
     let settings = h2c_upgrade_settings_header(DownstreamHttp2Policy::default());
 

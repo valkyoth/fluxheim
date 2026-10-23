@@ -85,6 +85,7 @@ fn admin_client_certificate_policy_requires_trusted_fingerprint_header() {
 
 #[test]
 fn admin_client_certificate_policy_denies_blocked_fingerprint() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let app = app_with_config(Config {
         admin: AdminConfig {
             client_certificate: AdminClientCertificateConfig {
@@ -111,6 +112,7 @@ fn admin_client_certificate_policy_denies_blocked_fingerprint() {
             .status,
         StatusCode::FORBIDDEN
     );
+    capture.assert_reason("authorization_rejected", 1);
 }
 
 #[test]

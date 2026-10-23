@@ -237,6 +237,7 @@ fn reload_endpoint_requires_current_snapshot() {
 
 #[test]
 fn reload_endpoint_applies_snapshot_safe_config() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let app = app();
     let new_config = Config {
         vhosts: vec![VhostConfig {
@@ -272,4 +273,5 @@ fn reload_endpoint_applies_snapshot_safe_config() {
     assert!(body.contains(&snapshot.id));
     assert_eq!(app.proxy.route_host(Some("example.test")), "example");
     assert_eq!(app.current_config.load().vhosts[0].name, "example");
+    capture.assert_audit("reload", "succeeded", "admin_token");
 }

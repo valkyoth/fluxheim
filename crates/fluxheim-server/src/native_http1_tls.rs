@@ -135,6 +135,19 @@ impl NativeHttp1UpstreamTls {
             .connect(server_name, stream)
             .await
             .map_err(|error| {
+                use fluxheim_observability::{event::FailureReason, operational::failure};
+                failure(
+                    if matches!(
+                        error
+                            .get_ref()
+                            .and_then(|e| e.downcast_ref::<rustls::Error>()),
+                        Some(rustls::Error::InvalidCertificate(_))
+                    ) {
+                        FailureReason::TlsVerification
+                    } else {
+                        FailureReason::TlsHandshake
+                    },
+                );
                 NativeHttp1Error::Io(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("native HTTP/1 upstream TLS handshake failed: {error}"),
@@ -196,6 +209,14 @@ impl NativeHttp1UpstreamTls {
             .connect()
             .await
             .map_err(|error| {
+                use fluxheim_observability::{event::FailureReason, operational::failure};
+                failure(
+                    if stream.ssl().verify_result() != openssl::x509::X509VerifyResult::OK {
+                        FailureReason::TlsVerification
+                    } else {
+                        FailureReason::TlsHandshake
+                    },
+                );
                 NativeHttp1Error::Io(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("native HTTP/1 upstream TLS handshake failed: {error}"),

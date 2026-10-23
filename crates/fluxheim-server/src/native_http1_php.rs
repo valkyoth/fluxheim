@@ -123,9 +123,33 @@ pub(crate) async fn native_php_execute_fpm(
             request_timeout,
             php.max_response_bytes.as_u64(),
         )
-        .await;
+        .await
+        .inspect_err(|error| {
+            use fluxheim_observability::{
+                event::{EventData, FailureReason},
+                operational::emit,
+            };
+            let reason = match error.kind() {
+                io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound => {
+                    FailureReason::PhpConnect
+                }
+                io::ErrorKind::TimedOut => FailureReason::PhpTimeout,
+                _ => FailureReason::PhpProtocol,
+            };
+            emit(EventData::Error {
+                reason,
+                attempt: Some(u32::from(attempts) + 1),
+            });
+        });
         match result {
-            Ok(output) => match native_php_fpm_output_plan(php, output, plan) {
+            Ok(output) => match native_php_fpm_output_plan(php, output, plan).inspect_err(|_| {
+                fluxheim_observability::operational::emit(
+                    fluxheim_observability::event::EventData::Error {
+                        reason: fluxheim_observability::event::FailureReason::PhpProtocol,
+                        attempt: Some(u32::from(attempts) + 1),
+                    },
+                );
+            }) {
                 Ok(response)
                     if native_php_response_retryable(php, &response)
                         && attempts < max_retries

@@ -1,11 +1,10 @@
 # Structured Event Contract
 
-Commit 02, schema version 1. This is a library contract in
-`crates/fluxheim-observability/src/event*.rs`, not a claim that the running
-server emits these events yet. Commit 03 connects operational owners, Commit 04
-adds dispatch, and Commit 06 connects native request completion/correlation.
-Legacy runtime logs and OTLP span encoders are unchanged and do not inherit this
-contract merely by depending on the crate. Existing configuration stays valid.
+Schema version 1, introduced in Commit 02. Commit 03 connects operational owners
+through `operational.rs` and the existing runtime logger. Commit 04 adds async
+dispatch; Commit 06 connects native request completion/correlation. Unmigrated
+legacy logs and OTLP encoders do not inherit this contract merely by depending
+on the crate. Existing configuration stays valid.
 
 ## Capture Boundary
 
@@ -14,7 +13,8 @@ identity, borrowed correlation candidates, policy and the effective filter
 decision. It neither writes files nor logs, queues, starts threads, contacts
 collectors or reads environment variables. `structured-events` enables this API;
 without it, standalone observability consumers do not acquire serde dependencies.
-The application enables it, but this checkpoint adds no production event caller.
+The application and native server enable it. Operational callers use a narrower
+API accepting only finite event data, with no request correlation or resources.
 
 There is deliberately no arbitrary field map, message string, URL, path, host,
 IP, HTTP header, query value, body, credential or `Display`/`Error` input. Owners
@@ -31,8 +31,9 @@ This does not sanitize unrelated uses of `log!` or arbitrary caller formatting.
 | Audit | finite operation/outcome, actor class, optional configuration revision | INFO success, WARN rejected, ERROR failed / protected |
 
 Failure codes: dns, connection_refused, connection_timeout, read_timeout,
-write_timeout, tls_verification, upstream_protocol, cache_read, cache_write,
-cache_encryption, php_connect, php_protocol, wasm_trap, acme, reload, rollback,
+write_timeout, tls_verification, tls_handshake, upstream_protocol, cache_read, cache_write,
+cache_encryption, php_connect, php_protocol, php_timeout, wasm_trap, wasm_timeout,
+wasm_execution, acme, reload, rollback,
 telemetry and internal. Security codes: authentication_rejected,
 authorization_rejected, host_rejected, request_limit, rate_limit,
 admission_rejected, path_rejected, wasm_denied and invalid_trace_context.
@@ -68,7 +69,10 @@ completion/cancellation accounting remains Commit 06 work.
    the typed level/target and fixed message, not a raw error or encoded envelope.
 2. Pass that decision to capture before allocating optional strings. An explicit
    off/filter rejection applies to every family; protected does not mean forced
-   logging. The existing logger is not replaced in this checkpoint.
+   logging. Commit 03 checks the log facade's metadata filter first; env_logger
+   applies the final message regex to the fixed message before formatting/output.
+   No optional strings are captured by these producers. A regex rejection may
+   still incur bounded encoding work, but never sinks an event.
 3. The access switch gates only access events. Turning it off cannot implicitly
    disable otherwise permitted error/security/audit events.
 4. Privacy mode suppresses access events and all optional resources/correlation
@@ -77,7 +81,7 @@ completion/cancellation accounting remains Commit 06 work.
 5. Correlation and resource capture default off in the library. Callers must
    deliberately map existing settings to policy without changing operator choices.
    Path/host/client-IP options remain configuration-compatible but gain no new
-   output through this schema. Do not claim they are wired up in Commit 02.
+   output through the current operational producers.
 
 Correlation candidates are borrowed and their Debug implementation redacts
 everything. Privacy-disabled capture still requires both the corresponding
@@ -126,8 +130,14 @@ PACKAGE_VERSION marker is substituted with the compiled version by the test.
 
 ## Protected Admission Design For Commit 04
 
-Classification exists now; NO queue, reservation, rate limiter, drop counter or
-lossless delivery guarantee is implemented here. The next dispatcher must:
+Commit 03 has a fixed-state sink admission limiter: separate ordinary and
+protected windows each admit at most 100 records per second. Windows use monotonic
+time; boundary-adjacent bursts can total 200 per class. Contention/poisoning drops
+instead of waiting on the budget mutex. Drops are counted with saturation, but
+are not yet exposed by the operational API. Filtering happens before admission.
+There is NO asynchronous queue or lossless delivery guarantee yet. The existing
+synchronous writer can still block: Commit 04 must address this, not describe
+rate limiting as async delivery. Its dispatcher must:
 
 - Use the Commit 01 default total of 4096 entries/8 MiB with a protected reserve
   of 256 entries/1 MiB INSIDE those totals. Ordinary access/error events cannot
@@ -149,9 +159,11 @@ canaries, oversized and malformed IDs, filter/module/message-regex precedence,
 feature-off builds, privacy feature override resistance and 512 randomized
 input cases per property-test run. Existing runtime/OTLP baseline fixtures remain.
 
-Commit 02 does not claim native event delivery or APM integration. No HTTP
-response, legacy log, filesystem trust, authentication or collector behavior is
-changed. Later runtime wiring must retain these tests AND prove owner-to-sink
-behavior. Incremental pentest, exact-SHA GitHub checks and user approval are
-required before Commit 03; native Windows/macOS execution is supplied by CI,
-not inferred from local Linux or cross-compilation.
+Commit 03 adds owner-to-sink verification; see its
+[coverage and limitations](../evidence/observability-03.md). Public responses,
+authentication, filesystem trust and recovery transitions remain unchanged.
+Automatic ACME renewal outcomes now omit legacy raw domain/error text in favor
+of typed events. Other legacy messages remain and must not be mistaken for
+sanitized events. Incremental pentest, exact-SHA GitHub checks and user approval
+are required before Commit 04. Native Windows/macOS execution must be supplied
+by CI or native hosts, not inferred from Linux or cross-compilation.

@@ -382,6 +382,9 @@ impl NativeHttp1Proxy {
         let max_attempts = self.upstreams.len().max(1);
         for attempt in 0..max_attempts {
             let Some(selected) = load_balancer.select_or_wait(&request, client_ip).await else {
+                fluxheim_observability::operational::security(
+                    fluxheim_observability::event::SecurityReason::AdmissionRejected,
+                );
                 if attempt == 0 {
                     let status = load_balancer.all_down_status();
                     if let Some((cache, key, _, _, _)) = proxy_cache_fill.as_ref()

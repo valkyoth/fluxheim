@@ -102,6 +102,7 @@ fn native_route_proxy_rejects_route_php_without_root() {
 #[cfg(feature = "php-fpm")]
 #[tokio::test]
 async fn native_route_proxy_php_route_fails_closed_when_fpm_unavailable() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let root = tempfile::TempDir::new().unwrap();
     std::fs::write(root.path().join("index.php"), b"<?php echo 'ok';").unwrap();
     let mut route = native_route_proxy_test_route();
@@ -124,6 +125,7 @@ async fn native_route_proxy_php_route_fails_closed_when_fpm_unavailable() {
 
     assert!(response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"));
     assert!(response.ends_with("php-fpm failed\n"));
+    capture.assert_reason("php_connect", 1);
 }
 
 #[cfg(feature = "php-fpm")]
@@ -164,6 +166,64 @@ async fn native_route_proxy_php_route_executes_fastcgi_responder() {
     );
     assert_eq!(response_header(&response, "x-powered-by"), None);
     assert!(response.ends_with("php-ok"));
+}
+
+#[cfg(feature = "php-fpm")]
+#[tokio::test]
+async fn operational_php_protocol_and_timeout_keep_gateway_response() {
+    for stalled in [false, true] {
+        let capture = fluxheim_observability::event_test_support::Capture::start();
+        let mut task = None;
+        let fpm = if stalled {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            task = Some(tokio::spawn(async move {
+                let (_stream, _) = listener.accept().await.unwrap();
+                std::future::pending::<()>().await;
+            }));
+            address
+        } else {
+            fastcgi_responder(b"Status: SECRET-CANARY\r\n\r\nprivate body").await
+        };
+        let root = tempfile::TempDir::new().unwrap();
+        std::fs::write(root.path().join("index.php"), b"<?php echo 'ok';").unwrap();
+        let mut route = native_route_proxy_test_route();
+        route.path_exact = Some("/index.php".into());
+        route.redirect = None;
+        route.php = Some(fluxheim_config::PhpConfig {
+            enabled: true,
+            root: Some(root.path().to_path_buf()),
+            request_timeout_secs: 1,
+            fpm: fluxheim_config::PhpFpmConfig {
+                tcp: Some(fpm.to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let route = NativeHttp1RouteProxyRoute::from_config(&route, None).unwrap();
+        let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+        let response = downstream_get(proxy, "/index.php").await;
+        if let Some(task) = task {
+            task.abort();
+            let _ = task.await;
+        }
+        assert!(response.starts_with("HTTP/1.1 502"), "{response}");
+        assert!(response.ends_with("php-fpm failed\n"));
+        capture.assert_reason(
+            if stalled {
+                "php_timeout"
+            } else {
+                "php_protocol"
+            },
+            1,
+        );
+        assert!(
+            capture
+                .events()
+                .iter()
+                .all(|event| !event.to_string().contains("SECRET-CANARY"))
+        );
+    }
 }
 
 #[cfg(feature = "php-fpm")]
@@ -226,6 +286,7 @@ async fn native_route_proxy_vhost_php_takes_precedence_over_static_web_for_php_p
 #[cfg(feature = "php-fpm")]
 #[tokio::test]
 async fn native_route_proxy_vhost_php_denied_paths_do_not_fall_through_to_static_web() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let fpm = fastcgi_responder(b"Status: 200 OK\r\nContent-Type: text/plain\r\n\r\nphp-ok").await;
     let root = tempfile::TempDir::new().unwrap();
     std::fs::create_dir(root.path().join("admin")).unwrap();
@@ -275,4 +336,5 @@ async fn native_route_proxy_vhost_php_denied_paths_do_not_fall_through_to_static
         "unexpected static response: {static_response:?}"
     );
     assert!(static_response.ends_with("body{}"));
+    capture.assert_reason("path_rejected", 1);
 }

@@ -74,6 +74,9 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 || decoded_policy_route
                     .is_some_and(|route| !route.access.allows(client_ip, tls_identity, geo_context))
             {
+                fluxheim_observability::operational::security(
+                    fluxheim_observability::event::SecurityReason::AuthorizationRejected,
+                );
                 return NativeHttp1Response::new(403, "Forbidden", b"forbidden\n")
                     .close_connection();
             }
@@ -83,6 +86,9 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             let _vhost_concurrency_permit = match self.acquire_vhost_concurrency_permit().await {
                 Ok(permit) => permit,
                 Err(status) => {
+                    fluxheim_observability::operational::security(
+                        fluxheim_observability::event::SecurityReason::AdmissionRejected,
+                    );
                     return NativeHttp1Response::new(
                         status,
                         "Too Many Requests",
@@ -98,6 +104,9 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     tokio::time::sleep(delay).await;
                 }
                 NativeRateLimitDecision::Reject(status) => {
+                    fluxheim_observability::operational::security(
+                        fluxheim_observability::event::SecurityReason::RateLimit,
+                    );
                     return NativeHttp1Response::new(
                         status,
                         "Too Many Requests",
@@ -116,6 +125,7 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     NativeWasmRouteResolution::Continue => selected_route,
                     NativeWasmRouteResolution::Select(route) => {
                         if !route.access.allows(client_ip, tls_identity, geo_context) {
+                            fluxheim_observability::operational::security(fluxheim_observability::event::SecurityReason::AuthorizationRejected);
                             return NativeHttp1Response::new(403, "Forbidden", b"forbidden\n")
                                 .close_connection();
                         }
@@ -130,6 +140,9 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             {
                 Ok(permits) => permits,
                 Err(status) => {
+                    fluxheim_observability::operational::security(
+                        fluxheim_observability::event::SecurityReason::AdmissionRejected,
+                    );
                     return NativeHttp1Response::new(
                         status,
                         "Too Many Requests",
@@ -145,6 +158,9 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     tokio::time::sleep(delay).await;
                 }
                 NativeRateLimitDecision::Reject(status) => {
+                    fluxheim_observability::operational::security(
+                        fluxheim_observability::event::SecurityReason::RateLimit,
+                    );
                     return NativeHttp1Response::new(
                         status,
                         "Too Many Requests",
@@ -501,6 +517,9 @@ impl NativeHttp1RouteProxy {
         let concurrency_permits = match self.acquire_concurrency_permits(concurrency_route).await {
             Ok(permits) => permits,
             Err(status) => {
+                fluxheim_observability::operational::security(
+                    fluxheim_observability::event::SecurityReason::AdmissionRejected,
+                );
                 return write_takeover_limit_rejection(
                     &mut stream,
                     status,
@@ -514,6 +533,9 @@ impl NativeHttp1RouteProxy {
             NativeRateLimitDecision::Allow => {}
             NativeRateLimitDecision::Delay(delay) => tokio::time::sleep(delay).await,
             NativeRateLimitDecision::Reject(status) => {
+                fluxheim_observability::operational::security(
+                    fluxheim_observability::event::SecurityReason::RateLimit,
+                );
                 return write_takeover_limit_rejection(
                     &mut stream,
                     status,

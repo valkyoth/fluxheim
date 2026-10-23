@@ -42,6 +42,7 @@ mod misc_helpers;
 use misc_helpers::*;
 mod load_balancer_mutations;
 mod load_balancer_status;
+mod operational_events;
 mod request_router;
 mod snapshot_runtime;
 
@@ -395,6 +396,8 @@ mod tests {
     mod cache_status;
     #[path = "admin_tests_core.rs"]
     mod core;
+    #[path = "admin_tests_events.rs"]
+    mod events;
     #[path = "admin_tests_lb_status.rs"]
     mod lb_status;
     #[path = "admin_tests_lb_validation.rs"]

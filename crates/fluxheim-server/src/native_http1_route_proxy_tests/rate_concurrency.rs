@@ -8,6 +8,7 @@ use super::{
 
 #[tokio::test]
 async fn native_route_proxy_vhost_concurrency_rejects_second_request() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let (upstream, observed, release) = upstream_hold_response("/slow", "released").await;
     let vhost = fluxheim_config::VhostConfig {
         name: "route.test".to_owned(),
@@ -56,6 +57,7 @@ async fn native_route_proxy_vhost_concurrency_rejects_second_request() {
     assert!(rejected.ends_with("too many requests\n"));
     assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(first.ends_with("released"));
+    capture.assert_reason("admission_rejected", 1);
 }
 
 #[tokio::test]
@@ -112,6 +114,7 @@ async fn native_route_proxy_route_concurrency_rejects_second_request() {
 
 #[tokio::test]
 async fn native_route_proxy_vhost_rate_limit_rejects_second_request() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let upstream = upstream_expect_path("/limited", "first").await;
     let vhost = fluxheim_config::VhostConfig {
         name: "route.test".to_owned(),
@@ -158,6 +161,7 @@ async fn native_route_proxy_vhost_rate_limit_rejects_second_request() {
     assert!(second.starts_with("HTTP/1.1 429 Too Many Requests\r\n"));
     assert!(second.contains("retry-after: 1\r\n"));
     assert!(second.ends_with("rate limited\n"));
+    capture.assert_reason("rate_limit", 1);
 }
 
 #[tokio::test]

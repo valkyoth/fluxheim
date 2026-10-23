@@ -285,6 +285,8 @@ Suggested subject: `Observability commit 03: instrument operational failures`.
 Operator value: distinguish DNS, refused connection, TLS verification,
 timeout, PHP, cache, ACME and rollback failures without debug logging.
 
+Review artifact: [owner coverage and local verification](../evidence/observability-03.md).
+
 Deliver:
 - Map causal categories at their actual owner, including denied requests,
   queue admission, upstream retries, cache encryption/store failures, Wasm
@@ -688,8 +690,8 @@ collector behavior is not the new required-collector acceptance contract.
 | --- | --- | --- |
 | Preparation - 1.8.3 reconciliation and this plan | Prepared; review pending | Not an observability implementation acceptance |
 | 01 - Inventory, schemas, budgets | Accepted for progression | Base implementation 74212e08; dependency remediation 4cc86fe1; plan a04459ae; test-only CI follow-up 29484229. User supplied clean pentest, reported GitHub green and authorized 02. Later queue/performance budgets still need implementation qualification. |
-| 02 - Event model/redaction | Implemented; review pending | Structured event contract, regressions and local evidence; pentest/CI acceptance pending |
-| 03 - Diagnostics/audit | Not started | Pending |
+| 02 - Event model/redaction | Accepted for progression | 74dbb160; user supplied clean pentest, reported GitHub green and authorized 03. Producer provenance is a mandatory integration gate. |
+| 03 - Diagnostics/audit | Implemented; review pending | [Owner coverage, local tests and live logger proof](../evidence/observability-03.md). Awaiting user pentest and exact-SHA GitHub/CodeQL; no permission to start 04. |
 | 04 - Bounded dispatcher | Not started | Pending |
 | 05 - File lifecycle | Not started | Pending |
 | 06 - Correlation | Not started | Pending |
@@ -701,5 +703,5 @@ collector behavior is not the new required-collector acceptance contract.
 | 12 - Observability docs / candidate qualification | Not started | Pending |
 | 13 - Documentation / final release acceptance | Not started | Pending |
 
-The current authorized implementation task is Commit 02. Stop for pentest,
-green GitHub checks and explicit approval before starting Commit 03.
+The current authorized implementation task is Commit 03. Stop for pentest,
+green GitHub checks and explicit approval before starting Commit 04.

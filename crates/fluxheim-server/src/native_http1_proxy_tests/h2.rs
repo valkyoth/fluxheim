@@ -130,6 +130,7 @@ async fn native_proxy_http2_upstream_stream_slot_wait_is_bounded() {
 
 #[tokio::test]
 async fn native_proxy_http2_upstream_total_connection_timeout_includes_h2_handshake() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let origin = h2_handshake_stall_upstream().await;
     let upstream = NativeHttp1Upstream::new(origin.to_string())
         .with_connect_timeout(Duration::from_secs(5))
@@ -152,6 +153,14 @@ async fn native_proxy_http2_upstream_total_connection_timeout_includes_h2_handsh
         NativeHttp1Error::Io(error) => assert_eq!(error.kind(), std::io::ErrorKind::TimedOut),
         NativeHttp1Error::Parse(error) => panic!("unexpected parse error: {error:?}"),
     }
+    let events = capture.events();
+    assert_eq!(events.len(), 1, "{events:?}");
+    // h2 may return its sender before peer SETTINGS arrives. The same deadline
+    // can then expire waiting for a response rather than establishing the sender.
+    assert!(matches!(
+        events[0]["data"]["reason"].as_str(),
+        Some("connection_timeout" | "read_timeout")
+    ));
 }
 
 #[tokio::test]

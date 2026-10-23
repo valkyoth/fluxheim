@@ -43,6 +43,11 @@ where
     )
     .await
     .map_err(|_| timeout_error("native HTTP/1 upstream read timeout"))?
+    .inspect_err(|_| {
+        fluxheim_observability::operational::failure(
+            fluxheim_observability::event::FailureReason::UpstreamProtocol,
+        )
+    })
     .map(|(response, _)| response)
 }
 
@@ -62,6 +67,11 @@ where
     )
     .await
     .map_err(|_| timeout_error("native HTTP/1 upstream read timeout"))?
+    .inspect_err(|_| {
+        fluxheim_observability::operational::failure(
+            fluxheim_observability::event::FailureReason::UpstreamProtocol,
+        )
+    })
 }
 
 async fn read_upstream_response_inner<S>(
@@ -372,5 +382,8 @@ fn response_header_allowed(
 }
 
 fn timeout_error(message: &'static str) -> NativeHttp1Error {
+    fluxheim_observability::operational::failure(
+        fluxheim_observability::event::FailureReason::ReadTimeout,
+    );
     NativeHttp1Error::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, message))
 }

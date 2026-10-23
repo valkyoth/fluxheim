@@ -187,6 +187,7 @@ async fn native_http1_rejects_overflow_sized_chunk_header() {
 
 #[tokio::test]
 async fn native_http1_enforces_configured_body_limit() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let policy = DownstreamHttp1Policy::from_server_limits(fluxheim_config::ServerLimitsConfig {
         max_request_header_bytes: fluxheim_config::ByteSize::from_bytes(4096),
         max_uri_bytes: fluxheim_config::ByteSize::from_bytes(1024),
@@ -210,6 +211,7 @@ async fn native_http1_enforces_configured_body_limit() {
 
     assert!(response.starts_with("HTTP/1.1 413 Payload Too Large\r\n"));
     assert!(response.ends_with("payload too large\n"));
+    capture.assert_reason("request_limit", 1);
 }
 
 #[tokio::test]

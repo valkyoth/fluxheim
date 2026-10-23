@@ -147,6 +147,9 @@ impl NativeDiskCache {
                         "native disk cache encryption {}: {error}",
                         root.display()
                     );
+                    fluxheim_observability::operational::failure(
+                        fluxheim_observability::event::FailureReason::CacheEncryption,
+                    );
                     return None;
                 }
             };
@@ -270,6 +273,18 @@ impl NativeDiskCache {
         key: NativeDiskCacheStoreKey,
         entry: &NativeMemoryCacheEntry,
     ) -> std::io::Result<()> {
+        self.store_inner(key, entry).inspect_err(|_| {
+            fluxheim_observability::operational::failure(
+                fluxheim_observability::event::FailureReason::CacheWrite,
+            )
+        })
+    }
+
+    fn store_inner(
+        &self,
+        key: NativeDiskCacheStoreKey,
+        entry: &NativeMemoryCacheEntry,
+    ) -> std::io::Result<()> {
         let meta = NativeDiskCacheMeta::from_entry(entry, key.vary_fields.clone());
         let disk_key = DiskCacheObjectKey {
             combined: key.combined.clone(),
@@ -285,7 +300,13 @@ impl NativeDiskCache {
             &entry.body,
         )?;
         let encoded = if let Some(encryption) = &self.encryption {
-            encryption.encrypt(&key.combined, &encoded)?
+            encryption
+                .encrypt(&key.combined, &encoded)
+                .inspect_err(|_| {
+                    fluxheim_observability::operational::failure(
+                        fluxheim_observability::event::FailureReason::CacheEncryption,
+                    )
+                })?
         } else {
             encoded
         };
@@ -405,6 +426,9 @@ impl NativeDiskCache {
         let object = match self.read_record(&record) {
             Ok(object) => object,
             Err(error) => {
+                fluxheim_observability::operational::failure(
+                    fluxheim_observability::event::FailureReason::CacheRead,
+                );
                 log::debug!(
                     target: "fluxheim::native_http1",
                     "native disk cache read {}: {error}",
@@ -415,6 +439,9 @@ impl NativeDiskCache {
             }
         };
         if object.combined_key.as_deref() != Some(combined_key) {
+            fluxheim_observability::operational::failure(
+                fluxheim_observability::event::FailureReason::CacheRead,
+            );
             log::error!(
                 target: "fluxheim::security",
                 "native disk cache object identity mismatch; discarding requested cache record"
@@ -483,7 +510,11 @@ impl NativeDiskCache {
 
     fn decrypt_if_needed(&self, bytes: &[u8]) -> std::io::Result<Zeroizing<Vec<u8>>> {
         match &self.encryption {
-            Some(encryption) => encryption.decrypt(bytes),
+            Some(encryption) => encryption.decrypt(bytes).inspect_err(|_| {
+                fluxheim_observability::operational::failure(
+                    fluxheim_observability::event::FailureReason::CacheEncryption,
+                )
+            }),
             None => {
                 if bytes.get(..NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1.len())
                     == Some(NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1)

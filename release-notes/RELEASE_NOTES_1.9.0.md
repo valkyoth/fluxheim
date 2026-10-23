@@ -45,6 +45,21 @@ or implemented in this release.
   later checkpoints connect owners and dispatch. See the
   [contract](../docs/architecture/structured-events.md) for limits and caveats.
 
+## Commit 03 Operational Events
+
+- Emit finite operational reasons at native upstream, TLS, PHP, cache, Wasm and
+  policy failure sites. Retrying owners do not infer causes from a final 502/503.
+- Audit authenticated admin mutations and automatic expired-validation rollback
+  separately. Request headers never select actor identity, logging policy or
+  correlation trust; this checkpoint omits correlation and resource identities.
+- Retain public response and fail-closed rollback behavior, with regression
+  assertions on both outcomes and emitted events. Add live JSON/text/filter
+  smoke coverage with private-data canaries.
+- Limit operational output separately for ordinary and security/audit classes.
+  This is not yet the asynchronous dispatcher or a lossless audit journal.
+- Replace automatic ACME renewal's raw domain/error outcome messages with typed
+  events. Other legacy logs retain their existing formats.
+
 ## Implemented Maintenance
 
 Post-1.8.3 security maintenance:

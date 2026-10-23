@@ -10,7 +10,8 @@ use tokio::time::{Instant as TokioInstant, timeout, timeout_at};
 use super::http2::{
     h2c_upgrade_error_can_fallback, h2c_upgrade_settings_header, native_http2_error,
     native_http2_error_is_connection_fatal, native_http2_error_retry_safe,
-    native_http2_response_to_http1, native_http2_upstream_request, upstream_h2_scheme,
+    native_http2_response_to_http1, native_http2_upstream_request, record_native_http2_failure,
+    upstream_h2_scheme,
 };
 use super::pool::{NativeHttp2PooledConnection, native_http1_retry_method_allowed};
 use super::upgrade::{h2c_upgrade_response_head_limits, validate_h2c_upgrade_response};
@@ -69,6 +70,7 @@ impl NativeHttp1Upstream {
             {
                 Ok(response) => response,
                 Err(error) if native_http2_error_retry_safe(&error) => {
+                    record_native_http2_failure(&error);
                     drop(h2_stream_permit.take());
                     self.invalidate_http2_connection().await;
                     log::debug!(
@@ -113,6 +115,9 @@ impl NativeHttp1Upstream {
         )
         .await
         .map_err(|_| {
+            fluxheim_observability::operational::security(
+                fluxheim_observability::event::SecurityReason::AdmissionRejected,
+            );
             NativeHttp1Error::Io(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 "native HTTP/2 stream slot timeout: all upstream H2 capacity in use",
@@ -210,9 +215,12 @@ impl NativeHttp1Upstream {
             Ok((client, true))
         };
         if let Some(timeout_duration) = self.total_connection_timeout {
-            timeout(timeout_duration, setup)
-                .await
-                .map_err(|_| timeout_error("native HTTP/2 upstream total connection timeout"))?
+            timeout(timeout_duration, setup).await.map_err(|_| {
+                timeout_error(
+                    "native HTTP/2 upstream total connection timeout",
+                    fluxheim_observability::event::FailureReason::ConnectionTimeout,
+                )
+            })?
         } else {
             setup.await
         }
@@ -225,14 +233,29 @@ impl NativeHttp1Upstream {
             let deadline = TokioInstant::now() + total_timeout;
             let stream = timeout_at(deadline, self.connect_stream_inner_without_proxy_protocol())
                 .await
-                .map_err(|_| timeout_error("native HTTP/2 upstream total connection timeout"))??;
+                .map_err(|_| {
+                    timeout_error(
+                        "native HTTP/2 upstream total connection timeout",
+                        fluxheim_observability::event::FailureReason::ConnectionTimeout,
+                    )
+                })??;
             let remaining = deadline
                 .checked_duration_since(TokioInstant::now())
-                .ok_or_else(|| timeout_error("native HTTP/2 upstream total connection timeout"))?;
+                .ok_or_else(|| {
+                    timeout_error(
+                        "native HTTP/2 upstream total connection timeout",
+                        fluxheim_observability::event::FailureReason::ConnectionTimeout,
+                    )
+                })?;
             let stream = if self.h2c_upgrade && self.cleartext_upstream() {
                 timeout_at(deadline, self.h2c_upgrade_stream(stream))
                     .await
-                    .map_err(|_| timeout_error("native h2c upgrade timeout"))??
+                    .map_err(|_| {
+                        timeout_error(
+                            "native h2c upgrade timeout",
+                            fluxheim_observability::event::FailureReason::ConnectionTimeout,
+                        )
+                    })??
             } else {
                 stream
             };
@@ -249,7 +272,12 @@ impl NativeHttp1Upstream {
                     ),
                 )
                 .await
-                .map_err(|_| timeout_error("native HTTP/2 upstream total connection timeout"))?
+                .map_err(|_| {
+                    timeout_error(
+                        "native HTTP/2 upstream total connection timeout",
+                        fluxheim_observability::event::FailureReason::ConnectionTimeout,
+                    )
+                })?
             } else {
                 timeout_at(
                     deadline,
@@ -260,12 +288,22 @@ impl NativeHttp1Upstream {
                     ),
                 )
                 .await
-                .map_err(|_| timeout_error("native HTTP/2 upstream total connection timeout"))?
+                .map_err(|_| {
+                    timeout_error(
+                        "native HTTP/2 upstream total connection timeout",
+                        fluxheim_observability::event::FailureReason::ConnectionTimeout,
+                    )
+                })?
             }
             .map_err(native_http2_error)?;
             let client = timeout_at(deadline, client.ready())
                 .await
-                .map_err(|_| timeout_error("native HTTP/2 upstream total connection timeout"))?
+                .map_err(|_| {
+                    timeout_error(
+                        "native HTTP/2 upstream total connection timeout",
+                        fluxheim_observability::event::FailureReason::ConnectionTimeout,
+                    )
+                })?
                 .map_err(|error| native_http2_error(NativeHttp2StackError::RequestReady(error)))?;
             return Ok(NativeHttp2PooledConnection { client, driver });
         }
@@ -319,14 +357,24 @@ impl NativeHttp1Upstream {
         );
         timeout(self.write_timeout, stream.write_all(request.as_bytes()))
             .await
-            .map_err(|_| timeout_error("native h2c upgrade write timeout"))?
+            .map_err(|_| {
+                timeout_error(
+                    "native h2c upgrade write timeout",
+                    fluxheim_observability::event::FailureReason::WriteTimeout,
+                )
+            })?
             .map_err(NativeHttp1Error::Io)?;
         let response_head = timeout(
             self.read_timeout,
             read_upstream_response_head(&mut stream, h2c_upgrade_response_head_limits()),
         )
         .await
-        .map_err(|_| timeout_error("native h2c upgrade response timeout"))??;
+        .map_err(|_| {
+            timeout_error(
+                "native h2c upgrade response timeout",
+                fluxheim_observability::event::FailureReason::ReadTimeout,
+            )
+        })??;
         validate_h2c_upgrade_response(&response_head, h2c_upgrade_response_head_limits())?;
         Ok(stream)
     }

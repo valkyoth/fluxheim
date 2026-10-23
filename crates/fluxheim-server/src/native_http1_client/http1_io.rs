@@ -78,7 +78,17 @@ impl NativeHttp1Upstream {
             write_upstream_request(&mut stream, &self.authority, request, false),
         )
         .await
-        .map_err(|_| timeout_error("native HTTP/1 upstream write timeout"))??;
+        .map_err(|_| {
+            timeout_error(
+                "native HTTP/1 upstream write timeout",
+                fluxheim_observability::event::FailureReason::WriteTimeout,
+            )
+        })?
+        .inspect_err(|_| {
+            fluxheim_observability::operational::failure(
+                fluxheim_observability::event::FailureReason::UpstreamProtocol,
+            )
+        })?;
         read_upstream_response(
             &mut stream,
             self.read_timeout,
@@ -101,7 +111,12 @@ impl NativeHttp1Upstream {
             write_websocket_upgrade_request(&mut upstream, &self.authority, request),
         )
         .await
-        .map_err(|_| timeout_error("native WebSocket upstream write timeout"))??;
+        .map_err(|_| {
+            timeout_error(
+                "native WebSocket upstream write timeout",
+                fluxheim_observability::event::FailureReason::WriteTimeout,
+            )
+        })??;
         let response_head = timeout(
             self.read_timeout,
             read_upstream_response_head(
@@ -110,7 +125,12 @@ impl NativeHttp1Upstream {
             ),
         )
         .await
-        .map_err(|_| timeout_error("native WebSocket upstream upgrade response timeout"))??;
+        .map_err(|_| {
+            timeout_error(
+                "native WebSocket upstream upgrade response timeout",
+                fluxheim_observability::event::FailureReason::ReadTimeout,
+            )
+        })??;
         validate_websocket_upgrade_response(
             &response_head,
             websocket_upgrade_response_head_limits(self.max_head_bytes),
@@ -135,7 +155,12 @@ impl NativeHttp1Upstream {
             tokio::io::copy_bidirectional(&mut upstream, &mut downstream),
         )
         .await
-        .map_err(|_| timeout_error("native WebSocket tunnel timeout"))??;
+        .map_err(|_| {
+            timeout_error(
+                "native WebSocket tunnel timeout",
+                fluxheim_observability::event::FailureReason::ReadTimeout,
+            )
+        })??;
         Ok(())
     }
 
@@ -149,7 +174,17 @@ impl NativeHttp1Upstream {
             write_upstream_request(stream, &self.authority, request, true),
         )
         .await
-        .map_err(|_| timeout_error("native HTTP/1 upstream write timeout"))??;
+        .map_err(|_| {
+            timeout_error(
+                "native HTTP/1 upstream write timeout",
+                fluxheim_observability::event::FailureReason::WriteTimeout,
+            )
+        })?
+        .inspect_err(|_| {
+            fluxheim_observability::operational::failure(
+                fluxheim_observability::event::FailureReason::UpstreamProtocol,
+            )
+        })?;
         read_upstream_response_for_pool(
             stream,
             self.read_timeout,
@@ -196,7 +231,12 @@ impl NativeHttp1Upstream {
         if let Some(timeout_duration) = self.total_connection_timeout {
             return timeout(timeout_duration, self.connect_stream_inner(request))
                 .await
-                .map_err(|_| timeout_error("native HTTP/1 upstream total connection timeout"))?;
+                .map_err(|_| {
+                    timeout_error(
+                        "native HTTP/1 upstream total connection timeout",
+                        fluxheim_observability::event::FailureReason::ConnectionTimeout,
+                    )
+                })?;
         }
         self.connect_stream_inner(request).await
     }
@@ -211,7 +251,12 @@ impl NativeHttp1Upstream {
                 self.connect_negotiated_stream_inner(request),
             )
             .await
-            .map_err(|_| timeout_error("native HTTP/1 upstream total connection timeout"))?;
+            .map_err(|_| {
+                timeout_error(
+                    "native HTTP/1 upstream total connection timeout",
+                    fluxheim_observability::event::FailureReason::ConnectionTimeout,
+                )
+            })?;
         }
         self.connect_negotiated_stream_inner(request).await
     }
@@ -231,7 +276,12 @@ impl NativeHttp1Upstream {
             ),
         )
         .await
-        .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))??;
+        .map_err(|_| {
+            timeout_error(
+                "native HTTP/1 upstream connect timeout",
+                fluxheim_observability::event::FailureReason::ConnectionTimeout,
+            )
+        })??;
         self.write_proxy_protocol_header(&mut stream, request)
             .await?;
         #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -241,7 +291,12 @@ impl NativeHttp1Upstream {
                 tls.connect_with_negotiated_protocol(stream, &self.authority),
             )
             .await
-            .map_err(|_| timeout_error("native HTTP/1 upstream TLS handshake timeout"))?;
+            .map_err(|_| {
+                timeout_error(
+                    "native HTTP/1 upstream TLS handshake timeout",
+                    fluxheim_observability::event::FailureReason::ConnectionTimeout,
+                )
+            })?;
         }
         Ok((
             Box::new(stream) as NativeHttp1Stream,
@@ -278,7 +333,12 @@ impl NativeHttp1Upstream {
             ),
         )
         .await
-        .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))?
+        .map_err(|_| {
+            timeout_error(
+                "native HTTP/1 upstream connect timeout",
+                fluxheim_observability::event::FailureReason::ConnectionTimeout,
+            )
+        })?
     }
 
     async fn finish_connect_stream(
@@ -289,7 +349,12 @@ impl NativeHttp1Upstream {
         if let Some(tls) = &self.tls {
             return timeout(self.connect_timeout, tls.connect(stream, &self.authority))
                 .await
-                .map_err(|_| timeout_error("native HTTP/1 upstream TLS handshake timeout"))?;
+                .map_err(|_| {
+                    timeout_error(
+                        "native HTTP/1 upstream TLS handshake timeout",
+                        fluxheim_observability::event::FailureReason::ConnectionTimeout,
+                    )
+                })?;
         }
         Ok(Box::new(stream) as NativeHttp1Stream)
     }
@@ -313,7 +378,12 @@ impl NativeHttp1Upstream {
         };
         timeout(self.write_timeout, stream.write_all(&header))
             .await
-            .map_err(|_| timeout_error("native upstream PROXY protocol write timeout"))?
+            .map_err(|_| {
+                timeout_error(
+                    "native upstream PROXY protocol write timeout",
+                    fluxheim_observability::event::FailureReason::WriteTimeout,
+                )
+            })?
             .map_err(|error| {
                 NativeHttp1Error::Io(std::io::Error::new(
                     error.kind(),

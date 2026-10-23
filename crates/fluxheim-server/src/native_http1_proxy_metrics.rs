@@ -87,6 +87,9 @@ pub(crate) fn record_native_proxy_outcome(vhost: &str, method: &str, status: u16
 }
 
 pub(crate) fn record_native_host_routing_rejection(reason: &'static str) {
+    fluxheim_observability::operational::security(
+        fluxheim_observability::event::SecurityReason::HostRejected,
+    );
     if let Some(recorder) = NATIVE_PROXY_METRICS_RECORDER.get() {
         recorder.record_host_routing_rejection(reason);
     }
@@ -99,6 +102,18 @@ pub(crate) fn record_native_wasm_execution(
     outcome: &'static str,
     duration: Duration,
 ) {
+    use fluxheim_observability::{
+        event::{FailureReason, SecurityReason},
+        operational::{failure, security},
+    };
+    // These labels are selected by the execution owner, not supplied by the module.
+    match outcome {
+        "deny" => security(SecurityReason::WasmDenied),
+        "trap" => failure(FailureReason::WasmTrap),
+        "timeout" => failure(FailureReason::WasmTimeout),
+        "error" => failure(FailureReason::WasmExecution),
+        _ => {}
+    }
     if let Some(recorder) = NATIVE_WASM_METRICS_RECORDER.get() {
         recorder.record_execution(plugin, phase, outcome, duration);
     }
@@ -110,6 +125,9 @@ pub(crate) fn record_native_wasm_admission_rejection(
     phase: &'static str,
     scope: &'static str,
 ) {
+    fluxheim_observability::operational::security(
+        fluxheim_observability::event::SecurityReason::AdmissionRejected,
+    );
     if let Some(recorder) = NATIVE_WASM_METRICS_RECORDER.get() {
         recorder.record_admission_rejection(plugin, phase, scope);
     }

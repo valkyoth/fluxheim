@@ -382,6 +382,7 @@ async fn native_host_router_falls_back_for_missing_and_unknown_host() {
 
 #[tokio::test]
 async fn native_host_router_strict_mode_rejects_missing_invalid_and_unknown_hosts() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let _ = crate::install_native_proxy_metrics_recorder(Arc::new(HostRoutingTestRecorder));
     HOST_REJECTION_MISSING.store(0, Ordering::Release);
     HOST_REJECTION_INVALID.store(0, Ordering::Release);
@@ -408,6 +409,7 @@ async fn native_host_router_strict_mode_rejects_missing_invalid_and_unknown_host
     assert!(HOST_REJECTION_MISSING.load(Ordering::Acquire) >= 1);
     assert_eq!(HOST_REJECTION_INVALID.load(Ordering::Acquire), 0);
     assert!(HOST_REJECTION_UNKNOWN.load(Ordering::Acquire) >= 1);
+    capture.assert_reason("host_rejected", 2);
 }
 
 #[tokio::test]

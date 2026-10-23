@@ -123,6 +123,7 @@ async fn native_proxy_writes_upstream_proxy_protocol_v1_from_listener_context() 
 
 #[tokio::test]
 async fn native_proxy_maps_upstream_timeout_to_gateway_timeout() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let upstream = upstream(|_, stream| async move {
         let _hold_open = stream;
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -155,6 +156,7 @@ async fn native_proxy_maps_upstream_timeout_to_gateway_timeout() {
 
     assert!(response.starts_with("HTTP/1.1 504 Gateway Timeout\r\n"));
     assert!(response.ends_with("gateway timeout\n"));
+    capture.assert_reason("read_timeout", 1);
 }
 
 #[tokio::test]

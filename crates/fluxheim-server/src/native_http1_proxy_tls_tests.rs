@@ -252,6 +252,7 @@ async fn native_proxy_http1_and_http2_falls_back_to_tls_http1_upstream() {
 
 #[tokio::test]
 async fn native_proxy_rejects_tls_upstream_hostname_mismatch_by_default() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let fixture = native_tls_fixture();
     let upstream = tls_upstream(
         fixture.alternate_chain_pem.clone(),
@@ -278,6 +279,41 @@ async fn native_proxy_rejects_tls_upstream_hostname_mismatch_by_default() {
         "unexpected response: {response:?}"
     );
     assert!(response.ends_with("bad gateway\n"));
+    capture.assert_reason("tls_verification", 1);
+}
+
+#[tokio::test]
+async fn operational_tls_handshake_failure_is_not_certificate_verification() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
+    let fixture = native_tls_fixture();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        stream.write_all(b"NOT-TLS-SECRET-CANARY").await.unwrap();
+    });
+    let config = fluxheim_config::ProxyConfig {
+        upstream: Some(address.to_string()),
+        upstream_tls: true,
+        upstream_sni: Some("localhost".into()),
+        upstream_ca_path: Some(fixture.ca_path.clone()),
+        ..Default::default()
+    };
+    let native = NativeHttp1Proxy::from_proxy_config(&config, DownstreamHttp1Policy::default())
+        .unwrap()
+        .unwrap();
+    let response = downstream_get(proxy_with_native(native).await, "/").await;
+    task.await.unwrap();
+    assert!(response.starts_with("HTTP/1.1 502"));
+    assert!(response.ends_with("bad gateway\n"));
+    capture.assert_reason("tls_handshake", 1);
+    capture.assert_reason("tls_verification", 0);
+    assert!(
+        capture
+            .events()
+            .iter()
+            .all(|event| !event.to_string().contains("SECRET-CANARY"))
+    );
 }
 
 #[tokio::test]

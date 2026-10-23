@@ -1,5 +1,9 @@
 use std::error::Error;
 
+#[cfg(feature = "acme-client")]
+#[path = "runtime_background_events.rs"]
+mod events;
+
 #[cfg(all(feature = "cache", feature = "metrics"))]
 const CACHE_RUNTIME_METRICS_INTERVAL_SECS: u64 = 5;
 
@@ -408,37 +412,25 @@ async fn run_acme_renewal_tick(
                 run.failed.len()
             );
             let renewed_count = run.renewed.len();
-            for outcome in run.renewed {
+            for _ in run.renewed {
+                events::renewal_outcome(true);
                 #[cfg(feature = "metrics")]
                 crate::metrics::record_acme_event("renewed");
-                log::info!(
-                    "ACME renewed vhost={} issuer={} certificate=installed challenges={}",
-                    outcome.vhost_name,
-                    outcome.issuer,
-                    outcome.published_challenges
-                );
             }
-            for failure in run.failed {
+            for _ in run.failed {
+                events::renewal_outcome(false);
                 #[cfg(feature = "metrics")]
                 crate::metrics::record_acme_event("failed");
-                log::error!(
-                    "ACME renewal failed vhost={} issuer={} domains={} error={}",
-                    failure.vhost_name,
-                    failure.issuer,
-                    failure.domains.join(","),
-                    failure.error
-                );
             }
             if renewed_count == 0 {
                 log::debug!("ACME renewal check completed without renewed certificates");
             } else if let Some(reloader) = reloader {
-                if let Err(error) = reload_downstream_certificates(reloader).await {
+                if reload_downstream_certificates(reloader).await.is_err() {
+                    events::reload_outcome(false);
                     #[cfg(feature = "metrics")]
                     crate::metrics::record_acme_event("reload_failed");
-                    log::error!(
-                        "failed to reload downstream TLS certificates after ACME renewal: {error}"
-                    );
                 } else {
+                    events::reload_outcome(true);
                     #[cfg(feature = "metrics")]
                     crate::metrics::record_acme_event("reload_success");
                     log::info!("downstream TLS certificates reloaded after ACME renewal");
@@ -451,10 +443,12 @@ async fn run_acme_renewal_tick(
                 );
             }
         }
-        Err(error) => {
+        Err(_) => {
             #[cfg(feature = "metrics")]
             crate::metrics::record_acme_event("tick_error");
-            log::error!("ACME renewal check failed: {error}");
+            fluxheim_observability::operational::failure(
+                fluxheim_observability::event::FailureReason::Acme,
+            );
         }
     }
 }

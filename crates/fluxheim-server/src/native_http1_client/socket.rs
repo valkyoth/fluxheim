@@ -15,8 +15,16 @@ pub(super) async fn connect_upstream(
 ) -> Result<TcpStream, NativeHttp1Error> {
     let mut addresses = tokio::net::lookup_host(authority)
         .await
+        .inspect_err(|_| {
+            fluxheim_observability::operational::failure(
+                fluxheim_observability::event::FailureReason::Dns,
+            )
+        })
         .map_err(NativeHttp1Error::Io)?;
     let address = addresses.next().ok_or_else(|| {
+        fluxheim_observability::operational::failure(
+            fluxheim_observability::event::FailureReason::Dns,
+        );
         NativeHttp1Error::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "upstream authority did not resolve",
@@ -42,7 +50,18 @@ pub(super) async fn connect_upstream(
     if let Some(tcp_user_timeout) = tcp_user_timeout {
         set_socket_tcp_user_timeout(&socket, tcp_user_timeout)?;
     }
-    socket.connect(address).await.map_err(NativeHttp1Error::Io)
+    socket
+        .connect(address)
+        .await
+        .inspect_err(|error| {
+            use fluxheim_observability::{event::FailureReason, operational::failure};
+            failure(match error.kind() {
+                std::io::ErrorKind::ConnectionRefused => FailureReason::ConnectionRefused,
+                std::io::ErrorKind::TimedOut => FailureReason::ConnectionTimeout,
+                _ => FailureReason::UpstreamProtocol,
+            });
+        })
+        .map_err(NativeHttp1Error::Io)
 }
 
 fn set_socket_tcp_keepalive(

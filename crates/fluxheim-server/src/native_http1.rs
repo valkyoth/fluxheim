@@ -229,6 +229,9 @@ where
             Http1BodyFraming::NoBody => 0,
             Http1BodyFraming::ContentLength(length) => {
                 let Ok(length) = usize::try_from(length) else {
+                    fluxheim_observability::operational::security(
+                        fluxheim_observability::event::SecurityReason::RequestLimit,
+                    );
                     write_response(
                         &mut stream,
                         NativeHttp1Response::new(413, "Payload Too Large", b"payload too large\n")
@@ -246,6 +249,9 @@ where
             match request_body_budget.reserve(reservation_bytes).await {
                 Ok(reservation) => reservation,
                 Err(_) => {
+                    fluxheim_observability::operational::security(
+                        fluxheim_observability::event::SecurityReason::AdmissionRejected,
+                    );
                     write_response(
                         &mut stream,
                         NativeHttp1Response::new(
@@ -274,6 +280,9 @@ where
         {
             Ok(body) => body,
             Err(NativeHttp1Error::Parse(Http1ParseError::BodyTooLarge)) => {
+                fluxheim_observability::operational::security(
+                    fluxheim_observability::event::SecurityReason::RequestLimit,
+                );
                 write_response(
                     &mut stream,
                     NativeHttp1Response::new(413, "Payload Too Large", b"payload too large\n")
@@ -304,6 +313,9 @@ where
                 return Ok(());
             }
             Err(NativeHttp1Error::Io(error)) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                fluxheim_observability::operational::security(
+                    fluxheim_observability::event::SecurityReason::AdmissionRejected,
+                );
                 write_response(
                     &mut stream,
                     NativeHttp1Response::new(

@@ -82,6 +82,7 @@ fn self_healing_fail_rolls_back_to_previous_snapshot() {
 
 #[test]
 fn expired_self_healing_validation_rolls_back_fail_closed() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let baseline_config = Config {
         vhosts: vec![VhostConfig {
             name: "baseline".to_owned(),
@@ -165,10 +166,12 @@ fn expired_self_healing_validation_rolls_back_fail_closed() {
     let state = app.runtime_state();
     assert_eq!(state.pending_validation, None);
     assert_eq!(state.known_good_snapshot, Some(baseline.id));
+    capture.assert_audit("rollback", "succeeded", "automatic");
 }
 
 #[test]
 fn expired_self_healing_failed_rollback_blocks_confirmation() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let app = app_with_config_and_self_healing(Config::default(), true);
     let candidate = app
         .store
@@ -212,10 +215,14 @@ fn expired_self_healing_failed_rollback_blocks_confirmation() {
     assert_eq!(pending.target_snapshot, candidate.id);
     assert_eq!(pending.rollback_attempts, 1);
     assert!(pending.last_rollback_failure.is_some());
+    capture.assert_reason("rollback", 1);
+    capture.assert_audit("rollback", "failed", "automatic");
+    capture.assert_audit("self_heal", "failed", "admin_token");
 }
 
 #[test]
 fn expired_self_healing_failed_rollback_blocks_successful_health_report() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let mut app = app_with_config_and_self_healing(Config::default(), true);
     app.min_successful_checks = 1;
     let candidate = app
@@ -261,6 +268,8 @@ fn expired_self_healing_failed_rollback_blocks_successful_health_report() {
     assert_eq!(pending.successful_checks, 0);
     assert_eq!(pending.rollback_attempts, 1);
     assert!(pending.last_rollback_failure.is_some());
+    capture.assert_audit("rollback", "failed", "automatic");
+    capture.assert_audit("self_heal", "failed", "admin_token");
 }
 
 #[test]

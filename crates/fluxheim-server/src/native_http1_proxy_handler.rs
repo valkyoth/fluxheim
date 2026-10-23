@@ -85,6 +85,9 @@ impl NativeHttp1Proxy {
                     apply_native_auth_request_headers(&mut request, &headers);
                 }
                 Ok(NativeAuthRequestDecision::Deny { status, body }) => {
+                    fluxheim_observability::operational::security(
+                        fluxheim_observability::event::SecurityReason::AuthorizationRejected,
+                    );
                     return NativeHttp1Response::new(
                         status,
                         native_auth_status_reason(status),

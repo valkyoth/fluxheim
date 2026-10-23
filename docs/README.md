@@ -93,6 +93,7 @@ a guide explicitly says otherwise.
 - [Observability Commit 01 Linux raw measurements](evidence/observability-01-linux.json)
 - [Observability Commit 02 verification](evidence/observability-02.md)
 - [Observability Commit 02 Linux raw measurements](evidence/observability-02-linux.json)
+- [Observability Commit 03 operational event coverage](evidence/observability-03.md)
 - [1.8.3 qualification](evidence/maintenance-1.8.3-qualification.md)
 - [Windows filesystem audit](evidence/dependency-audits/windows-filesystem-security.md)
 - [OWASP baseline](evidence/owasp-top10-2025-baseline.md)

@@ -4,6 +4,7 @@ use super::*;
 #[cfg(feature = "cache")]
 #[test]
 fn cache_purge_endpoint_requires_auth_and_purges_by_request_identity() {
+    let capture = fluxheim_observability::event_test_support::Capture::start();
     let config = Config {
         vhosts: vec![VhostConfig {
             name: "cached".to_owned(),
@@ -64,6 +65,8 @@ fn cache_purge_endpoint_requires_auth_and_purges_by_request_identity() {
     assert!(body.contains(r#""memory_not_purged":true"#));
     assert!(body.contains(r#""disk_purged":false"#));
     assert!(body.contains(r#""disk_not_purged":true"#));
+    capture.assert_reason("authentication_rejected", 1);
+    capture.assert_audit("cache_purge", "succeeded", "admin_token");
 }
 
 #[cfg(feature = "cache")]

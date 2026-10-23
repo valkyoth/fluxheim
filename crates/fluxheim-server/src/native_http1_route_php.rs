@@ -149,6 +149,9 @@ impl NativePhpFpmRoute {
                     .close_connection();
             }
             Ok(NativePhpScriptResolve::Forbidden) => {
+                fluxheim_observability::operational::security(
+                    fluxheim_observability::event::SecurityReason::PathRejected,
+                );
                 return NativeHttp1Response::new(403, "Forbidden", b"forbidden\n")
                     .close_connection();
             }
@@ -162,6 +165,9 @@ impl NativePhpFpmRoute {
             }
         };
         let Ok(_permit) = Arc::clone(&self.in_flight).try_acquire_owned() else {
+            fluxheim_observability::operational::security(
+                fluxheim_observability::event::SecurityReason::AdmissionRejected,
+            );
             return NativeHttp1Response::new(503, "Service Unavailable", b"php busy\n")
                 .with_retry_after_secs(1)
                 .close_connection();
@@ -170,6 +176,9 @@ impl NativePhpFpmRoute {
             Ok(body) if self.config.pass_request_body => body,
             Ok(_) => fluxheim_php_fpm::PhpRequestBody::memory(Vec::new()),
             Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                fluxheim_observability::operational::security(
+                    fluxheim_observability::event::SecurityReason::RequestLimit,
+                );
                 return NativeHttp1Response::new(413, "Payload Too Large", b"payload too large\n")
                     .close_connection();
             }

@@ -380,6 +380,10 @@ impl NativeHttp1Upstream {
     }
 }
 
-fn timeout_error(message: &'static str) -> NativeHttp1Error {
+fn timeout_error(
+    message: &'static str,
+    reason: fluxheim_observability::event::FailureReason,
+) -> NativeHttp1Error {
+    fluxheim_observability::operational::failure(reason);
     NativeHttp1Error::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, message))
 }
