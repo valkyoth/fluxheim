@@ -1091,13 +1091,25 @@ must retain the old file until restart; do not rotate it like an ordinary log.
 Monitor its size and errors through the host, and preserve stderr as fallback.
 Privacy builds reject this file option but still emit finite fatal codes to stderr.
 
-This restores a write-before-abort attempt, **not guaranteed forensic persistence**.
-Blocked stderr can delay abort when no working crash file is configured. A hung
-filesystem can likewise stall a synchronous file write or sync; the normal 500 ms
-logging shutdown deadline does not cover fatal diagnostics. Disk exhaustion,
-power loss, external kills, and same-UID/root process compromise remain outside
-this guarantee. High-assurance deployments need a separately supervised durable
-audit system; neither this file nor ordinary audit admission implements one.
+Fatal reporting is protected by one dedicated watchdog thread, started before
+serving even without a crash file. Startup fails if it cannot be created. It
+stays parked when healthy and is armed before any fatal sink lock or I/O. Once
+awakened, it unconditionally aborts after 250 ms if reporting/termination has not
+already finished. It uses no logger, crash-file or stderr locks, and concurrent
+fatal calls cannot reset or cancel it. Early failures before watchdog initialization
+terminate immediately without attempting diagnostics. Critical stream, UDP,
+metrics and HTTP proxy listener failures use this same finite-reason path;
+completed reports retain exit status 1, while a stalled path ends in an abort.
+
+This is **not guaranteed forensic persistence**: fail-stop takes precedence over
+finishing a diagnostic. A blocked stderr, disk write or sync can lose the record
+when the watchdog fires. Its grace period is separate from normal 500 ms logging
+shutdown, and OS scheduling latency is additional; it is not a real-time or
+kernel-failure guarantee. High-assurance deployments should configure a dedicated
+crash file, an external supervisor enforcing termination, and separately supervised
+durable auditing. Disk exhaustion, power loss, external kills and same-UID/root
+compromise remain outside this guarantee. Neither this file nor ordinary audit
+admission implements a durable audit journal.
 
 ### Historical Access Field Semantics
 

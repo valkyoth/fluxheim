@@ -1253,6 +1253,8 @@ dependencies = [
 name = "fluxheim-common"
 version = "1.9.0"
 dependencies = [
+ "rustix",
+ "tempfile",
  "thiserror 2.0.21",
  "windows-permissions",
 ]

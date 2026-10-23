@@ -318,6 +318,7 @@ Suggested subject: `Observability commit 04: bound asynchronous log dispatch`.
 
 Implementation/evidence: [bounded legacy logging](../evidence/observability-04.md).
 Pentest remediation: [fatal diagnostics before abort](../evidence/observability-04-fatal.md).
+Retest remediation: [bounded fatal watchdog and critical exits](../evidence/observability-04-watchdog.md).
 The earlier two-worker proposal is superseded: Commit 03 already requires three
 isolated typed lanes; Commit 04 adds one separately bounded legacy worker rather
 than letting arbitrary library messages consume audit/security capacity. Four

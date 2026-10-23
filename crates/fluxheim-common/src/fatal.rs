@@ -1,14 +1,44 @@
 //! Last-chance diagnostics, independent of asynchronous loggers and their filters.
 //!
-//! This is a synchronous write attempt, not a durable audit journal. A stalled
-//! kernel/device can stall termination; no in-process facility survives every
-//! storage failure, external kill, or process compromise.
+//! Diagnostics are best effort and guarded by a prestarted termination watchdog,
+//! not a durable audit journal. An external supervisor is still needed if the OS
+//! cannot schedule the watchdog or the process itself is compromised.
 
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::thread::{self, Thread};
+use std::time::Duration;
 
 static SINK: OnceLock<Mutex<File>> = OnceLock::new();
+static WATCHDOG: OnceLock<io::Result<Thread>> = OnceLock::new();
+static TERMINATING: AtomicBool = AtomicBool::new(false);
+const DIAGNOSTIC_GRACE: Duration = Duration::from_millis(250);
+
+/// Start once before serving, including when no crash file is configured.
+/// Failure must reject startup. The watchdog is parked while healthy, never
+/// touches logging locks, and cannot be disarmed once termination is requested.
+pub fn start_watchdog() -> io::Result<()> {
+    match WATCHDOG.get_or_init(|| {
+        thread::Builder::new()
+            .name("fluxheim-fatal-watchdog".into())
+            .spawn(|| {
+                while !TERMINATING.load(Ordering::Acquire) {
+                    thread::park();
+                }
+                thread::sleep(DIAGNOSTIC_GRACE);
+                std::process::abort();
+            })
+            .map(|handle| handle.thread().clone())
+    }) {
+        Ok(_) => Ok(()),
+        Err(error) => Err(io::Error::new(
+            error.kind(),
+            "fatal watchdog could not start",
+        )),
+    }
+}
 
 macro_rules! reasons {
     ($($name:ident),+ $(,)?) => {
@@ -41,6 +71,8 @@ reasons! {
     BackendHealthPoisoned, BackendDiscoveryPoisoned, BackendSelectionEntropyFailed,
     BackendRoutingEntropyFailed, CookieKeyEntropyFailed, CookieHmacEntropyFailed,
     CookieNameOverflow,
+    StreamListenerBindFailed, UdpListenerBindFailed, MetricsListenerBindFailed,
+    MetricsListenerFailed, HttpProxyListenerFailed,
 }
 
 /// Install a dedicated, securely opened private regular file before serving.
@@ -53,6 +85,7 @@ pub fn install(file: File) -> io::Result<()> {
             "crash sink must be a regular file",
         ));
     }
+    start_watchdog()?;
     SINK.set(Mutex::new(file))
         .map_err(|_| io::Error::new(io::ErrorKind::AlreadyExists, "crash sink already installed"))
 }
@@ -65,10 +98,14 @@ fn write_file(file: &mut File, reason: Reason) -> io::Result<()> {
     file.sync_data()
 }
 
-/// Attempt the finite diagnostic synchronously, then abort without unwinding.
-/// With no crash file (including early startup), or on a file error, stderr is
-/// the fallback. This bypasses RUST_LOG, privacy filters and ordinary log queues.
-pub fn abort(reason: Reason) -> ! {
+fn report(reason: Reason) {
+    // get() does not wait for an in-progress initialization. Without a ready
+    // watchdog, skip potentially blocking diagnostics and terminate immediately.
+    let Some(Ok(watchdog)) = WATCHDOG.get() else {
+        return;
+    };
+    TERMINATING.store(true, Ordering::Release);
+    watchdog.unpark();
     let written = SINK.get().is_some_and(|sink| {
         let mut file = sink.lock().unwrap_or_else(|poison| poison.into_inner());
         write_file(&mut file, reason).is_ok()
@@ -78,5 +115,23 @@ pub fn abort(reason: Reason) -> ! {
         let _ = stderr.write_all(reason.record());
         let _ = stderr.flush();
     }
+}
+
+/// Report with watchdog protection, then abort without unwinding. Before
+/// watchdog initialization, abort immediately without attempting sink I/O.
+pub fn abort(reason: Reason) -> ! {
+    report(reason);
     std::process::abort()
 }
+
+/// Critical service failure: preserve exit status 1 if reporting completes.
+/// If reporting or exit stalls, the watchdog aborts instead. No queue drain is
+/// implied; only this finite reason is attempted independently of the queues.
+pub fn exit(reason: Reason) -> ! {
+    report(reason);
+    std::process::exit(1)
+}
+
+#[cfg(test)]
+#[path = "fatal_tests.rs"]
+mod tests;

@@ -40,6 +40,7 @@ fn fatal_reporting_survives_logging_failure() {
         )
         .unwrap();
         let path = std::path::PathBuf::from(std::env::var_os(PATH).unwrap());
+        fluxheim_common::fatal::start_watchdog().unwrap();
         let config = crate::config::Config::default();
         if mode == "startup" {
             let mut config = config;

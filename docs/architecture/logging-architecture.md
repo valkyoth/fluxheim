@@ -11,8 +11,10 @@ defines count/byte limits, overflow, shutdown and native qualification gaps.
 
 Explicit invariant aborts use a [separate synchronous fatal path](../evidence/observability-04-fatal.md),
 not those queues: finite reason codes go to stderr or an optional private
-`logging.crash_file`. This restores a write-before-abort attempt, not guaranteed
-durability; blocked OS I/O can delay fatal termination.
+`logging.crash_file`. A prestarted parked watchdog bounds diagnostic stalls with
+a 250 ms grace period after wake-up, plus OS scheduling latency. Fail-stop takes
+priority over diagnostic delivery; this is not guaranteed durability. Critical
+listener exits use the same mechanism. See the [watchdog retest](../evidence/observability-04-watchdog.md).
 
 Typed operational events now use independent bounded ordinary/security/audit
 queues with admission before encoding and worker-only sink I/O. Their envelope

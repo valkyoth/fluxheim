@@ -46,7 +46,7 @@ fn unsafe_crash_file_fails_startup_before_workers_are_installed() {
 }
 
 #[test]
-fn runtime_abort_sites_cannot_bypass_fatal_diagnostics() {
+fn runtime_termination_sites_cannot_bypass_fatal_diagnostics() {
     fn scan(path: &Path) {
         for entry in std::fs::read_dir(path).unwrap() {
             let path = entry.unwrap().path();
@@ -61,6 +61,19 @@ fn runtime_abort_sites_cannot_bypass_fatal_diagnostics() {
                 assert!(
                     !source.contains(concat!("process::", "abort(")),
                     "route invariant aborts through the fatal reason vocabulary: {}",
+                    path.display()
+                );
+                let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+                let cli_entrypoint = [
+                    "src/main.rs",
+                    "src/bin/fluxheim-acme.rs",
+                    "src/bin/fluxheim-config-tester.rs",
+                ]
+                .iter()
+                .any(|relative| path == root.join(relative));
+                assert!(
+                    cli_entrypoint || !source.contains(concat!("process::", "exit(")),
+                    "runtime exits must use a finite fatal reason: {}",
                     path.display()
                 );
             }

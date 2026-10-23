@@ -14,6 +14,7 @@ fn poisoned_admin_throttle_reports_before_abort_with_logging_off() {
         )
         .unwrap();
         log::set_max_level(log::LevelFilter::Off);
+        fluxheim_common::fatal::start_watchdog().unwrap();
         let throttle = AdminAuthThrottle::new(AdminAuthThrottleConfig::default());
         let state = throttle.state.clone();
         assert!(

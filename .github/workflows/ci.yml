@@ -145,6 +145,7 @@ jobs:
 
       - name: Freeze observability baseline contracts
         run: |
+          cargo test --locked -p fluxheim-common fatal::tests
           cargo test --locked -p fluxheim-observability --no-default-features
           cargo test --locked -p fluxheim-observability --no-default-features --features structured-events
           cargo test --locked -p fluxheim-observability --all-features
@@ -159,6 +160,8 @@ jobs:
           cargo build --locked --no-default-features --features profile-observability --bin fluxheim
           python3 scripts/smoke_operational_events.py --binary target/debug/fluxheim
           python3 scripts/smoke_operational_backpressure.py --binary target/debug/fluxheim
+          cargo build --locked --no-default-features --features profile-observability,stream-proxy,udp-proxy --bin fluxheim
+          python3 scripts/smoke_fatal_listener_failures.py --binary target/debug/fluxheim
 
       - name: Test standalone systemd boundary without workspace feature unification
         run: |
@@ -322,10 +325,13 @@ jobs:
 
       - name: Test macOS bounded logging and real pipe backpressure
         run: |
+          cargo test --locked -p fluxheim-common fatal::tests
           cargo test --locked -p fluxheim --lib --no-default-features --features profile-observability runtime::runtime_logging
           cargo build --locked --no-default-features --features profile-observability --bin fluxheim
           python3 scripts/smoke_operational_events.py --binary target/debug/fluxheim
           python3 scripts/smoke_operational_backpressure.py --binary target/debug/fluxheim
+          cargo build --locked --no-default-features --features profile-observability,stream-proxy,udp-proxy --bin fluxheim
+          python3 scripts/smoke_fatal_listener_failures.py --binary target/debug/fluxheim
 
       - name: Build all macOS portable archives
         run: |

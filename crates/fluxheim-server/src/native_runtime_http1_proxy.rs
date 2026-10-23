@@ -467,7 +467,9 @@ impl NativeHttp1ProxyRuntime {
                         target: "fluxheim::native_runtime",
                         "native HTTP/1 proxy listener {local_addr} exited unexpectedly: {error}"
                     );
-                    std::process::exit(1);
+                    fluxheim_common::fatal::exit(
+                        fluxheim_common::fatal::Reason::HttpProxyListenerFailed,
+                    );
                 }
                 result
             });

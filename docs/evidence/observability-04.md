@@ -9,6 +9,9 @@ The follow-up [fatal-abort remediation](observability-04-fatal.md) restores a
 synchronous diagnostic attempt for explicit invariant aborts. Those calls are
 outside the ordinary dispatcher contract below; the worker limits and accepted
 non-durable admin-audit contract are unchanged.
+The subsequent [watchdog retest](observability-04-watchdog.md) adds one parked
+termination watchdog, separate from the four output workers. Earlier performance
+samples below predate this additional thread.
 
 ## Runtime Contract
 

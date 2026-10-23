@@ -1,6 +1,5 @@
 use std::io;
 use std::net::SocketAddr;
-use std::process;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::time::{Duration, Instant};
@@ -174,7 +173,9 @@ impl FluxBackgroundTask for StreamProxyTask {
                         target: "fluxheim::stream",
                         "failed to bind stream listener {listen}: {error}"
                     );
-                    process::exit(1);
+                    fluxheim_common::fatal::exit(
+                        fluxheim_common::fatal::Reason::StreamListenerBindFailed,
+                    );
                 }
             }
         }

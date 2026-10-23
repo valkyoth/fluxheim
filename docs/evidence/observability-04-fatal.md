@@ -1,6 +1,8 @@
 # Commit 04: Fatal Diagnostics Before Abort
 
 Review base: `a504b744d15b838af5371bff80191f7767b40e98`.
+Follow-up: [watchdog and critical-exit remediation](observability-04-watchdog.md)
+corrects the initial implementation's unbounded diagnostic-stall regression.
 
 ## Finding And Fix
 
@@ -17,7 +19,7 @@ longer the only diagnostic. The fail-stop conditions and authorization logic are
 unchanged. Previously silent load-balancer and Wasm aborts also receive codes.
 No abort behavior is changed into panic/unwind or poisoned-state recovery.
 
-By default the helper synchronously writes to stderr before aborting, independently
+With its watchdog initialized, the helper attempts a synchronous stderr write before aborting, independently
 of the log facade, level/regex filters, worker liveness and all queue capacities.
 An optional `logging.crash_file` is opened before serving: private regular file,
 trusted parents, no symlinks/reparse points, existing confidential ACL checks on
@@ -32,9 +34,10 @@ snapshot-safe field copying cannot change the destination.
 ## Explicit Limits
 
 - This is a synchronous write attempt, not a tamper-proof or durable audit journal.
-- A blocked stderr or hung disk can delay abort. A separate crash file avoids
-  ordinary queue/pipe blockage but not OS/storage failure. The normal bounded
-  worker shutdown does not apply to this exceptional path.
+- A separate, prestarted watchdog forces abort after its 250 ms diagnostic grace
+  period following wake-up, plus OS scheduling latency. It never acquires sink
+  locks. Before watchdog initialization, diagnostics are skipped for immediate
+  termination. The original unbounded stall behavior is no longer accepted.
 - File sync does not establish power-loss-safe directory creation, off-host
   replication, WORM retention or protection from same-UID/root compromise.
 - Process kill, memory corruption, external library aborts, OOM, panic hooks and
@@ -67,7 +70,7 @@ snapshot-safe field copying cannot change the destination.
 Native Windows/macOS execution and exact-SHA GitHub/CodeQL remain required CI
 gates. Linux execution is not a substitute for native ACL and runtime validation.
 
-## Local Validation
+## Original Local Validation (21451e18)
 
 - Locked workspace suite: 1,835 passing test executions (including subprocess
   harness invocations); one existing privileged ACME test ignored.

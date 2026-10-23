@@ -85,6 +85,7 @@ pub(super) fn init_logging(
             }
         })
     };
+    fluxheim_common::fatal::start_watchdog()?;
     if let Some(file) = crash_file {
         fluxheim_common::fatal::install(file)?;
     }

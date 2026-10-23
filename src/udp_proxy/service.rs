@@ -1,5 +1,4 @@
 use std::io;
-use std::process;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -165,7 +164,9 @@ impl FluxBackgroundTask for UdpProxyTask {
                         target: "fluxheim::udp",
                         "failed to bind UDP listener {listen}: {error}"
                     );
-                    process::exit(1);
+                    fluxheim_common::fatal::exit(
+                        fluxheim_common::fatal::Reason::UdpListenerBindFailed,
+                    );
                 }
             }
         }

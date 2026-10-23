@@ -1,8 +1,6 @@
 use std::error::Error;
 use std::fmt;
 #[cfg(feature = "proxy")]
-use std::process;
-#[cfg(feature = "proxy")]
 use std::sync::Arc;
 
 #[cfg(feature = "proxy")]
@@ -119,7 +117,9 @@ impl FluxBackgroundTask for NativeMetricsTask {
                     "failed to bind native metrics listener {}: {error}",
                     self.listen
                 );
-                process::exit(1);
+                fluxheim_common::fatal::exit(
+                    fluxheim_common::fatal::Reason::MetricsListenerBindFailed,
+                );
             }
         };
         ready.notify_ready();
@@ -138,7 +138,7 @@ impl FluxBackgroundTask for NativeMetricsTask {
                 "native metrics listener {} stopped unexpectedly: {error}",
                 self.listen
             );
-            process::exit(1);
+            fluxheim_common::fatal::exit(fluxheim_common::fatal::Reason::MetricsListenerFailed);
         }
     }
 }
