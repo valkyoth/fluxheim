@@ -267,17 +267,24 @@ impl AdminApp {
             .lock_runtime_state()
             .rollback_required(expired, self.max_error_rate_per_mille)?;
 
-        let response = self.rollback_pending_validation(&rollback.0, rollback.1.as_str());
-        fluxheim_observability::operational::audit(
+        let permit = match self.reserve_audit(
             fluxheim_observability::event::AuditOperation::Rollback,
-            if response.status.is_success() {
-                fluxheim_observability::event::AuditOutcome::Succeeded
-            } else {
-                fluxheim_observability::event::AuditOutcome::Failed
-            },
             fluxheim_observability::event::ActorClass::Automatic,
-        );
-        Some(response)
+        ) {
+            Ok(permit) => permit,
+            Err(_) => return Some(operational_events::unavailable()),
+        };
+        let response = self.rollback_pending_validation(&rollback.0, rollback.1.as_str());
+        let outcome = if response.status.is_success() {
+            fluxheim_observability::event::AuditOutcome::Succeeded
+        } else {
+            fluxheim_observability::event::AuditOutcome::Failed
+        };
+        Some(operational_events::complete(
+            Some(permit),
+            outcome,
+            response,
+        ))
     }
 
     pub(super) fn watchdog_interval_secs(&self) -> u64 {

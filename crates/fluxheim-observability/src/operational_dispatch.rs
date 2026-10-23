@@ -9,6 +9,9 @@ use crate::event::{
 };
 
 pub const QUEUE_CAPACITY: usize = 128;
+#[path = "operational_audit.rs"]
+mod audit;
+pub use audit::{AuditPermit, AuditUnavailable};
 pub type EventFilter = Arc<dyn Fn(EventData) -> bool + Send + Sync>;
 type Writer = Box<dyn Write + Send>;
 
@@ -33,6 +36,8 @@ struct Counters {
     completed: AtomicU64,
     alive: AtomicBool,
     closing: AtomicBool,
+    audit_slots: AtomicU64,
+    reserved: AtomicU64,
 }
 
 fn increment(value: &AtomicU64) {
@@ -43,6 +48,7 @@ fn increment(value: &AtomicU64) {
 
 #[derive(serde::Serialize)]
 pub struct LaneStatus {
+    pub reserved: u64,
     pub accepted: u64,
     pub filtered: u64,
     pub rate_limited: u64,
@@ -92,6 +98,7 @@ impl Lane {
         let c = &self.counters;
         let read = |v: &AtomicU64| v.load(Ordering::Relaxed);
         LaneStatus {
+            reserved: read(&c.reserved),
             accepted: read(&c.accepted),
             filtered: read(&c.filtered),
             rate_limited: read(&c.rate_limited),
@@ -120,6 +127,9 @@ impl Dispatcher {
         for (index, writer) in writers.into_iter().enumerate() {
             let (sender, receiver) = mpsc::sync_channel(QUEUE_CAPACITY);
             let counters = Arc::new(Counters::default());
+            counters
+                .audit_slots
+                .store(QUEUE_CAPACITY as u64, Ordering::Relaxed);
             counters.alive.store(true, Ordering::Release);
             let worker_counters = counters.clone();
             std::thread::Builder::new()
@@ -160,14 +170,25 @@ impl Dispatcher {
         if !lane.admit(now) {
             return;
         }
+        let audit = matches!(data, EventData::Audit { .. });
+        if audit && !audit::take_slot(c) {
+            return;
+        }
         let pending = Pending {
             data,
             timestamp: u64::try_from(crate::unix_time_nanos()).unwrap_or(u64::MAX),
         };
         match lane.sender.try_send(pending) {
             Ok(()) => increment(&c.accepted),
-            Err(TrySendError::Full(_)) => increment(&c.queue_full),
-            Err(TrySendError::Disconnected(_)) => increment(&c.unavailable),
+            Err(error) => {
+                if audit {
+                    c.audit_slots.fetch_add(1, Ordering::Relaxed);
+                }
+                match error {
+                    TrySendError::Full(_) => increment(&c.queue_full),
+                    TrySendError::Disconnected(_) => increment(&c.unavailable),
+                }
+            }
         }
     }
 
@@ -247,11 +268,17 @@ fn writer_loop(
             Err(io::Error::other("operational event encoding failed"))
         };
         increment(&c.completed);
+        if matches!(pending.data, EventData::Audit { .. }) {
+            c.audit_slots.fetch_add(1, Ordering::Release);
+        }
         if result.is_err() {
             increment(&c.sink_errors);
             c.alive.store(false, Ordering::Release);
             // Never recursively log or retry a failed sink; account for queued losses.
-            for _ in receiver.try_iter() {
+            for pending in receiver.try_iter() {
+                if matches!(pending.data, EventData::Audit { .. }) {
+                    c.audit_slots.fetch_add(1, Ordering::Release);
+                }
                 increment(&c.discarded);
                 increment(&c.completed);
             }

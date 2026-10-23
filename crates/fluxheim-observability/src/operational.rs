@@ -7,9 +7,22 @@ use crate::event::{
 
 #[path = "operational_dispatch.rs"]
 mod dispatch;
-pub use dispatch::{Dispatcher, DispatcherStatus, EventFilter, LaneStatus, QUEUE_CAPACITY};
+pub use dispatch::{
+    AuditPermit, AuditUnavailable, Dispatcher, DispatcherStatus, EventFilter, LaneStatus,
+    QUEUE_CAPACITY,
+};
 
 static DISPATCHER: OnceLock<Dispatcher> = OnceLock::new();
+
+pub fn reserve_audit(
+    operation: AuditOperation,
+    actor: ActorClass,
+) -> Result<AuditPermit, AuditUnavailable> {
+    DISPATCHER
+        .get()
+        .ok_or(AuditUnavailable)?
+        .try_reserve_audit(operation, actor)
+}
 
 pub fn install(dispatcher: Dispatcher) -> Result<(), &'static str> {
     DISPATCHER

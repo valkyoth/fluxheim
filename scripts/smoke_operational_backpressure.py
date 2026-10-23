@@ -120,6 +120,24 @@ root = "{directory / 'public'}"
             assert counters["audit"]["queue_full"] == counters["audit"]["rate_limited"] == 0, counters
             assert request(public, "GET", "/") == (200, b"healthy\n")
             if recover:
+                # Rejected authenticated attempts consume audit credits too. A full
+                # blocked lane must reject a new snapshot BEFORE changing the store.
+                before = request(admin, "GET", "/_fluxheim/snapshots", auth=True)
+                assert before[0] == 200, before
+                deadline = time.monotonic() + 10
+                while counters["audit"]["accepted"] < 128:
+                    status, body = request(admin, "POST", "/_fluxheim/rollback?to=missing", auth=True)
+                    assert status in (400, 404, 503), (status, body)
+                    assert time.monotonic() < deadline, counters
+                    if status == 503:
+                        assert json.loads(body)["error"] == "audit_unavailable", body
+                        time.sleep(0.05)
+                    counters = json.loads(request(admin, "GET", "/_fluxheim/status", auth=True)[1])["operational_events"]
+                time.sleep(1.1)  # Prove queue exhaustion independently of rate limiting.
+                status, body = request(admin, "POST", "/_fluxheim/snapshot", auth=True)
+                assert status == 503 and json.loads(body)["error"] == "audit_unavailable", (status, body)
+                assert request(admin, "GET", "/_fluxheim/snapshots", auth=True) == before
+                assert request(public, "GET", "/") == (200, b"healthy\n")
                 def consume():
                     while chunk := os.read(reader, 8192):
                         captured.extend(chunk)
@@ -128,10 +146,13 @@ root = "{directory / 'public'}"
                 deadline = time.monotonic() + 5
                 while True:
                     counters = json.loads(request(admin, "GET", "/_fluxheim/status", auth=True)[1])["operational_events"]
-                    if counters["audit"]["written"] == 1:
+                    if counters["audit"]["written"] == 128:
                         break
                     assert time.monotonic() < deadline, counters
                     time.sleep(0.02)
+                assert counters["audit"]["reserved"] == 0, counters
+                assert counters["audit"]["queue_full"] > 0, counters
+                assert request(admin, "POST", "/_fluxheim/snapshot", auth=True)[0] == 201
             started = time.monotonic()
             process.terminate()
             process.wait(timeout=6)
@@ -141,7 +162,8 @@ root = "{directory / 'public'}"
                 assert not drain.is_alive()
                 events = [json.loads(line) for line in captured.splitlines() if line.startswith(b"{")]
                 audits = [event for event in events if event["data"]["kind"] == "audit"]
-                assert len(audits) == 1, audits
+                assert len(audits) == 129, audits
+                assert sum(event["data"]["operation"] == "snapshot" for event in audits) == 2
                 assert audits[0]["data"]["operation"] == "snapshot"
                 assert audits[0]["data"]["outcome"] == "succeeded"
                 assert audits[0]["data"]["actor"] == "admin_token"

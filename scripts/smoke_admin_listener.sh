@@ -70,7 +70,7 @@ grace_period_seconds = 1
 graceful_shutdown_timeout_seconds = 2
 
 [logging]
-level = "warn"
+level = "info"
 format = "text"
 
 [logging.access]

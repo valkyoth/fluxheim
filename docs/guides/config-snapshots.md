@@ -215,6 +215,19 @@ failure leaves the active router and current pointer unchanged.
 
 ## Admin API Shape
 
+Admin mutations require available audit admission before changing state. Keep
+all audit outcomes enabled, including INFO successes: normal INFO logging works,
+or use `RUST_LOG=warn,fluxheim::event::audit=info` for quieter general logging.
+Disabled auditing, a failed writer or exhausted rate/queue capacity returns
+503 `audit_unavailable` before mutation. Automatic deadline rollback also waits
+for admission and retains pending recovery when it is unavailable.
+
+If an already admitted operation returns 503 `audit_delivery_failed` with
+`operation_may_have_completed: true`, inspect state before retrying. Admission
+reserves memory, not durable storage; crashes and subsequent sink failures can
+still lose records. See the [audit contract](../architecture/structured-events.md)
+for counters and limitations. This API is not a durable intent journal.
+
 Fluxheim reserves a separate admin control plane for live operations:
 
 ```toml

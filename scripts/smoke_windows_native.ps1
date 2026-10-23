@@ -564,7 +564,7 @@ listen = "127.0.0.1:$metricsPort"
 require_loopback = true
 
 [logging]
-level = "warn"
+level = "info"
 format = "text"
 
 [logging.access]

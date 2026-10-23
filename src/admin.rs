@@ -73,6 +73,8 @@ const MAX_CACHE_INDEXED_PURGE_BATCHES: usize = 64;
 
 #[derive(Clone)]
 pub struct AdminApp {
+    #[cfg(test)]
+    audit_dispatcher: Option<Arc<fluxheim_observability::operational::Dispatcher>>,
     token: AdminToken,
     client_certificate: AdminClientCertificatePolicy,
     store: SnapshotStore,
@@ -202,6 +204,8 @@ impl AdminApp {
         });
 
         let app = Self {
+            #[cfg(test)]
+            audit_dispatcher: None,
             token,
             client_certificate: AdminClientCertificatePolicy::from_config(&config.admin),
             store,
@@ -383,6 +387,8 @@ mod tests {
     mod support;
     use support::*;
 
+    #[path = "admin_tests_audit_admission.rs"]
+    mod audit_admission;
     #[path = "admin_tests_auth.rs"]
     mod auth;
     #[path = "admin_tests_cache_bulk.rs"]

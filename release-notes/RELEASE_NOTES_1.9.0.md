@@ -60,6 +60,13 @@ or implemented in this release.
   cannot spend audit queue capacity. Expose per-lane loss/failure counters through
   authenticated admin status. This is not a lossless/durable audit journal, and
   legacy logging still needs the wider Commit 04 dispatcher migration.
+- Reserve audit capacity before admin mutations and automatic deadline rollback.
+  Unavailable capacity or disabled audit outcomes return 503 `audit_unavailable`
+  before state changes. Enable INFO audit outcomes (for example,
+  `RUST_LOG=warn,fluxheim::event::audit=info`). Completion detecting a failed worker
+  returns `audit_delivery_failed` with `operation_may_have_completed: true`;
+  inspect state before retrying. This does not guarantee persistence across sink
+  failures or crashes. See the [admission boundary and tests](../docs/evidence/observability-03-audit-admission.md).
 - Replace automatic ACME renewal's raw domain/error outcome messages with typed
   events. Other legacy logs retain their existing formats.
 

@@ -4,6 +4,11 @@ Reviewed base: `ee3192ee0152a598660448e9bf5c8e9095a7a028`. Local verification:
 2026-10-23, Linux x86_64, Rust 1.99.1. This is remediation within Commit 03,
 not approval to advance to Commit 04. Pentest/retest and exact-SHA CI are pending.
 
+This records the first remediation. Its best-effort administrative admission
+limitation is superseded by [pre-mutation audit reservation](observability-03-audit-admission.md).
+The original tests remain; the live smoke now also fills the audit lane and
+verifies rejection before state changes and recovery after draining.
+
 ## Confirmed Findings
 
 1. **Late admission and synchronous sink calls.** Rejected events had already
@@ -101,8 +106,9 @@ asynchronous; that remains explicit Commit 04 work.
 Audit logging is **best effort**, not a transactional/durable journal. Audit
 traffic can exhaust its own lane. Public traffic cannot consume its reservation,
 but all writers may depend on the same blocked or failed OS sink. An accepted
-audit is not proof of persistence. Mutations do not reserve durable audit storage
-or fail closed on audit loss; operator filters can disable auditing deliberately.
+audit is not proof of persistence. Durable audit storage is not reserved. The
+follow-up fails closed on unavailable memory admission, including operator
+filters disabling audit outcomes.
 Deployments requiring such guarantees need an explicit future durability policy,
 not an assumption that this queue provides one. No military/compliance guarantee
 is made. Worker-only sink I/O prevents these typed events from blocking serving;

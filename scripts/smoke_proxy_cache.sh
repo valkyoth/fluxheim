@@ -407,7 +407,7 @@ max_request_headers = 100
 max_request_body_bytes = "1MiB"
 
 [logging]
-level = "warn"
+level = "info"
 format = "text"
 
 [logging.access]

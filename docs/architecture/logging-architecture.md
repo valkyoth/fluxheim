@@ -12,6 +12,8 @@ queues with admission before encoding and worker-only sink I/O. Their envelope
 differs from legacy JSON. Authenticated admin status exposes per-lane losses and
 worker health. See the [structured event contract](structured-events.md) and
 [security remediation evidence](../evidence/observability-03-security.md).
+Admin mutations now [reserve audit admission before execution](../evidence/observability-03-audit-admission.md)
+and fail closed when unavailable; disabled audit outcomes also block mutations.
 This is not a durable audit journal. The remaining synchronous legacy paths,
 full dispatcher qualification and rotation/reopen lifecycle are still future work.
 

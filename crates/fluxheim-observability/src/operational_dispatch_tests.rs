@@ -2,6 +2,9 @@ use super::*;
 use crate::event::{ActorClass, AuditOperation, AuditOutcome, FailureReason, SecurityReason};
 use std::sync::{Condvar, Mutex};
 
+#[path = "operational_audit_tests.rs"]
+mod audit_reservation;
+
 fn security() -> EventData {
     EventData::Security {
         reason: SecurityReason::HostRejected,

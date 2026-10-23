@@ -1,4 +1,6 @@
+use super::{AdminApp, AdminResponse, StatusCode, json_response};
 use fluxheim_observability::event::{ActorClass, AuditOperation, AuditOutcome};
+use fluxheim_observability::operational::{AuditPermit, AuditUnavailable};
 
 pub(super) fn operation(method: &str, path: &str) -> Option<AuditOperation> {
     if method != "POST" {
@@ -29,15 +31,50 @@ pub(super) fn operation(method: &str, path: &str) -> Option<AuditOperation> {
     })
 }
 
-// Call only after token and client-certificate policy have both succeeded.
-pub(super) fn authenticated_outcome(operation: Option<AuditOperation>, status: http::StatusCode) {
-    if let Some(operation) = operation {
-        fluxheim_observability::operational::audit(
-            operation,
-            outcome(status),
-            ActorClass::AdminToken,
+impl AdminApp {
+    pub(super) fn reserve_audit(
+        &self,
+        operation: AuditOperation,
+        actor: ActorClass,
+    ) -> Result<AuditPermit, AuditUnavailable> {
+        #[cfg(test)]
+        if let Some(dispatcher) = &self.audit_dispatcher {
+            return dispatcher.try_reserve_audit(operation, actor);
+        }
+        fluxheim_observability::operational::reserve_audit(operation, actor)
+    }
+}
+
+pub(super) fn unavailable() -> AdminResponse {
+    json_response(
+        StatusCode::SERVICE_UNAVAILABLE,
+        br#"{"error":"audit_unavailable"}"#,
+    )
+}
+
+pub(super) fn complete(
+    permit: Option<AuditPermit>,
+    outcome: AuditOutcome,
+    response: AdminResponse,
+) -> AdminResponse {
+    if let Some(permit) = permit
+        && permit.commit(outcome).is_err()
+    {
+        // The operation may already have executed. Do not report a false success
+        // or imply that retrying is safe; this differs from pre-mutation rejection.
+        return json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            br#"{"error":"audit_delivery_failed","operation_may_have_completed":true}"#,
         );
     }
+    response
+}
+
+pub(super) fn authenticated_outcome(
+    permit: Option<AuditPermit>,
+    response: AdminResponse,
+) -> AdminResponse {
+    complete(permit, outcome(response.status), response)
 }
 
 pub(super) fn outcome(status: http::StatusCode) -> AuditOutcome {

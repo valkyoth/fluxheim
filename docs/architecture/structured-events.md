@@ -153,17 +153,39 @@ cancelled safely; its fixed worker may remain blocked until process exit.
 Authenticated `GET /_fluxheim/status` includes `operational_events`: independent
 accepted, filtered, rate_limited (including admission contention), queue_full,
 unavailable, encoded, written, sink_errors, discarded, pending and worker_alive
-fields, plus queue capacities. Null means no dispatcher is installed, not zero
+fields, plus reserved credits and queue capacities. Null means no dispatcher is installed, not zero
 loss. Counters saturate and snapshots are approximate across concurrent updates;
 pending is accepted minus completed, including in-flight output. `written`
 means successful write and flush, not durable storage or remote acknowledgment.
 
-This remains best-effort logging, not a durable audit journal. Audit traffic can
-exhaust its own lane; a failed or blocked shared OS sink affects eventual delivery.
-Mutations are not transactional with audit persistence, and an explicit operator
-filter can disable auditing. Deployments requiring guaranteed audit persistence
-must not treat this as a compliance guarantee. Public security traffic does not
-consume the reserved audit admission/storage capacity.
+Authenticated admin mutations reserve rate admission and one audit credit before
+dispatch. Audit has a total of 128 credits across reservations, queued records and
+in-flight writes; ordinary/security lanes can each have 128 queued plus one in
+flight. Background audits share these credits and cannot steal a held reservation.
+Completion consumes the single-use permit without a second rate/filter check.
+Dropping an unused permit returns capacity, not rate quota. `reserved` counts
+held permits and is separate from accepted/pending records.
+
+Missing/failed/stopping dispatch, disabled outcomes, contention, exhausted rate
+or capacity return HTTP 503 `audit_unavailable` **before mutation**. Automatic
+deadline rollback also reserves first; unavailable auditing leaves recovery
+pending and cannot be bypassed by confirming the candidate. Read-only requests
+remain available unless they themselves trigger required deadline recovery.
+
+Enable all audit outcomes, including INFO successes. For a quieter general log,
+use `RUST_LOG=warn,fluxheim::event::audit=info`. A global `warn`/`off` filter or
+message-regex filter excluding an audit outcome blocks mutations deliberately;
+logging filters are not silently bypassed. Default INFO logging permits audits.
+
+This is **memory admission**, not a durable journal. A sink may fail after a
+reservation or successful enqueue; a crash can lose queued records. If completion
+detects a failed/stopping worker, the API returns 503 `audit_delivery_failed` with
+`operation_may_have_completed: true`. Inspect state before retrying. An enqueued
+event can still fail later without changing the already returned response.
+Background ACME events remain best effort. Durable pre-mutation intent, append-only
+integrity protection and independent persistence are not implemented; do not
+treat this as military-grade or compliance auditing. Public security traffic
+cannot consume audit credits, but all workers may depend on the same OS sink.
 
 Commit 04 must migrate remaining synchronous legacy hot-path logging, qualify
 slow sinks and performance across platforms, and expand configurable queue and
@@ -181,7 +203,8 @@ input cases per property-test run. Existing runtime/OTLP baseline fixtures remai
 
 Commit 03 adds owner-to-sink verification; see its
 [coverage and limitations](../evidence/observability-03.md). Public responses,
-authentication, filesystem trust and recovery transitions remain unchanged.
+authentication and filesystem trust remain unchanged. Audit admission now gates
+admin mutations and automatic recovery as described above.
 Automatic ACME renewal outcomes now omit legacy raw domain/error text in favor
 of typed events. Other legacy messages remain and must not be mistaken for
 sanitized events. Incremental pentest, exact-SHA GitHub checks and user approval

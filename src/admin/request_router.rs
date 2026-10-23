@@ -136,17 +136,24 @@ impl AdminApp {
         }
         self.auth_throttle.record_success(source);
         let operation = operational_events::operation(method, path);
+        let audit_permit = match operation {
+            Some(operation) => match self.reserve_audit(
+                operation,
+                fluxheim_observability::event::ActorClass::AdminToken,
+            ) {
+                Ok(permit) => Some(permit),
+                Err(_) => return operational_events::unavailable(),
+            },
+            None => None,
+        };
         if let Some(response) = self.enforce_self_healing_deadline()
             && !response.status.is_success()
         {
-            if let Some(operation) = operation {
-                fluxheim_observability::operational::audit(
-                    operation,
-                    fluxheim_observability::event::AuditOutcome::Failed,
-                    fluxheim_observability::event::ActorClass::AdminToken,
-                );
-            }
-            return response;
+            return operational_events::complete(
+                audit_permit,
+                fluxheim_observability::event::AuditOutcome::Failed,
+                response,
+            );
         }
         if health_request {
             if method != "GET" {
@@ -158,8 +165,10 @@ impl AdminApp {
             return self.health_response();
         }
         if query.is_some_and(|query| query.len() > MAX_ADMIN_QUERY_BYTES) {
-            operational_events::authenticated_outcome(operation, StatusCode::URI_TOO_LONG);
-            return json_response(StatusCode::URI_TOO_LONG, br#"{"error":"query_too_large"}"#);
+            return operational_events::authenticated_outcome(
+                audit_permit,
+                json_response(StatusCode::URI_TOO_LONG, br#"{"error":"query_too_large"}"#),
+            );
         }
 
         let response = match (method, path) {
@@ -391,8 +400,7 @@ impl AdminApp {
                 br#"{"error":"method_not_allowed"}"#,
             ),
         };
-        operational_events::authenticated_outcome(operation, response.status);
-        response
+        operational_events::authenticated_outcome(audit_permit, response)
     }
 
     #[cfg(unix)]

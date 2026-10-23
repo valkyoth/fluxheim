@@ -288,6 +288,9 @@ timeout, PHP, cache, ACME and rollback failures without debug logging.
 
 Review artifact: [owner coverage and local verification](../evidence/observability-03.md).
 Security follow-up: [early admission and independent audit capacity](../evidence/observability-03-security.md).
+Second follow-up: [fail-closed pre-mutation audit reservation](../evidence/observability-03-audit-admission.md).
+Keep both prior backpressure/flood regressions and reservation regressions green;
+memory admission is not a durable audit journal. Retest and exact-SHA CI are pending.
 This remediation brings forward minimal typed-event dispatch from 04, not
 acceptance of the full dispatcher milestone or permission to start it.
 

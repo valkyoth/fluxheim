@@ -5,6 +5,10 @@ Base: `74dbb1603fb3eea6aee9e2921e448304d4dcf34f`. Local qualification on
 the user's pentest and exact-final-SHA GitHub/CodeQL pass. Git records the final
 SHA; this document does not self-embed it.
 
+Subsequent remediation records cover [bounded independent dispatch](observability-03-security.md)
+and [pre-mutation audit admission](observability-03-audit-admission.md). The latter
+adds fail-closed mutation admission; the original results below are checkpoint history.
+
 ## Scope And Trust
 
 The [structured event contract](../architecture/structured-events.md) now has
