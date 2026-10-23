@@ -31,6 +31,12 @@ or implemented in this release.
 
 ## Implemented Maintenance
 
+Post-1.8.3 security maintenance:
+
+- Update the locked ACME cryptography dependency `ctutils` from 0.4.3 to 0.4.4
+  to address RUSTSEC-2026-0385 (non-constant-time mask generation and `u128`
+  comparisons). No ACME configuration or protocol behavior changes.
+
 The shared 1.8.3 maintenance is retained, not a new 1.9 observability feature.
 Production runtime sources and normalized dependency manifests were compared
 with the maintenance branch before starting this implementation train.
