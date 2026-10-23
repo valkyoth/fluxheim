@@ -55,8 +55,11 @@ FLUXHEIM_TEST_SYSTEMD=1 python3 scripts/test_core_dump_policy.py
 
 This test requires a running user systemd manager and the repository's Python
 test dependencies. It does not start the installed server or alter host policy.
-Zero limits do not stop all host crash collectors. Before handling secrets,
-apply the separate [host crash-collection policy](../../SECURITY.md#fatal-termination-and-memory-dumps).
+Zero limits alone do not stop all host crash collectors. Current Linux Fluxheim
+executables additionally mark themselves non-dumpable before reading config;
+failure rejects startup. Keep the launcher limits for defense in depth and read
+the [memory-dump policy](../../SECURITY.md#fatal-termination-and-memory-dumps)
+for external children, old binaries, debugger restrictions and other platforms.
 
 ## Manual Binary Install
 

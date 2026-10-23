@@ -48,6 +48,10 @@ repeated for these Linux deployment-only changes.
 
 ## Remaining Operator Responsibility
 
+The next [Linux non-dumpable startup fix](observability-04-nondumpable.md)
+closes the piped-collector gap for the three Fluxheim executables. The launcher
+limits described here remain defense in depth.
+
 Zero limits suppress ordinary core files, not necessarily host-piped collectors.
 The [security guidance](../../SECURITY.md#fatal-termination-and-memory-dumps)
 explains host collector policy, existing-dump retention, platform differences and

@@ -797,8 +797,12 @@ podman exec fluxheim_gateway cat /proc/1/limits
 ```
 
 The `Max core file size` row must have soft and hard limits of `0`.
-Linux host crash collectors may still receive memory despite this limit;
-also follow the [host crash-collection policy](../../SECURITY.md#fatal-termination-and-memory-dumps).
+This limit alone does not stop Linux piped crash collectors. Current Linux
+Fluxheim executables also mark themselves non-dumpable before loading config,
+including in containers. A custom seccomp policy must allow `PR_SET_DUMPABLE`
+and `PR_GET_DUMPABLE`; blocking them rejects startup. See the
+[memory-dump policy](../../SECURITY.md#fatal-termination-and-memory-dumps)
+for older binaries, external children and remaining operator responsibilities.
 
 Compose example:
 

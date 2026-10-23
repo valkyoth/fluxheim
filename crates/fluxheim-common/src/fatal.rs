@@ -16,6 +16,27 @@ static WATCHDOG: OnceLock<io::Result<Thread>> = OnceLock::new();
 static TERMINATING: AtomicBool = AtomicBool::new(false);
 const DIAGNOSTIC_GRACE: Duration = Duration::from_millis(250);
 
+/// Disable Linux kernel memory dumps, including delivery to piped collectors.
+/// Call before loading configuration/secrets or starting threads; failure must
+/// reject startup. Other platforms still require operator-managed dump policy.
+/// This does not protect against privileged inspection or code in this process
+/// deliberately re-enabling dumps. Exec/credential changes may reset the flag.
+pub fn disable_memory_dumps() -> io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        use rustix::process::{DumpableBehavior, dumpable_behavior, set_dumpable_behavior};
+
+        set_dumpable_behavior(DumpableBehavior::NotDumpable)?;
+        if dumpable_behavior()? != DumpableBehavior::NotDumpable {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "process remained dumpable",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Start once before serving, including when no crash file is configured.
 /// Failure must reject startup. The watchdog is parked while healthy, never
 /// touches logging locks, and cannot be disarmed once termination is requested.

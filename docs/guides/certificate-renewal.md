@@ -652,9 +652,11 @@ podman run --rm --ulimit core=0:0 \
   status
 ```
 
-Both the gateway and companion handle secrets. Keep core-file limits at zero
-and apply the separate [host crash-collection policy](../../SECURITY.md#fatal-termination-and-memory-dumps);
-container limits alone do not disable a host's piped collector.
+Both the gateway and companion handle secrets. Current Linux executables mark
+themselves non-dumpable before loading config. Keep core-file limits at zero too;
+container limits alone do not disable a host's piped collector. Review the
+[memory-dump policy](../../SECURITY.md#fatal-termination-and-memory-dumps)
+for older binaries and other platforms.
 
 For Compose, keep `fluxheim` and `fluxheim-acme` on the same network and use
 the same bind mounts. The companion service should override only the entrypoint

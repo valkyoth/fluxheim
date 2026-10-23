@@ -83,6 +83,23 @@ An OS memory dump may contain secrets even though Fluxheim's finite fatal reason
 records do not. `logging.crash_file` contains those reason records, not a memory
 dump; disabling that option does not disable OS crash collection.
 
+On Linux, all three shipped executables (`fluxheim`, `fluxheim-acme` and
+`fluxheim-config-tester`) set `PR_SET_DUMPABLE=0` and verify it at the start of
+`main`, before parsing arguments, loading configuration/secrets or starting
+application threads. Failure rejects startup, including `--version`. This
+prevents kernel-generated process memory dumps, including delivery to piped
+collectors, without requiring a host-wide collector change. There is no runtime
+configuration opt-out. See [Linux's dumpable policy](https://man7.org/linux/man-pages/man2/PR_SET_DUMPABLE.2const.html).
+
+This also restricts ordinary same-user debugger attachment and access to some
+`/proc/<pid>` files. It does not stop privileged inspection or compromised
+in-process code from re-enabling dumps. Exec and credential changes can reset
+the flag: each Fluxheim executable reapplies it, but external programs such as
+managed PHP-FPM need their own policy. Library embedders must call
+`fluxheim_common::fatal::disable_memory_dumps()` before loading secrets or
+starting workers themselves; the executable entrypoints provide this guarantee,
+not arbitrary library calls. Windows/macOS do not implement this Linux control.
+
 The packaged server and ACME systemd units set `LimitCORE=0` (both limits).
 Shipped Compose examples set `ulimits.core.soft` and `hard` to zero; direct
 Podman/Docker deployments must pass `--ulimit core=0:0`. These are launcher
@@ -90,10 +107,11 @@ settings, not properties baked into the image or enforced by the Rust binary.
 Recreate containers or restart services after applying them. Existing/custom
 deployments do not acquire the settings merely by pulling a new image.
 
-On Linux, `RLIMIT_CORE=0` does **not** prevent a kernel-piped crash collector from
-receiving process memory. Inspect `sysctl kernel.core_pattern` on the host,
-including container hosts, and configure the actual collector not to retain or
-process Fluxheim memory dumps. See the [Linux core documentation](https://man7.org/linux/man-pages/man5/core.5.html).
+Keep those launcher limits as defense in depth. Unlike the process dumpable
+policy above, `RLIMIT_CORE=0` alone does **not** prevent a kernel-piped crash
+collector from receiving memory. For older Fluxheim executables, external
+children and additional host hardening, inspect `sysctl kernel.core_pattern`
+and configure the actual collector. See the [Linux core documentation](https://man7.org/linux/man-pages/man5/core.5.html).
 
 For hosts using systemd-coredump, an administrator may install a host-wide
 `/etc/systemd/coredump.conf.d/90-no-memory-dumps.conf` containing:
@@ -113,8 +131,10 @@ Fluxheim packaging intentionally does not change host-wide crash policy.
 Other collectors, Windows Error Reporting/LocalDumps and macOS diagnostic tools
 need their own operator-managed policy; Linux limits do not configure them.
 
-Effective-limit tests prove the launcher limits, not absence of host collection,
-privileged memory inspection, swap contents or previously retained dumps.
+Effective-limit tests prove the launcher limits. Separate Linux subprocess and
+syscall-fault tests verify the executable policy and fail-closed startup. Neither
+control prevents privileged memory inspection, swap contents or access to
+previously retained dumps.
 
 ```bash
 fluxheim --config path/to/fluxheim.toml --check-tls-storage

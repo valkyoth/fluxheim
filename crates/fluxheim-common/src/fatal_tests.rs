@@ -7,6 +7,36 @@ const CHILD: &str = "FLUXHEIM_WATCHDOG_TEST";
 const TEST: &str =
     "fatal::tests::termination_is_bounded_with_real_full_stderr_and_stalled_crash_sink";
 
+#[cfg(target_os = "linux")]
+#[test]
+fn memory_dump_policy_is_effective_and_inherited_by_threads() {
+    use rustix::process::{DumpableBehavior, dumpable_behavior};
+
+    const CHILD: &str = "FLUXHEIM_DUMP_POLICY_TEST";
+    if std::env::var_os(CHILD).is_some() {
+        // Keep the test harness process unchanged; only this child is hardened.
+        disable_memory_dumps().unwrap();
+        disable_memory_dumps().unwrap();
+        assert_eq!(dumpable_behavior().unwrap(), DumpableBehavior::NotDumpable);
+        thread::spawn(|| {
+            assert_eq!(dumpable_behavior().unwrap(), DumpableBehavior::NotDumpable);
+        })
+        .join()
+        .unwrap();
+        return;
+    }
+    let status = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "fatal::tests::memory_dump_policy_is_effective_and_inherited_by_threads",
+            "--nocapture",
+        ])
+        .env(CHILD, "1")
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
 fn block_real_stderr() {
     let (locked, received) = mpsc::channel();
     let finished = Arc::new(AtomicBool::new(false));
@@ -30,6 +60,7 @@ fn block_real_stderr() {
 #[test]
 fn termination_is_bounded_with_real_full_stderr_and_stalled_crash_sink() {
     if let Ok(mode) = std::env::var(CHILD) {
+        disable_memory_dumps().unwrap();
         #[cfg(unix)]
         rustix::process::setrlimit(
             rustix::process::Resource::Core,

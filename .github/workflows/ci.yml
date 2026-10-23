@@ -164,6 +164,13 @@ jobs:
           cargo build --locked --no-default-features --features profile-observability,stream-proxy,udp-proxy --bin fluxheim
           python3 scripts/smoke_fatal_listener_failures.py --binary target/debug/fluxheim
 
+      - name: Verify Linux non-dumpable startup and fail-closed errors
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y strace
+          cargo build --locked --no-default-features --features profile-observability --bins
+          python3 scripts/smoke_linux_dump_policy.py --bin-dir target/debug
+
       - name: Test standalone systemd boundary without workspace feature unification
         run: |
           cargo test --locked -p fluxheim-systemd --all-targets
