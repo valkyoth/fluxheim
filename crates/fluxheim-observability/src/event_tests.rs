@@ -127,7 +127,7 @@ fn access_switch_and_filter_do_not_conflate_security_with_access() {
         );
     }
     assert_eq!(access.admission_class(), AdmissionClass::Ordinary);
-    assert_eq!(security().admission_class(), AdmissionClass::Protected);
+    assert_eq!(security().admission_class(), AdmissionClass::Security);
     assert!(
         !CapturePolicy {
             privacy_mode: true,

@@ -63,25 +63,18 @@ accepts the actual connection or response-read phase, never infers it from HTTP.
 
 ## Delivery Bounds And Compatibility
 
-The existing logger receives a fixed filterable message and reserved bounded
-payload fields. Its formatter writes one JSON object (not nested JSON) or the
-text envelope. `RUST_LOG` target/level and message-regex filtering still apply.
-Metadata-disabled records are rejected before encoding. Regex rejection occurs
-later in the logger, after bounded encoding.
+The initial implementation used synchronous logging, late admission and shared
+security/audit capacity. Pentest identified both as release-blocking. Those
+mechanisms are superseded by the [security remediation](observability-03-security.md):
+filter/admission before encoding, three independent bounded queues, worker-only
+typed-event sink I/O and authenticated status/loss counters. Public security
+traffic cannot consume audit admission or queue capacity. The wire envelope and
+existing filtering/privacy rules are retained. This is not a durable audit journal.
 
-Each event is at most 8 KiB including newline. An in-process fixed-state budget
-allows 100 ordinary errors and, separately, 100 security/audit records per
-one-second window. Nonblocking lock contention or exhausted capacity drops the
-event and increments a saturating counter. The boundary test proves separate
-capacity, contention behavior, exact cap and window recovery. This is not
-lossless auditing; security bursts can consume audit capacity. The counter is
-internal until the dispatcher/status checkpoints. Encoding work is bounded per
-attempt, not eliminated for suppressed records.
-
-There is no new worker, queue, collector or configuration option. Local sink
-writes are still synchronous and may block: Commit 04 owns asynchronous dispatch,
-exported loss accounting and slow-sink qualification. No unbounded request/error
-buffer is added. No throughput or latency improvement is claimed here.
+No collector or configuration option is added. Commit 04 retains the remaining
+legacy logging migration and wider resource/performance qualification. The local
+test results below record the original checkpoint; the remediation document
+records the new tests and reruns. No throughput improvement is claimed here.
 
 Legacy logs are not globally rewritten or sanitized. Background ACME per-target
 raw error/domain/issuer messages are intentionally replaced by finite outcomes;

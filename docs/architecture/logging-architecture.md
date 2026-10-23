@@ -2,11 +2,18 @@
 
 ## Current Status (2026-10-23)
 
-The native runtime uses `log` with synchronous `env_logger` output. JSON records
-have timestamp, level, target and message strings; stderr is the default.
-stdout and an optional protected file are supported. `RUST_LOG` overrides the
-configured startup filter. There is no bounded asynchronous logging dispatcher
-or automatic rotation/reopen lifecycle yet.
+Legacy runtime messages use `log` with synchronous `env_logger` output. Their
+JSON records have timestamp, level, target and message strings; stderr is the
+default. stdout and an optional protected file are supported. `RUST_LOG`
+overrides the configured startup filter.
+
+Typed operational events now use independent bounded ordinary/security/audit
+queues with admission before encoding and worker-only sink I/O. Their envelope
+differs from legacy JSON. Authenticated admin status exposes per-lane losses and
+worker health. See the [structured event contract](structured-events.md) and
+[security remediation evidence](../evidence/observability-03-security.md).
+This is not a durable audit journal. The remaining synchronous legacy paths,
+full dispatcher qualification and rotation/reopen lifecycle are still future work.
 
 Access-log configuration and helper functions exist, but the former Pingora
 completion hook is not wired into the current native request lifecycle.

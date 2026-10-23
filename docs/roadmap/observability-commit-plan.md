@@ -269,6 +269,7 @@ Deliver:
   so text and JSON cannot bypass the same privacy/size contract.
 - Define reserved capacity/rate limits for security/audit separately from
   ordinary access events; never promise lossless audit under hostile load.
+  Security and audit must also have independent reservations from one another.
 
 Tests: CR/LF/control/Unicode inputs, huge nested errors, canary secrets,
 truncation boundaries, malformed IDs and property/fuzz tests for new parsers.
@@ -286,6 +287,9 @@ Operator value: distinguish DNS, refused connection, TLS verification,
 timeout, PHP, cache, ACME and rollback failures without debug logging.
 
 Review artifact: [owner coverage and local verification](../evidence/observability-03.md).
+Security follow-up: [early admission and independent audit capacity](../evidence/observability-03-security.md).
+This remediation brings forward minimal typed-event dispatch from 04, not
+acceptance of the full dispatcher milestone or permission to start it.
 
 Deliver:
 - Map causal categories at their actual owner, including denied requests,
@@ -315,6 +319,8 @@ Deliver:
 - Move identified synchronous hot-path writes behind a bounded dispatcher.
   Bound event count, bytes, producers, workers and submission cost.
 - Freeze overflow semantics and counters, including security/audit exhaustion.
+  Retain the independent audit/security lanes added by the Commit 03 remediation;
+  never merge them into a quota that unauthenticated traffic can consume.
   Default to bounded loss rather than an unbounded block; any opt-in blocking
   mode needs a finite deadline and explicit latency tradeoff.
 - Define initialization failure, dispatcher failure, recursive logging guard,
@@ -692,7 +698,7 @@ collector behavior is not the new required-collector acceptance contract.
 | 01 - Inventory, schemas, budgets | Accepted for progression | Base implementation 74212e08; dependency remediation 4cc86fe1; plan a04459ae; test-only CI follow-up 29484229. User supplied clean pentest, reported GitHub green and authorized 02. Later queue/performance budgets still need implementation qualification. |
 | 02 - Event model/redaction | Accepted for progression | 74dbb160; user supplied clean pentest, reported GitHub green and authorized 03. Producer provenance is a mandatory integration gate. |
 | 03 - Diagnostics/audit | Implemented; review pending | [Owner coverage, local tests and live logger proof](../evidence/observability-03.md). Awaiting user pentest and exact-SHA GitHub/CodeQL; no permission to start 04. |
-| 04 - Bounded dispatcher | Not started | Pending |
+| 04 - Bounded dispatcher | Not started as a checkpoint | Minimal typed-event dispatch brought forward to fix Commit 03 findings; remaining legacy migration and qualification pending. |
 | 05 - File lifecycle | Not started | Pending |
 | 06 - Correlation | Not started | Pending |
 | 07 - Metrics | Not started | Pending |

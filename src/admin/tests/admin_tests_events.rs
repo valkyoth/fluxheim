@@ -54,3 +54,15 @@ fn authenticated_rejection_is_audited_but_unknown_routes_are_not_mutations() {
     );
     assert_eq!(capture.events().len(), count);
 }
+
+#[test]
+fn operational_loss_status_requires_auth_and_distinguishes_uninitialized() {
+    let app = app();
+    let denied = app.handle("GET", "/_fluxheim/status", None, &HeaderMap::new());
+    assert_eq!(denied.status, StatusCode::UNAUTHORIZED);
+    assert!(!String::from_utf8_lossy(&denied.body).contains("operational_events"));
+    let response = app.handle("GET", "/_fluxheim/status", None, &auth_headers());
+    assert_eq!(response.status, StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+    assert!(body.get("operational_events").unwrap().is_null());
+}

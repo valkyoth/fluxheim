@@ -20,12 +20,15 @@ def port():
         return sock.getsockname()[1]
 
 
-def run(binary, format_, filter_, expected):
+def run(binary, format_, filter_, expected, target="stderr", file_sink=False):
     temporary = ROOT / "target" / "fluxheim-smoke-tmp"
     temporary.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="events-", dir=temporary) as temp:
         directory = Path(temp).resolve()
         listen = port()
+        sink_path = directory / "file-sink.log"
+        file_config = (f'[logging.file]\nenabled = true\npath = "{sink_path}"\n'
+                       if file_sink else "")
         # Reserved but not listening: repeatable connection refusal, no external DNS.
         with socket.socket() as origin:
             origin.bind(("127.0.0.1", 0))
@@ -42,6 +45,8 @@ graceful_shutdown_timeout_seconds = 2
 [logging]
 level = "info"
 format = "{format_}"
+target = "{target}"
+{file_config}
 [logging.access]
 enabled = false
 [proxy]
@@ -85,6 +90,8 @@ upstream_tls = false
                         process.kill()
                         process.wait(timeout=5)
             contents = log_path.read_text()
+            if file_sink:
+                contents += sink_path.read_text()
             assert CANARY not in contents, "private input leaked to logs"
             events = []
             for line in contents.splitlines():
@@ -111,7 +118,9 @@ def main():
     run(binary, "json", "off", 0)
     run(binary, "json", "error/Operation failed", 1)
     run(binary, "json", "error/NEVER_MATCH", 0)
-    print("operational events live smoke: 5 scenarios passed")
+    run(binary, "json", "off,fluxheim::event::error=error", 1, target="stdout")
+    run(binary, "json", "off,fluxheim::event::error=error", 1, file_sink=True)
+    print("operational events live smoke: 7 scenarios passed")
 
 
 if __name__ == "__main__":

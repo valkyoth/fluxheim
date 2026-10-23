@@ -56,7 +56,7 @@ use runtime_shutdown::{
 };
 #[cfg(feature = "proxy")]
 pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
-    init_logging(&config)?;
+    let _logging = init_logging(&config)?;
     #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
     crate::tls::install_rustls_crypto_provider()?;
     #[cfg(any(

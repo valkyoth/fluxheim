@@ -4,7 +4,10 @@ use std::path::Path;
 
 pub(super) fn init_logging(
     config: &crate::config::Config,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<
+    fluxheim_observability::operational::ShutdownGuard,
+    Box<dyn std::error::Error + Send + Sync>,
+> {
     let env = env_logger::Env::default().default_filter_or(config.logging.level.as_filter());
     let format = config.logging.format;
     let mut builder = env_logger::Builder::from_env(env);
@@ -13,7 +16,7 @@ pub(super) fn init_logging(
         crate::config::LoggingFormat::Text => write_text_log_record(buf, record),
     });
 
-    if config.logging.file.enabled {
+    let writers: [Box<dyn Write + Send>; 3] = if config.logging.file.enabled {
         let path = config.logging.file.path.as_deref().ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -21,16 +24,53 @@ pub(super) fn init_logging(
             )
         })?;
         let file = open_log_file(path, config.logging.file.append)?;
+        let writers = [
+            Box::new(file.try_clone()?) as Box<dyn Write + Send>,
+            Box::new(file.try_clone()?),
+            Box::new(file.try_clone()?),
+        ];
         builder.target(env_logger::Target::Pipe(Box::new(file)));
+        writers
     } else {
         builder.target(match config.logging.target {
             crate::config::LoggingTarget::Stdout => env_logger::Target::Stdout,
             crate::config::LoggingTarget::Stderr => env_logger::Target::Stderr,
         });
-    }
+        std::array::from_fn(|_| match config.logging.target {
+            crate::config::LoggingTarget::Stdout => {
+                Box::new(std::io::stdout()) as Box<dyn Write + Send>
+            }
+            crate::config::LoggingTarget::Stderr => {
+                Box::new(std::io::stderr()) as Box<dyn Write + Send>
+            }
+        })
+    };
 
+    // The separate matcher preserves env_logger target/level/regex semantics,
+    // but only inspects a fixed message and never reaches its output target.
+    let matcher = env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or(config.logging.level.as_filter()),
+    )
+    .build();
+    let filter = std::sync::Arc::new(move |data: fluxheim_observability::event::EventData| {
+        matcher.matches(
+            &log::Record::builder()
+                .target(data.target())
+                .level(data.level())
+                .args(format_args!("{}", data.message()))
+                .build(),
+        )
+    });
+    let format = match format {
+        crate::config::LoggingFormat::Json => fluxheim_observability::event::EventFormat::Json,
+        crate::config::LoggingFormat::Text => fluxheim_observability::event::EventFormat::Text,
+    };
+    fluxheim_observability::operational::install(
+        fluxheim_observability::operational::Dispatcher::new(format, filter, writers)?,
+    )
+    .map_err(std::io::Error::other)?;
     let _ = builder.try_init();
-    Ok(())
+    Ok(fluxheim_observability::operational::ShutdownGuard)
 }
 
 pub(super) fn open_log_file(path: &Path, append: bool) -> std::io::Result<File> {
@@ -158,13 +198,6 @@ pub(super) fn write_text_log_record(
     buf: &mut env_logger::fmt::Formatter,
     record: &log::Record<'_>,
 ) -> std::io::Result<()> {
-    if write_operational_record(
-        buf,
-        record,
-        fluxheim_observability::event::EventFormat::Text,
-    )? {
-        return Ok(());
-    }
     writeln!(
         buf,
         "{} {} {}: {}",
@@ -179,13 +212,6 @@ pub(super) fn write_json_log_record(
     buf: &mut env_logger::fmt::Formatter,
     record: &log::Record<'_>,
 ) -> std::io::Result<()> {
-    if write_operational_record(
-        buf,
-        record,
-        fluxheim_observability::event::EventFormat::Json,
-    )? {
-        return Ok(());
-    }
     writeln!(
         buf,
         "{}",
@@ -196,25 +222,6 @@ pub(super) fn write_json_log_record(
             &record.args().to_string(),
         )
     )
-}
-
-fn write_operational_record(
-    buf: &mut impl Write,
-    record: &log::Record<'_>,
-    format: fluxheim_observability::event::EventFormat,
-) -> std::io::Result<bool> {
-    use fluxheim_observability::operational::{EventBudget, record_payload};
-    static BUDGET: std::sync::OnceLock<EventBudget> = std::sync::OnceLock::new();
-    let Some((payload, class)) = record_payload(record, format) else {
-        return Ok(false);
-    };
-    if BUDGET
-        .get_or_init(EventBudget::default)
-        .admit(class, std::time::Instant::now())
-    {
-        buf.write_all(payload.as_bytes())?;
-    }
-    Ok(true)
 }
 
 pub(super) fn log_record_json(timestamp: &str, level: &str, target: &str, message: &str) -> String {

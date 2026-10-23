@@ -55,8 +55,11 @@ or implemented in this release.
 - Retain public response and fail-closed rollback behavior, with regression
   assertions on both outcomes and emitted events. Add live JSON/text/filter
   smoke coverage with private-data canaries.
-- Limit operational output separately for ordinary and security/audit classes.
-  This is not yet the asynchronous dispatcher or a lossless audit journal.
+- Admit typed events before encoding into independent bounded ordinary, security
+  and audit queues. Dedicated workers perform sink I/O; public security floods
+  cannot spend audit queue capacity. Expose per-lane loss/failure counters through
+  authenticated admin status. This is not a lossless/durable audit journal, and
+  legacy logging still needs the wider Commit 04 dispatcher migration.
 - Replace automatic ACME renewal's raw domain/error outcome messages with typed
   events. Other legacy logs retain their existing formats.
 

@@ -244,6 +244,7 @@ impl AdminApp {
         let tls_compliance_mode = tls.compliance_mode();
         let body = json!({
             "status": "ok",
+            "operational_events": fluxheim_observability::operational::status(),
             "snapshot_current": current,
             "snapshots": snapshots,
             "self_healing_enabled": self.self_healing_enabled,

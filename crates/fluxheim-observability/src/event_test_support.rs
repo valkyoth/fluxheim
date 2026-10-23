@@ -1,44 +1,38 @@
-//! Opt-in test logger. Capture is thread-local: use current-thread async tests.
+//! Opt-in producer capture, not a production delivery path. Use current-thread async tests.
+use crate::event::{CapturePolicy, CorrelationInput, EventData, EventFormat, StructuredEvent};
 use std::cell::RefCell;
-use std::sync::Once;
 
 thread_local! {
     static EVENTS: RefCell<Option<Vec<serde_json::Value>>> = const { RefCell::new(None) };
 }
 
-struct Logger;
-impl log::Log for Logger {
-    fn enabled(&self, _: &log::Metadata<'_>) -> bool {
-        true
-    }
-    fn log(&self, record: &log::Record<'_>) {
-        if let Some((payload, _)) =
-            crate::operational::record_payload(record, crate::event::EventFormat::Json)
+pub(crate) fn capture(data: EventData) -> bool {
+    EVENTS.with(|events| {
+        let mut events = events.borrow_mut();
+        let Some(events) = events.as_mut() else {
+            return false;
+        };
+        if events.len() < 1024
+            && let Some(event) = StructuredEvent::capture(
+                0,
+                data,
+                None,
+                CorrelationInput::default(),
+                CapturePolicy::default(),
+                true,
+            )
+            && let Ok(encoded) = event.encode(EventFormat::Json)
+            && let Ok(event) = serde_json::from_slice(encoded.as_bytes())
         {
-            EVENTS.with(|events| {
-                if let Some(events) = events.borrow_mut().as_mut()
-                    && events.len() < 1024
-                    && let Ok(event) = serde_json::from_str(payload)
-                {
-                    events.push(event);
-                }
-            });
+            events.push(event);
         }
-    }
-    fn flush(&self) {}
+        true
+    })
 }
 
 pub struct Capture;
 impl Capture {
     pub fn start() -> Self {
-        static INIT: Once = Once::new();
-        INIT.call_once(|| {
-            assert!(
-                log::set_logger(&Logger).is_ok(),
-                "test logger already installed"
-            );
-            log::set_max_level(log::LevelFilter::Trace);
-        });
         EVENTS.with(|events| assert!(events.replace(Some(Vec::new())).is_none(), "nested capture"));
         Self
     }

@@ -73,17 +73,19 @@ impl EventData {
 
     pub fn admission_class(self) -> AdmissionClass {
         match self {
-            Self::Security { .. } | Self::Audit { .. } => AdmissionClass::Protected,
+            Self::Security { .. } => AdmissionClass::Security,
+            Self::Audit { .. } => AdmissionClass::Audit,
             Self::Access { .. } | Self::Error { .. } => AdmissionClass::Ordinary,
         }
     }
 }
 
-/// Classification only; queue reservations and rate limits are implemented in Commit 04.
+/// Independent admission and queue capacity; public traffic cannot spend audit capacity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdmissionClass {
     Ordinary,
-    Protected,
+    Security,
+    Audit,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -292,7 +294,7 @@ mod tests {
                 revision: None,
             };
             assert_eq!(data.level(), level);
-            assert_eq!(data.admission_class(), AdmissionClass::Protected);
+            assert_eq!(data.admission_class(), AdmissionClass::Audit);
         }
         assert_eq!(
             EventData::Error {

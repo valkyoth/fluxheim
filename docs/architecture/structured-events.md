@@ -1,8 +1,9 @@
 # Structured Event Contract
 
 Schema version 1, introduced in Commit 02. Commit 03 connects operational owners
-through `operational.rs` and the existing runtime logger. Commit 04 adds async
-dispatch; Commit 06 connects native request completion/correlation. Unmigrated
+through `operational.rs`. Its security remediation brings forward bounded async
+delivery for these typed events; Commit 04 handles the remaining logging paths
+and wider dispatcher qualification. Commit 06 connects request completion/correlation. Unmigrated
 legacy logs and OTLP encoders do not inherit this contract merely by depending
 on the crate. Existing configuration stays valid.
 
@@ -27,8 +28,8 @@ This does not sanitize unrelated uses of `log!` or arbitrary caller formatting.
 | --- | --- | --- |
 | Access | completed/cancelled/failed outcome, finite HTTP method, optional 100..599 status, duration_micros, bytes_sent, attempts | INFO / ordinary |
 | Error | finite failure reason, optional retry attempt | ERROR / ordinary |
-| Security | finite policy-decision reason | WARN / protected |
-| Audit | finite operation/outcome, actor class, optional configuration revision | INFO success, WARN rejected, ERROR failed / protected |
+| Security | finite policy-decision reason | WARN / security |
+| Audit | finite operation/outcome, actor class, optional configuration revision | INFO success, WARN rejected, ERROR failed / audit |
 
 Failure codes: dns, connection_refused, connection_timeout, read_timeout,
 write_timeout, tls_verification, tls_handshake, upstream_protocol, cache_read, cache_write,
@@ -68,11 +69,10 @@ completion/cancellation accounting remains Commit 06 work.
    are `fluxheim::event::{access,error,security,audit}`. Test the filter against
    the typed level/target and fixed message, not a raw error or encoded envelope.
 2. Pass that decision to capture before allocating optional strings. An explicit
-   off/filter rejection applies to every family; protected does not mean forced
-   logging. Commit 03 checks the log facade's metadata filter first; env_logger
-   applies the final message regex to the fixed message before formatting/output.
-   No optional strings are captured by these producers. A regex rejection may
-   still incur bounded encoding work, but never sinks an event.
+   off/filter rejection applies to every family; reserved capacity does not mean
+   forced logging. The runtime uses env_logger's matcher against fixed metadata
+   and message before admission. A rejected event never enters a queue, encodes,
+   calls the logger or flushes the sink. No optional strings are captured.
 3. The access switch gates only access events. Turning it off cannot implicitly
    disable otherwise permitted error/security/audit events.
 4. Privacy mode suppresses access events and all optional resources/correlation
@@ -128,28 +128,48 @@ not unauthenticated JSON clients, construct them. See the
 [audit fixture](../../tests/fixtures/observability/structured-audit.json), whose
 PACKAGE_VERSION marker is substituted with the compiled version by the test.
 
-## Protected Admission Design For Commit 04
+## Operational Dispatch And Remaining Work
 
-Commit 03 has a fixed-state sink admission limiter: separate ordinary and
-protected windows each admit at most 100 records per second. Windows use monotonic
-time; boundary-adjacent bursts can total 200 per class. Contention/poisoning drops
-instead of waiting on the budget mutex. Drops are counted with saturation, but
-are not yet exposed by the operational API. Filtering happens before admission.
-There is NO asynchronous queue or lossless delivery guarantee yet. The existing
-synchronous writer can still block: Commit 04 must address this, not describe
-rate limiting as async delivery. Its dispatcher must:
+Typed events use three independent lanes: ordinary, security and audit. Each
+has its own admission mutex, 100-record/second fixed window, 128-entry bounded
+channel and one writer thread. Public security events cannot consume audit
+quota, hold its admission lock or occupy its queue. Boundary-adjacent bursts
+can total 200 per lane. Contention/poisoning, rate exhaustion and full queues
+drop without waiting for capacity. Admission precedes capture/encoding and I/O.
 
-- Use the Commit 01 default total of 4096 entries/8 MiB with a protected reserve
-  of 256 entries/1 MiB INSIDE those totals. Ordinary access/error events cannot
-  consume that reserve. Saturation must count losses separately by family/reason.
-- Apply a proposed aggregate protected-lane token budget of 100 events/second
-  with burst 256, using monotonic time and bounded state (not a per-client map).
-  Denied-request floods must not exhaust RAM or block request workers. Review
-  these defaults with the dispatcher tests before acceptance; they are not new
-  configuration keys or an operational promise in this checkpoint.
-- Keep audit/security exhaustion visible locally without recursive logging.
-  Priority is finite reserved capacity, not guaranteed retention, authentication
-  of an event, or permission to bypass configured filters/privacy.
+Only finite `EventData` and a timestamp enter a channel, without heap-backed
+strings. Queue payload storage is `128 * size_of::<Pending>()` per lane plus
+fixed channel bookkeeping. Each worker retains at most one in-flight event and
+encodes only the configured format, with the existing 8 KiB limit. Exactly three
+threads are created at initialization, not per event. Their stacks and the
+encoder's temporary allocation are additional bounded overhead, not queue bytes.
+
+Writers perform all typed-event writes and flushes. On sink/encoding error the
+lane stops, counts the failure and queued discards, and rejects subsequent
+events; it neither recursively logs nor retries indefinitely. Shutdown stops
+admission and waits at most 500 ms total. An OS-blocked write cannot be forcibly
+cancelled safely; its fixed worker may remain blocked until process exit.
+
+Authenticated `GET /_fluxheim/status` includes `operational_events`: independent
+accepted, filtered, rate_limited (including admission contention), queue_full,
+unavailable, encoded, written, sink_errors, discarded, pending and worker_alive
+fields, plus queue capacities. Null means no dispatcher is installed, not zero
+loss. Counters saturate and snapshots are approximate across concurrent updates;
+pending is accepted minus completed, including in-flight output. `written`
+means successful write and flush, not durable storage or remote acknowledgment.
+
+This remains best-effort logging, not a durable audit journal. Audit traffic can
+exhaust its own lane; a failed or blocked shared OS sink affects eventual delivery.
+Mutations are not transactional with audit persistence, and an explicit operator
+filter can disable auditing. Deployments requiring guaranteed audit persistence
+must not treat this as a compliance guarantee. Public security traffic does not
+consume the reserved audit admission/storage capacity.
+
+Commit 04 must migrate remaining synchronous legacy hot-path logging, qualify
+slow sinks and performance across platforms, and expand configurable queue and
+loss reporting within the Commit 01 ceilings. Any future capacity changes must
+retain independent security/audit reservations; the old shared protected bucket
+must not be reinstated. No new configuration keys are introduced by this fix.
 
 ## Verification And Remaining Gates
 
