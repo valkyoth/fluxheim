@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Linux live proof: a full stderr pipe cannot block typed-event producers."""
+"""Unix live proof: a full stderr pipe cannot block runtime log producers."""
 import argparse
 import http.client
 import json
@@ -12,6 +12,7 @@ import threading
 import time
 
 from smoke_operational_events import ROOT, port
+from observability_baseline import percentile, process_usage
 
 
 def request(listener, method, path, host="known.test", auth=False):
@@ -27,10 +28,11 @@ def request(listener, method, path, host="known.test", auth=False):
         connection.close()
 
 
-def run(binary, recover):
-    temporary = ROOT / "target" / "fluxheim-smoke-tmp"
+def run(binary, recover, legacy=False):
+    # Keep Unix socket paths below macOS's shorter sockaddr_un limit.
+    temporary = ROOT / "target" / "fh"
     temporary.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="events-pressure-", dir=temporary) as temp:
+    with tempfile.TemporaryDirectory(prefix="ev-", dir=temporary) as temp:
         directory = Path(temp).resolve()
         public, admin = port(), port()
         (directory / "public").mkdir()
@@ -67,6 +69,8 @@ require_loopback = true
 token_file = "{token}"
 snapshot_store = "{directory / 'snapshots'}"
 snapshot_integrity_key_file = "{key}"
+[admin.auth_throttle]
+enabled = {str(not legacy).lower()}
 [[vhosts]]
 name = "known"
 hosts = ["known.test"]
@@ -89,7 +93,7 @@ root = "{directory / 'public'}"
             os.set_blocking(writer, True)
             process = subprocess.Popen([str(binary), "--config", str(config)], cwd=directory,
                 stdout=subprocess.DEVNULL, stderr=writer,
-                env=dict(os.environ, RUST_LOG="off,fluxheim::event::security=warn,fluxheim::event::audit=info"))
+                env=dict(os.environ, RUST_LOG="info" if legacy else "off,fluxheim::event::security=warn,fluxheim::event::audit=info"))
             os.close(writer)
             writer = None
             deadline = time.monotonic() + 20
@@ -106,10 +110,30 @@ root = "{directory / 'public'}"
             for _ in range(1200):
                 status, _ = request(public, "GET", "/secret-canary", host="unknown.test")
                 assert status == 421, status
+            if legacy:
+                # Disable throttling only in this generated fixture to exercise
+                # the actual legacy auth logger without locking out status reads.
+                for _ in range(1200):
+                    assert request(admin, "POST", "/_fluxheim/snapshot")[0] == 401
             assert request(public, "GET", "/") == (200, b"healthy\n")
             status, body = request(admin, "GET", "/_fluxheim/status", auth=True)
             assert status == 200, (status, body)
             counters = json.loads(body)["operational_events"]
+            if legacy:
+                logs = json.loads(body)["legacy_logging"]
+                assert logs["accepted"] == logs["pending"] == logs["capacity"] == 128, logs
+                assert logs["queue_full"] > 0 and logs["written"] == 0, logs
+                assert logs["active_producers"] == 0, logs
+                timings = []
+                for _ in range(100):
+                    started = time.perf_counter()
+                    assert request(public, "GET", "/") == (200, b"healthy\n")
+                    timings.append((time.perf_counter() - started) * 1000)
+                print(json.dumps({
+                    "scenario": "legacy-blocked-recovery" if recover else "legacy-blocked-shutdown",
+                    "latency_ms": {f"p{n}": percentile(timings, n / 100) for n in (50, 95, 99)},
+                    "usage": process_usage(process.pid), "legacy_logging": logs,
+                }), flush=True)
             assert counters["security"]["rate_limited"] + counters["security"]["queue_full"] > 0, counters
             assert counters["security"]["encoded"] == 1, counters
             assert counters["security"]["written"] == 0, counters
@@ -161,13 +185,17 @@ root = "{directory / 'public'}"
                 drain.join(timeout=5)
                 assert not drain.is_alive()
                 events = [json.loads(line) for line in captured.splitlines() if line.startswith(b"{")]
-                audits = [event for event in events if event["data"]["kind"] == "audit"]
+                audits = [event for event in events if event.get("data", {}).get("kind") == "audit"]
                 assert len(audits) == 129, audits
                 assert sum(event["data"]["operation"] == "snapshot" for event in audits) == 2
                 assert audits[0]["data"]["operation"] == "snapshot"
                 assert audits[0]["data"]["outcome"] == "succeeded"
                 assert audits[0]["data"]["actor"] == "admin_token"
                 assert b"secret-canary" not in captured
+                if legacy:
+                    logs = [event for event in events if "target" in event]
+                    assert any("admin auth failed" in event["message"] for event in logs), logs
+                    assert sum(event["message"] == "native runtime started" for event in logs) == 1
         finally:
             if process is not None and process.poll() is None:
                 process.kill()
@@ -185,4 +213,6 @@ if __name__ == "__main__":
     binary = parser.parse_args().binary.resolve(strict=True)
     run(binary, recover=True)
     run(binary, recover=False)
-    print("operational backpressure smoke: flood/audit recovery and blocked-sink shutdown passed")
+    run(binary, recover=True, legacy=True)
+    run(binary, recover=False, legacy=True)
+    print("operational backpressure smoke: typed and legacy flood/audit recovery and blocked-sink shutdown passed")

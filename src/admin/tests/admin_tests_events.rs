@@ -61,8 +61,10 @@ fn operational_loss_status_requires_auth_and_distinguishes_uninitialized() {
     let denied = app.handle("GET", "/_fluxheim/status", None, &HeaderMap::new());
     assert_eq!(denied.status, StatusCode::UNAUTHORIZED);
     assert!(!String::from_utf8_lossy(&denied.body).contains("operational_events"));
+    assert!(!String::from_utf8_lossy(&denied.body).contains("legacy_logging"));
     let response = app.handle("GET", "/_fluxheim/status", None, &auth_headers());
     assert_eq!(response.status, StatusCode::OK);
     let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
     assert!(body.get("operational_events").unwrap().is_null());
+    assert!(body.get("legacy_logging").unwrap().is_null());
 }

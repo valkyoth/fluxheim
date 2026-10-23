@@ -1003,6 +1003,19 @@ attributes.
 
 ## Logging
 
+Runtime logs use bounded asynchronous output. Legacy records are limited to
+4 KiB messages, 1 KiB targets and 8 KiB encoded lines, with 128 outstanding
+records and eight concurrent capture calls. Full/unavailable queues and oversized
+records are dropped and counted in authenticated admin status `legacy_logging`.
+Text output escapes controls, quotes and backslashes; JSON retains the existing
+timestamp/level/target/message fields. Logging format/filter/file ownership stays
+startup-only. See the [dispatcher contract](../evidence/observability-04.md).
+Typed security/audit events have separate capacity. Admin mutations require audit
+admission, including INFO success outcomes; use
+`RUST_LOG=warn,fluxheim::event::audit=info` to keep audits enabled with quieter
+general logging. Neither queueing nor a successful write/flush guarantees durable
+audit persistence. Shutdown waits at most 500 ms for all logging workers.
+
 Runtime logs support the configuration below. Access-log settings are accepted,
 but the native completion hook is not wired yet; do not rely on these flags
 alone for an access audit trail. The 1.9 plan includes that missing integration.

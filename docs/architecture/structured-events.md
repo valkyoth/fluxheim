@@ -187,9 +187,9 @@ integrity protection and independent persistence are not implemented; do not
 treat this as military-grade or compliance auditing. Public security traffic
 cannot consume audit credits, but all workers may depend on the same OS sink.
 
-Commit 04 must migrate remaining synchronous legacy hot-path logging, qualify
-slow sinks and performance across platforms, and expand configurable queue and
-loss reporting within the Commit 01 ceilings. Any future capacity changes must
+Commit 04 [moves legacy `log` calls to a fourth bounded worker](../evidence/observability-04.md).
+It retains separate queues and adds authenticated `legacy_logging` status. Native
+qualification remains explicit; queue sizes remain fixed. Any future capacity changes must
 retain independent security/audit reservations; the old shared protected bucket
 must not be reinstated. No new configuration keys are introduced by this fix.
 

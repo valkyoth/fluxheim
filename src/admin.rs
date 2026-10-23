@@ -249,6 +249,7 @@ impl AdminApp {
         let body = json!({
             "status": "ok",
             "operational_events": fluxheim_observability::operational::status(),
+            "legacy_logging": crate::runtime::logging_status(),
             "snapshot_current": current,
             "snapshots": snapshots,
             "self_healing_enabled": self.self_healing_enabled,

@@ -1,22 +1,43 @@
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
+
+#[path = "runtime_log_dispatch.rs"]
+mod dispatch;
+#[path = "runtime_log_record.rs"]
+mod record;
+pub(crate) use dispatch::Status as LoggingStatus;
+static LEGACY: OnceLock<Arc<dispatch::Logger>> = OnceLock::new();
+
+pub(crate) fn status() -> Option<LoggingStatus> {
+    LEGACY.get().map(|logger| logger.status())
+}
+
+pub(super) struct ShutdownGuard;
+impl Drop for ShutdownGuard {
+    fn drop(&mut self) {
+        let start = Instant::now();
+        fluxheim_observability::operational::shutdown(Duration::ZERO);
+        if let Some(logger) = LEGACY.get() {
+            logger.shutdown(Duration::from_millis(500));
+        }
+        fluxheim_observability::operational::shutdown(
+            Duration::from_millis(500).saturating_sub(start.elapsed()),
+        );
+    }
+}
 
 pub(super) fn init_logging(
     config: &crate::config::Config,
-) -> Result<
-    fluxheim_observability::operational::ShutdownGuard,
-    Box<dyn std::error::Error + Send + Sync>,
-> {
-    let env = env_logger::Env::default().default_filter_or(config.logging.level.as_filter());
+) -> Result<ShutdownGuard, Box<dyn std::error::Error + Send + Sync>> {
+    if LEGACY.get().is_some() {
+        return Err(std::io::Error::other("runtime logging already initialized").into());
+    }
     let format = config.logging.format;
-    let mut builder = env_logger::Builder::from_env(env);
-    builder.format(move |buf, record| match format {
-        crate::config::LoggingFormat::Json => write_json_log_record(buf, record),
-        crate::config::LoggingFormat::Text => write_text_log_record(buf, record),
-    });
 
-    let writers: [Box<dyn Write + Send>; 3] = if config.logging.file.enabled {
+    let writers: [Box<dyn Write + Send>; 4] = if config.logging.file.enabled {
         let path = config.logging.file.path.as_deref().ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -24,18 +45,13 @@ pub(super) fn init_logging(
             )
         })?;
         let file = open_log_file(path, config.logging.file.append)?;
-        let writers = [
+        [
             Box::new(file.try_clone()?) as Box<dyn Write + Send>,
             Box::new(file.try_clone()?),
             Box::new(file.try_clone()?),
-        ];
-        builder.target(env_logger::Target::Pipe(Box::new(file)));
-        writers
+            Box::new(file),
+        ]
     } else {
-        builder.target(match config.logging.target {
-            crate::config::LoggingTarget::Stdout => env_logger::Target::Stdout,
-            crate::config::LoggingTarget::Stderr => env_logger::Target::Stderr,
-        });
         std::array::from_fn(|_| match config.logging.target {
             crate::config::LoggingTarget::Stdout => {
                 Box::new(std::io::stdout()) as Box<dyn Write + Send>
@@ -45,6 +61,19 @@ pub(super) fn init_logging(
             }
         })
     };
+    let [ordinary, security, audit, legacy_writer] = writers;
+    let legacy = Arc::new(dispatch::Logger::new(
+        env_logger::Builder::from_env(
+            env_logger::Env::default().default_filter_or(config.logging.level.as_filter()),
+        )
+        .build(),
+        format,
+        legacy_writer,
+    )?);
+    LEGACY
+        .set(legacy.clone())
+        .map_err(|_| std::io::Error::other("runtime logging already initialized"))?;
+    let guard = ShutdownGuard;
 
     // The separate matcher preserves env_logger target/level/regex semantics,
     // but only inspects a fixed message and never reaches its output target.
@@ -66,11 +95,18 @@ pub(super) fn init_logging(
         crate::config::LoggingFormat::Text => fluxheim_observability::event::EventFormat::Text,
     };
     fluxheim_observability::operational::install(
-        fluxheim_observability::operational::Dispatcher::new(format, filter, writers)?,
+        fluxheim_observability::operational::Dispatcher::new(
+            format,
+            filter,
+            [ordinary, security, audit],
+        )?,
     )
     .map_err(std::io::Error::other)?;
-    let _ = builder.try_init();
-    Ok(fluxheim_observability::operational::ShutdownGuard)
+    let max_level = legacy.max_level();
+    log::set_boxed_logger(Box::new(legacy))
+        .map_err(|_| std::io::Error::other("another process logger is already installed"))?;
+    log::set_max_level(max_level);
+    Ok(guard)
 }
 
 pub(super) fn open_log_file(path: &Path, append: bool) -> std::io::Result<File> {
@@ -194,36 +230,7 @@ fn rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {
     std::io::Error::from_raw_os_error(error.raw_os_error())
 }
 
-pub(super) fn write_text_log_record(
-    buf: &mut env_logger::fmt::Formatter,
-    record: &log::Record<'_>,
-) -> std::io::Result<()> {
-    writeln!(
-        buf,
-        "{} {} {}: {}",
-        buf.timestamp_millis(),
-        record.level(),
-        record.target(),
-        record.args()
-    )
-}
-
-pub(super) fn write_json_log_record(
-    buf: &mut env_logger::fmt::Formatter,
-    record: &log::Record<'_>,
-) -> std::io::Result<()> {
-    writeln!(
-        buf,
-        "{}",
-        log_record_json(
-            &buf.timestamp_millis().to_string(),
-            record.level().as_str(),
-            record.target(),
-            &record.args().to_string(),
-        )
-    )
-}
-
+#[cfg(test)]
 pub(super) fn log_record_json(timestamp: &str, level: &str, target: &str, message: &str) -> String {
     format!(
         "{{\"timestamp\":\"{}\",\"level\":\"{}\",\"target\":\"{}\",\"message\":\"{}\"}}",

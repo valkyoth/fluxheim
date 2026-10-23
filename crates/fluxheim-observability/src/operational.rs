@@ -34,6 +34,12 @@ pub fn status() -> Option<DispatcherStatus> {
     DISPATCHER.get().map(Dispatcher::status)
 }
 
+pub fn shutdown(timeout: std::time::Duration) {
+    if let Some(dispatcher) = DISPATCHER.get() {
+        dispatcher.shutdown(timeout);
+    }
+}
+
 /// No synchronous fallback: an uninitialized dispatcher must not block serving.
 pub fn emit(data: EventData) {
     #[cfg(feature = "test-support")]
@@ -69,8 +75,6 @@ pub fn audit(operation: AuditOperation, outcome: AuditOutcome, actor: ActorClass
 pub struct ShutdownGuard;
 impl Drop for ShutdownGuard {
     fn drop(&mut self) {
-        if let Some(dispatcher) = DISPATCHER.get() {
-            dispatcher.shutdown(std::time::Duration::from_millis(500));
-        }
+        shutdown(std::time::Duration::from_millis(500));
     }
 }

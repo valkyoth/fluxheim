@@ -44,6 +44,8 @@ mod runtime_readiness;
 #[cfg(feature = "proxy")]
 use runtime_logging::init_logging;
 #[cfg(feature = "proxy")]
+pub(crate) use runtime_logging::status as logging_status;
+#[cfg(feature = "proxy")]
 #[path = "runtime_shutdown.rs"]
 mod runtime_shutdown;
 #[cfg(feature = "proxy")]

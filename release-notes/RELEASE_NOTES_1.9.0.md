@@ -70,6 +70,23 @@ or implemented in this release.
 - Replace automatic ACME renewal's raw domain/error outcome messages with typed
   events. Other legacy logs retain their existing formats.
 
+## Commit 04 Bounded Logging
+
+- Route runtime/library `log` calls through a separate bounded worker. Slow or
+  closed sinks no longer make those calls wait on file/pipe I/O. Preserve typed
+  security/audit capacity and pre-mutation audit reservations.
+- Limit legacy records to 128 outstanding, eight concurrent captures, 4 KiB
+  message, 1 KiB target and 8 KiB encoded output. Oversized/full/unavailable
+  submissions are dropped and counted, not synchronously retried.
+- Preserve runtime JSON fields and startup filter precedence. Text output now
+  escapes controls, quotes and backslashes so one record remains one line.
+- Expose authenticated `legacy_logging` health/loss counters. Fail startup on
+  logger installation failure instead of silently using a preinstalled logger.
+  Drain all four workers with a shared 500 ms deadline; no durability guarantee.
+- Keep reload ownership startup-only, existing file trust checks and the `log`
+  facade. No new tracing bridge, duplicate completion producer, collector or
+  queue-sizing configuration is introduced. See [evidence and limits](../docs/evidence/observability-04.md).
+
 ## Implemented Maintenance
 
 Post-1.8.3 security maintenance:

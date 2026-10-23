@@ -1,0 +1,284 @@
+{
+  "schema_version": 1,
+  "description": "Commit 04 same-host release-build comparison; summaries of three 10000-request off/on pairs. Full per-request samples retained locally, not embedded.",
+  "before": {
+    "schema_version": 1,
+    "source_commit": "27c752a2341297ba10c055eaec234479f42714dc",
+    "worktree_dirty": false,
+    "binary_sha256": "970d0cf120d805e332913f499afed0345f6e8d1b08cb049e45cdea7a4d8973e1",
+    "binary_version": "fluxheim 1.9.0 (v1.8.2-24-g27c752a2-g27c752a2)",
+    "platform": "Linux-7.2.4-1-default-x86_64-with-glibc2.44",
+    "machine": "x86_64",
+    "cpu_count": 32,
+    "python": "3.13.16",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "results": [
+      {
+        "enabled": false,
+        "requests": 10000,
+        "concurrency": 8,
+        "elapsed_seconds": 3.5831726100004744,
+        "requests_per_second": 2790.8228512604855,
+        "latency_ms": {
+          "p50": 2.813295999658294,
+          "p95": 3.6583469991455786,
+          "p99": 4.179288000159431
+        },
+        "cpu_seconds": 1.69,
+        "rss_peak_bytes": 13221888,
+        "shutdown_seconds": 1.0145586560029187,
+        "received_exports": {
+          "metrics": 0,
+          "traces": 0
+        },
+        "runtime_records": 0,
+        "access_records": 0
+      },
+      {
+        "enabled": true,
+        "requests": 10000,
+        "concurrency": 8,
+        "elapsed_seconds": 3.32457922300091,
+        "requests_per_second": 3007.8994450833284,
+        "latency_ms": {
+          "p50": 2.600576000986621,
+          "p95": 3.376897999260109,
+          "p99": 3.7787339970236644
+        },
+        "cpu_seconds": 1.58,
+        "rss_peak_bytes": 14024704,
+        "shutdown_seconds": 1.0146880690008402,
+        "received_exports": {
+          "metrics": 7,
+          "traces": 0
+        },
+        "runtime_records": 8,
+        "access_records": 0
+      },
+      {
+        "enabled": true,
+        "requests": 10000,
+        "concurrency": 8,
+        "elapsed_seconds": 3.3379192680004053,
+        "requests_per_second": 2995.8783293133815,
+        "latency_ms": {
+          "p50": 2.625472996442113,
+          "p95": 3.3629410027060658,
+          "p99": 3.7422250024974346
+        },
+        "cpu_seconds": 1.59,
+        "rss_peak_bytes": 14016512,
+        "shutdown_seconds": 1.0145316939961049,
+        "received_exports": {
+          "metrics": 7,
+          "traces": 0
+        },
+        "runtime_records": 8,
+        "access_records": 0
+      },
+      {
+        "enabled": false,
+        "requests": 10000,
+        "concurrency": 8,
+        "elapsed_seconds": 3.320231427998806,
+        "requests_per_second": 3011.8382458741057,
+        "latency_ms": {
+          "p50": 2.6044330006698146,
+          "p95": 3.39336899924092,
+          "p99": 3.8147119994391687
+        },
+        "cpu_seconds": 1.57,
+        "rss_peak_bytes": 13221888,
+        "shutdown_seconds": 1.014610383004765,
+        "received_exports": {
+          "metrics": 0,
+          "traces": 0
+        },
+        "runtime_records": 0,
+        "access_records": 0
+      },
+      {
+        "enabled": false,
+        "requests": 10000,
+        "concurrency": 8,
+        "elapsed_seconds": 3.307814302002953,
+        "requests_per_second": 3023.144314342188,
+        "latency_ms": {
+          "p50": 2.5899559987010434,
+          "p95": 3.3999809966189787,
+          "p99": 3.8320239982567728
+        },
+        "cpu_seconds": 1.55,
+        "rss_peak_bytes": 13176832,
+        "shutdown_seconds": 1.0145884320008918,
+        "received_exports": {
+          "metrics": 0,
+          "traces": 0
+        },
+        "runtime_records": 0,
+        "access_records": 0
+      },
+      {
+        "enabled": true,
+        "requests": 10000,
+        "concurrency": 8,
+        "elapsed_seconds": 3.277818952999951,
+        "requests_per_second": 3050.809133569663,
+        "latency_ms": {
+          "p50": 2.5669329988886602,
+          "p95": 3.3469710033386946,
+          "p99": 3.7851960005355068
+        },
+        "cpu_seconds": 1.57,
+        "rss_peak_bytes": 14114816,
+        "shutdown_seconds": 1.0145698459964478,
+        "received_exports": {
+          "metrics": 7,
+          "traces": 0
+        },
+        "runtime_records": 8,
+        "access_records": 0
+      }
+    ]
+  },
+  "after": {
+    "schema_version": 1,
+    "source_commit": "27c752a2341297ba10c055eaec234479f42714dc",
+    "worktree_dirty": true,
+    "binary_sha256": "b6c1dae190f19af5b8eadbbf676eda805d976dbeb274a2cc01df92f3f5f245d3",
+    "binary_version": "fluxheim 1.9.0 (v1.8.2-24-g27c752a2-g27c752a2)",
+    "platform": "Linux-7.2.4-1-default-x86_64-with-glibc2.44",
+    "machine": "x86_64",
+    "cpu_count": 32,
+    "python": "3.13.16",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "results": [
+      {
+        "enabled": false,
+        "requests": 10000,
+        "concurrency": 8,
+        "elapsed_seconds": 3.3022520009981235,
+        "requests_per_second": 3028.236487396312,
+        "latency_ms": {
+          "p50": 2.583827001217287,
+          "p95": 3.3946640032809228,
+          "p99": 3.8459540010080673
+        },
+        "cpu_seconds": 1.54,
+        "rss_peak_bytes": 14118912,
+        "shutdown_seconds": 1.0145841839985223,
+        "received_exports": {
+          "metrics": 0,
+          "traces": 0
+        },
+        "runtime_records": 0,
+        "access_records": 0
+      },
+      {
+        "enabled": true,
+        "requests": 10000,
+        "concurrency": 8,
+        "elapsed_seconds": 3.278934729001776,
+        "requests_per_second": 3049.770985543331,
+        "latency_ms": {
+          "p50": 2.5640699968789704,
+          "p95": 3.348607999214437,
+          "p99": 3.798764999373816
+        },
+        "cpu_seconds": 1.57,
+        "rss_peak_bytes": 14729216,
+        "shutdown_seconds": 1.0146624699991662,
+        "received_exports": {
+          "metrics": 7,
+          "traces": 0
+        },
+        "runtime_records": 8,
+        "access_records": 0
+      },
+      {
+        "enabled": true,
+        "requests": 10000,
+        "concurrency": 8,
+        "elapsed_seconds": 3.283889892998559,
+        "requests_per_second": 3045.169090876211,
+        "latency_ms": {
+          "p50": 2.571654003986623,
+          "p95": 3.335253000841476,
+          "p99": 3.736808997928165
+        },
+        "cpu_seconds": 1.58,
+        "rss_peak_bytes": 15044608,
+        "shutdown_seconds": 1.0146294579972164,
+        "received_exports": {
+          "metrics": 7,
+          "traces": 0
+        },
+        "runtime_records": 8,
+        "access_records": 0
+      },
+      {
+        "enabled": false,
+        "requests": 10000,
+        "concurrency": 8,
+        "elapsed_seconds": 3.303419109004608,
+        "requests_per_second": 3027.1666022460035,
+        "latency_ms": {
+          "p50": 2.5791679945541546,
+          "p95": 3.376369997567963,
+          "p99": 3.7670350066036917
+        },
+        "cpu_seconds": 1.56,
+        "rss_peak_bytes": 14336000,
+        "shutdown_seconds": 1.0144960680045187,
+        "received_exports": {
+          "metrics": 0,
+          "traces": 0
+        },
+        "runtime_records": 0,
+        "access_records": 0
+      },
+      {
+        "enabled": false,
+        "requests": 10000,
+        "concurrency": 8,
+        "elapsed_seconds": 3.3350823809960275,
+        "requests_per_second": 2998.426682645688,
+        "latency_ms": {
+          "p50": 2.6139539986616,
+          "p95": 3.413720005482901,
+          "p99": 3.873456000292208
+        },
+        "cpu_seconds": 1.58,
+        "rss_peak_bytes": 13881344,
+        "shutdown_seconds": 1.014486959997157,
+        "received_exports": {
+          "metrics": 0,
+          "traces": 0
+        },
+        "runtime_records": 0,
+        "access_records": 0
+      },
+      {
+        "enabled": true,
+        "requests": 10000,
+        "concurrency": 8,
+        "elapsed_seconds": 3.3211204430044745,
+        "requests_per_second": 3011.0320211553158,
+        "latency_ms": {
+          "p50": 2.602982996904757,
+          "p95": 3.3745159962563775,
+          "p99": 3.821457998128608
+        },
+        "cpu_seconds": 1.6,
+        "rss_peak_bytes": 15060992,
+        "shutdown_seconds": 1.0147428620039136,
+        "received_exports": {
+          "metrics": 7,
+          "traces": 0
+        },
+        "runtime_records": 8,
+        "access_records": 0
+      }
+    ]
+  }
+}

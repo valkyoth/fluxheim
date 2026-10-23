@@ -2,10 +2,12 @@
 
 ## Current Status (2026-10-23)
 
-Legacy runtime messages use `log` with synchronous `env_logger` output. Their
+Legacy runtime messages use `log` with bounded asynchronous output. Their
 JSON records have timestamp, level, target and message strings; stderr is the
 default. stdout and an optional protected file are supported. `RUST_LOG`
-overrides the configured startup filter.
+overrides the configured startup filter. env_logger supplies matching only; it
+does not write runtime records. The [Commit 04 contract](../evidence/observability-04.md)
+defines count/byte limits, overflow, shutdown and native qualification gaps.
 
 Typed operational events now use independent bounded ordinary/security/audit
 queues with admission before encoding and worker-only sink I/O. Their envelope
@@ -14,8 +16,9 @@ worker health. See the [structured event contract](structured-events.md) and
 [security remediation evidence](../evidence/observability-03-security.md).
 Admin mutations now [reserve audit admission before execution](../evidence/observability-03-audit-admission.md)
 and fail closed when unavailable; disabled audit outcomes also block mutations.
-This is not a durable audit journal. The remaining synchronous legacy paths,
-full dispatcher qualification and rotation/reopen lifecycle are still future work.
+This is not a durable audit journal. Runtime `log` calls now use a fourth,
+independent worker. Rotation/reopen lifecycle remains Commit 05 work; native
+cross-platform and performance acceptance must not be inferred from Linux tests.
 
 Access-log configuration and helper functions exist, but the former Pingora
 completion hook is not wired into the current native request lifecycle.

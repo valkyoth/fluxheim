@@ -49,6 +49,7 @@ ingress = [
 ]
 pingora-compat = []
 proxy = [
+    "dep:jiff",
     "ingress",
     "dep:async-trait",
     "dep:base64-ng",
@@ -283,6 +284,7 @@ getrandom = "0.4.3"
 httpdate = { version = "1.0.3", optional = true }
 http = { version = "1.5.0", optional = true }
 log = "0.4.34"
+jiff = { version = "0.2.38", default-features = false, features = ["std"], optional = true }
 mime_guess = { version = "2.0.5", optional = true }
 moka = { version = "0.12.16", default-features = false, features = ["sync"], optional = true }
 openssl = { version = "0.10.81", optional = true }

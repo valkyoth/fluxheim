@@ -316,6 +316,13 @@ unbounded high-frequency event stream or raw upstream errors.
 
 Suggested subject: `Observability commit 04: bound asynchronous log dispatch`.
 
+Implementation/evidence: [bounded legacy logging](../evidence/observability-04.md).
+The earlier two-worker proposal is superseded: Commit 03 already requires three
+isolated typed lanes; Commit 04 adds one separately bounded legacy worker rather
+than letting arbitrary library messages consume audit/security capacity. Four
+fixed workers and 128 records per lane remain far below the original byte/count
+ceilings; runtime configuration for queue sizing is not introduced here.
+
 Operator value: slow logging cannot stall serving indefinitely or exhaust RAM.
 
 Deliver:
@@ -700,8 +707,8 @@ collector behavior is not the new required-collector acceptance contract.
 | Preparation - 1.8.3 reconciliation and this plan | Prepared; review pending | Not an observability implementation acceptance |
 | 01 - Inventory, schemas, budgets | Accepted for progression | Base implementation 74212e08; dependency remediation 4cc86fe1; plan a04459ae; test-only CI follow-up 29484229. User supplied clean pentest, reported GitHub green and authorized 02. Later queue/performance budgets still need implementation qualification. |
 | 02 - Event model/redaction | Accepted for progression | 74dbb160; user supplied clean pentest, reported GitHub green and authorized 03. Producer provenance is a mandatory integration gate. |
-| 03 - Diagnostics/audit | Implemented; review pending | [Owner coverage, local tests and live logger proof](../evidence/observability-03.md). Awaiting user pentest and exact-SHA GitHub/CodeQL; no permission to start 04. |
-| 04 - Bounded dispatcher | Not started as a checkpoint | Minimal typed-event dispatch brought forward to fix Commit 03 findings; remaining legacy migration and qualification pending. |
+| 03 - Diagnostics/audit | Accepted for progression | 27c752a2341297ba10c055eaec234479f42714dc; user accepted the documented non-durable audit limitation, reported GitHub green and authorized 04. |
+| 04 - Bounded dispatcher | Implemented; review pending | [Legacy dispatch, bounds and qualification](../evidence/observability-04.md). Retest, exact-SHA CI and native qualification remain gates; no authorization for 05. |
 | 05 - File lifecycle | Not started | Pending |
 | 06 - Correlation | Not started | Pending |
 | 07 - Metrics | Not started | Pending |
@@ -712,5 +719,5 @@ collector behavior is not the new required-collector acceptance contract.
 | 12 - Observability docs / candidate qualification | Not started | Pending |
 | 13 - Documentation / final release acceptance | Not started | Pending |
 
-The current authorized implementation task is Commit 03. Stop for pentest,
-green GitHub checks and explicit approval before starting Commit 04.
+The current authorized implementation task is Commit 04. Stop for pentest,
+green GitHub checks and explicit approval before starting Commit 05.

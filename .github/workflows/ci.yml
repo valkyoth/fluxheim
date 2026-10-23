@@ -320,6 +320,13 @@ jobs:
       - name: Run macOS native parity smoke
         run: sh scripts/smoke_macos_native_parity.sh
 
+      - name: Test macOS bounded logging and real pipe backpressure
+        run: |
+          cargo test --locked -p fluxheim --lib --no-default-features --features profile-observability runtime::runtime_logging
+          cargo build --locked --no-default-features --features profile-observability --bin fluxheim
+          python3 scripts/smoke_operational_events.py --binary target/debug/fluxheim
+          python3 scripts/smoke_operational_backpressure.py --binary target/debug/fluxheim
+
       - name: Build all macOS portable archives
         run: |
           version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | sed -n '1p')"
