@@ -566,7 +566,7 @@ The release notes should end with concrete evidence, not placeholders:
 Pull one published image and confirm the packaged default site starts:
 
 ```bash
-podman run --rm -d --name fluxheim-release-smoke -p 127.0.0.1:18080:8080 "ghcr.io/valkyoth/fluxheim:${TAG}-wolfi"
+podman run --rm -d --ulimit core=0:0 --name fluxheim-release-smoke -p 127.0.0.1:18080:8080 "ghcr.io/valkyoth/fluxheim:${TAG}-wolfi"
 curl -I http://127.0.0.1:18080/
 podman logs fluxheim-release-smoke
 podman stop fluxheim-release-smoke

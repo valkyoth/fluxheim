@@ -43,9 +43,13 @@ podman build \
     -f "$CONTAINERFILE" \
     .
 
-podman run --rm "$IMAGE" --check-config --config /etc/fluxheim/fluxheim.toml >/dev/null
+podman run --rm --ulimit core=0:0 --entrypoint /bin/sh "$IMAGE" -ec '
+    test "$(ulimit -S -c)" = 0
+    test "$(ulimit -H -c)" = 0
+    exec /usr/local/bin/fluxheim --check-config --config /etc/fluxheim/fluxheim.toml
+' >/dev/null
 
-USER_LINE="$(podman run --rm --entrypoint /bin/sh "$IMAGE" -c id)"
+USER_LINE="$(podman run --rm --ulimit core=0:0 --entrypoint /bin/sh "$IMAGE" -c id)"
 case "$USER_LINE" in
     *"uid=$EXPECTED_UID"* )
         ;;

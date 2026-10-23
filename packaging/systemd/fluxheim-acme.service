@@ -5,6 +5,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+LimitCORE=0
 Type=oneshot
 User=fluxheim
 Group=fluxheim

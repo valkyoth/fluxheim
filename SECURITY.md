@@ -76,6 +76,46 @@ MAC key is generated at startup and intentionally remains resident for the
 process lifetime, so high-assurance deployments should also disable core dumps,
 avoid swap, and use service isolation that prevents `/proc/<pid>/mem` access.
 
+### Fatal Termination And Memory Dumps
+
+Fatal invariant failures and the fatal-output watchdog can abort the process.
+An OS memory dump may contain secrets even though Fluxheim's finite fatal reason
+records do not. `logging.crash_file` contains those reason records, not a memory
+dump; disabling that option does not disable OS crash collection.
+
+The packaged server and ACME systemd units set `LimitCORE=0` (both limits).
+Shipped Compose examples set `ulimits.core.soft` and `hard` to zero; direct
+Podman/Docker deployments must pass `--ulimit core=0:0`. These are launcher
+settings, not properties baked into the image or enforced by the Rust binary.
+Recreate containers or restart services after applying them. Existing/custom
+deployments do not acquire the settings merely by pulling a new image.
+
+On Linux, `RLIMIT_CORE=0` does **not** prevent a kernel-piped crash collector from
+receiving process memory. Inspect `sysctl kernel.core_pattern` on the host,
+including container hosts, and configure the actual collector not to retain or
+process Fluxheim memory dumps. See the [Linux core documentation](https://man7.org/linux/man-pages/man5/core.5.html).
+
+For hosts using systemd-coredump, an administrator may install a host-wide
+`/etc/systemd/coredump.conf.d/90-no-memory-dumps.conf` containing:
+
+```ini
+[Coredump]
+Storage=none
+ProcessSizeMax=0
+```
+
+Both settings are needed: `Storage=none` alone can still allow temporary disk
+storage for processing. This affects **all applications on the host**, preserves
+a crash log entry, and does not remove previously collected dumps. Apply/reload
+according to the installed systemd version and check for overriding drop-ins.
+See [systemd's collector policy](https://www.freedesktop.org/software/systemd/man/latest/coredump.conf.html).
+Fluxheim packaging intentionally does not change host-wide crash policy.
+Other collectors, Windows Error Reporting/LocalDumps and macOS diagnostic tools
+need their own operator-managed policy; Linux limits do not configure them.
+
+Effective-limit tests prove the launcher limits, not absence of host collection,
+privileged memory inspection, swap contents or previously retained dumps.
+
 ```bash
 fluxheim --config path/to/fluxheim.toml --check-tls-storage
 ```

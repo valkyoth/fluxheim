@@ -5,6 +5,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+LimitCORE=0
 Type=notify
 NotifyAccess=main
 User=fluxheim

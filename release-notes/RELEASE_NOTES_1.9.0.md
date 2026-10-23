@@ -6,6 +6,12 @@ archives exist yet.
 
 ## Planned Outcome
 
+Packaged systemd services and container deployment examples now disable core
+files with zero soft/hard limits. Existing deployments must restart services or
+recreate containers with the updated settings; pulling an image alone does not
+apply them. Host crash collectors require separate operator configuration; see
+[memory-dump security guidance](../SECURITY.md#fatal-termination-and-memory-dumps).
+
 The [observability commit plan](../docs/roadmap/observability-commit-plan.md) defines
 logging, metrics and operational visibility as this release's scope:
 actionable diagnostics, bounded logging/export, request correlation,

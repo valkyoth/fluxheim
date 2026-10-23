@@ -19,6 +19,7 @@ The packaged unit is intentionally conservative:
   architecture filtering, and a conservative system-service/network syscall
   allow-list;
 - limits address families to IPv4, IPv6, and Unix domain sockets;
+- sets both core-file limits to zero for the server and ACME companion;
 - stops with `SIGTERM` and lets Fluxheim shut down gracefully.
 
 These systemd controls are the supported `1.0` host sandbox. They are
@@ -28,6 +29,34 @@ The packaged native config listens on `0.0.0.0:80` by default. HTTPS uses
 `0.0.0.0:443` once `server.tls_listen` and certificate paths are enabled. This
 matches normal bare-metal web server expectations while keeping the process
 unprivileged.
+
+## Core Dump Policy
+
+Both packaged services set `LimitCORE=0`. When upgrading a custom unit, apply
+that setting to `[Service]` in both `fluxheim.service` and
+`fluxheim-acme.service`, reload the service manager and restart the running
+server. The next ACME invocation inherits its updated limit.
+
+Verify the effective settings and the running server's limits:
+
+```bash
+systemctl show fluxheim.service fluxheim-acme.service -p LimitCORE -p LimitCORESoft
+pid="$(systemctl show fluxheim.service -p MainPID --value)"
+sudo prlimit --pid "$pid" --core
+```
+
+Both soft and hard limits must be `0`. Inspect overrides with `systemctl cat`
+if they differ. For a non-production regression check using transient user
+services and the shipped unit values:
+
+```bash
+FLUXHEIM_TEST_SYSTEMD=1 python3 scripts/test_core_dump_policy.py
+```
+
+This test requires a running user systemd manager and the repository's Python
+test dependencies. It does not start the installed server or alter host policy.
+Zero limits do not stop all host crash collectors. Before handling secrets,
+apply the separate [host crash-collection policy](../../SECURITY.md#fatal-termination-and-memory-dumps).
 
 ## Manual Binary Install
 

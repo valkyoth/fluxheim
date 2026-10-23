@@ -617,7 +617,7 @@ reload socket. It is useful for manual checks, but scheduled renewals are often
 cleaner as a one-shot companion container:
 
 ```bash
-podman run --rm \
+podman run --rm --ulimit core=0:0 \
   --name fluxheim_acme_due \
   --network gateway_net \
   --entrypoint /usr/local/bin/fluxheim-acme \
@@ -638,7 +638,7 @@ podman run --rm \
 Use `status` before `renew` when testing a new mount layout:
 
 ```bash
-podman run --rm \
+podman run --rm --ulimit core=0:0 \
   --network gateway_net \
   --entrypoint /usr/local/bin/fluxheim-acme \
   -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
@@ -652,6 +652,10 @@ podman run --rm \
   status
 ```
 
+Both the gateway and companion handle secrets. Keep core-file limits at zero
+and apply the separate [host crash-collection policy](../../SECURITY.md#fatal-termination-and-memory-dumps);
+container limits alone do not disable a host's piped collector.
+
 For Compose, keep `fluxheim` and `fluxheim-acme` on the same network and use
 the same bind mounts. The companion service should override only the entrypoint
 and command:
@@ -659,6 +663,10 @@ and command:
 ```yaml
 services:
   fluxheim:
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
     image: ghcr.io/valkyoth/fluxheim:latest-wolfi
     ports:
       - "80:8080"
@@ -672,6 +680,10 @@ services:
       - /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro
 
   fluxheim-acme:
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
     image: ghcr.io/valkyoth/fluxheim:latest-wolfi
     entrypoint: ["/usr/local/bin/fluxheim-acme"]
     command: ["--config", "/etc/fluxheim/fluxheim.toml", "renew"]

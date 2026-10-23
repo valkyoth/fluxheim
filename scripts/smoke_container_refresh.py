@@ -31,6 +31,12 @@ def engine_command(engine, *command, check=True):
     return result.stdout.strip()
 
 
+def check_core_limit(output):
+    match = re.search(r"^Max core file size\s+(\S+)\s+(\S+)\s+bytes\s*$", output, re.M)
+    if not match or match.groups() != ("0", "0"):
+        raise ValueError("running Fluxheim must have zero soft and hard core limits")
+
+
 def check_php(output, modules, required, variant):
     if re.search(r"PHP (Startup|Warning)|Unable to load dynamic library|undefined symbol", modules, re.I):
         raise ValueError("PHP extension startup failure")
@@ -55,13 +61,13 @@ def smoke(args):
     def run(*command):
         return engine_command(args.engine, *command)
 
-    version = run("run", "--rm", "--network", "none", args.image, "--version")
+    version = run("run", "--rm", "--ulimit", "core=0:0", "--network", "none", args.image, "--version")
     if not re.search(rf"^fluxheim {re.escape(args.version.removeprefix('v'))}(?:\s|$)", version, re.M):
         raise ValueError(f"wrong application version: {version}")
     print(version, flush=True)
     if args.profile == "php":
-        php = run("run", "--rm", "--network", "none", "--entrypoint", "/usr/bin/php-fpm", args.image, "-v")
-        modules = run("run", "--rm", "--network", "none", "--entrypoint", "/usr/bin/php-fpm", args.image, "-m")
+        php = run("run", "--rm", "--ulimit", "core=0:0", "--network", "none", "--entrypoint", "/usr/bin/php-fpm", args.image, "-v")
+        modules = run("run", "--rm", "--ulimit", "core=0:0", "--network", "none", "--entrypoint", "/usr/bin/php-fpm", args.image, "-m")
         check_php(php, modules, release_text("php-modules"), args.variant)
         print(php, flush=True)
 
@@ -112,7 +118,7 @@ def smoke(args):
             (root / "smoke.toml").write_text(config)
             for file in root.iterdir():
                 file.chmod(0o644)
-            run("run", "-d", "--name", name, "--network", "host",
+            run("run", "-d", "--ulimit", "core=0:0", "--name", name, "--network", "host",
                 "-v", f"{root}:/srv/fluxheim:ro,Z", args.image,
                 "--config", "/srv/fluxheim/smoke.toml")
             opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -131,6 +137,7 @@ def smoke(args):
                 time.sleep(1)
             else:
                 raise RuntimeError("live HTTP smoke failed")
+            check_core_limit(run("exec", name, "cat", "/proc/1/limits"))
             if args.profile == "cache":
                 with opener.open(request, timeout=2) as response:
                     if response.read() != marker.encode() or response.headers.get("X-Cache-Status") != "HIT":

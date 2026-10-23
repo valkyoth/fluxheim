@@ -99,6 +99,7 @@ a guide explicitly says otherwise.
 - [Observability Commit 04 bounded logging dispatcher](evidence/observability-04.md)
 - [Observability Commit 04 fatal-abort remediation](evidence/observability-04-fatal.md)
 - [Observability Commit 04 watchdog and critical-exit retest](evidence/observability-04-watchdog.md)
+- [Observability Commit 04 core dump deployment policy](evidence/observability-04-core-limits.md)
 - [Observability Commit 04 Linux performance samples](evidence/observability-04-linux.json)
 - [1.8.3 qualification](evidence/maintenance-1.8.3-qualification.md)
 - [Windows filesystem audit](evidence/dependency-audits/windows-filesystem-security.md)

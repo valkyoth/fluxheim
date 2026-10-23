@@ -38,6 +38,10 @@ already completed, and the common termination helper.
 
 ## Assurance Boundary
 
+The subsequent [core dump deployment fix](observability-04-core-limits.md)
+adds zero launcher limits and documents the separate host collector policy.
+Watchdog aborts must not be treated as secret-free OS memory dumps.
+
 Fail-stop wins over diagnostic delivery. The watchdog can terminate before a
 blocked record reaches storage; neither crash reports nor ordinary audit records
 are durable journaling. Its 250 ms grace period starts on watchdog wake-up and

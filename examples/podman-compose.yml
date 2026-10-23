@@ -6,6 +6,10 @@ networks:
 
 services:
   fluxheim:
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
     image: ghcr.io/valkyoth/fluxheim:latest-wolfi
     container_name: fluxheim_gateway
     restart: always

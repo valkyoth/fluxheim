@@ -449,7 +449,7 @@ podman build \
 Validate the bundled example config:
 
 ```bash
-podman run --rm fluxheim:dev --check-config --config /etc/fluxheim/fluxheim.toml
+podman run --rm --ulimit core=0:0 fluxheim:dev --check-config --config /etc/fluxheim/fluxheim.toml
 ```
 
 Run the complete local smoke:
@@ -770,7 +770,7 @@ first and then `/etc/fluxheim/conf.d/*.toml`.
 Podman run example:
 
 ```bash
-podman run --rm \
+podman run --rm --ulimit core=0:0 \
   --name fluxheim \
   --network gateway_net \
   --stop-signal SIGTERM \
@@ -787,6 +787,19 @@ podman run --rm \
   ghcr.io/valkyoth/fluxheim:latest-wolfi
 ```
 
+Core-file limits are runtime settings: use `--ulimit core=0:0` for direct
+Podman/Docker runs or the `ulimits` block below for Compose, including one-shot
+ACME commands. Recreate existing containers after changing Compose settings.
+The image alone cannot enforce these limits. Verify a running container with:
+
+```bash
+podman exec fluxheim_gateway cat /proc/1/limits
+```
+
+The `Max core file size` row must have soft and hard limits of `0`.
+Linux host crash collectors may still receive memory despite this limit;
+also follow the [host crash-collection policy](../../SECURITY.md#fatal-termination-and-memory-dumps).
+
 Compose example:
 
 ```yaml
@@ -798,6 +811,10 @@ networks:
 
 services:
   fluxheim:
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
     image: ghcr.io/valkyoth/fluxheim:latest-wolfi
     container_name: fluxheim_gateway
     restart: always
@@ -893,7 +910,7 @@ Validate the mounted config directly with `podman run --rm`. This avoids
 compose-provider differences around one-shot commands:
 
 ```bash
-podman run --rm \
+podman run --rm --ulimit core=0:0 \
   --name fluxheim_validate \
   --network gateway_net \
   -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
@@ -915,7 +932,7 @@ you kept `server.tls_listen` enabled, also publish `443:8443`; otherwise publish
 only `80:8080` for the first issuance step:
 
 ```bash
-podman run -d \
+podman run -d --ulimit core=0:0 \
   --name fluxheim_gateway \
   --network gateway_net \
   --restart always \
@@ -938,7 +955,7 @@ Run due-only renewal from a second container. Missing certificate files are due
 targets, so first issuance does not require `--force-renew`:
 
 ```bash
-podman run --rm \
+podman run --rm --ulimit core=0:0 \
   --name fluxheim_acme_due \
   --network gateway_net \
   --entrypoint /usr/local/bin/fluxheim-acme \
@@ -1101,7 +1118,7 @@ over configured service destinations for Podman remote connections.
 Run rootless on an unprivileged port:
 
 ```bash
-podman run --rm \
+podman run --rm --ulimit core=0:0 \
   --name fluxheim \
   -p 8080:8080 \
   -v ./examples/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
@@ -1112,7 +1129,7 @@ For TLS, mount certificate files read-only and keep private keys owner-only on
 the host. Use the storage check before starting:
 
 ```bash
-podman run --rm \
+podman run --rm --ulimit core=0:0 \
   -v ./fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
   -v ./tls:/etc/fluxheim/tls:ro,Z \
   fluxheim:dev \
