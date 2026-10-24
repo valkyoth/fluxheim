@@ -2,16 +2,37 @@
 """Live proof of protected ordinary-log rotation, fallback and status counters."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 import errno
 import http.client
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import time
 
 from smoke_operational_events import ROOT, port
+
+
+def protect_directory(root):
+    if sys.platform == "win32":
+        subprocess.run([
+            "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
+            "-File", str(ROOT / "scripts" / "protect_windows_smoke_directory.ps1"),
+            "-Directory", str(root),
+        ], check=True, timeout=30)
+
+
+@contextmanager
+def private_fixture(temporary):
+    with tempfile.TemporaryDirectory(prefix="rotate-", dir=temporary) as temp:
+        root = Path(temp).resolve()
+        # A private directory alone is insufficient if its ACL does not inherit
+        # to children: config/secret files can receive a broader default DACL.
+        protect_directory(root)
+        yield root
 
 
 def request(port_, path, token=None, method="GET"):
@@ -56,8 +77,7 @@ def run(binary, quota_dir=None):
         assert 0 < stats.f_blocks * stats.f_frsize <= 8 * 1024 * 1024
         temporary = quota_dir
     temporary.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="rotate-", dir=temporary) as temp:
-        root = Path(temp).resolve()
+    with private_fixture(temporary) as root:
         public, admin, origin = port(), port(), port()
         log, old = root / "events.log", root / "events.old"
         fatal = root / "fatal.log"

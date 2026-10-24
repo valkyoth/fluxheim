@@ -76,6 +76,25 @@ startup smokes passed, as did the real container ENOSPC scenario. Privacy-profil
 tests passed 194 cases; no assertions were relaxed to accommodate the fix.
 Native Windows execution remains a required CI check, not a local pass claim.
 
+## Native Windows CI Follow-Up
+
+The [f39a26ad Windows run](https://github.com/valkyoth/fluxheim/actions/runs/40090056662/job/120860730363)
+passed the full workspace tests, including all three new confidentiality tests
+with Guests/Everyone ACLs, file lifecycle and sharing-conflict tests. Native
+runtime parity also passed. The new live rotation smoke then failed before
+server startup: its generated config was rejected for an untrusted filesystem
+component. This is not a failure of the confidentiality assertions.
+
+The Python smoke now protects its empty Windows fixture directory with an
+explicit inheritable DACL before creating config, token or key files. Only the
+current user, SYSTEM and Administrators receive full control. The helper reads
+the ACL back and checks protection, identities, rights and inheritance; a setup
+failure prevents server launch. It does not modify production ACL policy or
+relax any permission assertion. The fixture regression suite checks argument
+handling, setup ordering, error propagation and cleanup. On Windows it also
+executes the ACL helper; the live smoke remains required before accepting this
+follow-up. No Rust source, manifest or lockfile changes accompany this fix.
+
 ## Repeatable Commands
 
 ```sh

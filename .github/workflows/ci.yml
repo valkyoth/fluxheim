@@ -31,6 +31,7 @@ jobs:
       - run: python3 scripts/test_development_scope.py
       - run: python3 scripts/test_documentation_layout.py
       - run: python3 scripts/test_observability_baseline.py
+      - run: python3 scripts/test_log_rotation_fixture.py
       - run: bash -n scripts/promote_container_refresh.sh
 
   checks:
@@ -393,7 +394,9 @@ jobs:
         run: scripts/smoke_windows_native.ps1
 
       - name: Test Windows protected log rotation
-        run: python scripts/smoke_log_file_rotation.py --binary target/debug/fluxheim.exe
+        run: |
+          python scripts/test_log_rotation_fixture.py
+          python scripts/smoke_log_file_rotation.py --binary target/debug/fluxheim.exe
 
       - name: Build and test Windows portable archives
         shell: pwsh
