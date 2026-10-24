@@ -76,7 +76,9 @@ can still go to an unlinked/open old file and become inaccessible. Windows
 can keep deletion pending until the last handle closes, preventing reopen.
 In that case Fluxheim retains its trusted handle and increments `reopen_errors`;
 restart to release the pending deletion and recreate the file. Use rename, not
-delete, for Windows rotation. Truncation of the same
+delete, for Windows rotation. If removal unlinks the name immediately and a
+replacement can be safely opened, recreation proceeds normally. Do not assume
+that every Windows removal leaves a pending delete. Truncation of the same
 file resumes at its new EOF, without an offset-sized hole. Copy-and-truncate has
 an unavoidable race with the external copier and is not a lossless policy.
 Prefer rename and retain the old file until the reopen succeeds.

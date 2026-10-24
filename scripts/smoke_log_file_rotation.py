@@ -16,6 +16,36 @@ import time
 from smoke_operational_events import ROOT, port
 
 
+def deletion_result(before, after):
+    assert not after["failed"] and after["write_errors"] == before["write_errors"], after
+    reopens = after["reopens"] - before["reopens"]
+    errors = after["reopen_errors"] - before["reopen_errors"]
+    if (reopens, errors) == (0, 0):
+        return None  # The worker has not completed its reopen check yet.
+    assert (reopens, errors) in ((1, 0), (0, 1)), (before, after)
+    return "recreated" if reopens else "pending"
+
+
+def fixture_parent(quota):
+    if quota:
+        # No caller-supplied filesystem path: destructive filling is confined to
+        # the documented disposable container mount, never a host-selected root.
+        mount = Path("/quota")
+        if sys.platform != "linux" or mount.is_symlink() or not mount.is_mount():
+            raise ValueError("quota smoke requires a disposable Linux /quota mount")
+        stats = os.statvfs(mount)
+        if not 0 < stats.f_blocks * stats.f_frsize <= 8 * 1024 * 1024:
+            raise ValueError("quota mount must be at most 8 MiB")
+        if any(mount.iterdir()):
+            raise ValueError("quota mount must be empty")
+        return mount
+    if os.name == "nt":
+        return None  # tempfile selects the user-local root, outside the checkout.
+    temporary = ROOT / "target" / "fh"
+    temporary.mkdir(parents=True, exist_ok=True)
+    return temporary
+
+
 def protect_directory(root):
     if sys.platform == "win32":
         subprocess.run([
@@ -65,19 +95,8 @@ def records(path):
     return [json.loads(line) for line in content.splitlines()]
 
 
-def run(binary, quota_dir=None):
-    # Windows checkout roots can have intentionally untrusted inherited ACLs.
-    # Match the native parity smoke by using the user's local temporary root.
-    temporary = Path(tempfile.gettempdir()) if os.name == "nt" else ROOT / "target" / "fh"
-    if quota_dir is not None:
-        # Never fill an ordinary host filesystem. This mode is for an explicit,
-        # disposable, tiny mount (for example a container's 1 MiB tmpfs).
-        assert os.name == "posix" and quota_dir.is_mount()
-        stats = os.statvfs(quota_dir)
-        assert 0 < stats.f_blocks * stats.f_frsize <= 8 * 1024 * 1024
-        temporary = quota_dir
-    temporary.mkdir(parents=True, exist_ok=True)
-    with private_fixture(temporary) as root:
+def run(binary, quota=False):
+    with private_fixture(fixture_parent(quota)) as root:
         public, admin, origin = port(), port(), port()
         log, old = root / "events.log", root / "events.old"
         fatal = root / "fatal.log"
@@ -121,10 +140,13 @@ snapshot_integrity_key_file = "{key.as_posix()}"
                 env=dict(os.environ, RUST_LOG="off,fluxheim::event::error=error,fluxheim::event::audit=info"))
             pending_delete = False
             try:
-                def status():
+                def status_document():
                     code, body = request(admin, "/_fluxheim/status", token.read_text())
                     assert code == 200, (code, body)
-                    return json.loads(body)["legacy_logging"]["file_sink"]
+                    return json.loads(body)
+
+                def status():
+                    return status_document()["legacy_logging"]["file_sink"]
 
                 def ready():
                     assert process.poll() is None, (root / "stderr.log").read_text()
@@ -191,8 +213,23 @@ snapshot_integrity_key_file = "{key.as_posix()}"
                 wait_for(lambda: any(record["data"].get("operation") == "reload" for record in records(log)))
                 assert status()["reopens"] == reopens + 2
                 assert "secret-canary" not in log.read_text()
-                if os.name == "posix" and quota_dir is None:
-                    wait_for(lambda: len(records(log)) == 2)
+                wait_for(lambda: len(records(log)) == 2)
+                before = status()
+                written = status_document()["operational_events"]["ordinary"]["written"]
+                log.unlink()
+                time.sleep(1.1)
+                emit()
+                wait_for(lambda: deletion_result(before, status()))
+                outcome = deletion_result(before, status())
+                wait_for(lambda: status_document()["operational_events"]["ordinary"]["written"] > written)
+                if outcome == "recreated":
+                    wait_for(lambda: len(records(log)) == 1)
+                    assert records(log)[0]["data"]["reason"] == "connection_refused"
+                else:
+                    assert os.name == "nt", (before, status())
+                    pending_delete = True
+                print(f"log deletion: {outcome}; new record written without sink failure")
+                if os.name == "posix" and not quota:
                     private_old = root / "private-old.log"
                     log.rename(private_old)
                     previous_records = len(records(private_old))
@@ -222,16 +259,7 @@ snapshot_integrity_key_file = "{key.as_posix()}"
                     time.sleep(0.1)
                     assert log.read_bytes() == private_bytes
                     print("log confidentiality: readable replacement rejected; active read access stops writes")
-                if os.name == "nt":
-                    before = status()
-                    log.unlink()  # DeleteFileW: pending while the writer owns its handle.
-                    pending_delete = True
-                    time.sleep(1.1)
-                    emit()
-                    wait_for(lambda: status()["reopen_errors"] > before["reopen_errors"])
-                    assert status()["reopens"] == before["reopens"]
-                    assert not status()["failed"]
-                if quota_dir is not None:
+                if quota:
                     filler = root / "quota-filler"
                     try:
                         with filler.open("xb", buffering=0) as output:
@@ -262,15 +290,15 @@ snapshot_integrity_key_file = "{key.as_posix()}"
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=5)
-                if pending_delete:
-                    assert not log.exists(), "pending deletion completes when the process closes its handle"
+            if pending_delete:
+                assert not log.exists(), "pending deletion completes when the process closes its handle"
         print("log file rotation: rename/delete/truncate/unsafe replacement/recovery/concurrent reload/status passed")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
-    parser.add_argument("--quota-dir", type=Path,
-        help="also fill an explicitly supplied disposable mount of at most 8 MiB")
+    parser.add_argument("--quota", action="store_true",
+        help="also fill the empty disposable Linux /quota mount (at most 8 MiB)")
     args = parser.parse_args()
-    run(args.binary.resolve(strict=True), args.quota_dir)
+    run(args.binary.resolve(strict=True), args.quota)

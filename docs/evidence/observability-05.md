@@ -95,6 +95,32 @@ handling, setup ordering, error propagation and cleanup. On Windows it also
 executes the ACL helper; the live smoke remains required before accepting this
 follow-up. No Rust source, manifest or lockfile changes accompany this fix.
 
+The [2ab8d92f run](https://github.com/valkyoth/fluxheim/actions/runs/40091527815)
+passed Linux and macOS. Windows passed the protected-fixture tests and advanced
+through the live rotation smoke to deletion. That assertion incorrectly
+required a pending-delete reopen error; it did not allow successful recreation,
+although the Rust lifecycle tests already account for both outcomes. The smoke
+now requires exactly one successful reopen or exactly one retained-handle
+reopen error, no write failure, and an additional written ordinary record.
+Recreation must produce a fresh log containing the expected record; a pending
+delete must complete after process exit. A no-op still times out, and cleanup
+no longer masks an earlier assertion failure.
+
+CodeQL alerts 392, 395 and 396 traced to the arbitrary `--quota-dir` input. That
+option is removed, not suppressed: `--quota` opts into the fixed `/quota` mount
+only, on Linux. The mount must not be a symlink, must be an actual empty mount,
+and must have a positive capacity of at most 8 MiB before fixture creation.
+These checks raise errors even with Python assertions disabled. Regression
+tests reject arbitrary path arguments, invalid mounts, existing data and
+oversized/zero-capacity mounts, and cover both deletion outcomes and failures.
+Native Windows execution and CodeQL rescanning must confirm this follow-up;
+local tests are not evidence that GitHub has closed the alerts.
+Local verification passed nine fixture/deletion/quota regressions, the Linux
+live rotation/confidentiality smoke and the disposable 1 MiB container ENOSPC
+test using the fixed mount. Documentation and Windows script-policy validators
+passed. The macOS builder was unreachable for this follow-up; its prior green
+run is not relabelled as verification of these script changes.
+
 ## Repeatable Commands
 
 ```sh
@@ -122,11 +148,12 @@ podman run --rm --network host --security-opt label=disable \
   --tmpfs /quota:rw,size=1m,mode=0700 \
   -v "$PWD:/workspace:ro" -w /workspace \
   registry.opensuse.org/opensuse/tumbleweed:latest \
-  sh -c 'zypper --non-interactive install --no-recommends python3 && python3 scripts/smoke_log_file_rotation.py --binary target/debug/fluxheim --quota-dir /quota'
+  sh -c 'zypper --non-interactive install --no-recommends python3 && python3 scripts/smoke_log_file_rotation.py --binary target/debug/fluxheim --quota'
 ```
 
 This is a disposable test harness, not a release-image recipe: the container
 installs Python, mounts source/binary read-only and binds listeners to loopback.
-The explicit quota mode refuses mounts larger than 8 MiB; never substitute a
-production volume. Native Windows/macOS disk quotas, stalled kernel I/O and
+The explicit `--quota` mode only accepts the empty Linux `/quota` mount and
+refuses capacities larger than 8 MiB; never mount a production volume there.
+Native Windows/macOS disk quotas, stalled kernel I/O and
 external log-collector integration remain broader platform qualification work.
