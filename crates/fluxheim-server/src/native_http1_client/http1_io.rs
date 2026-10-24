@@ -32,7 +32,8 @@ impl NativeHttp1Upstream {
         &self,
         request: &mut NativeHttp1Request,
     ) -> Result<NativeHttp1Response, NativeHttp1Error> {
-        crate::native_request_telemetry::upstream_attempt(self.send_inner(request)).await
+        // Keep the large HTTP/TLS transport state out of nested telemetry futures.
+        crate::native_request_telemetry::upstream_attempt(Box::pin(self.send_inner(request))).await
     }
 
     async fn send_inner(

@@ -97,3 +97,33 @@ checks and Windows MSVC test cross-compilation passed. Live configuration
 rejection plus the existing 31-outcome/48-span correlation smoke passed on Linux
 and native Apple Silicon macOS. No dependency versions, audit admission or
 dispatcher loss policies changed. Native Windows execution remains a CI gate.
+
+## CI And Code-Scanning Follow-Up
+
+Review base: `fdb0a7f0`. GitHub run `40113579198` failed the Wasm-profile
+Clippy gate: adding completion ownership enlarged `NativeHttp1Response`, making
+the Wasm route-resolution rejection variant disproportionately large. The
+rejection variant now owns a boxed response; status, body, close behavior and
+the route/ACL decision order are unchanged. The same strict Clippy command
+failed locally before the fix and passed afterward; no lint was suppressed.
+
+CodeQL alert 397 identified an implicit TLS floor in the Python correlation
+smoke. Its HTTP/2 client now explicitly requires TLS 1.2 or newer and asserts
+the negotiated version. The fixed loopback certificate fixture remains scoped
+to this smoke; production TLS configuration was not changed. Alert closure
+still requires a new GitHub analysis of the fix.
+
+Expanded Wasm testing also found a Commit 06 stack regression in the upstream
+attempt wrapper. The cache-TTL test passed at pre-06 `d4a2569b`, but overflowed
+the normal test stack at `fdb0a7f0`. A debugger located the overflow in the
+wrapped HTTP transport future. Heap-pinning that future prevents its large
+state from being embedded through nested telemetry futures. A new size-budget
+test failed at 44,096 bytes before the fix and passes an 8 KiB upper bound now.
+No thread-stack limit was increased in code or CI.
+
+Verification includes all 43 native Wasm tests and the exact CI native server
+suite (593 tests), both on the normal test stack, locked workspace tests,
+strict workspace/Wasm Clippy and Windows MSVC test cross-compilation. Live
+correlation, including header-allowlist startup rejection and TLS/HTTP2, passed
+on Linux and native Apple Silicon macOS. The closed correlation-header
+allowlist, provenance checks, audit admission and loss policies are unchanged.

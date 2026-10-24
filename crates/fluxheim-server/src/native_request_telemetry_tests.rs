@@ -182,6 +182,18 @@ fn disabled_correlation_has_no_identifiers() {
 }
 
 #[test]
+fn upstream_telemetry_future_does_not_inline_large_transport_state() {
+    let upstream = crate::NativeHttp1Upstream::new("127.0.0.1:1");
+    let mut request = request(&[]);
+    let future = upstream.send(&mut request);
+    let bytes = std::mem::size_of_val(&future);
+    assert!(
+        bytes <= 8192,
+        "upstream telemetry future grew to {bytes} bytes"
+    );
+}
+
+#[test]
 fn telemetry_rejects_unvalidated_identity_header_configuration() {
     for name in [
         "x-authenticated-user",

@@ -131,7 +131,7 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                         }
                         Some(route)
                     }
-                    NativeWasmRouteResolution::Reject(response) => return response,
+                    NativeWasmRouteResolution::Reject(response) => return *response,
                 }
             };
             let _route_concurrency_permits = match self
@@ -419,7 +419,7 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
 enum NativeWasmRouteResolution<'a> {
     Continue,
     Select(&'a NativeHttp1RouteProxyRoute),
-    Reject(NativeHttp1Response),
+    Reject(Box<NativeHttp1Response>),
 }
 
 #[cfg(feature = "wasm")]
@@ -443,24 +443,26 @@ impl NativeHttp1RouteProxy {
                 {
                     NativeWasmRouteResolution::Select(route)
                 } else {
-                    NativeWasmRouteResolution::Reject(
+                    NativeWasmRouteResolution::Reject(Box::new(
                         NativeHttp1Response::new(
                             503,
                             "Service Unavailable",
                             b"wasm route decision unavailable\n",
                         )
                         .close_connection(),
-                    )
+                    ))
                 }
             }
-            NativeWasmRouteOutcome::Deny { status, reason } => NativeWasmRouteResolution::Reject(
-                NativeHttp1Response::new(
-                    status,
-                    status_reason(status),
-                    format!("{reason}\n").into_bytes(),
-                )
-                .close_connection(),
-            ),
+            NativeWasmRouteOutcome::Deny { status, reason } => {
+                NativeWasmRouteResolution::Reject(Box::new(
+                    NativeHttp1Response::new(
+                        status,
+                        status_reason(status),
+                        format!("{reason}\n").into_bytes(),
+                    )
+                    .close_connection(),
+                ))
+            }
         }
     }
 }

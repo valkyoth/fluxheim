@@ -165,11 +165,13 @@ def request_http1(listen, host, id_, extra=(), path=None):
 
 def request_http2(listen, origin):
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE  # Local fixed fixture; upstream verification has its own smoke.
     context.set_alpn_protocols(["h2"])
     with socket.create_connection(("127.0.0.1", listen), timeout=10) as tcp:
         with context.wrap_socket(tcp, server_hostname="static.test") as stream:
+            assert stream.version() in ("TLSv1.2", "TLSv1.3")
             assert stream.selected_alpn_protocol() == "h2"
             h2 = H2Connection(config=H2Configuration(client_side=True, header_encoding="utf-8"))
             h2.initiate_connection()
