@@ -1,6 +1,4 @@
-use std::fs::File;
 use std::io::Write;
-use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -8,13 +6,27 @@ use std::time::{Duration, Instant};
 mod crash;
 #[path = "runtime_log_dispatch.rs"]
 mod dispatch;
+#[path = "runtime_log_file.rs"]
+mod file;
 #[path = "runtime_log_record.rs"]
 mod record;
 pub(crate) use dispatch::Status as LoggingStatus;
+#[cfg(test)]
+pub(super) fn open_log_file(
+    path: &std::path::Path,
+    append: bool,
+) -> std::io::Result<std::fs::File> {
+    file::open(path, append)
+}
 static LEGACY: OnceLock<Arc<dispatch::Logger>> = OnceLock::new();
+static FILE_STATUS: OnceLock<Arc<file::Counters>> = OnceLock::new();
 
 pub(crate) fn status() -> Option<LoggingStatus> {
-    LEGACY.get().map(|logger| logger.status())
+    LEGACY.get().map(|logger| {
+        let mut status = logger.status();
+        status.file_sink = FILE_STATUS.get().map(|counters| counters.status());
+        status
+    })
 }
 
 pub(super) struct ShutdownGuard;
@@ -60,19 +72,14 @@ pub(super) fn init_logging(
                 "logging.file.enabled requires logging.file.path",
             )
         })?;
-        // Detect aliases before a non-append ordinary sink could truncate the
-        // dedicated crash file. Compare handles, not just configured strings.
-        let file = open_log_file(path, true)?;
-        if let Some(crash) = &crash_file {
-            crash::require_distinct(crash, &file)?;
-        }
-        if !config.logging.file.append {
-            file.set_len(0)?;
-        }
+        let file = file::Sink::new(path, config.logging.file.append, crash_file.as_ref())?;
+        FILE_STATUS
+            .set(file.counters()?)
+            .map_err(|_| std::io::Error::other("file logging already initialized"))?;
         [
-            Box::new(file.try_clone()?) as Box<dyn Write + Send>,
-            Box::new(file.try_clone()?),
-            Box::new(file.try_clone()?),
+            Box::new(file.clone()) as Box<dyn Write + Send>,
+            Box::new(file.clone()),
+            Box::new(file.clone()),
             Box::new(file),
         ]
     } else {
@@ -135,127 +142,6 @@ pub(super) fn init_logging(
         .map_err(|_| std::io::Error::other("another process logger is already installed"))?;
     log::set_max_level(max_level);
     Ok(guard)
-}
-
-pub(super) fn open_log_file(path: &Path, append: bool) -> std::io::Result<File> {
-    reject_log_path_symlink_prefix(path)?;
-
-    #[cfg(windows)]
-    {
-        open_log_file_windows(path, append)
-    }
-
-    #[cfg(unix)]
-    {
-        let mut flags =
-            rustix::fs::OFlags::CREATE | rustix::fs::OFlags::WRONLY | rustix::fs::OFlags::CLOEXEC;
-        if append {
-            flags |= rustix::fs::OFlags::APPEND;
-        } else {
-            flags |= rustix::fs::OFlags::TRUNC;
-        }
-
-        flags |= rustix::fs::OFlags::NOFOLLOW;
-
-        let fd = rustix::fs::open(
-            path,
-            flags,
-            rustix::fs::Mode::RUSR
-                | rustix::fs::Mode::WUSR
-                | rustix::fs::Mode::RGRP
-                | rustix::fs::Mode::WGRP
-                | rustix::fs::Mode::ROTH
-                | rustix::fs::Mode::WOTH,
-        )
-        .map_err(rustix_to_io_error)?;
-        let file = File::from(fd);
-        let metadata = file.metadata()?;
-        if !metadata.is_file() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("log path is not a regular file: {}", path.display()),
-            ));
-        }
-
-        Ok(file)
-    }
-}
-
-#[cfg(windows)]
-fn open_log_file_windows(path: &Path, append: bool) -> std::io::Result<File> {
-    use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
-
-    use windows_sys::Win32::Storage::FileSystem::{
-        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, SECURITY_IDENTIFICATION,
-        SECURITY_SQOS_PRESENT,
-    };
-
-    if fluxheim_config::fs_trust::existing_parent_has_insecure_write_permissions(path)? {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "log path has an untrusted owner or writable parent component",
-        ));
-    }
-    let open = |create_new: bool| {
-        let mut options = std::fs::OpenOptions::new();
-        options
-            .create_new(create_new)
-            .write(true)
-            .append(append)
-            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-            .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
-        options.open(path)
-    };
-    let (file, created) = match fluxheim_config::fs_trust::create_confidential_file(path) {
-        Ok(file) => {
-            drop(file);
-            (open(false)?, true)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (open(false)?, false),
-        Err(error) => return Err(error),
-    };
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("log path is not a regular file: {}", path.display()),
-        ));
-    }
-    let path_handle = same_file::Handle::from_path(path)?;
-    let opened_handle = same_file::Handle::from_file(file.try_clone()?)?;
-    if path_handle != opened_handle {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "log path changed during secure open",
-        ));
-    }
-    if !created
-        && fluxheim_config::fs_trust::opened_file_has_insecure_owner_or_write_permissions(&file)?
-    {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "log file has an untrusted owner or writable ACL",
-        ));
-    }
-    if !append {
-        file.set_len(0)?;
-    }
-    Ok(file)
-}
-
-fn reject_log_path_symlink_prefix(path: &Path) -> std::io::Result<()> {
-    if fluxheim_config::config_path::path_existing_prefix_contains_symlink(path)? {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("log path contains symlink component: {}", path.display()),
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
-fn rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {
-    std::io::Error::from_raw_os_error(error.raw_os_error())
 }
 
 #[cfg(test)]

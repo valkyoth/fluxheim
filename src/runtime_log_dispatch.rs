@@ -62,6 +62,7 @@ struct Counters {
 
 #[derive(serde::Serialize)]
 pub(crate) struct Status {
+    pub(super) file_sink: Option<super::file::Status>,
     capacity: u64,
     max_producers: u64,
     queue_payload_bytes: usize,
@@ -160,6 +161,7 @@ impl Logger {
         let c = &self.counters;
         let read = |v: &AtomicU64| v.load(Ordering::Relaxed);
         Status {
+            file_sink: None,
             capacity: CAPACITY,
             max_producers: PRODUCERS,
             queue_payload_bytes: CAPACITY as usize * std::mem::size_of::<Queued>(),

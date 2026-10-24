@@ -160,6 +160,7 @@ jobs:
           cargo test --locked -p fluxheim-server --lib --features wasm,php-fpm,tls-rustls,load-balancer
           cargo build --locked --no-default-features --features profile-observability --bin fluxheim
           python3 scripts/smoke_operational_events.py --binary target/debug/fluxheim
+          python3 scripts/smoke_log_file_rotation.py --binary target/debug/fluxheim
           python3 scripts/smoke_operational_backpressure.py --binary target/debug/fluxheim
           cargo build --locked --no-default-features --features profile-observability,stream-proxy,udp-proxy --bin fluxheim
           python3 scripts/smoke_fatal_listener_failures.py --binary target/debug/fluxheim
@@ -337,6 +338,7 @@ jobs:
           cargo test --locked -p fluxheim --lib --no-default-features --features profile-observability runtime::runtime_logging
           cargo build --locked --no-default-features --features profile-observability --bin fluxheim
           python3 scripts/smoke_operational_events.py --binary target/debug/fluxheim
+          python3 scripts/smoke_log_file_rotation.py --binary target/debug/fluxheim
           python3 scripts/smoke_operational_backpressure.py --binary target/debug/fluxheim
           cargo build --locked --no-default-features --features profile-observability,stream-proxy,udp-proxy --bin fluxheim
           python3 scripts/smoke_fatal_listener_failures.py --binary target/debug/fluxheim
@@ -389,6 +391,9 @@ jobs:
       - name: Run Windows native runtime parity smoke
         shell: pwsh
         run: scripts/smoke_windows_native.ps1
+
+      - name: Test Windows protected log rotation
+        run: python scripts/smoke_log_file_rotation.py --binary target/debug/fluxheim.exe
 
       - name: Build and test Windows portable archives
         shell: pwsh

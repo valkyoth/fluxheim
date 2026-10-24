@@ -34,6 +34,16 @@ pub(super) fn open(path: &Path) -> io::Result<File> {
 }
 
 pub(super) fn require_distinct(crash: &File, ordinary: &File) -> io::Result<()> {
+    if same(crash, ordinary)? {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "crash log must be separate from ordinary log",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn same(crash: &File, ordinary: &File) -> io::Result<bool> {
     #[cfg(windows)]
     let same = same_file::Handle::from_file(crash.try_clone()?)?
         == same_file::Handle::from_file(ordinary.try_clone()?)?;
@@ -44,13 +54,7 @@ pub(super) fn require_distinct(crash: &File, ordinary: &File) -> io::Result<()> 
         let b = ordinary.metadata()?;
         (a.dev(), a.ino()) == (b.dev(), b.ino())
     };
-    if same {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "crash log must be separate from ordinary log",
-        ));
-    }
-    Ok(())
+    Ok(same)
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 # Logging Architecture
 
-## Current Status (2026-10-23)
+## Current Status (2026-10-24)
 
 Legacy runtime messages use `log` with bounded asynchronous output. Their
 JSON records have timestamp, level, target and message strings; stderr is the
@@ -24,8 +24,11 @@ worker health. See the [structured event contract](structured-events.md) and
 Admin mutations now [reserve audit admission before execution](../evidence/observability-03-audit-admission.md)
 and fail closed when unavailable; disabled audit outcomes also block mutations.
 This is not a durable audit journal. Runtime `log` calls now use a fourth,
-independent worker. Rotation/reopen lifecycle remains Commit 05 work; native
-cross-platform and performance acceptance must not be inferred from Linux tests.
+independent worker. File output now shares one protected, record-serialized
+handle across those four workers, with automatic reopen checks on worker writes.
+See the [file lifecycle guide](../guides/logging.md) and
+[Commit 05 qualification](../evidence/observability-05.md). Native cross-platform
+and performance acceptance must not be inferred from Linux tests.
 
 Access-log configuration and helper functions exist, but the former Pingora
 completion hook is not wired into the current native request lifecycle.
