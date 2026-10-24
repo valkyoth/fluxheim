@@ -121,6 +121,14 @@ test using the fixed mount. Documentation and Windows script-policy validators
 passed. The macOS builder was unreachable for this follow-up; its prior green
 run is not relabelled as verification of these script changes.
 
+After the builder returned online, the scripts from `14d5433c` were transferred
+to the existing Apple Silicon qualification workspace and rerun. All nine
+fixture/deletion/quota regression tests and the live rotation smoke passed,
+including deletion/recreation, confidentiality rejection, repaired-replacement
+recovery and concurrent snapshot reload. This reused the previously tested
+native binary: the follow-up changed scripts/docs only, not Rust or build
+inputs. Windows execution and CodeQL rescanning remain separate GitHub gates.
+
 ## Repeatable Commands
 
 ```sh
