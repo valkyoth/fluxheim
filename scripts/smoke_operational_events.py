@@ -115,7 +115,13 @@ upstream_tls = false
             assert len(events) == expected, events
             for event in events:
                 assert event["data"]["reason"] == "connection_refused"
-                assert event["correlation"] == {}
+                # An untrusted inbound ID is replaced locally, even when access
+                # events are disabled. No request text or trace context is copied.
+                correlation = event["correlation"]
+                assert set(correlation) == {"request_id"}, correlation
+                id_ = correlation["request_id"]
+                assert id_.startswith("fh-") and len(id_) == 35
+                assert all(c in "0123456789abcdef" for c in id_[3:])
                 assert "resource" not in event
 
 

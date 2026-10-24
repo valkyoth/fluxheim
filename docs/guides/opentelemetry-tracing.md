@@ -1,167 +1,23 @@
 # OpenTelemetry Tracing
 
-Status (2026-10-23): native route-proxy trace-context propagation exists behind
-`otel-tracing`. The `otel-otlp` library provides a queue and HTTP/HTTPS JSON span
-encoder/exporter, but the native runtime does not construct that exporter or
-submit request spans. Access-log correlation is also not wired. A successful
-propagation smoke or encoder unit test is not proof of stored Fluxheim traces.
-See the [Commit 01 inventory](../evidence/observability-baseline.md).
+Unreleased 1.9.0 adds native request completion and upstream-attempt spans.
+Tracing is optional and vendor-neutral. Collector/backend ingestion is a later
+gate in the [observability plan](../roadmap/observability-commit-plan.md).
 
-The remainder contains historical design and library behavior, not a claim of
-end-to-end native tracing. The [active plan](../roadmap/observability-commit-plan.md) must
-close these gaps and prove actual collector ingestion before 1.9.0 acceptance.
-gRPC export and advanced sampling remain proposals.
+## Configuration
 
-Cargo features:
-
-- `otel-tracing`: native route-proxy propagation; access-log correlation pending.
-- `otel-otlp`: library OTLP/HTTP JSON export; native request-span wiring pending.
-
-Latest crate candidates checked on 2026-05-05:
-
-- `opentelemetry 0.31.0`
-- `opentelemetry_sdk 0.31.0`
-- `opentelemetry-otlp 0.31.1`
-- `tracing-opentelemetry 0.32.1`
-
-Tracing is different from metrics and logs. Metrics show aggregate behavior,
-logs record events, and traces explain the path of a specific request through
-Fluxheim and its upstream services.
-
-## Design Goals
-
-- Keep OpenTelemetry code out of default builds.
-- Use W3C Trace Context propagation.
-- Correlate access logs, security events, and traces through a trace ID.
-- Pair new operational observability with Prometheus metrics where practical:
-  metrics provide aggregate service health, while OpenTelemetry explains the
-  request path behind those aggregate signals.
-- Keep tracing overhead bounded through sampling and background export.
-- Avoid storing secrets, cookies, authorization headers, raw request bodies, or
-  high-cardinality labels in spans.
-- Make tracing incompatible with `privacy-mode` unless a future privacy-preserve
-  propagation-only mode is explicitly designed.
-
-## Stage 1: Trace Context Propagation
-
-The first useful milestone is propagation without exporting spans. This stage is
-implemented when Fluxheim is built with `otel-tracing` and `[tracing]` is
-enabled at runtime.
-
-Behavior:
-
-- extract a valid `traceparent` header from incoming requests;
-- reject malformed trace context without reflecting it;
-- generate a new trace ID when no valid context exists;
-- inject the selected context into upstream proxy requests;
-- include the trace ID in structured access logs when logging is enabled;
-- trust inbound sampled flags only when the direct peer is trusted.
-
-This gives operators log/backend correlation even before Fluxheim exports full
-traces.
-
-## Stage 2: Internal Spans
-
-After propagation is stable, Fluxheim should create spans around key request
-operations.
-
-Planned spans:
-
-- `fluxheim.request`: root request span;
-- `fluxheim.vhost_route`: host/SNI routing and policy selection;
-- `fluxheim.request_filter`: request limits, header policy, and security
-  checks;
-- `fluxheim.auth_request`: future external authorization probe;
-- `fluxheim.cache_lookup`: memory/disk cache lookup and hit/miss decision;
-- `fluxheim.cache_store`: cache admission and write;
-- `fluxheim.cache_purge`: admin-triggered cache invalidation by scope, prefix,
-  wildcard, tag, or soft-purge operation;
-- `fluxheim.upstream_select`: load-balancer selection;
-- `fluxheim.upstream_connect`: TCP/TLS connect and handshake;
-- `fluxheim.upstream_response`: upstream first-byte and response metadata;
-- `fluxheim.body_filter`: compression, image transforms, WAF body scanning, or
-  other future body work;
-- `fluxheim.static_file`: static resolution and body read path.
-
-Span attributes must use bounded, low-cardinality values:
-
-- vhost name;
-- route name;
-- status class;
-- cache tier and hit/miss;
-- upstream pool name, not arbitrary upstream URL;
-- load-balancer upstream alias and retry count, never raw upstream URLs;
-- configured policy names;
-- error class, not raw error strings when they may contain paths or secrets.
-
-Avoid:
-
-- raw path by default;
-- query strings;
-- cookies;
-- authorization values;
-- request/response bodies;
-- client IP unless a non-privacy deployment explicitly enables it.
-
-## Stage 3: OTLP Trace Export
-
-Trace export is optional and intended to send data to a local OpenTelemetry
-Collector or tracing backend. Prometheus can receive OTLP metrics over HTTP when
-its OTLP receiver is enabled, but it is not the direct trace storage target.
-
-Implemented in the first exporter:
-
-- background worker;
-- bounded queue with drop-on-full behavior;
-- OTLP/HTTP JSON export to `http://` or `https://` endpoints such as local
-  Jaeger `http://127.0.0.1:4318/v1/traces`;
-- optional `tracing.otlp.tls_ca_cert_path` PEM CA bundle for private-PKI HTTPS
-  collectors;
-- request-level server spans with trace ID, regenerated span ID, optional parent
-  span ID, method, vhost, resolved route name, status, error flag, body byte
-  counts, cache phase/timing, compression encoding, and PHP-FPM outcome when
-  those modules are compiled in.
-
-Requirements:
-
-- expose exporter health through metrics/admin status when those modules are
-  enabled;
-- support explicit overflow behavior: `drop_new`, `drop_oldest`, or
-  `block_startup_only`;
-- never block request workers on collector availability;
-- use HTTPS for remote collectors unless the network is already isolated and
-  authenticated;
-- redact all configured sensitive fields before export.
-
-The exporter supports HTTP and HTTPS. Keep loopback HTTP for local collectors;
-use HTTPS for collector endpoints that cross a host or container trust boundary.
-When no private CA bundle is configured, the HTTPS client uses the bundled
-WebPKI roots. Plaintext HTTP to a non-loopback collector logs a startup warning.
-
-## Sampling
-
-Tracing every request can be too expensive for a proxy. Sampling must be
-configurable.
-
-Planned sampling modes:
-
-- `off`;
-- `propagate_only`;
-- fixed probabilistic sampling;
-- status-aware sampling;
-- latency-aware sampling;
-- always sample admin/security failures when those modules are enabled.
-
-Recommended future default for enabled export:
-
-- sample a small percentage of normal successful requests;
-- sample all `5xx` responses;
-- sample requests slower than a configured latency threshold;
-- respect inbound sampled flags only when the direct peer is trusted.
-
-## Configuration Sketch
+Build with `otel-tracing` for propagation and correlated logs, or `otel-otlp`
+for OTLP/HTTP JSON export too. `profile-observability` includes both.
 
 ```toml
+[logging]
+format = "json"
+
+[logging.access]
+enabled = true
+request_id = true
+request_id_header = "x-request-id"
+
 [tracing]
 enabled = true
 mode = "propagate_only"
@@ -169,7 +25,7 @@ traceparent = true
 log_trace_id = true
 
 [tracing.otlp]
-enabled = false
+enabled = true
 endpoint = "http://127.0.0.1:4318/v1/traces"
 service_name = "fluxheim"
 queue_size = 8192
@@ -177,50 +33,105 @@ timeout_secs = 2
 # tls_ca_cert_path = "/etc/fluxheim/otlp-ca.pem"
 ```
 
-`mode = "propagate_only"` is the only implemented mode in stage 1. It validates
-incoming W3C `traceparent`, generates a fresh context when the inbound header is
-missing or invalid, forwards a normalized `traceparent` to upstreams, and can
-add `trace_id` to structured access logs.
+Use HTTPS for remote collectors. Without a custom CA bundle, HTTPS uses bundled
+WebPKI roots. Plain HTTP produces a startup warning, including loopback.
+The exporter has a bounded queue and drops new spans when full. Request tasks
+never wait for collector network I/O. Export is best effort, not durable audit
+storage: shutdown/crash can lose queued spans. gRPC export, advanced sampling
+and durable acknowledgement are not implemented by this commit.
 
-Future sampling configuration is expected to look like this:
+## Trust And Sampling
 
-```toml
+Only a direct transport peer matching `server.trusted_proxies` may supply an
+accepted request ID or trace parent. Forwarded IP headers cannot grant trust.
+Do not trust arbitrary public clients or shared container networks just to
+enable traces. IDs are diagnostic correlation, never authorization credentials.
 
-[tracing.sampling]
-success_ratio = 0.01
-sample_5xx = true
-slow_request_threshold = "500ms"
+Request IDs must be a single header containing 1..128 ASCII letters, digits,
+periods, hyphens or underscores. Duplicates, even identical values, are invalid.
+Missing, invalid or untrusted IDs are replaced with a cryptographically random
+`fh-` identifier, never truncated. Choose a dedicated `x-` header: protocol,
+authentication and proxy-identity headers cannot be used for correlation.
+
+A trace parent must be a single 55-byte W3C version-00 value with nonzero trace
+and parent span IDs. Invalid, conflicting or untrusted parents produce a fresh
+trace. Every request has a fresh server span ID. `baggage` and `tracestate` are
+not implicitly forwarded or stored.
+
+The existing `propagate_only` mode makes no new sampling decision. Only an
+accepted trusted parent's sampled bit enables export. Locally generated roots
+are unsampled. With OTLP enabled, sampled requests and attempts are exported;
+unsampled requests still have IDs in enabled logs and propagation. There is no
+hidden sample-all default. To test export, send a sampled parent from a
+genuinely trusted upstream proxy.
+
+`logging.access.enabled = false` suppresses access events, not security/errors.
+`logging.access.request_id = false` disables request-ID capture and generation.
+`tracing.log_trace_id = false` suppresses trace/span IDs in logs independently
+of export. Compile-time `privacy-mode` prevents request correlation/access events
+and rejects enabled tracing configuration.
+
+## Completion And Attempts
+
+- One access completion attempt and, when sampled, one server span cover each admitted
+  application request. HTTP/1.1 keep-alive requests and multiplexed HTTP/2
+  streams have separate contexts.
+- Successful response writing records `completed`, meaning acceptance by the
+  local transport, not proof of remote application consumption. HTTP/1.1 flush
+  and HTTP/2 end-of-stream submission are the respective boundaries.
+- Write errors record `failed`; dropped handler/response futures record
+  `cancelled`, including timeout/shutdown cancellation. Drop never emits a
+  second outcome after completion. Failed partial writes report zero body
+  bytes instead of claiming full delivery. Cancellation may have no status.
+- Streaming/upgrade takeover has one lifetime outcome on tunnel completion,
+  error or cancellation, without frame contents or guessed status/byte counts.
+- Rejections before a complete request reaches the router, such as malformed
+  HTTP heads or incomplete uploads, do not get fabricated correlated outcomes.
+
+Exactly-once completion does not promise delivery. Access records share the
+bounded ordinary dispatcher: admission-lock contention, rate limiting, a full
+queue or sink failure can drop records. Inspect authenticated status counters;
+do not use access logs as a lossless audit journal.
+
+HTTP sends and FastCGI transport attempts get separate child spans. Safe
+stale-connection retries get new span IDs. Load-balancer and PHP retries count
+against the same logical request. Static/cache hits need no upstream attempt.
+FastCGI transport spans do not claim an HTTP status before parsing. Bounded
+protocol-error events are correlated with the logical request.
+
+Provenance is established before header rewriting. Explicit header policy can
+remove propagation without erasing internal IDs. Attempts replace an existing
+traceparent with their child context but do not reinsert a removed header.
+No request-ID response header is automatically added. Correlation alone does
+not add IDs to cache keys. Detached background tasks do not inherit foreground
+context or emit another foreground completion. Cache revalidation retains its
+existing outbound header snapshot; this commit does not create separately
+instrumented background traces or rewrite those cache-refresh headers. Health
+checks likewise do not inherit the request's local correlation scope.
+
+## Data Boundaries
+
+Access events contain finite method/outcome, status, duration, successful body
+bytes, attempt count and bounded IDs. Native spans contain bounded essentials
+and parentage, not complete module timing or route/vhost labels yet.
+
+Raw paths/URLs, queries, client IPs, cookies, authorization, bodies and arbitrary
+errors are not captured. Legacy `include_host`, `include_path`, `include_route`,
+`include_client_ip`, `include_upstream` and `include_cache_phase` settings do not
+expand this structured schema into raw-data capture.
+
+## Live Verification
+
+```sh
+python3 -m venv target/correlation-venv
+target/correlation-venv/bin/python -m pip install -r scripts/request_correlation_requirements.txt
+cargo build --locked --no-default-features --features profile-observability,php-fpm --bin fluxheim
+target/correlation-venv/bin/python scripts/smoke_request_correlation.py --binary target/debug/fluxheim
 ```
 
-## Security Requirements
-
-- Disabled by default at compile time and runtime.
-- Remote export disabled unless explicitly configured.
-- Collector endpoint must be validated.
-- Trace and span IDs must be validated before reuse.
-- Do not trust inbound sampled flags from untrusted peers by default.
-- Do not expose trace IDs as authorization or session identifiers.
-- Do not store trace context in cache keys.
-- Do not propagate trace context to auth, metadata, ad, or AI decision services
-  unless that service is explicitly configured to receive it.
-- Redact trace attributes before logging/export.
-- Reject with config validation when combined with `privacy-mode`, unless the
-  future mode is strictly propagation-only and documented separately.
-
-## Test Plan
-
-- Extract valid `traceparent`.
-- Reject malformed `traceparent`.
-- Generate trace context when absent.
-- Inject trace context into upstream requests.
-- Correlate trace ID in access logs when logging is enabled.
-- Run `scripts/smoke_observability_local.sh` to prove stage 1 propagation
-  through a live proxy path and verify Prometheus metrics are exposed from the
-  same `profile-observability` build.
-- Ensure malformed trace headers are never reflected.
-- Ensure untrusted sampled flags do not force sampling.
-- Verify sampling decisions for success, slow, and `5xx` requests.
-- Verify exporter queue overflow behavior.
-- Verify collector failure never blocks request handling.
-- Verify sensitive span attributes are redacted.
-- Verify OpenTelemetry code is absent from default and privacy builds.
+On Windows use `target/correlation-venv/Scripts/python.exe` and
+`target/debug/fluxheim.exe`. The smoke starts a real Fluxheim process plus local
+HTTP, FastCGI protocol and OTLP fixtures. It decodes actual access JSON and
+spans for concurrent HTTP/1.1 and TLS HTTP/2 requests, retry/reset behavior and
+hostile context. It is not a PHP interpreter or proof that an APM backend
+stored the spans; those have separate release gates.

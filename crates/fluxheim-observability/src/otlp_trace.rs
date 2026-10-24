@@ -64,6 +64,8 @@ impl TraceExporter {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraceSpan {
+    pub client: bool,
+    pub attempt: Option<u32>,
     pub trace_id: String,
     pub span_id: String,
     pub parent_span_id: Option<String>,
@@ -147,7 +149,7 @@ fn build_trace_payload(span: TraceSpan, service_name: &str) -> String {
         "traceId": span.trace_id,
         "spanId": span.span_id,
         "name": span.name,
-        "kind": "SPAN_KIND_SERVER",
+        "kind": if span.client { "SPAN_KIND_CLIENT" } else { "SPAN_KIND_SERVER" },
         "startTimeUnixNano": span.start_time_unix_nanos.to_string(),
         "endTimeUnixNano": span.end_time_unix_nanos.to_string(),
         "attributes": [
@@ -161,6 +163,12 @@ fn build_trace_payload(span: TraceSpan, service_name: &str) -> String {
             "code": if span.error { "STATUS_CODE_ERROR" } else { "STATUS_CODE_OK" }
         }
     });
+
+    if let Some(attempt) = span.attempt
+        && let Some(attributes) = span_json["attributes"].as_array_mut()
+    {
+        attributes.push(int_attr("fluxheim.upstream.attempt", u64::from(attempt)));
+    }
 
     if let Some(parent_span_id) = span.parent_span_id
         && let Some(object) = span_json.as_object_mut()
@@ -376,6 +384,8 @@ mod tests {
     fn trace_payload_contains_required_otlp_fields() {
         let payload = build_trace_payload(
             TraceSpan {
+                client: false,
+                attempt: None,
                 trace_id: "4bf92f3577b34da6a3ce929d0e0e4736".to_owned(),
                 span_id: "00f067aa0ba902b7".to_owned(),
                 parent_span_id: None,
@@ -428,6 +438,8 @@ mod tests {
     fn trace_payload_rejects_raw_load_balancer_upstream_attribute() {
         let payload = build_trace_payload(
             TraceSpan {
+                client: false,
+                attempt: None,
                 trace_id: "4bf92f3577b34da6a3ce929d0e0e4736".to_owned(),
                 span_id: "00f067aa0ba902b7".to_owned(),
                 parent_span_id: None,

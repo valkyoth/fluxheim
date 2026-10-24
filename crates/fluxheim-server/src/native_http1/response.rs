@@ -13,6 +13,7 @@ const WRITE_CHUNK_BYTES: usize = 8192;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1Response {
+    pub(crate) completion: Option<crate::native_request_telemetry::Completion>,
     status: u16,
     reason: String,
     headers: Vec<(String, String)>,
@@ -49,6 +50,7 @@ impl NativeHttp1Response {
     pub fn new(status: u16, reason: impl Into<String>, body: impl Into<Vec<u8>>) -> Self {
         Self {
             status,
+            completion: None,
             reason: reason.into(),
             headers: Vec::new(),
             content_length: None,
@@ -223,14 +225,25 @@ where
     S: AsyncWrite + Unpin,
 {
     let policy = response.write_policy;
+    let completion = response.completion.clone();
+    let status = response.status;
+    let bytes = response.body.len() as u64;
     let write = write_response_inner(stream, response, close, policy);
-    if let Some(total_response_timeout) = policy.total_response_timeout {
+    let result = if let Some(total_response_timeout) = policy.total_response_timeout {
         timeout(total_response_timeout, write)
             .await
-            .map_err(|_| timeout_error("response total timeout"))?
+            .unwrap_or_else(|_| Err(timeout_error("response total timeout")))
     } else {
         write.await
+    };
+    if let Some(completion) = completion {
+        completion.finish(
+            Some(status),
+            if result.is_ok() { bytes } else { 0 },
+            result.is_ok(),
+        );
     }
+    result
 }
 
 async fn write_response_inner<S>(

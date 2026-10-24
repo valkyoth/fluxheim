@@ -95,6 +95,7 @@ mod native_http2_error;
 mod native_http2_response;
 mod native_http2_route_adapter;
 mod native_http2_stack;
+mod native_request_telemetry;
 mod native_runtime_http1_proxy;
 mod native_runtime_launch_plan;
 mod native_runtime_manifest;

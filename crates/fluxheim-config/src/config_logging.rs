@@ -187,6 +187,21 @@ impl AccessLoggingConfig {
 
         if self.request_id {
             validate_header_name("logging.access.request_id_header", &self.request_id_header)?;
+            // Correlation owns this field before routing. Never overwrite framing,
+            // authentication, proxy identity or protocol negotiation fields.
+            let name = self.request_id_header.to_ascii_lowercase();
+            if !name.starts_with("x-")
+                || name.starts_with("x-forwarded-")
+                || matches!(
+                    name.as_str(),
+                    "x-real-ip" | "x-api-key" | "x-auth-token" | "x-http-method-override"
+                )
+            {
+                return Err(ConfigError::InvalidHeaderName {
+                    field: "logging.access.request_id_header (use a dedicated x- correlation header)",
+                    name: self.request_id_header.clone(),
+                });
+            }
         }
 
         Ok(())
@@ -203,4 +218,38 @@ fn default_request_id_header() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+#[cfg(all(test, not(feature = "privacy-mode")))]
+mod correlation_tests {
+    use super::*;
+
+    #[test]
+    fn request_id_cannot_take_over_protocol_or_authentication_headers() {
+        for name in [
+            "host",
+            "authorization",
+            "cookie",
+            "content-length",
+            "connection",
+            "traceparent",
+            "baggage",
+            "x-forwarded-for",
+            "X-Real-IP",
+            "x-api-key",
+        ] {
+            let config = AccessLoggingConfig {
+                request_id_header: name.to_owned(),
+                ..Default::default()
+            };
+            assert!(config.validate().is_err(), "{name}");
+        }
+        for name in ["x-request-id", "X-Correlation-ID"] {
+            let config = AccessLoggingConfig {
+                request_id_header: name.to_owned(),
+                ..Default::default()
+            };
+            assert!(config.validate().is_ok(), "{name}");
+        }
+    }
 }

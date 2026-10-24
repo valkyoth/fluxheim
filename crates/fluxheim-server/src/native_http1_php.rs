@@ -114,14 +114,20 @@ pub(crate) async fn native_php_execute_fpm(
     let mut attempts = 0_u8;
     loop {
         let endpoint_index = (start_index + usize::from(attempts)) % endpoints.len();
-        let result = fluxheim_php_fpm::execute_php_fpm_once(
-            pools.get(endpoint_index).map(Arc::as_ref),
-            &endpoints[endpoint_index],
-            native_php_fastcgi_params(plan),
-            &body,
-            connect_timeout,
-            request_timeout,
-            php.max_response_bytes.as_u64(),
+        let result = crate::native_request_telemetry::transport_attempt(
+            async {
+                fluxheim_php_fpm::execute_php_fpm_once(
+                    pools.get(endpoint_index).map(Arc::as_ref),
+                    &endpoints[endpoint_index],
+                    native_php_fastcgi_params(plan),
+                    &body,
+                    connect_timeout,
+                    request_timeout,
+                    php.max_response_bytes.as_u64(),
+                )
+                .await
+            },
+            |_| None,
         )
         .await
         .inspect_err(|error| {
@@ -211,8 +217,14 @@ fn native_php_fpm_output_plan(
 
 fn native_php_fastcgi_params(plan: &NativePhpRequestPlan) -> fastcgi_client::Params<'static> {
     let mut params = fastcgi_client::Params::default();
+    let traceparent = crate::native_request_telemetry::attempt_traceparent();
     for (name, value) in &plan.params {
-        params.insert(name.clone().into(), value.clone().into());
+        let value = if name == "HTTP_TRACEPARENT" {
+            traceparent.as_deref().unwrap_or(value)
+        } else {
+            value
+        };
+        params.insert(name.clone().into(), value.to_owned().into());
     }
     params
 }

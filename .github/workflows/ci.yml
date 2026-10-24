@@ -173,6 +173,14 @@ jobs:
           cargo build --locked --no-default-features --features profile-observability --bins
           python3 scripts/smoke_linux_dump_policy.py --bin-dir target/debug
 
+      - name: Test Linux live request and trace correlation
+        run: |
+          python3 -m venv target/correlation-venv
+          target/correlation-venv/bin/python -m pip install -r scripts/request_correlation_requirements.txt
+          cargo test --locked -p fluxheim-server --features otel-otlp,php-fpm native_request_telemetry
+          cargo build --locked --no-default-features --features profile-observability,php-fpm --bin fluxheim
+          target/correlation-venv/bin/python scripts/smoke_request_correlation.py --binary target/debug/fluxheim
+
       - name: Test standalone systemd boundary without workspace feature unification
         run: |
           cargo test --locked -p fluxheim-systemd --all-targets
@@ -344,6 +352,14 @@ jobs:
           cargo build --locked --no-default-features --features profile-observability,stream-proxy,udp-proxy --bin fluxheim
           python3 scripts/smoke_fatal_listener_failures.py --binary target/debug/fluxheim
 
+      - name: Test macOS live request and trace correlation
+        run: |
+          python3 -m venv target/correlation-venv
+          target/correlation-venv/bin/python -m pip install -r scripts/request_correlation_requirements.txt
+          cargo test --locked -p fluxheim-server --features otel-otlp,php-fpm native_request_telemetry
+          cargo build --locked --no-default-features --features profile-observability,php-fpm --bin fluxheim
+          target/correlation-venv/bin/python scripts/smoke_request_correlation.py --binary target/debug/fluxheim
+
       - name: Build all macOS portable archives
         run: |
           version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | sed -n '1p')"
@@ -397,6 +413,14 @@ jobs:
         run: |
           python scripts/test_log_rotation_fixture.py
           python scripts/smoke_log_file_rotation.py --binary target/debug/fluxheim.exe
+
+      - name: Test Windows live request and trace correlation
+        run: |
+          python -m venv target/correlation-venv
+          target/correlation-venv/Scripts/python.exe -m pip install -r scripts/request_correlation_requirements.txt
+          cargo test --locked -p fluxheim-server --features otel-otlp,php-fpm native_request_telemetry
+          cargo build --locked --no-default-features --features profile-observability,php-fpm --bin fluxheim
+          target/correlation-venv/Scripts/python.exe scripts/smoke_request_correlation.py --binary target/debug/fluxheim.exe
 
       - name: Build and test Windows portable archives
         shell: pwsh

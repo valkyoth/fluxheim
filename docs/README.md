@@ -99,6 +99,7 @@ a guide explicitly says otherwise.
 - [Observability Commit 03 pre-mutation audit admission](evidence/observability-03-audit-admission.md)
 - [Observability Commit 04 bounded logging dispatcher](evidence/observability-04.md)
 - [Observability Commit 05 protected file lifecycle](evidence/observability-05.md)
+- [Observability Commit 06 request and trace correlation](evidence/observability-06.md)
 - [Observability Commit 04 fatal-abort remediation](evidence/observability-04-fatal.md)
 - [Observability Commit 04 watchdog and critical-exit retest](evidence/observability-04-watchdog.md)
 - [Observability Commit 04 core dump deployment policy](evidence/observability-04-core-limits.md)

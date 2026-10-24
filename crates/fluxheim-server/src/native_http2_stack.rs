@@ -30,6 +30,7 @@ pub struct NativeHttp2Request {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp2Response {
+    pub(crate) completion: Option<crate::native_request_telemetry::Completion>,
     pub(crate) status: StatusCode,
     pub(crate) headers: HeaderMap,
     pub(crate) body: Bytes,
@@ -41,6 +42,7 @@ impl NativeHttp2Response {
     pub fn new(status: StatusCode, body: impl Into<Bytes>) -> Self {
         Self {
             status,
+            completion: None,
             headers: HeaderMap::new(),
             body: body.into(),
             trailers: None,

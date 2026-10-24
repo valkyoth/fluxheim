@@ -133,6 +133,7 @@ fn native_http1_response_to_http2(response: NativeHttp1Response) -> NativeHttp2R
     let retention = response.retention();
     let mut converted = NativeHttp2Response::new(status, Bytes::copy_from_slice(response.body()))
         .with_retention(retention);
+    converted.completion = response.completion.clone();
     for (name, value) in response.headers() {
         let Ok(name) = HeaderName::from_bytes(name.as_bytes()) else {
             continue;

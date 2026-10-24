@@ -94,6 +94,8 @@ impl AuditPermit {
         let pending = Pending {
             data,
             timestamp: u64::try_from(crate::unix_time_nanos()).unwrap_or(u64::MAX),
+            correlation: Default::default(),
+            policy: Default::default(),
         };
         match self.sender.try_send(pending) {
             Ok(()) => {

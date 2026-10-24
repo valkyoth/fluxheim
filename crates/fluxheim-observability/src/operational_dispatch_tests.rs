@@ -78,6 +78,79 @@ fn wait_until(mut check: impl FnMut() -> bool) {
 }
 
 #[test]
+#[cfg(not(feature = "privacy-mode"))]
+fn correlated_events_reach_the_worker_with_bounded_validated_ids() {
+    let output = Output::default();
+    let dispatcher = Dispatcher::new(
+        EventFormat::Json,
+        Arc::new(|_| true),
+        [
+            Box::new(output.clone()),
+            Box::new(io::sink()),
+            Box::new(io::sink()),
+        ],
+    )
+    .unwrap();
+    let data = EventData::Access {
+        outcome: crate::event::AccessOutcome::Completed,
+        method: crate::event::Method::GET,
+        status: crate::event::HttpStatus::new(200),
+        duration_micros: 1,
+        bytes_sent: 2,
+        attempts: 1,
+    };
+    let policy = CapturePolicy {
+        access_enabled: true,
+        include_request_id: true,
+        include_trace_ids: true,
+        ..Default::default()
+    };
+    dispatcher.try_emit_correlated(
+        data,
+        CorrelationInput {
+            trusted: true,
+            request_id: Some("a".repeat(128).as_str()),
+            trace_id: Some("4bf92f3577b34da6a3ce929d0e0e4736"),
+            span_id: Some("00f067aa0ba902b7"),
+        },
+        policy,
+    );
+    dispatcher.try_emit_correlated(
+        data,
+        CorrelationInput {
+            trusted: false,
+            request_id: Some("secret"),
+            ..Default::default()
+        },
+        policy,
+    );
+    dispatcher.try_emit_correlated(
+        data,
+        CorrelationInput {
+            trusted: true,
+            request_id: Some("x".repeat(129).as_str()),
+            ..Default::default()
+        },
+        policy,
+    );
+    wait_until(|| dispatcher.status().ordinary.written == 3);
+    dispatcher.shutdown(Duration::from_secs(1));
+    let bytes = output.0.lock().unwrap();
+    let lines: Vec<serde_json::Value> = std::str::from_utf8(&bytes)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(lines[0]["correlation"]["request_id"], "a".repeat(128));
+    assert_eq!(
+        lines[0]["correlation"]["trace_id"],
+        "4bf92f3577b34da6a3ce929d0e0e4736"
+    );
+    assert_eq!(lines[1]["correlation"], serde_json::json!({}));
+    assert_eq!(lines[2]["correlation"], serde_json::json!({}));
+}
+
+#[test]
 fn public_flood_is_rejected_before_encoding_and_cannot_spend_audit_capacity() {
     let gate = Gate::default();
     let output = Output::default();

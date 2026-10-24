@@ -10,6 +10,24 @@ pub(super) async fn send_native_http2_response(
     respond: &mut h2::server::SendResponse<Bytes>,
     response: NativeHttp2Response,
 ) -> Result<(), NativeHttp2StackError> {
+    let completion = response.completion.clone();
+    let status = response.status.as_u16();
+    let bytes = response.body.len() as u64;
+    let result = send_response_inner(respond, response).await;
+    if let Some(completion) = completion {
+        completion.finish(
+            Some(status),
+            if result.is_ok() { bytes } else { 0 },
+            result.is_ok(),
+        );
+    }
+    result
+}
+
+async fn send_response_inner(
+    respond: &mut h2::server::SendResponse<Bytes>,
+    response: NativeHttp2Response,
+) -> Result<(), NativeHttp2StackError> {
     validate_response_headers(&response.headers)?;
     if let Some(trailers) = &response.trailers {
         validate_response_headers(trailers)?;

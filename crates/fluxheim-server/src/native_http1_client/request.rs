@@ -32,7 +32,13 @@ where
             .await?;
     }
     let connection_tokens = connection_tokens(request);
+    let attempt_traceparent = crate::native_request_telemetry::attempt_traceparent();
     for (name, value) in &request.headers {
+        let value = if name.eq_ignore_ascii_case("traceparent") {
+            attempt_traceparent.as_deref().unwrap_or(value)
+        } else {
+            value
+        };
         if upstream_hop_by_hop_header(name, &connection_tokens)
             || upstream_owned_header_for_request(name, request)
         {
@@ -76,7 +82,13 @@ where
     stream.write_all(b"connection: Upgrade\r\n").await?;
     stream.write_all(b"upgrade: websocket\r\n").await?;
     let connection_tokens = connection_tokens(request);
+    let attempt_traceparent = crate::native_request_telemetry::attempt_traceparent();
     for (name, value) in &request.headers {
+        let value = if name.eq_ignore_ascii_case("traceparent") {
+            attempt_traceparent.as_deref().unwrap_or(value)
+        } else {
+            value
+        };
         if upstream_hop_by_hop_header(name, &connection_tokens)
             || upstream_websocket_owned_header_for_request(name, request)
         {

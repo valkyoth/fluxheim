@@ -32,6 +32,13 @@ impl NativeHttp1Upstream {
         &self,
         request: &mut NativeHttp1Request,
     ) -> Result<NativeHttp1Response, NativeHttp1Error> {
+        crate::native_request_telemetry::upstream_attempt(self.send_inner(request)).await
+    }
+
+    async fn send_inner(
+        &self,
+        request: &mut NativeHttp1Request,
+    ) -> Result<NativeHttp1Response, NativeHttp1Error> {
         match self.protocol {
             NativeUpstreamHttpProtocol::Http2 => return self.send_http2(request).await,
             NativeUpstreamHttpProtocol::Http1AndHttp2 => {
@@ -54,6 +61,7 @@ impl NativeHttp1Upstream {
                     && request.body.is_empty()
                     && native_http1_retry_method_allowed(&request.method) =>
             {
+                crate::native_request_telemetry::retry_attempt();
                 let fresh = self.connect_stream(request).await?;
                 return self.send_on_stream(fresh, request).await;
             }
@@ -100,6 +108,19 @@ impl NativeHttp1Upstream {
     }
 
     pub(crate) async fn websocket_tunnel(
+        &self,
+        request: &NativeHttp1Request,
+        prebuffered: Vec<u8>,
+        downstream: NativeHttp1ConnectionStream,
+    ) -> Result<(), NativeHttp1Error> {
+        crate::native_request_telemetry::transport_attempt(
+            self.websocket_tunnel_inner(request, prebuffered, downstream),
+            |_| None,
+        )
+        .await
+    }
+
+    async fn websocket_tunnel_inner(
         &self,
         request: &NativeHttp1Request,
         prebuffered: Vec<u8>,

@@ -14,6 +14,28 @@ pub use dispatch::{
 
 static DISPATCHER: OnceLock<Dispatcher> = OnceLock::new();
 
+tokio::task_local! {
+    static REQUEST: (dispatch::PendingCorrelation, crate::event::CapturePolicy);
+}
+
+/// Request-local values, not thread-local state. Detached background tasks start
+/// without this context. Audit admission and identity never use request context.
+pub async fn scope<T>(
+    correlation: crate::event::CorrelationInput<'_>,
+    policy: crate::event::CapturePolicy,
+    future: impl std::future::Future<Output = T>,
+) -> T {
+    REQUEST
+        .scope(
+            (
+                dispatch::PendingCorrelation::capture(correlation, policy),
+                policy,
+            ),
+            future,
+        )
+        .await
+}
+
 pub fn reserve_audit(
     operation: AuditOperation,
     actor: ActorClass,
@@ -47,7 +69,28 @@ pub fn emit(data: EventData) {
         return;
     }
     if let Some(dispatcher) = DISPATCHER.get() {
+        if !matches!(data, EventData::Audit { .. })
+            && REQUEST
+                .try_with(|(correlation, policy)| {
+                    dispatcher.try_emit_correlated(data, correlation.input(), *policy)
+                })
+                .is_ok()
+        {
+            return;
+        }
         dispatcher.try_emit(data);
+    }
+}
+
+/// The producer must establish local generation or configured peer trust first.
+/// Candidates are validated and copied into fixed-size queue fields after admission.
+pub fn emit_correlated(
+    data: EventData,
+    correlation: crate::event::CorrelationInput<'_>,
+    policy: crate::event::CapturePolicy,
+) {
+    if let Some(dispatcher) = DISPATCHER.get() {
+        dispatcher.try_emit_correlated(data, correlation, policy);
     }
 }
 

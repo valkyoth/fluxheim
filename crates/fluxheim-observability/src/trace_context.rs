@@ -28,7 +28,7 @@ impl TraceContext {
 
     pub fn parse_traceparent(value: &str, trusted_peer: bool) -> Option<Self> {
         let value = value.trim();
-        if value.len() != TRACEPARENT_LEN {
+        if value.len() != TRACEPARENT_LEN || !value.is_ascii() {
             return None;
         }
         let bytes = value.as_bytes();
@@ -64,6 +64,18 @@ impl TraceContext {
 
     pub fn trace_id_hex(&self) -> String {
         hex_bytes(&self.trace_id)
+    }
+
+    pub const fn sampled(self) -> bool {
+        self.flags & SAMPLED_FLAG != 0
+    }
+
+    pub fn child(self) -> Option<Self> {
+        Some(Self {
+            span_id: non_zero_random_8()?,
+            parent_span_id: Some(self.span_id),
+            ..self
+        })
     }
 
     pub fn span_id_hex(&self) -> String {
@@ -208,5 +220,28 @@ mod tests {
 
         assert_ne!(context.trace_id_hex(), "00000000000000000000000000000000");
         assert_eq!(context.to_traceparent().len(), TRACEPARENT_LEN);
+    }
+
+    #[test]
+    fn malformed_unicode_context_never_panics() {
+        for offset in 3..34 {
+            let mut value = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_owned();
+            value.replace_range(offset..offset + 2, "\u{e9}");
+            assert!(TraceContext::parse_traceparent(&value, true).is_none());
+        }
+    }
+
+    #[test]
+    fn children_preserve_trace_and_sampling_but_not_span() {
+        let parent = TraceContext::parse_traceparent(
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            true,
+        )
+        .unwrap();
+        let child = parent.child().unwrap();
+        assert_eq!(child.trace_id_hex(), parent.trace_id_hex());
+        assert_eq!(child.parent_span_id_hex(), Some(parent.span_id_hex()));
+        assert_ne!(child.span_id_hex(), parent.span_id_hex());
+        assert!(child.sampled());
     }
 }

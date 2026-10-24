@@ -9,7 +9,7 @@ description = "Internal Fluxheim observability and trace context boundary."
 
 [features]
 default = []
-structured-events = ["dep:serde", "dep:serde_json"]
+structured-events = ["dep:serde", "dep:serde_json", "dep:tokio"]
 test-support = ["structured-events"]
 privacy-mode = []
 metrics-secret = ["dep:fluxheim-config", "dep:rustix", "dep:sanitization", "dep:zeroize"]
@@ -21,6 +21,7 @@ otlp-trace = ["dep:fluxheim-config", "dep:serde_json", "otlp-http"]
 fluxheim-config = { path = "../fluxheim-config", optional = true }
 getrandom = "0.4.3"
 log = "0.4.34"
+tokio = { version = "1.54.0", default-features = false, features = ["rt"], optional = true }
 prometheus = { version = "0.14.0", optional = true }
 rustix = { version = "1.1.5", features = ["fs"], optional = true }
 sanitization = { version = "2.1.1", features = ["alloc"], optional = true }

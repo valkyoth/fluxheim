@@ -20,6 +20,70 @@ type Writer = Box<dyn Write + Send>;
 struct Pending {
     data: EventData,
     timestamp: u64,
+    correlation: PendingCorrelation,
+    policy: CapturePolicy,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct PendingCorrelation {
+    request: [u8; 128],
+    request_len: u8,
+    trace: [u8; 32],
+    span: [u8; 16],
+}
+
+impl Default for PendingCorrelation {
+    fn default() -> Self {
+        Self {
+            request: [0; 128],
+            request_len: 0,
+            trace: [0; 32],
+            span: [0; 16],
+        }
+    }
+}
+
+impl PendingCorrelation {
+    pub(super) fn capture(input: CorrelationInput<'_>, policy: CapturePolicy) -> Self {
+        let mut value = Self::default();
+        if !input.trusted || policy.privacy_mode || cfg!(feature = "privacy-mode") {
+            return value;
+        }
+        if policy.include_request_id
+            && let Some(id) = input
+                .request_id
+                .filter(|id| crate::access_log_request_id_valid(id))
+        {
+            value.request[..id.len()].copy_from_slice(id.as_bytes());
+            value.request_len = id.len() as u8;
+        }
+        if policy.include_trace_ids
+            && let (Some(trace), Some(span)) = (input.trace_id, input.span_id)
+            && trace.len() == 32
+            && span.len() == 16
+            && trace.bytes().all(|b| b.is_ascii_hexdigit())
+            && span.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            value.trace.copy_from_slice(trace.as_bytes());
+            value.span.copy_from_slice(span.as_bytes());
+        }
+        value
+    }
+
+    pub(super) fn input(&self) -> CorrelationInput<'_> {
+        CorrelationInput {
+            trusted: true,
+            request_id: (self.request_len > 0)
+                .then(|| std::str::from_utf8(&self.request[..usize::from(self.request_len)]).ok())
+                .flatten(),
+            trace_id: (self.trace[0] != 0)
+                .then(|| std::str::from_utf8(&self.trace).ok())
+                .flatten(),
+            span_id: (self.span[0] != 0)
+                .then(|| std::str::from_utf8(&self.span).ok())
+                .flatten(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -152,6 +216,30 @@ impl Dispatcher {
     }
 
     fn try_emit_at(&self, data: EventData, now: Instant) {
+        self.emit_at(
+            data,
+            CorrelationInput::default(),
+            CapturePolicy::default(),
+            now,
+        );
+    }
+
+    pub fn try_emit_correlated(
+        &self,
+        data: EventData,
+        correlation: CorrelationInput<'_>,
+        policy: CapturePolicy,
+    ) {
+        self.emit_at(data, correlation, policy, Instant::now());
+    }
+
+    fn emit_at(
+        &self,
+        data: EventData,
+        correlation: CorrelationInput<'_>,
+        policy: CapturePolicy,
+        now: Instant,
+    ) {
         let index = match data.admission_class() {
             AdmissionClass::Ordinary => 0,
             AdmissionClass::Security => 1,
@@ -159,7 +247,7 @@ impl Dispatcher {
         };
         let lane = &self.lanes[index];
         let c = &lane.counters;
-        if !CapturePolicy::default().allows(data, (self.filter)(data)) {
+        if !policy.allows(data, (self.filter)(data)) {
             increment(&c.filtered);
             return;
         }
@@ -177,6 +265,8 @@ impl Dispatcher {
         let pending = Pending {
             data,
             timestamp: u64::try_from(crate::unix_time_nanos()).unwrap_or(u64::MAX),
+            correlation: PendingCorrelation::capture(correlation, policy),
+            policy,
         };
         match lane.sender.try_send(pending) {
             Ok(()) => increment(&c.accepted),
@@ -254,8 +344,8 @@ fn writer_loop(
             pending.timestamp,
             pending.data,
             None,
-            CorrelationInput::default(),
-            CapturePolicy::default(),
+            pending.correlation.input(),
+            pending.policy,
             true,
         )
         .and_then(|event| event.encode(format).ok());

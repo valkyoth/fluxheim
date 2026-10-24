@@ -47,7 +47,13 @@ pub(super) fn native_http2_upstream_request(
         .map_err(|_| fluxheim_protocol::Http1ParseError::InvalidRequestTarget)?;
     let mut headers = HeaderMap::new();
     let connection_tokens = super::request::connection_tokens(request);
+    let attempt_traceparent = crate::native_request_telemetry::attempt_traceparent();
     for (name, value) in &request.headers {
+        let value = if name.eq_ignore_ascii_case("traceparent") {
+            attempt_traceparent.as_deref().unwrap_or(value)
+        } else {
+            value
+        };
         if super::request::upstream_hop_by_hop_header(name, &connection_tokens)
             || super::request::upstream_owned_header_for_request(name, request)
         {

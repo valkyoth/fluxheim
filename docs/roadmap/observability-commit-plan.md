@@ -1,6 +1,6 @@
 # 1.9.0 Observability Commit Plan
 
-Status: Commits 01-04 accepted for progression; Commit 05 implemented for review, 2026-10-24.
+Status: Commits 01-05 accepted for progression; Commit 06 implemented for review, 2026-10-24.
 Main stays at **1.9.0
 (unreleased)**. This document replaces the earlier ten-checkpoint outline;
 no previously accepted implementation checkpoint is being renumbered.
@@ -711,8 +711,8 @@ collector behavior is not the new required-collector acceptance contract.
 | 02 - Event model/redaction | Accepted for progression | 74dbb160; user supplied clean pentest, reported GitHub green and authorized 03. Producer provenance is a mandatory integration gate. |
 | 03 - Diagnostics/audit | Accepted for progression | 27c752a2341297ba10c055eaec234479f42714dc; user accepted the documented non-durable audit limitation, reported GitHub green and authorized 04. |
 | 04 - Bounded dispatcher | Accepted for progression | User supplied clean pentest, reported GitHub green after follow-ups through ee98efea and authorized the next commit. [Legacy dispatch, bounds and qualification](../evidence/observability-04.md). |
-| 05 - File lifecycle | Implemented; review pending | [Protected file lifecycle and qualification](../evidence/observability-05.md). Pentest, exact-SHA GitHub and native Windows validation remain gates. |
-| 06 - Correlation | Not started | Pending |
+| 05 - File lifecycle | Accepted for progression | User supplied clean pentest, reported GitHub green after follow-ups through d4a2569b and authorized 06. [Protected file lifecycle and qualification](../evidence/observability-05.md). |
+| 06 - Correlation | Implemented; review pending | [Request correlation and live qualification](../evidence/observability-06.md). Incremental pentest and exact-SHA CI, including native Windows, remain gates. |
 | 07 - Metrics | Not started | Pending |
 | 08 - Export | Not started | Pending |
 | 09 - Read-only API | Not started | Pending |
@@ -721,5 +721,5 @@ collector behavior is not the new required-collector acceptance contract.
 | 12 - Observability docs / candidate qualification | Not started | Pending |
 | 13 - Documentation / final release acceptance | Not started | Pending |
 
-The current authorized implementation task is Commit 05. Stop for pentest,
-green GitHub checks and explicit approval before starting Commit 06.
+The current authorized implementation task is Commit 06. Stop for pentest,
+green GitHub checks and explicit approval before starting Commit 07.

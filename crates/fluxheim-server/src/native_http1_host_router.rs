@@ -40,6 +40,7 @@ pub type NativeLoadBalancerAdminPools = Vec<()>;
 
 #[derive(Clone, Debug)]
 pub struct NativeHttp1HostRouter {
+    telemetry: crate::native_request_telemetry::RequestTelemetry,
     exact_hosts: HashMap<String, Arc<NativeHttp1RouteProxy>>,
     wildcard_hosts: Vec<NativeHttp1WildcardHost>,
     default_proxy: Arc<NativeHttp1RouteProxy>,
@@ -85,6 +86,7 @@ impl NativeHostRouteError {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NativeHttp1HostRouterConfigError {
+    Telemetry,
     InvalidHostPattern {
         vhost: String,
         host: String,
@@ -116,6 +118,7 @@ pub enum NativeHttp1HostRouterConfigError {
 impl std::fmt::Display for NativeHttp1HostRouterConfigError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Telemetry => write!(formatter, "request telemetry initialization failed"),
             Self::InvalidHostPattern { vhost, host } => {
                 write!(
                     formatter,
@@ -295,6 +298,11 @@ impl NativeHttp1HostRouter {
 
         Ok((
             Self {
+                telemetry: crate::native_request_telemetry::RequestTelemetry::new(
+                    config,
+                    trusted_sources.clone(),
+                )
+                .map_err(|_| NativeHttp1HostRouterConfigError::Telemetry)?,
                 exact_hosts,
                 wildcard_hosts,
                 default_proxy,
@@ -336,6 +344,11 @@ impl NativeHttp1HostRouter {
                 Err(error) => return Err(NativeHttp1HostRouterConfigError::from(error)),
             };
         Ok(Self {
+            telemetry: crate::native_request_telemetry::RequestTelemetry::new(
+                config,
+                trusted_sources_from_config(config)?,
+            )
+            .map_err(|_| NativeHttp1HostRouterConfigError::Telemetry)?,
             exact_hosts: HashMap::new(),
             wildcard_hosts: Vec::new(),
             default_proxy,
@@ -392,17 +405,23 @@ impl NativeHttp1HostRouter {
 impl NativeHttp1Handler for NativeHttp1HostRouter {
     fn handle<'a>(
         &'a self,
-        request: NativeHttp1Request,
+        mut request: NativeHttp1Request,
     ) -> Pin<Box<dyn Future<Output = NativeHttp1Response> + Send + 'a>> {
         let selected = self.select_request(&request).cloned();
         Box::pin(async move {
-            match selected {
-                Ok(proxy) => proxy.handle(request).await,
-                Err(error) => {
-                    record_native_host_routing_rejection(error.metric_reason());
-                    error.response()
-                }
-            }
+            let completion = self.telemetry.begin(&mut request);
+            let response = completion
+                .scope(async move {
+                    match selected {
+                        Ok(proxy) => proxy.handle(request).await,
+                        Err(error) => {
+                            record_native_host_routing_rejection(error.metric_reason());
+                            error.response()
+                        }
+                    }
+                })
+                .await;
+            completion.attach(response)
         })
     }
 
@@ -435,24 +454,31 @@ impl NativeHttp1Handler for NativeHttp1HostRouter {
 
     fn handle_connection_takeover<'a>(
         &'a self,
-        request: NativeHttp1Request,
+        mut request: NativeHttp1Request,
         prebuffered: Vec<u8>,
         stream: NativeHttp1ConnectionStream,
     ) -> Pin<Box<dyn Future<Output = Result<(), NativeHttp1Error>> + Send + 'a>> {
         let selected = self.select_request(&request).cloned();
         Box::pin(async move {
-            match selected {
-                Ok(proxy) => {
-                    proxy
-                        .handle_connection_takeover(request, prebuffered, stream)
-                        .await
-                }
-                Err(_) => Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "strict host routing rejected connection takeover",
-                )
-                .into()),
-            }
+            let completion = self.telemetry.begin(&mut request);
+            let result = completion
+                .scope(async move {
+                    match selected {
+                        Ok(proxy) => {
+                            proxy
+                                .handle_connection_takeover(request, prebuffered, stream)
+                                .await
+                        }
+                        Err(_) => Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "strict host routing rejected connection takeover",
+                        )
+                        .into()),
+                    }
+                })
+                .await;
+            completion.finish(None, 0, result.is_ok());
+            result
         })
     }
 }

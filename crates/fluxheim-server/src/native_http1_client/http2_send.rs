@@ -61,7 +61,7 @@ impl NativeHttp1Upstream {
         upstream_request = upstream_request.with_owned_body(request.take_body());
         let request_policy = self.http2_request_policy(fresh_connection);
         let response = if retry_allowed {
-            let Some(retry_request) = retry_request else {
+            let Some(mut retry_request) = retry_request else {
                 return Err(NativeHttp1Error::Io(std::io::Error::other(
                     "body-bearing HTTP/2 request cannot be retained for retry",
                 )));
@@ -70,6 +70,13 @@ impl NativeHttp1Upstream {
             {
                 Ok(response) => response,
                 Err(error) if native_http2_error_retry_safe(&error) => {
+                    crate::native_request_telemetry::retry_attempt();
+                    if retry_request.headers.contains_key("traceparent")
+                        && let Some(value) = crate::native_request_telemetry::attempt_traceparent()
+                        && let Ok(value) = http::HeaderValue::from_str(&value)
+                    {
+                        retry_request.headers.insert("traceparent", value);
+                    }
                     record_native_http2_failure(&error);
                     drop(h2_stream_permit.take());
                     self.invalidate_http2_connection().await;
@@ -138,6 +145,7 @@ impl NativeHttp1Upstream {
                     if h2c_upgrade_error_can_fallback(&error)
                         && (body_was_empty || !request.body.is_empty()) =>
                 {
+                    crate::native_request_telemetry::retry_attempt();
                     self.invalidate_http2_connection().await;
                     log::debug!(
                         target: "fluxheim::native_http2",
