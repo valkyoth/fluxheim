@@ -101,3 +101,24 @@ This is native regression and loopback runtime evidence, not a release-package
 qualification, public-network/ACME issuance test, or guarantee of no defects.
 GitHub CI and CodeQL still need to run against the pushed fix commit; this result
 does not assert that the ten hosted code-scanning alerts have closed.
+
+## Source Scanner Follow-up: Alerts 390 And 391
+
+The scan of `de63e87a` reported two new paths from `DirEntry::path()` to the
+test inventory's `read_dir` and `read_to_string` calls. The existing canonical
+root confinement and dot-dot checks used assertions, which the reported flows
+did not treat as validation barriers. The other alert locations are no longer
+listed as open.
+
+The scanner now returns `PermissionDenied` explicitly for root escapes,
+ambiguous paths and symlinks before enumeration or reading. Recursive and I/O
+errors propagate to the top-level test, which fails rather than skipping a
+directory. Direct runtime abort/exit detection and its narrow exemptions remain
+unchanged. No CodeQL suppression or production change was added.
+
+Regression fixtures exercise a valid nested Rust file, direct abort and exit
+violations, an outside root, dot-dot-containing file and directory names, and
+internal/external symlinks on Unix. Linux observability and native macOS logging
+suites passed all 18 tests, and strict Clippy passed. Native Windows execution of
+this follow-up remains pending CI because the disposable host is no longer
+reachable. Hosted CodeQL must rescan the explicit guards to confirm closure.

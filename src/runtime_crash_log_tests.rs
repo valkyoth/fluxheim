@@ -47,31 +47,55 @@ fn unsafe_crash_file_fails_startup_before_workers_are_installed() {
 
 #[test]
 fn runtime_termination_sites_cannot_bypass_fatal_diagnostics() {
-    fn scan(root: &Path, path: &Path) {
-        let path = path.canonicalize().unwrap();
-        assert!(path.starts_with(root), "source scan escaped repository");
+    fn scan(root: &Path, path: &Path) -> std::io::Result<()> {
+        use std::io::{Error, ErrorKind};
+
+        let path = path.canonicalize()?;
+        if !path.starts_with(root) {
+            return Err(Error::new(
+                ErrorKind::PermissionDenied,
+                "source scan escaped repository",
+            ));
+        }
         let text = path.to_str().unwrap();
-        assert!(!text.contains(".."), "ambiguous source path");
-        for entry in std::fs::read_dir(text).unwrap() {
-            let entry = entry.unwrap();
-            let kind = entry.file_type().unwrap();
-            assert!(
-                !kind.is_symlink(),
-                "source inventory must not follow symlinks"
-            );
-            let path = entry.path().canonicalize().unwrap();
-            assert!(path.starts_with(root), "source scan escaped repository");
+        if text.contains("..") {
+            return Err(Error::new(
+                ErrorKind::PermissionDenied,
+                "ambiguous source path",
+            ));
+        }
+        for entry in std::fs::read_dir(text)? {
+            let entry = entry?;
+            let kind = entry.file_type()?;
+            if kind.is_symlink() {
+                return Err(Error::new(
+                    ErrorKind::PermissionDenied,
+                    "source inventory must not follow symlinks",
+                ));
+            }
+            let path = entry.path().canonicalize()?;
+            if !path.starts_with(root) {
+                return Err(Error::new(
+                    ErrorKind::PermissionDenied,
+                    "source scan escaped repository",
+                ));
+            }
             let text = path.to_str().unwrap();
-            assert!(!text.contains(".."), "ambiguous source path");
+            if text.contains("..") {
+                return Err(Error::new(
+                    ErrorKind::PermissionDenied,
+                    "ambiguous source path",
+                ));
+            }
             if kind.is_dir() {
                 if path.file_name().unwrap() != "target" {
-                    scan(root, &path);
+                    scan(root, &path)?;
                 }
             } else if path.extension().is_some_and(|ext| ext == "rs")
                 && !path.ends_with("fluxheim-common/src/fatal.rs")
             {
                 assert!(kind.is_file(), "source inventory requires regular files");
-                let source = std::fs::read_to_string(text).unwrap();
+                let source = std::fs::read_to_string(text)?;
                 assert!(
                     !source.contains(concat!("process::", "abort(")),
                     "route invariant aborts through the fatal reason vocabulary: {}",
@@ -91,25 +115,56 @@ fn runtime_termination_sites_cannot_bypass_fatal_diagnostics() {
                 );
             }
         }
+        Ok(())
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .canonicalize()
         .unwrap();
-    scan(&root, &root.join("src"));
-    scan(&root, &root.join("crates"));
+    scan(&root, &root.join("src")).unwrap();
+    scan(&root, &root.join("crates")).unwrap();
 
     let fixture = tempfile::tempdir().unwrap();
     let fixture_root = fixture.path().canonicalize().unwrap();
     let outside = tempfile::tempdir().unwrap();
-    assert!(std::panic::catch_unwind(|| scan(&fixture_root, outside.path())).is_err());
+    assert_eq!(
+        scan(&fixture_root, outside.path()).unwrap_err().kind(),
+        std::io::ErrorKind::PermissionDenied
+    );
+    let source = fixture_root.join("source");
+    std::fs::create_dir(&source).unwrap();
+    let file = source.join("safe.rs");
+    std::fs::write(&file, "fn valid() {}\n").unwrap();
+    scan(&fixture_root, &fixture_root).unwrap();
+    for operation in ["abort", "exit"] {
+        std::fs::write(&file, format!("std::process::{operation}();\n")).unwrap();
+        assert!(std::panic::catch_unwind(|| scan(&fixture_root, &fixture_root)).is_err());
+    }
+    std::fs::remove_file(file).unwrap();
+    let ambiguous = source.join("ambiguous..rs");
+    std::fs::write(&ambiguous, "").unwrap();
+    assert_eq!(
+        scan(&fixture_root, &fixture_root).unwrap_err().kind(),
+        std::io::ErrorKind::PermissionDenied
+    );
+    std::fs::remove_file(ambiguous).unwrap();
+    let ambiguous_directory = source.join("ambiguous..directory");
+    std::fs::create_dir(&ambiguous_directory).unwrap();
+    assert_eq!(
+        scan(&fixture_root, &ambiguous_directory)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::PermissionDenied
+    );
+    std::fs::remove_dir(ambiguous_directory).unwrap();
     #[cfg(unix)]
     {
-        let source = fixture_root.join("source");
-        std::fs::create_dir(&source).unwrap();
         for target in [outside.path(), source.as_path()] {
             let link = fixture_root.join("link");
             std::os::unix::fs::symlink(target, &link).unwrap();
-            assert!(std::panic::catch_unwind(|| scan(&fixture_root, &fixture_root)).is_err());
+            assert_eq!(
+                scan(&fixture_root, &fixture_root).unwrap_err().kind(),
+                std::io::ErrorKind::PermissionDenied
+            );
             std::fs::remove_file(link).unwrap();
         }
     }
