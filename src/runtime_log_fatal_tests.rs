@@ -1,8 +1,7 @@
 use super::*;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 const CHILD: &str = "FLUXHEIM_FATAL_CHILD";
-const PATH: &str = "FLUXHEIM_FATAL_PATH";
 const TEST: &str =
     "runtime::runtime_logging::dispatch::fatal_tests::fatal_reporting_survives_logging_failure";
 
@@ -39,7 +38,7 @@ fn fatal_reporting_survives_logging_failure() {
             },
         )
         .unwrap();
-        let path = std::path::PathBuf::from(std::env::var_os(PATH).unwrap());
+        let path = std::path::PathBuf::from("fatal.log");
         fluxheim_common::fatal::start_watchdog().unwrap();
         let config = crate::config::Config::default();
         if mode == "startup" {
@@ -109,16 +108,20 @@ fn fatal_reporting_survives_logging_failure() {
         if mode == "startup" && cfg!(feature = "privacy-mode") {
             continue; // The privacy build has a separate startup-rejection test.
         }
-        let path = fluxheim_common::test_support::unique_temp_path("fatal-subprocess");
-        let mut child = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", TEST, "--nocapture"])
-            .env(CHILD, mode)
-            .env(PATH, &path)
-            .env("RUST_LOG", "off")
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
+        let directory = tempfile::tempdir_in(fluxheim_common::test_support::test_root()).unwrap();
+        let path = directory.path().join("fatal.log");
+        let mut child = fluxheim_common::test_process::self_command(
+            fluxheim_common::test_process::TestBinary::Server,
+        )
+        .unwrap()
+        .args(["--exact", TEST, "--nocapture"])
+        .env(CHILD, mode)
+        .current_dir(directory.path())
+        .env("RUST_LOG", "off")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
         let deadline = Instant::now() + Duration::from_secs(15);
         while child.try_wait().unwrap().is_none() {
             if Instant::now() >= deadline {
@@ -163,5 +166,6 @@ fn fatal_reporting_survives_logging_failure() {
             assert!(!String::from_utf8_lossy(&output.stderr).contains("secret-canary"));
             std::fs::remove_file(path).unwrap();
         }
+        directory.close().unwrap();
     }
 }

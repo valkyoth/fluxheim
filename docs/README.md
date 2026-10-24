@@ -101,6 +101,7 @@ a guide explicitly says otherwise.
 - [Observability Commit 04 watchdog and critical-exit retest](evidence/observability-04-watchdog.md)
 - [Observability Commit 04 core dump deployment policy](evidence/observability-04-core-limits.md)
 - [Observability Commit 04 Linux non-dumpable startup](evidence/observability-04-nondumpable.md)
+- [Observability Commit 04 CI portability and test boundaries](evidence/observability-04-ci-portability.md)
 - [Observability Commit 04 Linux performance samples](evidence/observability-04-linux.json)
 - [1.8.3 qualification](evidence/maintenance-1.8.3-qualification.md)
 - [Windows filesystem audit](evidence/dependency-audits/windows-filesystem-security.md)

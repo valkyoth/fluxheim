@@ -1,5 +1,6 @@
 use super::*;
-use std::process::{Command, Stdio};
+use crate::test_process::{TestBinary, self_command};
+use std::process::Stdio;
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
@@ -25,7 +26,8 @@ fn memory_dump_policy_is_effective_and_inherited_by_threads() {
         .unwrap();
         return;
     }
-    let status = Command::new(std::env::current_exe().unwrap())
+    let status = self_command(TestBinary::Common)
+        .unwrap()
         .args([
             "--exact",
             "fatal::tests::memory_dump_policy_is_effective_and_inherited_by_threads",
@@ -43,10 +45,14 @@ fn block_real_stderr() {
     let writer_finished = finished.clone();
     thread::spawn(move || {
         let mut stderr = io::stderr().lock();
-        locked.send(()).unwrap();
         // The parent does not read this pipe until the child terminates. Keep
-        // Rust's actual global stderr lock held during the blocking OS write.
-        stderr.write_all(&vec![b'x'; 1024 * 1024]).unwrap();
+        // Rust's actual stderr lock held. Complete a small write first: Windows
+        // may cancel an oversized pending WriteFile without retaining its bytes.
+        stderr.write_all(b"x").unwrap();
+        locked.send(()).unwrap();
+        for _ in 0..1024 {
+            stderr.write_all(&[b'x'; 1024]).unwrap();
+        }
         writer_finished.store(true, Ordering::Release);
     });
     received.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -111,7 +117,8 @@ fn termination_is_bounded_with_real_full_stderr_and_stalled_crash_sink() {
         "exit-full",
     ] {
         let started = Instant::now();
-        let mut child = Command::new(std::env::current_exe().unwrap())
+        let mut child = self_command(TestBinary::Common)
+            .unwrap()
             .args(["--exact", TEST, "--nocapture"])
             .env(CHILD, mode)
             .stdout(Stdio::null())

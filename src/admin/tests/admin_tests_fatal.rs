@@ -28,7 +28,7 @@ fn poisoned_admin_throttle_reports_before_abort_with_logging_off() {
         drop(throttle.lock_state());
         panic!("poisoned admin state must not be recovered");
     }
-    let output = std::process::Command::new(std::env::current_exe().unwrap())
+    let output = fluxheim_common::test_process::self_command(fluxheim_common::test_process::TestBinary::Server).unwrap()
         .args(["--exact", "admin::security::fatal_tests::poisoned_admin_throttle_reports_before_abort_with_logging_off", "--nocapture"])
         .env(CHILD, "1").output().unwrap();
     #[cfg(unix)]

@@ -31,9 +31,13 @@ def run(binary, format_, filter_, expected, target="stderr", file_sink=False):
         crash_config = f'crash_file = "{crash_path}"\n' if file_sink else ""
         file_config = (f'[logging.file]\nenabled = true\npath = "{sink_path}"\n'
                        if file_sink else "")
-        # Reserved but not listening: repeatable connection refusal, no external DNS.
+        # Release the TCP port before use: macOS times out on a socket that is
+        # bound but not listening. If another service claims it, the response
+        # and connection_refused assertions below must fail, never silently pass.
         with socket.socket() as origin:
             origin.bind(("127.0.0.1", 0))
+            origin_port = origin.getsockname()[1]
+            origin.close()
             config = directory / "fluxheim.toml"
             config.write_text(f'''[server]
 listen = ["127.0.0.1:{listen}"]
@@ -53,7 +57,7 @@ target = "{target}"
 [logging.access]
 enabled = false
 [proxy]
-upstreams = ["127.0.0.1:{origin.getsockname()[1]}"]
+upstreams = ["127.0.0.1:{origin_port}"]
 upstream_tls = false
 ''')
             environment = dict(os.environ, RUST_LOG=filter_)

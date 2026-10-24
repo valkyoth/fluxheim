@@ -254,7 +254,7 @@ fn repeated_initialization_does_not_replace_or_stop_the_owner() {
         );
         return;
     }
-    assert!(std::process::Command::new(std::env::current_exe().unwrap())
+    assert!(fluxheim_common::test_process::self_command(fluxheim_common::test_process::TestBinary::Server).unwrap()
         .args(["--exact", "runtime::runtime_logging::dispatch::tests::repeated_initialization_does_not_replace_or_stop_the_owner"])
         .env(CHILD, "1").status().unwrap().success());
 }
@@ -367,7 +367,7 @@ fn preinstalled_logger_fails_initialization_and_stops_workers() {
         );
         return;
     }
-    assert!(std::process::Command::new(std::env::current_exe().unwrap())
+    assert!(fluxheim_common::test_process::self_command(fluxheim_common::test_process::TestBinary::Server).unwrap()
         .args(["--exact", "runtime::runtime_logging::dispatch::tests::preinstalled_logger_fails_initialization_and_stops_workers"])
         .env(CHILD, "1").status().unwrap().success());
 }

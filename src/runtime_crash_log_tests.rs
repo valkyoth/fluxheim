@@ -47,23 +47,36 @@ fn unsafe_crash_file_fails_startup_before_workers_are_installed() {
 
 #[test]
 fn runtime_termination_sites_cannot_bypass_fatal_diagnostics() {
-    fn scan(path: &Path) {
-        for entry in std::fs::read_dir(path).unwrap() {
-            let path = entry.unwrap().path();
-            if path.is_dir() {
+    fn scan(root: &Path, path: &Path) {
+        let path = path.canonicalize().unwrap();
+        assert!(path.starts_with(root), "source scan escaped repository");
+        let text = path.to_str().unwrap();
+        assert!(!text.contains(".."), "ambiguous source path");
+        for entry in std::fs::read_dir(text).unwrap() {
+            let entry = entry.unwrap();
+            let kind = entry.file_type().unwrap();
+            assert!(
+                !kind.is_symlink(),
+                "source inventory must not follow symlinks"
+            );
+            let path = entry.path().canonicalize().unwrap();
+            assert!(path.starts_with(root), "source scan escaped repository");
+            let text = path.to_str().unwrap();
+            assert!(!text.contains(".."), "ambiguous source path");
+            if kind.is_dir() {
                 if path.file_name().unwrap() != "target" {
-                    scan(&path);
+                    scan(root, &path);
                 }
             } else if path.extension().is_some_and(|ext| ext == "rs")
                 && !path.ends_with("fluxheim-common/src/fatal.rs")
             {
-                let source = std::fs::read_to_string(&path).unwrap();
+                assert!(kind.is_file(), "source inventory requires regular files");
+                let source = std::fs::read_to_string(text).unwrap();
                 assert!(
                     !source.contains(concat!("process::", "abort(")),
                     "route invariant aborts through the fatal reason vocabulary: {}",
                     path.display()
                 );
-                let root = Path::new(env!("CARGO_MANIFEST_DIR"));
                 let cli_entrypoint = [
                     "src/main.rs",
                     "src/bin/fluxheim-acme.rs",
@@ -79,9 +92,27 @@ fn runtime_termination_sites_cannot_bypass_fatal_diagnostics() {
             }
         }
     }
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    scan(&root.join("src"));
-    scan(&root.join("crates"));
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .canonicalize()
+        .unwrap();
+    scan(&root, &root.join("src"));
+    scan(&root, &root.join("crates"));
+
+    let fixture = tempfile::tempdir().unwrap();
+    let fixture_root = fixture.path().canonicalize().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    assert!(std::panic::catch_unwind(|| scan(&fixture_root, outside.path())).is_err());
+    #[cfg(unix)]
+    {
+        let source = fixture_root.join("source");
+        std::fs::create_dir(&source).unwrap();
+        for target in [outside.path(), source.as_path()] {
+            let link = fixture_root.join("link");
+            std::os::unix::fs::symlink(target, &link).unwrap();
+            assert!(std::panic::catch_unwind(|| scan(&fixture_root, &fixture_root)).is_err());
+            std::fs::remove_file(link).unwrap();
+        }
+    }
 }
 
 #[test]
@@ -130,12 +161,29 @@ fn crash_file_rejects_public_permissions_symlinks_and_fifo_without_blocking() {
     symlink(&path, &link).unwrap();
     assert!(open(&link).is_err());
     let fifo = path.with_extension("fifo");
+    #[cfg(not(target_os = "macos"))]
     rustix::fs::mkfifoat(
         rustix::fs::CWD,
         &fifo,
         rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
     )
     .unwrap();
+    #[cfg(target_os = "macos")]
+    assert!(
+        std::process::Command::new("/usr/bin/mkfifo")
+            .args(["-m", "600"])
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    use std::os::unix::fs::FileTypeExt as _;
+    assert!(
+        std::fs::symlink_metadata(&fifo)
+            .unwrap()
+            .file_type()
+            .is_fifo()
+    );
     assert!(open(&fifo).is_err());
     let untrusted =
         fluxheim_common::test_support::unique_world_writable_child("crash-parent", "fatal.log");
