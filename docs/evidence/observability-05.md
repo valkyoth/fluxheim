@@ -47,6 +47,35 @@ No dependency versions or runtime feature defaults changed. GitHub runs the
 rotation smoke on Linux, Apple Silicon macOS and Windows. Native evidence above
 is scoped to these commands, not all archives or the final release candidate.
 
+## Confidentiality Retest Remediation
+
+Review base: `11d41ffe`. The pentest identified that the integrity-only file
+check accepted logs readable by other users. Both open/reopen and the per-record
+handle check now use the existing confidential-file policy. Unix 0640/0644 and
+Windows ACLs granting untrusted readers are rejected; existing permissions are
+never silently repaired. Startup rejection precedes truncation. A readable
+replacement leaves the private old handle in service. Active confidentiality
+loss latches the shared sink before another record is written; restoring
+permissions does not clear that latch.
+
+Three new regression tests failed on the vulnerable implementation before the
+fix. They cover group/everyone read access, append and truncate startup modes,
+reopen fallback and recovery, and active permission loss both before and after
+the reopen deadline. The active failure is shared across lane clones. Unix
+uses 0640 and 0644; Windows uses explicit protected ACLs for Guests and Everyone.
+Windows-only test code reuses already-locked `windows-permissions` 0.2.4 as a
+dev dependency; no package versions or production dependency set changed.
+
+Linux runtime tests (51) and native Apple Silicon runtime tests (49) passed.
+The expanded live smoke passed on both: a 0644 replacement remains unchanged,
+repair to 0600 permits reopening, and active 0640 permissions prevent further
+records while HTTP remains responsive. Locked workspace tests, privacy tests,
+strict workspace Clippy and Windows MSVC test cross-compilation also passed.
+Existing operational-event, backpressure, fatal-listener and Linux non-dumpable
+startup smokes passed, as did the real container ENOSPC scenario. Privacy-profile
+tests passed 194 cases; no assertions were relaxed to accommodate the fix.
+Native Windows execution remains a required CI check, not a local pass claim.
+
 ## Repeatable Commands
 
 ```sh

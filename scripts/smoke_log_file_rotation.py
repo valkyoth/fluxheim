@@ -171,6 +171,37 @@ snapshot_integrity_key_file = "{key.as_posix()}"
                 wait_for(lambda: any(record["data"].get("operation") == "reload" for record in records(log)))
                 assert status()["reopens"] == reopens + 2
                 assert "secret-canary" not in log.read_text()
+                if os.name == "posix" and quota_dir is None:
+                    wait_for(lambda: len(records(log)) == 2)
+                    private_old = root / "private-old.log"
+                    log.rename(private_old)
+                    previous_records = len(records(private_old))
+                    log.write_bytes(b"public replacement must stay unchanged\n")
+                    log.chmod(0o644)
+                    before = status()
+                    time.sleep(1.1)
+                    emit()
+                    wait_for(lambda: len(records(private_old)) == previous_records + 1)
+                    assert log.read_bytes() == b"public replacement must stay unchanged\n"
+                    assert status()["reopen_errors"] > before["reopen_errors"]
+                    assert status()["reopens"] == before["reopens"]
+                    assert not status()["failed"]
+                    log.chmod(0o600)
+                    time.sleep(1.1)
+                    emit()
+                    wait_for(lambda: status()["reopens"] == before["reopens"] + 1)
+                    wait_for(lambda: len(log.read_bytes().splitlines()) == 2)
+                    private_bytes = log.read_bytes()
+                    log.chmod(0o640)
+                    emit()
+                    wait_for(lambda: status()["failed"])
+                    assert status()["write_errors"] == 1
+                    assert log.read_bytes() == private_bytes
+                    log.chmod(0o600)
+                    emit()
+                    time.sleep(0.1)
+                    assert log.read_bytes() == private_bytes
+                    print("log confidentiality: readable replacement rejected; active read access stops writes")
                 if os.name == "nt":
                     before = status()
                     log.unlink()  # DeleteFileW: pending while the writer owns its handle.

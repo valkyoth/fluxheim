@@ -30,11 +30,15 @@ append = true
 Create the parent directory first, owned by the service identity or root, with
 no untrusted write access. A Unix deployment can use mode 0700 or an appropriate
 0750 directory and a 0600 file. Newly created files use 0600. Existing files
-must be regular and must not be group/world writable. Symlink components are
+must be private regular files with no group/other permission bits: 0640 and 0644
+are rejected, not just writable modes such as 0666. Symlink components are
 rejected. Do not use a shared writable log directory to bypass these checks.
 On Windows, use a local absolute path such as `C:/Fluxheim/logs/events.log` and
 the same trusted-owner/ACL rules as other Fluxheim state files. Reparse points
 and untrusted ACLs fail closed; creation installs the protected confidential ACL.
+Existing files and replacements must also satisfy the confidential-file ACL
+policy: read access for untrusted principals is rejected, including Everyone
+and Guests. Fluxheim does not silently change existing files' permissions.
 
 Each process needs its own log file. Unix uses append mode; Windows seeks to EOF
 under the shared sink lock. Neither policy promises safe concurrent rotation
@@ -84,8 +88,13 @@ Prefer rename and retain the old file until the reopen succeeds.
   record after one second. This includes directory/symlink replacements,
   crash-file aliases, ACL failures and Windows sharing conflicts. It does not
   redirect to stdout/stderr. Fix the path or permissions to recover.
+- **Rotation tool creates a readable file:** configure it to create mode 0600
+  (or a confidential Windows ACL), or let Fluxheim create the replacement.
+  A 0644/0640 replacement is rejected and the old private handle is retained.
 - **Opened file loses trust or writing fails:** latch the shared sink as failed.
-  This includes ENOSPC, permission loss and partial writes followed by error.
+  This includes ENOSPC, confidentiality loss (even 0600 to 0644/0640) and partial
+  writes followed by error. The opened handle is checked before each record,
+  independently of the one-second reopen interval.
   No record is retried, replayed, or redirected to another sink. A partial final
   record may remain. Freeing space or restoring permissions does not clear the
   latch: inspect the log, correct the cause and restart Fluxheim.

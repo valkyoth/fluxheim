@@ -80,6 +80,7 @@ fn failed_reopen_keeps_old_handle_and_is_rate_limited_then_recovers() {
     assert_eq!(std::fs::read(&rotated).unwrap(), b"old\n".repeat(11));
     std::fs::remove_dir(&path).unwrap();
     // Non-append applies at startup only. An existing replacement is preserved.
+    drop(open(&path, true).unwrap());
     std::fs::write(&path, b"replacement\n").unwrap();
     due(&sink);
     sink.write_all(b"new\n").unwrap();

@@ -138,12 +138,12 @@ impl Write for Sink {
         // Serialize the entire record, including short OS writes, with the
         // handle swap. Producers and status readers never acquire this mutex.
         let result = (|| {
-            if fluxheim_config::fs_trust::opened_file_has_insecure_owner_or_write_permissions(
+            if fluxheim_config::fs_trust::opened_file_has_insecure_confidential_permissions(
                 &state.file,
             )? {
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
-                    "log handle no longer trusted",
+                    "log handle no longer confidential",
                 ));
             }
             #[cfg(windows)]
@@ -200,11 +200,11 @@ pub(super) fn open(path: &Path, append: bool) -> io::Result<File> {
         Err(error) => return Err(error),
     };
     if !file.metadata()?.is_file()
-        || fluxheim_config::fs_trust::opened_file_has_insecure_owner_or_write_permissions(&file)?
+        || fluxheim_config::fs_trust::opened_file_has_insecure_confidential_permissions(&file)?
     {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
-            "untrusted log file",
+            "log file must be a private regular file",
         ));
     }
     if !append {
@@ -216,3 +216,7 @@ pub(super) fn open(path: &Path, append: bool) -> io::Result<File> {
 #[cfg(test)]
 #[path = "runtime_log_file_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "runtime_log_file_permission_tests.rs"]
+mod permission_tests;

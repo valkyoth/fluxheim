@@ -332,6 +332,7 @@ fn opens_existing_log_file_for_verified_truncation()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let path = unique_temp_path("runtime-log-truncate").with_extension("log");
     let _ = std::fs::remove_file(&path);
+    drop(open_log_file(&path, true)?);
     std::fs::write(&path, b"previous log contents")?;
 
     let file = open_log_file(&path, false)?;
