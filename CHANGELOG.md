@@ -15,8 +15,9 @@ behavior when the change improves security or project direction.
   context and optional OTLP request/attempt spans. Retries have distinct child
   spans; cancellation and upgrades complete once. Add real concurrent
   static/proxy/FastCGI correlation smoke gates on Linux, macOS and Windows.
-  Request-ID headers must be dedicated `x-` fields, not protocol/authentication
-  headers. Export remains best effort and locally generated roots unsampled.
+  Request-ID headers are restricted to `x-request-id` or `x-correlation-id`,
+  never arbitrary identity fields. Export remains best effort and locally
+  generated roots unsampled.
 - Carry forward the released 1.8.3 systemd/RPM fixes, release regressions and
   remote macOS helper improvements. Expand observability into twelve review
   checkpoints, retaining full management API/UI work as a separate proposal.

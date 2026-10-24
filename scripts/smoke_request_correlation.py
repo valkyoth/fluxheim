@@ -327,6 +327,17 @@ mode = "external"
 tcp = "127.0.0.1:{php.server_address[1]}"
 allow_private_tcp_upstreams = true
 ''')
+            # The real startup validator must reject identity-header clobbering,
+            # even when access output is disabled but request IDs remain enabled.
+            for header in ("x-authenticated-user", "x-ssl-client-cert", "x-client-ip", "x-envoy-external-address", "x-proxyuser-ip"):
+                rejected = root / "rejected.toml"
+                rejected.write_text(config.read_text() + f'\n[logging.access]\nenabled = false\nrequest_id_header = "{header}"\n')
+                validation = subprocess.run(
+                    [str(binary), "--config", str(rejected), "--validate-config"],
+                    cwd=root, capture_output=True, timeout=10,
+                )
+                assert validation.returncode != 0, header
+                assert b"logging.access.request_id_header" in validation.stdout + validation.stderr, validation.stderr
             with (root / "process.log").open("wb") as output:
                 process = subprocess.Popen([str(binary), "--config", str(config)], cwd=root,
                     env=dict(os.environ, RUST_LOG="info"), stdout=output, stderr=output)

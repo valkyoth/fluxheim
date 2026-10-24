@@ -67,3 +67,33 @@ Tokio dependency for task-local context. The CI workflow runs the new live
 smoke on Linux, Apple Silicon macOS and Windows. FastCGI here is a protocol
 fixture, not an interpreter; backend APM ingestion, final native archives and
 the real collector/container matrix remain later plan gates.
+
+## Pentest Remediation: Correlation Header Ownership
+
+Review base: `b44d1f13`. The request-ID header prefix/denylist accepted arbitrary
+identity headers. Since ingress correlation replaces that header before routing,
+an otherwise valid operator configuration could manufacture an authoritative-
+looking identity field. This finding is fixed, not accepted as an operational
+limitation.
+
+Enabled request-ID capture now permits only `x-request-id` and
+`x-correlation-id`, case-insensitively. Validation applies even when access
+output is disabled, because error correlation remains active. Telemetry
+construction repeats the same validation before creating the exporter or
+handling requests, including programmatically constructed configurations.
+With request-ID capture disabled, the unused name is not interpreted or written.
+
+Three regression cases failed before the fix and passed afterward. Tests cover
+identity/certificate/proxy-address names, arbitrary custom names, suffix tricks,
+case-insensitive allowed names, disabled access output, and unchanged identity
+headers for both trusted and untrusted peers. The existing live smoke now also
+invokes the actual binary's configuration validator against five identity-header
+configurations and requires rejection with the relevant field diagnostic.
+
+Verification: full locked workspace tests, nine focused telemetry tests, two
+configuration tests (also in privacy mode), five privacy telemetry tests,
+strict workspace and observability/PHP-profile Clippy, formatting, documentation
+checks and Windows MSVC test cross-compilation passed. Live configuration
+rejection plus the existing 31-outcome/48-span correlation smoke passed on Linux
+and native Apple Silicon macOS. No dependency versions, audit admission or
+dispatcher loss policies changed. Native Windows execution remains a CI gate.

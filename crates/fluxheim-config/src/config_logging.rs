@@ -179,7 +179,7 @@ impl Default for AccessLoggingConfig {
 }
 
 impl AccessLoggingConfig {
-    fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         #[cfg(feature = "privacy-mode")]
         if self.enabled {
             return Err(ConfigError::PrivacyModeAccessLogging);
@@ -187,18 +187,12 @@ impl AccessLoggingConfig {
 
         if self.request_id {
             validate_header_name("logging.access.request_id_header", &self.request_id_header)?;
-            // Correlation owns this field before routing. Never overwrite framing,
-            // authentication, proxy identity or protocol negotiation fields.
+            // Correlation owns this field before routing. A prefix/denylist cannot
+            // distinguish arbitrary application identity headers from diagnostics.
             let name = self.request_id_header.to_ascii_lowercase();
-            if !name.starts_with("x-")
-                || name.starts_with("x-forwarded-")
-                || matches!(
-                    name.as_str(),
-                    "x-real-ip" | "x-api-key" | "x-auth-token" | "x-http-method-override"
-                )
-            {
+            if !matches!(name.as_str(), "x-request-id" | "x-correlation-id") {
                 return Err(ConfigError::InvalidHeaderName {
-                    field: "logging.access.request_id_header (use a dedicated x- correlation header)",
+                    field: "logging.access.request_id_header (must be x-request-id or x-correlation-id)",
                     name: self.request_id_header.clone(),
                 });
             }
@@ -220,7 +214,7 @@ fn default_true() -> bool {
     true
 }
 
-#[cfg(all(test, not(feature = "privacy-mode")))]
+#[cfg(test)]
 mod correlation_tests {
     use super::*;
 
@@ -237,6 +231,14 @@ mod correlation_tests {
             "x-forwarded-for",
             "X-Real-IP",
             "x-api-key",
+            "x-client-ip",
+            "x-envoy-external-address",
+            "x-proxyuser-ip",
+            "x-authenticated-user",
+            "X-SSL-Client-Cert",
+            "x-arbitrary-custom-header",
+            "x-request-id-extra",
+            "x-correlation-id-extra",
         ] {
             let config = AccessLoggingConfig {
                 request_id_header: name.to_owned(),
@@ -244,12 +246,36 @@ mod correlation_tests {
             };
             assert!(config.validate().is_err(), "{name}");
         }
-        for name in ["x-request-id", "X-Correlation-ID"] {
+        for name in [
+            "x-request-id",
+            "X-Request-ID",
+            "x-correlation-id",
+            "X-Correlation-ID",
+        ] {
             let config = AccessLoggingConfig {
                 request_id_header: name.to_owned(),
                 ..Default::default()
             };
             assert!(config.validate().is_ok(), "{name}");
         }
+    }
+
+    #[test]
+    fn disabled_access_output_does_not_allow_identity_header_capture() {
+        let config = AccessLoggingConfig {
+            enabled: false,
+            request_id: true,
+            request_id_header: "x-authenticated-user".into(),
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+        assert!(
+            AccessLoggingConfig {
+                request_id: false,
+                ..config
+            }
+            .validate()
+            .is_ok()
+        );
     }
 }

@@ -30,6 +30,12 @@ impl RequestTelemetry {
         config: &fluxheim_config::Config,
         trusted: Vec<ProxyProtocolTrustedSource>,
     ) -> std::io::Result<Self> {
+        config.logging.access.validate().map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid request correlation configuration",
+            )
+        })?;
         Ok(Self {
             access: config.logging.access.clone(),
             trace: cfg!(feature = "otel-tracing")

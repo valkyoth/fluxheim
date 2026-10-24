@@ -181,6 +181,48 @@ fn disabled_correlation_has_no_identifiers() {
     assert!(completion.0.context.trace.is_none());
 }
 
+#[test]
+fn telemetry_rejects_unvalidated_identity_header_configuration() {
+    for name in [
+        "x-authenticated-user",
+        "x-ssl-client-cert",
+        "x-client-ip",
+        "x-envoy-external-address",
+    ] {
+        let mut config = fluxheim_config::Config::default();
+        config.logging.access.enabled = false;
+        config.logging.access.request_id_header = name.into();
+        let result = RequestTelemetry::new(&config, Vec::new());
+        assert!(result.is_err(), "accepted unsafe request-ID header: {name}");
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+    }
+}
+
+#[test]
+#[cfg(not(feature = "privacy-mode"))]
+fn correlation_headers_do_not_create_or_replace_identity_headers() {
+    for name in ["x-request-id", "X-Correlation-ID"] {
+        for trusted in [false, true] {
+            let mut telemetry = telemetry(trusted);
+            telemetry.access.request_id_header = name.into();
+            let mut request = request(&[
+                (name, "inbound-id"),
+                ("x-authenticated-user", "original-user"),
+            ]);
+            let completion = telemetry.begin(&mut request);
+            assert_eq!(
+                unique_header(&request, "x-authenticated-user"),
+                Some("original-user")
+            );
+            assert!(unique_header(&request, "x-ssl-client-cert").is_none());
+            assert!(unique_header(&request, "x-client-ip").is_none());
+            let id = completion.0.context.request_id.as_deref().unwrap();
+            assert_eq!(id == "inbound-id", trusted);
+            assert_eq!(unique_header(&request, name), Some(id));
+        }
+    }
+}
+
 #[tokio::test]
 #[cfg(all(feature = "otel-tracing", not(feature = "privacy-mode")))]
 async fn outbound_header_removal_does_not_remove_local_context_or_reinsert_headers() {

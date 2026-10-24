@@ -50,8 +50,10 @@ enable traces. IDs are diagnostic correlation, never authorization credentials.
 Request IDs must be a single header containing 1..128 ASCII letters, digits,
 periods, hyphens or underscores. Duplicates, even identical values, are invalid.
 Missing, invalid or untrusted IDs are replaced with a cryptographically random
-`fh-` identifier, never truncated. Choose a dedicated `x-` header: protocol,
-authentication and proxy-identity headers cannot be used for correlation.
+`fh-` identifier, never truncated. `request_id_header` accepts only
+`x-request-id` or `x-correlation-id` (case-insensitive). Other names are rejected
+whenever `request_id = true`, even if access-log output is disabled. These two
+headers are diagnostic identifiers, not authentication or proxy identity.
 
 A trace parent must be a single 55-byte W3C version-00 value with nonzero trace
 and parent span IDs. Invalid, conflicting or untrusted parents produce a fresh

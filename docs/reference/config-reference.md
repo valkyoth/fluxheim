@@ -1048,6 +1048,12 @@ request_id_header = "x-request-id"
 `target` values: `stderr`, `stdout`. File logging overrides this stream target
 when `logging.file.enabled = true`.
 
+With `logging.access.request_id = true`, `request_id_header` must be
+`x-request-id` or `x-correlation-id` (case-insensitive). This restriction also
+applies when `logging.access.enabled = false`: request IDs can still correlate
+errors. Arbitrary names, including identity and certificate headers, are
+rejected. Neither allowed header is an authorization credential.
+
 `logging.file` is disabled by default. When enabled, `path` is required. Relative
 paths are resolved from the config file that defines them. Existing symlinked
 path prefixes are rejected during config validation, and Linux opens the log file
