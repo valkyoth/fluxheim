@@ -54,6 +54,50 @@ dismissed or suppressed. GitHub's subsequent CodeQL scan determines closure.
   scenarios, and typed/legacy blocked-pipe recovery and shutdown smokes passed.
 
 Production fatal handling, dump protection, filesystem trust, privacy policy and
-audit admission are unchanged. Native Windows execution remains pending CI;
-cross-compilation is not evidence of Windows pipe behavior. Stop before Commit 05
-until the independent review and GitHub gates pass.
+audit admission are unchanged. Native Windows results are recorded below;
+cross-compilation alone is not evidence of Windows pipe behavior. Stop before
+Commit 05 until the independent review and GitHub gates pass.
+
+## Native Windows Follow-up
+
+On 2026-10-24, tested exact commit
+`7a0d84eddda3a7bfccf8bbfd7d4350393d07eea3` on a fresh Windows Server 2025
+x86_64 cloud host with four logical CPUs and 16 GiB RAM. The existing bootstrap
+installed Rust 1.99.1/MSVC and verified the compiler inventory and ACLs. All builds
+and tests ran as the non-administrator `fluxheim-build` account with
+`RUSTFLAGS=-Dwarnings`, a fresh Cargo cache, and locked dependencies.
+
+The transferred `git archive` source was checked before extraction:
+
+```text
+8ffe0ee9c97e0c5c95b6754d09474797f29f852888415e39e7f9cf9d406a9a42  fluxheim-windows-ci-7a0d84ed.tar.gz
+```
+
+Results:
+
+- Common crate: nine tests passed, including all eight fatal watchdog subprocess
+  scenarios using real OS pipes and both executable-allowlist tests.
+- Observability-profile logging: 17 tests passed; poisoned-admin fatal test: one
+  passed. Privacy-profile logging: 17 passed. The Unix-only FIFO case is not
+  applicable to Windows and remains exercised on native Linux and macOS.
+- Full locked workspace: 1,770 passing test executions, including child
+  harnesses and documentation tests; zero failures or ignored tests.
+- Windows release-script validation passed.
+- `smoke_windows_native.ps1` passed its ACME, managed-PHP rejection, external
+  TCP FastCGI, storage-lease and absolute-path prerequisites. Its live checks
+  passed static HTTP, downstream and verified upstream TLS, memory/disk cache,
+  proxy, load-balancer, admin, snapshot, metrics and CTRL_BREAK graceful shutdown.
+  Snapshot verification reported two authenticated snapshots and none unverified.
+- The remote command exited zero. No Fluxheim, Cargo or rustc processes remained
+  after completion. No source changes were required for the run.
+
+Collected transcript SHA-256:
+
+```text
+71a828161d5f67486b3684315d741c9cef4eb8c3af99eed1c25e3fd6a88e3d23  fluxheim-windows-ci-7a0d84ed-transcript.txt
+```
+
+This is native regression and loopback runtime evidence, not a release-package
+qualification, public-network/ACME issuance test, or guarantee of no defects.
+GitHub CI and CodeQL still need to run against the pushed fix commit; this result
+does not assert that the ten hosted code-scanning alerts have closed.
