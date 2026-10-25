@@ -244,7 +244,7 @@ def request_keep_alive(listen):
         connection.close()
 
 
-def run(binary):
+def run(binary, container_image=None):
     collector = ThreadingHTTPServer(("127.0.0.1", 0), Collector)
     origin = ThreadingHTTPServer(("127.0.0.1", 0), Origin)
     php = FastCGIServer(("127.0.0.1", 0), FastCGI)
@@ -257,7 +257,7 @@ def run(binary):
         thread.start()
     try:
         with private_fixture(fixture_parent(False)) as root:
-            public, tls, admin = port(), port(), port()
+            public, tls, admin, metrics = port(), port(), port(), port()
             (root / "token").write_text("correlation-test-secret")
             (root / "token").chmod(0o600)
             (root / "snapshot.key").write_bytes(b"k" * 32)
@@ -268,6 +268,16 @@ def run(binary):
                 shutil.copyfile(ROOT / "tests/fixtures/tls" / source, root / dest)
                 (root / dest).chmod(0o600)
             config = root / "fluxheim.toml"
+            def command(config_path):
+                if not container_image:
+                    return [str(binary), "--config", str(config_path)]
+                return ["podman", "run", "--rm", "--pull=never", "--network=host",
+                        "--userns=keep-id", "--user", f"{os.getuid()}:{os.getgid()}",
+                        "--ulimit", "core=0:0", "--workdir", str(root),
+                        "--volume", f"{root}:{root}:Z",
+                        "--volume", f"{binary}:/fluxheim:ro,Z",
+                        "--entrypoint", "/fluxheim", container_image,
+                        "--config", str(config_path)]
             config.write_text(f'''[server]
 listen = ["127.0.0.1:{public}"]
 tls_listen = ["127.0.0.1:{tls}"]
@@ -284,6 +294,9 @@ grace_period_seconds = 1
 graceful_shutdown_timeout_seconds = 2
 [logging]
 format = "json"
+[metrics]
+enabled = true
+listen = "127.0.0.1:{metrics}"
 [admin]
 enabled = true
 listen = "127.0.0.1:{admin}"
@@ -335,13 +348,13 @@ allow_private_tcp_upstreams = true
                 rejected = root / "rejected.toml"
                 rejected.write_text(config.read_text() + f'\n[logging.access]\nenabled = false\nrequest_id_header = "{header}"\n')
                 validation = subprocess.run(
-                    [str(binary), "--config", str(rejected), "--validate-config"],
-                    cwd=root, capture_output=True, timeout=10,
+                    command(rejected) + ["--validate-config"],
+                    cwd=root, capture_output=True, timeout=30,
                 )
                 assert validation.returncode != 0, header
                 assert b"logging.access.request_id_header" in validation.stdout + validation.stderr, validation.stderr
             with (root / "process.log").open("wb") as output:
-                process = subprocess.Popen([str(binary), "--config", str(config)], cwd=root,
+                process = subprocess.Popen(command(config), cwd=root,
                     env=dict(os.environ, RUST_LOG="info"), stdout=output, stderr=output)
                 try:
                     def ready():
@@ -416,7 +429,31 @@ allow_private_tcp_upstreams = true
                     assert status_code == 200
                     lane = json.loads(status_body)["operational_events"]["ordinary"]
                     assert lane["rate_limited"] == lane["queue_full"] == lane["unavailable"] == 0, lane
+                    connection = http.client.HTTPConnection("127.0.0.1", metrics, timeout=5)
+                    try:
+                        connection.request("GET", "/metrics")
+                        response = connection.getresponse()
+                        assert response.status == 200
+                        exposition = response.read().decode()
+                    finally:
+                        connection.close()
+                    def total(name):
+                        return sum(float(line.rsplit(" ", 1)[1]) for line in exposition.splitlines()
+                                   if line.startswith(name + "{") or line.startswith(name + " "))
+                    assert total("fluxheim_http_requests_total") == len(events), exposition
+                    assert total("fluxheim_http_request_duration_seconds_count") == len(events)
+                    assert total("fluxheim_upstream_attempts_total") == sum(e["data"]["attempts"] for e in events)
+                    assert total("fluxheim_upstream_attempt_duration_seconds_count") == total("fluxheim_upstream_attempts_total")
+                    assert total("fluxheim_http_requests_active") == total("fluxheim_upstream_attempts_active") == 0
+                    assert total("fluxheim_http_response_body_bytes_total") == sum(e["data"]["bytes_sent"] for e in events if e["data"]["outcome"] == "completed")
+                    # Multiplexed traffic and the reset share one TLS connection.
+                    assert total("fluxheim_downstream_tls_handshakes_total") == 1
+                    assert total("fluxheim_metric_series_overflow_total") == 0
+                    assert len([line for line in exposition.splitlines() if line and not line.startswith("#")]) < 20000
+                    assert CANARY not in exposition and PARENT not in exposition
+                    assert 'fluxheim_log_dispatch_state{lane="ordinary",state="available"} 1' in exposition
                     print("request correlation: concurrent HTTP/1.1 + TLS HTTP/2 static/proxy/FastCGI, actual JSON/OTLP/errors, safe retry, reset, WebSocket, keep-alive, duplicate/oversized context, unsampled IDs: ok")
+                    print("operational metrics: exact request/attempt/byte deltas, cancellation, histograms, TLS and dispatch health: ok")
                 except Exception:
                     if process.poll() is None:
                         print("dispatcher status:", admin_request(admin, "/_fluxheim/status", "correlation-test-secret"))
@@ -442,5 +479,6 @@ allow_private_tcp_upstreams = true
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
+    parser.add_argument("--container-image", help="Optional already-pulled compatible Linux runtime image; runs the supplied binary in rootless Podman")
     args = parser.parse_args()
-    run(args.binary.resolve(strict=True))
+    run(args.binary.resolve(strict=True), args.container_image)

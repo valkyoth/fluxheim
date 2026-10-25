@@ -9,6 +9,8 @@ target/
 /.codex/
 /.cargo-deny-advisory-dbs/
 README.internal.md
+# Local shared-VM coordination instructions; keep host details out of releases.
+/windows-qemu.md
 
 # Logs and diagnostics
 *.log

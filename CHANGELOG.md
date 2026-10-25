@@ -11,6 +11,13 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- Add process-wide request/attempt latency, completion, connection admission,
+  TLS handshake, typed operational failure and dispatcher-health metrics.
+  Bound configured metric identities across reloads, including histogram sample
+  costs, with explicit overflow accounting and cumulative counter semantics.
+  Preserve existing metric names and fix ambiguous adjacent label tuples.
+- Fix canonical Windows metrics-token paths using the existing shared secure
+  path inspector; retain confidential ACL and reparse-point checks.
 - Wire bounded native HTTP/1.1 and HTTP/2 access outcomes to trusted request
   context and optional OTLP request/attempt spans. Retries have distinct child
   spans; cancellation and upgrades complete once. Add real concurrent
@@ -19,7 +26,7 @@ behavior when the change improves security or project direction.
   never arbitrary identity fields. Export remains best effort and locally
   generated roots unsampled.
 - Carry forward the released 1.8.3 systemd/RPM fixes, release regressions and
-  remote macOS helper improvements. Expand observability into twelve review
+  remote macOS helper improvements. Expand observability into reviewable
   checkpoints, retaining full management API/UI work as a separate proposal.
 - Focus 1.9.0 on logging, metrics and operational visibility through numbered
   pentest/CI checkpoints and real container/native-platform acceptance.

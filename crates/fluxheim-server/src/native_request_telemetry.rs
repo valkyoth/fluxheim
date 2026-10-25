@@ -9,6 +9,7 @@ use fluxheim_observability::TraceContext;
 use fluxheim_observability::event::{
     AccessOutcome, CapturePolicy, CorrelationInput, EventData, HttpStatus, Method,
 };
+use fluxheim_observability::operational::metrics::{Measurement, record};
 
 tokio::task_local! {
     static CURRENT: Arc<RequestContext>;
@@ -95,6 +96,7 @@ impl RequestTelemetry {
         request.headers.retain(|(name, _)| {
             !name.eq_ignore_ascii_case("tracestate") && !name.eq_ignore_ascii_case("baggage")
         });
+        record(Measurement::RequestStarted);
         Completion(Arc::new(CompletionState {
             context: Arc::new(RequestContext {
                 request_id,
@@ -342,10 +344,12 @@ struct Attempt {
     start: u128,
     number: u32,
     finished: bool,
+    monotonic_start: Instant,
 }
 
 impl Attempt {
     fn new(context: Arc<RequestContext>) -> Self {
+        record(Measurement::AttemptStarted);
         let number = context
             .attempts
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
@@ -359,14 +363,24 @@ impl Attempt {
             start: fluxheim_observability::unix_time_nanos(),
             number,
             finished: false,
+            monotonic_start: Instant::now(),
         }
     }
 
     fn finish(&mut self, status: Option<u16>, error: bool) {
+        self.finish_outcome(status, error, false);
+    }
+
+    fn finish_outcome(&mut self, status: Option<u16>, error: bool, cancelled: bool) {
         if self.finished {
             return;
         }
         self.finished = true;
+        record(Measurement::AttemptFinished {
+            failed: error || status.is_some_and(|status| status >= 500),
+            cancelled,
+            duration: self.monotonic_start.elapsed(),
+        });
         #[cfg(feature = "otel-otlp")]
         if let Some(exporter) = &self.context.exporter
             && let Some(trace) = self.trace.filter(|trace| trace.sampled())
@@ -384,7 +398,7 @@ impl Attempt {
 
 impl Drop for Attempt {
     fn drop(&mut self) {
-        self.finish(None, true);
+        self.finish_outcome(None, true, true);
     }
 }
 

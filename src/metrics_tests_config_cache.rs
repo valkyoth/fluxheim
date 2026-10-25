@@ -1,4 +1,27 @@
 use super::*;
+
+#[test]
+fn config_refresh_retires_pool_gauges_but_preserves_lifetime_counters() {
+    let _guard = metrics_test_lock();
+    init().unwrap();
+    record_proxy_outcome("reload-lifetime", "GET", Some(200), false);
+    record_php_fpm_pool_idle("retired-pool", "default", 7);
+    let total = || {
+        super::super::metrics_registry::proxy_requests_total()
+            .unwrap()
+            .with_label_values(&["reload-lifetime", "GET", "success", "2xx"])
+            .get()
+    };
+    let before = total();
+    for _ in 0..1000 {
+        record_config(&cache_metrics_config());
+    }
+    assert_eq!(total(), before);
+    record_proxy_outcome("reload-lifetime", "GET", Some(200), false);
+    assert_eq!(total(), before + 1);
+    let text = String::from_utf8(super::super::prometheus_text().unwrap()).unwrap();
+    assert!(!text.contains("retired-pool"));
+}
 #[test]
 fn records_acme_event_counter_with_bounded_labels() {
     let _guard = metrics_test_lock();

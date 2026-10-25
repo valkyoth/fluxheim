@@ -85,6 +85,11 @@ pub struct AuditPermit {
 
 impl AuditPermit {
     pub fn commit(mut self, outcome: AuditOutcome) -> Result<(), AuditUnavailable> {
+        crate::operational::metrics::record(crate::operational::metrics::Measurement::Event(data(
+            self.operation,
+            outcome,
+            self.actor,
+        )));
         let c = &self.counters;
         if !c.alive.load(Ordering::Acquire) || c.closing.load(Ordering::Acquire) {
             increment(&c.unavailable);

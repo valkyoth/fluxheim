@@ -20,6 +20,9 @@ mod types;
 pub use encode::{EncodedEvent, EncodingError, EventFormat};
 pub use types::*;
 
+#[path = "event_metric_labels.rs"]
+mod metric_labels;
+
 pub const SCHEMA_VERSION: u8 = 1;
 pub const MAX_EVENT_BYTES: usize = 8192;
 pub const MAX_EVENT_FIELDS: usize = 32;

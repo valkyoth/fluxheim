@@ -1,14 +1,15 @@
 # Metrics Architecture
 
-## Current Status (2026-10-23)
+## Current Status (2026-10-25)
 
 Prometheus pull and optional OTLP/HTTP JSON metrics export are implemented.
 Counters, gauges and histograms use the existing Prometheus registry, including
-configured-resource labels. Their presence does not prove every native producer
-is connected or that series are bounded across reloads. See the
-[Commit 01 inventory](../evidence/observability-baseline.md) for verified scope and gaps.
+configured-resource labels. Commit 07 bounds variable series across reloads and
+adds lifecycle/operational measurements. The authoritative implemented contract,
+unavailable signals and dashboard queries are in the [metrics guide](../guides/metrics.md).
+See [Commit 07 evidence](../evidence/observability-07.md) for qualification.
 
-The sections below mix implemented series and historical proposals. In
+The remaining sections below mix older implemented series and historical proposals. In
 particular, `metrics.advanced`, a new facade and atomic bucket redesign are not
 implemented configuration. Do not copy the advanced configuration sketch as a
 working example. The [active plan](../roadmap/observability-commit-plan.md) controls new work.

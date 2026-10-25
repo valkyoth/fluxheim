@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fs;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use sanitization::SecretString;
 use zeroize::Zeroizing;
@@ -122,18 +122,7 @@ fn metrics_secret_parent_path_contains_symlink(path: &Path) -> std::io::Result<b
         return Ok(false);
     }
 
-    let mut current = PathBuf::new();
-    for component in parent.components() {
-        current.push(component);
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error),
-        }
-    }
-
-    Ok(false)
+    fluxheim_config::config_path::path_existing_prefix_contains_symlink(parent)
 }
 
 #[cfg(unix)]
@@ -194,4 +183,45 @@ fn open_regular_metrics_secret_file(path: &Path) -> Result<fs::File, Box<dyn Err
 #[cfg(unix)]
 fn rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {
     std::io::Error::from_raw_os_error(error.raw_os_error())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fluxheim_common::test_support::unique_temp_path;
+
+    #[test]
+    fn canonical_metrics_token_path_is_inspectable() {
+        let token = unique_temp_path("canonical-metrics-token");
+        fs::write(&token, b"fixture-token\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let canonical = token.canonicalize().unwrap();
+        let inspected = metrics_secret_parent_path_contains_symlink(&canonical);
+        let result = read_metrics_secret_file(&canonical);
+        fs::remove_file(&token).unwrap();
+        assert!(!inspected.unwrap());
+        assert_eq!(result.unwrap().as_str(), "fixture-token\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn metrics_token_below_a_symlink_is_still_rejected() {
+        let target = unique_temp_path("metrics-token-directory");
+        let link = unique_temp_path("metrics-token-link");
+        fs::create_dir(&target).unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let result = read_metrics_secret_file(&link.join("token"));
+        fs::remove_file(&link).unwrap();
+        fs::remove_dir(&target).unwrap();
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("symlinked directory")
+        );
+    }
 }

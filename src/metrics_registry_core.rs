@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 
-use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts};
+use super::super::bounded::{HistogramVec, IntCounterVec, IntGaugeVec};
+use prometheus::{HistogramOpts, Opts};
 
 static PROXY_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static HOST_ROUTING_REJECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();

@@ -85,6 +85,34 @@ pub(crate) struct Status {
 }
 
 struct Producer(Arc<Counters>);
+
+#[cfg(feature = "metrics")]
+impl Status {
+    pub(crate) fn metric_gauges(&self) -> [(&'static str, u64); 4] {
+        [
+            ("pending", self.pending),
+            ("capacity", self.capacity),
+            ("active_producers", self.active_producers),
+            ("alive", u64::from(self.worker_alive)),
+        ]
+    }
+    pub(crate) fn metric_counters(&self) -> [(&'static str, u64); 12] {
+        [
+            ("accepted", self.accepted),
+            ("filtered", self.filtered),
+            ("oversized", self.oversized),
+            ("queue_full", self.queue_full),
+            ("producer_busy", self.producer_busy),
+            ("recursive", self.recursive),
+            ("unavailable", self.unavailable),
+            ("written", self.written),
+            ("discarded", self.discarded),
+            ("sink_errors", self.sink_errors),
+            ("worker_panics", self.worker_panics),
+            ("capture_panics", self.capture_panics),
+        ]
+    }
+}
 impl Drop for Producer {
     fn drop(&mut self) {
         if std::thread::panicking() {

@@ -18,7 +18,11 @@ impl NativeConnectionTasks {
     }
 
     pub(super) fn spawn(&mut self, task: impl Future<Output = ()> + Send + 'static) {
-        self.tasks.spawn(task);
+        let connection = fluxheim_observability::operational::metrics::Connection::default();
+        self.tasks.spawn(async move {
+            let _connection = connection;
+            task.await;
+        });
     }
 
     pub(super) async fn join_next(&mut self) {

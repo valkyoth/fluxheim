@@ -159,7 +159,10 @@ impl AdminApp {
                 tokio::task::block_in_place(|| self.proxy.reload_from_config(new_config))
             }
             _ => self.proxy.reload_from_config(new_config),
-        }
+        }?;
+        #[cfg(feature = "metrics")]
+        crate::metrics::record_config(new_config);
+        Ok(())
     }
 
     pub(super) fn self_heal_confirm_response(&self) -> AdminResponse {

@@ -205,6 +205,10 @@ impl Method {
 pub struct HttpStatus(u16);
 
 impl HttpStatus {
+    pub fn as_u16(self) -> u16 {
+        self.0
+    }
+
     pub fn new(value: u16) -> Option<Self> {
         (100..=599).contains(&value).then_some(Self(value))
     }

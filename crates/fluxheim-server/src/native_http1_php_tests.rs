@@ -155,9 +155,7 @@ async fn native_php_request_body_uses_memory_below_spool_threshold() {
 
 #[tokio::test]
 async fn native_php_request_body_spools_and_cleans_up_large_body() {
-    let test_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
-    std::fs::create_dir_all(&test_root).unwrap();
-    let spool_dir = tempfile::TempDir::new_in(test_root).unwrap();
+    let spool_dir = tempfile::TempDir::new_in(fluxheim_common::test_support::test_root()).unwrap();
     let body = native_php_request_body(
         &request("/index.php"),
         &fluxheim_config::PhpConfig {
@@ -171,11 +169,26 @@ async fn native_php_request_body_spools_and_cleans_up_large_body() {
     .unwrap();
 
     assert_eq!(body.len(), b"name=fluxheim".len());
+    #[cfg(not(windows))]
     assert_eq!(
         std::fs::read_dir(spool_dir.path()).unwrap().count(),
         0,
         "spool file should be unlinked while the request body is alive"
     );
+    #[cfg(windows)]
+    {
+        let entries: Vec<_> = std::fs::read_dir(spool_dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(
+            entries.len(),
+            1,
+            "only the live delete-on-close spool remains"
+        );
+        std::fs::File::open(&entries[0])
+            .expect_err("exclusive spool must not permit another opener");
+    }
     drop(body);
     assert_eq!(
         std::fs::read_dir(spool_dir.path()).unwrap().count(),

@@ -26,7 +26,10 @@ fn native_static_web_resolves_explicit_php_script_for_native_adapter() {
     let NativePhpScriptResolve::Execute(resolution) = resolution else {
         panic!("expected executable PHP script");
     };
-    assert_eq!(resolution.local_path, root.path().join("index.php"));
+    assert_eq!(
+        resolution.local_path,
+        root.path().join("index.php").canonicalize().unwrap()
+    );
     assert_eq!(resolution.script_name, "/index.php");
     assert_eq!(resolution.path_info, "/user");
 
@@ -46,7 +49,10 @@ fn native_static_web_php_front_controller_uses_index_when_missing_path() {
     let NativePhpScriptResolve::Execute(resolution) = resolution else {
         panic!("expected front-controller PHP script");
     };
-    assert_eq!(resolution.local_path, root.path().join("index.php"));
+    assert_eq!(
+        resolution.local_path,
+        root.path().join("index.php").canonicalize().unwrap()
+    );
     assert_eq!(resolution.script_name, "/index.php");
     assert!(resolution.path_info.is_empty());
 

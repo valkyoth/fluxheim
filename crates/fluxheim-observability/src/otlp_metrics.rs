@@ -24,7 +24,7 @@ pub fn build_metrics_payload(
                 metrics.push(json!({
                     "name": family.name(),
                     "description": family.help(),
-                    "unit": "1",
+                    "unit": metric_unit(family.name()),
                     "sum": {
                         "aggregationTemporality": "AGGREGATION_TEMPORALITY_CUMULATIVE",
                         "isMonotonic": true,
@@ -44,7 +44,7 @@ pub fn build_metrics_payload(
                 metrics.push(json!({
                     "name": family.name(),
                     "description": family.help(),
-                    "unit": "1",
+                    "unit": metric_unit(family.name()),
                     "gauge": {
                         "dataPoints": data_points,
                     }
@@ -58,7 +58,7 @@ pub fn build_metrics_payload(
                 metrics.push(json!({
                     "name": family.name(),
                     "description": family.help(),
-                    "unit": "s",
+                    "unit": metric_unit(family.name()),
                     "histogram": {
                         "aggregationTemporality": "AGGREGATION_TEMPORALITY_CUMULATIVE",
                         "dataPoints": data_points,
@@ -103,6 +103,17 @@ fn number_data_point(
         "timeUnixNano": time_unix_nanos,
         "asDouble": value,
     })
+}
+
+fn metric_unit(name: &str) -> &'static str {
+    let name = name.strip_suffix("_total").unwrap_or(name);
+    if name.ends_with("_bytes") {
+        "By"
+    } else if name.ends_with("_seconds") {
+        "s"
+    } else {
+        "1"
+    }
 }
 
 fn histogram_data_point(
@@ -157,6 +168,20 @@ mod tests {
     use prometheus::{CounterVec, Encoder, Gauge, HistogramOpts, HistogramVec, Opts};
 
     use super::build_metrics_payload;
+
+    #[test]
+    fn metric_units_follow_prometheus_names() {
+        assert_eq!(
+            super::metric_unit("fluxheim_http_response_body_bytes_total"),
+            "By"
+        );
+        assert_eq!(super::metric_unit("fluxheim_cache_disk_size_bytes"), "By");
+        assert_eq!(
+            super::metric_unit("fluxheim_http_request_duration_seconds"),
+            "s"
+        );
+        assert_eq!(super::metric_unit("fluxheim_upstream_attempts_active"), "1");
+    }
 
     #[test]
     fn payload_contains_counter_gauge_and_histogram_metrics() {

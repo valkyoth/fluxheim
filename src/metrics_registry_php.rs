@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 
-use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts};
+use super::super::bounded::{HistogramVec, IntCounterVec, IntGaugeVec};
+use prometheus::{HistogramOpts, Opts};
 
 static PHP_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static PHP_REQUEST_DURATION_SECONDS: OnceLock<HistogramVec> = OnceLock::new();

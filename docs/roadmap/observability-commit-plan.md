@@ -1,6 +1,7 @@
 # 1.9.0 Observability Commit Plan
 
-Status: Commits 01-05 accepted for progression; Commit 06 implemented for review, 2026-10-24.
+Status: Commits 01-06 accepted for progression; Commit 07 implemented, awaiting
+pentest and exact-SHA GitHub acceptance, 2026-10-25.
 Main stays at **1.9.0
 (unreleased)**. This document replaces the earlier ten-checkpoint outline;
 no previously accepted implementation checkpoint is being renumbered.
@@ -13,7 +14,7 @@ and authenticated status describe the same outcome, remain bounded, and expose
 telemetry failures without stopping healthy application traffic.
 
 Ship one coherent 1.9.0 after the numbered checkpoints. The checkpoints are
-reviewable Git commits, not thirteen public releases. Use 1.9.x for maintenance
+reviewable Git commits, not separate public releases. Use 1.9.x for maintenance
 and compatible follow-ups. Existing configuration and privacy defaults remain
 valid. New sensitive or expensive detail is opt-in; no public diagnostic
 headers or management listener are silently enabled.
@@ -420,6 +421,93 @@ disabled features and privacy mode. Assert RSS/series ceilings.
 Exit: metric tables and compatibility fixtures match implementation; no new
 arbitrary input is admitted as a series identity.
 
+## Commit 07A - Dedicated Windows QEMU Builder And Test VM
+
+Suggested subject: `Observability commit 07A: add a dedicated Windows QEMU workflow`.
+
+Operator value: run native Windows builds, live tests and release packaging
+locally without renting a cloud builder or changing another project's VM.
+This is a separate infrastructure checkpoint after 07 and before 08; it does
+not renumber the existing checkpoints or replace their acceptance gates.
+
+Deliver:
+- Create a fresh Windows 11 x86_64 installation from official installation
+  media with an appropriate owner-supplied license. Give Fluxheim its own disk,
+  persistent machine identity, virtual TPM, firmware variables, SSH host keys
+  and loopback forwarding ports. Do not clone another project's development
+  security settings or modify its running VM, launcher or clean backup.
+- Use QEMU with explicit KVM acceleration on the x86_64 Linux host. Fail
+  clearly if KVM is unavailable rather than silently falling back to CPU
+  emulation. Record guest/host CPU, OS, firmware and virtualization versions;
+  retain normal Windows security settings without development test-signing
+  exceptions. Document actual Secure Boot/TPM/VBS state and any qualification
+  gap rather than weakening settings to get a passing test.
+- Provide a small, project-scoped launcher/setup workflow with exclusive
+  instance locking, free-space/resource checks, bounded readiness polling,
+  normal guest shutdown and explicit reset approval. Prefer existing QEMU
+  tooling and Windows provisioning scripts over a new VM management framework.
+  Never stop another project's processes or alter host virtualization settings
+  automatically. Check port conflicts before launch; bind management endpoints
+  to loopback and verify SSH host keys.
+- Preserve two powered-off baselines: clean installed Windows, then Windows
+  with the pinned build/test tools provisioned. Save disk, firmware variables,
+  TPM and identity consistently with integrity manifests. Baselines must not
+  be booted writable; restore into an isolated working copy. Preserve required
+  encryption recovery material privately. A restore must not discard unsaved
+  logs/artifacts or run while the guest is active. Explain disk growth, backup
+  refresh after tool/OS updates, and that same-disk snapshots are not backups
+  against host disk loss.
+- Reuse the Windows provisioning and native release runner. Extend the Linux
+  release helper to accept an explicit Windows SSH port or controlled SSH
+  alias, consistently across preflight, upload, execution and download.
+  Retain cloud-host compatibility; do not implement a second packaging engine.
+  Keep strict host verification, signed-source selection, protected toolchain
+  policy, non-administrator build identity, locked dependencies and existing
+  checksum/reproducibility checks. VM setup/reset is explicit, never a hidden
+  destructive side effect of starting the release helper.
+- Keep routine development runs distinct from official packaging. Official
+  runs start from a reviewed, updated tool-equipped baseline and a clean
+  per-run build environment, not an accumulated development checkout. Record
+  baseline identity, exact signed source, toolchain, commands and results.
+  Preserve the existing reproducibility scope; two builds on this one host
+  do not establish independent trust-domain verification.
+- Keep release binaries portable across supported x86_64 CPUs: using KVM's
+  host CPU model must not silently add Rust `target-cpu=native` or native C/C++
+  optimization flags to release builds. VM performance and hardware coverage
+  are not equivalent to testing every customer's machine.
+- Commit reusable scripts, regression tests and a version-neutral guide.
+  Keep licensed installation media, VM disks/state, activation/recovery data,
+  credentials, machine-specific handoff notes and private evidence outside Git.
+  Do not commit a preactivated VM or require a checked-in license key.
+
+Tests and acceptance:
+- Test configuration/command construction, SSH/SCP port consistency, quoting,
+  path validation, unavailable KVM, insufficient space, port/lock conflicts,
+  failed provisioning/builds, interrupted transfers and checksum mismatches.
+  Failure must preserve evidence and must not publish partial outputs.
+- Boot the real guest, provision tools, run Windows workspace/security tests
+  and the live HTTP/HTTPS, correlation/metrics, cache, TLS, external TCP
+  FastCGI and Wasm workflows relevant to the candidate. Use host-originated
+  requests through loopback forwarding as well as guest-local tests. This
+  proves the host-to-guest path, not public Internet reachability or public
+  ACME issuance; keep those distinct where required by release qualification.
+- Build and extract all seven Windows profiles using the existing release
+  helper/runner, execute each profile's applicable checks, download artifacts,
+  verify checksums and confirm the combined release report retains its Windows,
+  Linux and macOS sections and existing reproducibility labels.
+- Demonstrate graceful shutdown and a restore/rebuild from the Fluxheim
+  baseline without changing the baseline or another project's state. Record
+  real native execution separately from cross-compilation. Windows 11 evidence
+  does not silently replace any separately claimed Windows Server coverage.
+- Follow the same pentest/retest, exact-SHA green GitHub/CodeQL and explicit
+  user-approval cycle as every other checkpoint. No new cloud account, public
+  listener or automatic release publication is required.
+
+Exit: an operator can prepare, boot, test, package, collect results and reset
+the dedicated VM using documented commands. AWS remains an alternative native
+Windows builder. Commit 11 still qualifies the final candidate's archives;
+this checkpoint supplies reusable infrastructure, not advance release approval.
+
 ## Commit 08 - OTLP Failure, Recovery And Shutdown
 
 Suggested subject: `Observability commit 08: bound collector export lifecycle`.
@@ -712,8 +800,9 @@ collector behavior is not the new required-collector acceptance contract.
 | 03 - Diagnostics/audit | Accepted for progression | 27c752a2341297ba10c055eaec234479f42714dc; user accepted the documented non-durable audit limitation, reported GitHub green and authorized 04. |
 | 04 - Bounded dispatcher | Accepted for progression | User supplied clean pentest, reported GitHub green after follow-ups through ee98efea and authorized the next commit. [Legacy dispatch, bounds and qualification](../evidence/observability-04.md). |
 | 05 - File lifecycle | Accepted for progression | User supplied clean pentest, reported GitHub green after follow-ups through d4a2569b and authorized 06. [Protected file lifecycle and qualification](../evidence/observability-05.md). |
-| 06 - Correlation | Implemented; review pending | [Request correlation and live qualification](../evidence/observability-06.md). Incremental pentest and exact-SHA CI, including native Windows, remain gates. |
-| 07 - Metrics | Not started | Pending |
+| 06 - Correlation | Accepted for progression | b563894556fa; user supplied clean incremental pentest, reported GitHub green and authorized 07. [Request correlation and live qualification](../evidence/observability-06.md). |
+| 07 - Metrics | Implemented; review pending | [Bounded metrics and qualification](../evidence/observability-07.md). Linux/container, native macOS and native Windows checks passed. Pentest and exact-SHA CI remain gates. |
+| 07A - Dedicated Windows QEMU builder/test VM | Planned; not implemented | Owner requested a fresh Fluxheim-only VM and local release-helper integration. Preserve other projects and clean backups; native execution and packaging evidence pending. |
 | 08 - Export | Not started | Pending |
 | 09 - Read-only API | Not started | Pending |
 | 10 - Live containers/collectors | Not started | Pending |
@@ -721,5 +810,7 @@ collector behavior is not the new required-collector acceptance contract.
 | 12 - Observability docs / candidate qualification | Not started | Pending |
 | 13 - Documentation / final release acceptance | Not started | Pending |
 
-The current authorized implementation task is Commit 06. Stop for pentest,
-green GitHub checks and explicit approval before starting Commit 07.
+Commit 07 implementation is complete. Stop for pentest,
+green GitHub checks and explicit approval before starting Commit 07A, then
+repeat that acceptance cycle before Commit 08. Adding 07A to this plan does
+not authorize VM provisioning, licensing purchases or changes to shared VMs.

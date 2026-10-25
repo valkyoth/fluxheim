@@ -14,6 +14,9 @@ pub use dispatch::{
 
 static DISPATCHER: OnceLock<Dispatcher> = OnceLock::new();
 
+#[path = "operational_metrics.rs"]
+pub mod metrics;
+
 tokio::task_local! {
     static REQUEST: (dispatch::PendingCorrelation, crate::event::CapturePolicy);
 }
@@ -64,6 +67,7 @@ pub fn shutdown(timeout: std::time::Duration) {
 
 /// No synchronous fallback: an uninitialized dispatcher must not block serving.
 pub fn emit(data: EventData) {
+    metrics::record(metrics::Measurement::Event(data));
     #[cfg(feature = "test-support")]
     if crate::event_test_support::capture(data) {
         return;
@@ -89,6 +93,7 @@ pub fn emit_correlated(
     correlation: crate::event::CorrelationInput<'_>,
     policy: crate::event::CapturePolicy,
 ) {
+    metrics::record(metrics::Measurement::Event(data));
     if let Some(dispatcher) = DISPATCHER.get() {
         dispatcher.try_emit_correlated(data, correlation, policy);
     }

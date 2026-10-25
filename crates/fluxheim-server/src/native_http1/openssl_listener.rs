@@ -1,3 +1,4 @@
+use fluxheim_observability::operational::metrics::{HandshakeOutcome, Measurement, record};
 use std::future::Future;
 use std::sync::Arc;
 
@@ -40,6 +41,7 @@ where
             accepted = listener.accept() => {
                 let (stream, peer_addr) = accepted?;
                 let Ok(permit) = semaphore.clone().try_acquire_owned() else {
+                    record(Measurement::ConnectionRejected);
                     log::warn!(
                         target: "fluxheim::native_http1",
                         "HTTPS HTTP/1 connection rejected: listener at capacity; peer={peer_addr}; limit={}",
@@ -66,18 +68,21 @@ where
                             .await;
                     match handshake {
                         Ok(Ok(())) => {
+                            record(Measurement::TlsHandshake(HandshakeOutcome::Succeeded));
                             let mut request_context = native_openssl_request_context(&stream);
                             request_context.local_addr = local_addr;
                             let stream = OpenSslGenerationDrainStream::new(stream);
                             let _ = serve_native_http1_connection_with_context(stream, Some(peer_addr), request_context, policy, handler).await;
                         }
                         Ok(Err(error)) => {
+                            record(Measurement::TlsHandshake(HandshakeOutcome::Failed));
                             log::debug!(
                                 target: "fluxheim::native_http1",
                                 "HTTPS HTTP/1 TLS handshake failed; peer={peer_addr}; error={error}"
                             );
                         }
                         Err(_) => {
+                            record(Measurement::TlsHandshake(HandshakeOutcome::Timeout));
                             log::debug!(
                                 target: "fluxheim::native_http1",
                                 "HTTPS HTTP/1 TLS handshake timed out; peer={peer_addr}; timeout_secs={}",
@@ -119,6 +124,7 @@ where
             accepted = listener.accept() => {
                 let (stream, peer_addr) = accepted?;
                 let Ok(permit) = semaphore.clone().try_acquire_owned() else {
+                    record(Measurement::ConnectionRejected);
                     log::warn!(
                         target: "fluxheim::native_http1",
                         "HTTPS connection rejected: listener at capacity; peer={peer_addr}; limit={}",
@@ -145,6 +151,7 @@ where
                             .await;
                     match handshake {
                         Ok(Ok(())) => {
+                            record(Measurement::TlsHandshake(HandshakeOutcome::Succeeded));
                             let mut request_context = native_openssl_request_context(&stream);
                             request_context.local_addr = local_addr;
                             let selected_alpn =
@@ -182,12 +189,14 @@ where
                             }
                         }
                         Ok(Err(error)) => {
+                            record(Measurement::TlsHandshake(HandshakeOutcome::Failed));
                             log::debug!(
                                 target: "fluxheim::native_http1",
                                 "HTTPS TLS handshake failed; peer={peer_addr}; error={error}"
                             );
                         }
                         Err(_) => {
+                            record(Measurement::TlsHandshake(HandshakeOutcome::Timeout));
                             log::debug!(
                                 target: "fluxheim::native_http1",
                                 "HTTPS TLS handshake timed out; peer={peer_addr}; timeout_secs={}",

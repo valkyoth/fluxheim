@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 
-use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, Opts};
+use super::super::bounded::{HistogramVec, IntCounterVec};
+use prometheus::{HistogramOpts, Opts};
 
 static CACHE_ACTIVITY_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_ACTIVITY_SCOPE_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();

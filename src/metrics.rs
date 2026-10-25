@@ -38,6 +38,14 @@ pub(crate) use fluxheim_observability::{
 mod metrics_registry;
 use metrics_registry::*;
 
+#[path = "metrics_bounded.rs"]
+mod bounded;
+
+#[path = "metrics_health.rs"]
+mod health;
+#[path = "metrics_operational.rs"]
+mod operational;
+
 #[path = "metrics_cache.rs"]
 mod metrics_cache;
 pub use metrics_cache::*;
@@ -54,6 +62,9 @@ pub fn prometheus_text() -> Result<Vec<u8>, prometheus::Error> {
 }
 
 pub fn init() -> Result<(), prometheus::Error> {
+    static INIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _init = INIT.lock().unwrap_or_else(|e| e.into_inner());
+    operational::init()?;
     proxy_requests_total()?;
     host_routing_rejections_total()?;
     edge_policy_events_total()?;
@@ -118,6 +129,11 @@ pub fn init() -> Result<(), prometheus::Error> {
 }
 
 pub fn record_config(config: &crate::config::Config) {
+    // Gauges are current observations, not history. Counter and histogram
+    // admissions intentionally survive reloads, including removed resources.
+    if let Ok(gauge) = php_fpm_pool_idle_connections() {
+        gauge.reset();
+    }
     let stats = crate::config::cache_config_stats(config);
     set_gauge(cache_vhosts(), stats.vhosts);
     set_gauge(cache_enabled_vhosts(), stats.enabled_vhosts);

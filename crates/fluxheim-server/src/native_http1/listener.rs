@@ -35,6 +35,9 @@ where
             accepted = listener.accept() => {
                 let (stream, peer_addr) = accepted?;
                 let Ok(permit) = semaphore.clone().try_acquire_owned() else {
+                    fluxheim_observability::operational::metrics::record(
+                        fluxheim_observability::operational::metrics::Measurement::ConnectionRejected,
+                    );
                     log::warn!(
                         target: "fluxheim::native_http1",
                         "HTTP/1 connection rejected: listener at capacity; peer={peer_addr}; limit={}",
@@ -81,6 +84,9 @@ where
             accepted = listener.accept() => {
                 let (stream, peer_addr) = accepted?;
                 let Ok(permit) = semaphore.clone().try_acquire_owned() else {
+                    fluxheim_observability::operational::metrics::record(
+                        fluxheim_observability::operational::metrics::Measurement::ConnectionRejected,
+                    );
                     log::warn!(
                         target: "fluxheim::native_http1",
                         "HTTP/1 PROXY-protocol connection rejected: listener at capacity; peer={peer_addr}; limit={}",
@@ -137,6 +143,9 @@ where
             accepted = listener.accept() => {
                 let (stream, _) = accepted?;
                 let Ok(permit) = semaphore.clone().try_acquire_owned() else {
+                    fluxheim_observability::operational::metrics::record(
+                        fluxheim_observability::operational::metrics::Measurement::ConnectionRejected,
+                    );
                     log::warn!(
                         target: "fluxheim::native_http1",
                         "HTTP/1 Unix listener connection rejected: listener at capacity; limit={}",
