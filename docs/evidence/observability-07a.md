@@ -130,3 +130,32 @@ retained but was not reused for the successful restoration. Previous working
 state and all downloaded package evidence remain retained separately.
 Final release-candidate archive qualification remains Commit 11.
 Stop for pentest, exact-commit GitHub/CodeQL and user approval before Commit 08.
+
+## Local Builder Security Follow-Up
+
+The additional tooling review identified guest-escape blast radius, online
+guest networking and single-builder artifact evidence as high-assurance gaps.
+These were reviewed separately from the clean webserver-source assessment.
+
+The launcher now requires the system QEMU/swtpm paths, enables QEMU's seccomp
+policy (obsolete calls, privilege elevation, spawning and resource control
+denied), and disables implicit devices and configuration loading. It does not
+fall back to an unsandboxed launch. This is targeted defense in depth, not a
+dedicated host identity or filesystem confinement. Outbound networking remains
+enabled and no independent artifact-build requirement was added. The
+[security boundary](../guides/windows-qemu.md#security-boundary) documents these
+remaining risks explicitly, including what checksums and repeat builds cannot
+prove. The three recommendations are not reported as fully remediated.
+
+After owner-performed normal shutdown, the existing Windows guest booted with
+the new flags and its original identity. Host kernel inspection confirmed
+`NoNewPrivs: 1`, `Seccomp: 2` and an installed seccomp filter on QEMU. Strict SSH
+and the compiler inventory/ACL check passed. The full native live smoke and
+all 11 Windows security helper plus 17 filesystem-trust tests passed again.
+This reused the earlier development build/cache; it was not a new release or
+repeat of the seven-profile archive matrix. Baselines were not modified.
+
+Host launcher/checkpoint regressions now total 25 passing tests, including the
+mandatory sandbox/device arguments and rejection of missing system executables
+without PATH fallback. All 21 release-helper tests, four documentation-layout
+tests, PowerShell release-policy validation, doc links and diff checks passed.

@@ -45,6 +45,15 @@ archives are CI evidence rather than a second publication source. This matches
 the Linux ARM release model: publish the exact-tag archives produced by the
 disposable native host after their checksums and native smoke evidence pass.
 
+Checksums and repeat builds from one builder establish internal consistency and
+repeatability, not independent proof against a compromised builder. Signed tags
+authenticate source, not executable output. A malicious guest could fabricate
+matching binaries, manifests and reports; freshness and compiler ACLs do not
+eliminate that risk. This limitation also applies to the single-builder Linux
+ARM workflow. Independent cross-host artifact verification is not enforced.
+Local QEMU additionally shares the operator's host trust boundary; consult its
+[explicit sandbox and network limitations](windows-qemu.md#security-boundary).
+
 ## One-Time Preparation
 
 For a disposable Windows Server 2025 Desktop Experience or Windows 11 Pro host,

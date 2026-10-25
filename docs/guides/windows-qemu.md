@@ -151,6 +151,50 @@ Firewall. Verify the new SSH host key from the guest console before trusting
 it. No LAN listeners or host firewall changes are made. Windows has outbound
 NAT network access for setup and updates; this is not an isolated malware lab.
 
+## Security Boundary
+
+This is a single-owner development/build VM, not a hostile-code analysis service
+or an independently verified release system. Cargo build scripts and procedural
+macros execute code: a fresh guest and read-only compiler reduce persistence
+opportunities but do not make malicious dependencies safe.
+
+The launcher uses `/usr/bin/qemu-system-x86_64` and `/usr/bin/swtpm` rather than
+PATH-selected copies. QEMU always starts with `-no-user-config`, `-nodefaults`
+and `-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny`.
+Required display, storage, network and input devices remain explicitly declared.
+If the installed QEMU cannot apply this policy, startup fails; there is no
+automatic unsandboxed fallback. Keep QEMU, swtpm, firmware and the host kernel
+updated through trusted distribution packages. Fixed executable paths are not
+version pins or cryptographic package verification.
+
+Seccomp reduces available system calls; it does **not** confine QEMU's filesystem
+access to this VM. QEMU and swtpm still run as the invoking Linux user. A successful
+escape could expose that user's files and credentials. The resource-limited user
+service is not a separate security identity or filesystem sandbox. Do not use
+this launcher for intentionally hostile guest workloads; use a separately managed
+host or a confined VM service for that threat model. Do not copy release-signing
+private keys into Windows or forward signing/SSH agents to it.
+
+Outbound networking remains enabled for Windows updates, tool installation,
+source/dependency fetching and online tests. Loopback-only incoming forwards do
+**not** block guest access to host services, reachable LAN services or the Internet.
+Do not rely on them as an egress firewall. An offline workflow would require
+QEMU `restrict=on`, preloaded dependencies and offline build commands; it is not
+implemented or claimed by this workflow. No host firewall changes are automated.
+
+Release checksums detect transfer corruption or later modification relative to
+the supplied manifest, not a malicious builder that replaces both. Two builds on
+this VM check repeatability, not independent provenance. Signed tags authenticate
+source selection, not resulting executables. Independent builds across separately
+administered hosts are a stronger optional release policy, not a requirement of
+the current Linux ARM/Windows release model. Treat host/guest compromise as loss
+of trust: discard affected outputs, investigate and rebuild on a clean trusted
+host rather than accepting its checksum report.
+
+These are explicit residual risks, not claims that all three high-assurance
+pentest recommendations have been implemented. See
+[QEMU security guidance](https://www.qemu.org/docs/master/system/security.html).
+
 ## Baselines And Provisioning
 
 Before provisioning tools, shut down and preserve a clean installed baseline

@@ -21,6 +21,9 @@ PORTS = {2223: 22, 13390: 3389, 18080: 80, 18443: 443}
 GIB = 1024 ** 3
 CPU = "host,hv-relaxed=on,hv-vapic=on,hv-spinlocks=0x1fff,hv-time=on"
 VM_DISK_BYTES_PER_SECOND = 64 * 1024 ** 2
+QEMU = Path('/usr/bin/qemu-system-x86_64')
+SWTPM = Path('/usr/bin/swtpm')
+SANDBOX = 'on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny'
 
 
 def background_priority():
@@ -73,7 +76,10 @@ def check_resources(root, cpus, memory, minimum_free):
 
 
 def preflight():
-    for tool in ("qemu-system-x86_64", "qemu-img", "swtpm", "remote-viewer", "ionice"):
+    for tool in (QEMU, SWTPM):
+        if not tool.is_file() or not os.access(tool, os.X_OK):
+            raise RuntimeError(f"missing system executable: {tool}")
+    for tool in ("qemu-img", "remote-viewer", "ionice"):
         if not shutil.which(tool):
             raise RuntimeError(f"missing executable: {tool}")
     if not os.access("/dev/kvm", os.R_OK | os.W_OK):
@@ -142,7 +148,8 @@ def command(root, runtime, identity, cpus, memory, iso=None, unthrottled_io=Fals
     identity = validate_identity(identity)
     for path in (root, runtime):
         qemu_path(path)
-    args = ["qemu-system-x86_64", "-name", "fluxheim-windows11", "-uuid", identity["uuid"],
+    args = [str(QEMU), "-no-user-config", "-nodefaults", "-sandbox", SANDBOX,
+            "-name", "fluxheim-windows11", "-uuid", identity["uuid"],
             "-smbios", "type=1,manufacturer=Fluxheim Local Lab,product=Windows Builder,version=1,serial=" + identity["system_serial"],
             "-smbios", "type=2,manufacturer=Fluxheim Local Lab,product=Virtual Mainboard,version=1,serial=" + identity["board_serial"],
             "-smbios", "type=3,manufacturer=Fluxheim Local Lab,version=1,serial=" + identity["chassis_serial"],
@@ -196,7 +203,7 @@ def start(root, iso, unthrottled_io=False):
             args = command(root, runtime, identity, settings["cpus"], settings["memory_gib"], iso, unthrottled_io)
             (root / "last-command.json").write_text(json.dumps(args, indent=2) + "\n")
             with (root / "tpm.log").open("ab") as tpm_log, (root / "qemu.log").open("ab") as qemu_log:
-                tpm = subprocess.Popen(["swtpm", "socket", "--tpm2", "--tpmstate", f"dir={root / 'tpm'}",
+                tpm = subprocess.Popen([str(SWTPM), "socket", "--tpm2", "--tpmstate", f"dir={root / 'tpm'}",
                                         "--ctrl", f"type=unixio,path={runtime / 'tpm.sock'}",
                                         "--flags", "not-need-init,startup-clear"], stdout=tpm_log, stderr=tpm_log)
                 guest = None

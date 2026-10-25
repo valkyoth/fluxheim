@@ -75,9 +75,34 @@ class VMTests(unittest.TestCase):
                     vm.check_ports()
 
     def test_kvm_missing_fails_closed(self):
-        with patch.object(vm.shutil, "which", return_value="/usr/bin/tool"), patch.object(vm.os, "access", return_value=False):
+        with patch.object(Path, 'is_file', return_value=True), \
+                patch.object(vm.shutil, "which", return_value="/usr/bin/tool"), \
+                patch.object(vm.os, "access", side_effect=lambda path, mode: str(path) != '/dev/kvm'):
             with self.assertRaisesRegex(RuntimeError, "KVM unavailable"):
                 vm.preflight()
+
+    def test_qemu_sandbox_and_explicit_devices_are_mandatory(self):
+        for iso in (None, Path('/media/windows.iso')):
+            with self.subTest(iso=iso):
+                command = vm.command(Path('/state'), Path('/tmp/fh'), vm.new_identity(), 8, 16, iso)
+                self.assertEqual(command[0], '/usr/bin/qemu-system-x86_64')
+                self.assertIn('-no-user-config', command)
+                self.assertIn('-nodefaults', command)
+                self.assertEqual(command[command.index('-sandbox') + 1],
+                                 'on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny')
+                self.assertEqual(command[command.index('-vga') + 1], 'std')
+                self.assertIn('usb-tablet', command)
+                self.assertTrue(any(value.startswith('e1000e,') for value in command))
+
+    def test_missing_system_binary_never_falls_back_to_path(self):
+        for missing in (vm.QEMU, vm.SWTPM):
+            with self.subTest(missing=missing), \
+                    patch.object(Path, 'is_file', autospec=True, side_effect=lambda path: path != missing), \
+                    patch.object(vm.os, 'access', return_value=True), \
+                    patch.object(vm.shutil, 'which') as which:
+                with self.assertRaisesRegex(RuntimeError, 'missing system executable'):
+                    vm.preflight()
+                which.assert_not_called()
 
     def test_background_priority_is_process_local(self):
         with patch.object(vm.os, 'nice') as nice, patch.object(vm.os, 'getpid', return_value=123), \
