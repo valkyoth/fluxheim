@@ -181,3 +181,28 @@ validation or background-priority setup. Init/start still require the complete
 toolchain. All 31 launcher/checkpoint tests passed, including a regression that
 rejects any external helper execution during shutdown and the existing name/UUID
 mismatch tests. No actual guest shutdown or baseline modification was needed.
+
+### CodeQL Checkpoint Paths (#400-#424)
+
+All 25 open Python alerts on `62eb5068` followed the CLI checkpoint name through
+the checkpoint/verify/restore filesystem operations. The existing filename
+allowlist remains; a shared resolver now also checks the canonical path against
+the baseline directory with a directory-separator boundary and rejects linked
+roots and leaf aliases before operations or priority-helper execution.
+
+Local CodeQL 2.27.3 with `codeql/python-queries` 1.8.13 reproduced all 25
+`py/path-injection` results on the two original VM modules and zero on the
+updated modules. The run enabled the local threat model in addition to the
+default remote model, matching GitHub's `remote_and_local` setting. The default
+remote-only run returned zero even before the fix and was not used as evidence
+of remediation. No query exclusions, suppression comments or alert dismissals
+were added. GitHub must still analyze the new commit to close its alerts.
+The complete Python code-scanning suite also returned zero findings on these
+two modules under the same remote-and-local threat model.
+
+All 37 launcher/checkpoint tests passed, including traversal/absolute-path/name
+rejection, sibling-prefix and internal/dangling/self symlinks, validation before
+CLI side effects, and a synthetic CLI checkpoint/verify/restore roundtrip.
+Release-helper tests (21), log-fixture tests (10), documentation-layout tests (4),
+PowerShell release-policy validation and diff checks also passed. No live VM,
+saved baseline, Rust code or dependency was changed.

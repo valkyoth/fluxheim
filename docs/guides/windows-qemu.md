@@ -222,6 +222,13 @@ Disk, TPM, firmware and identity are saved together. Failed copies retain an
 Hashes detect accidental changes, not a malicious host administrator; the owner
 and host are trusted. Store a separate backup outside this physical disk too.
 
+Checkpoint names are single ASCII components (1-64 characters: first a letter
+or digit, then letters, digits, underscores or hyphens). All three checkpoint
+commands resolve the selected path and enforce a baseline-directory boundary
+before use. Linked baseline roots and linked checkpoint names are rejected,
+including links to another checkpoint in the same directory. This does not
+provide isolation against a malicious process running as the host owner.
+
 After initial administrator SSH access and host-key verification, provision:
 
 ```sh

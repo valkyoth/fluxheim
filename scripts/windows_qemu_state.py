@@ -20,6 +20,22 @@ IO_BYTES_PER_SECOND = 32 * 1024 ** 2
 IO_CHUNK = 1024 ** 2
 
 
+def checkpoint_path(name):
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", name):
+        raise ValueError("invalid checkpoint name")
+    if BASELINES.is_symlink():
+        raise ValueError("linked baseline directory")
+    base = os.path.realpath(BASELINES)
+    requested = os.path.join(base, name)
+    resolved = os.path.realpath(requested)
+    # Check a directory boundary, not a string prefix shared by sibling paths.
+    if not resolved.startswith(base + os.sep):
+        raise ValueError("checkpoint path escapes baseline directory")
+    if resolved != requested or Path(resolved).is_symlink():
+        raise ValueError("linked checkpoint directory")
+    return Path(resolved)
+
+
 class IOBudget:
     """Pace application reads/writes; not a device-wide bandwidth guarantee."""
 
@@ -168,14 +184,15 @@ def main():
     parser.add_argument("--unthrottled-io", action="store_true",
                         help="disable copy/hash pacing for this run; CPU/I/O priority stays low")
     args = parser.parse_args()
-    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", args.name):
-        parser.error("invalid checkpoint name")
+    try:
+        baseline = checkpoint_path(args.name)
+    except ValueError as error:
+        parser.error(str(error))
     os.umask(0o077)
     background_priority()
     if args.unthrottled_io:
         IO_BYTES_PER_SECOND = 0
     print("Copy/hash I/O: " + ("unthrottled" if IO_BYTES_PER_SECOND == 0 else "32 MiB/s"), flush=True)
-    baseline = BASELINES / args.name
     if args.action == "checkpoint":
         checkpoint(ROOT, baseline)
     elif args.action == "verify":

@@ -2,7 +2,10 @@
 """Offline checkpoint/restore safety tests using tiny synthetic VM files."""
 import json
 import hashlib
+import contextlib
+import io
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -32,6 +35,66 @@ class CheckpointTests(unittest.TestCase):
         for path in self.base.rglob("*"):
             if not path.is_symlink():
                 path.chmod(0o700 if path.is_dir() else 0o600)
+
+    def test_checkpoint_names_resolve_only_inside_baseline_directory(self):
+        with patch.object(state, 'BASELINES', self.target.parent):
+            for name in ('clean-installed-20261025', 'tools_installed', 'A', 'a' * 64):
+                with self.subTest(name=name):
+                    self.assertEqual(state.checkpoint_path(name), self.target.parent / name)
+
+    def test_invalid_names_are_rejected_before_path_resolution(self):
+        for name in ('', '.', '..', '../outside', '/tmp/outside', 'a/b', 'a\\b',
+                     'a..b', '-a', 'a b', 'a\n', 'a\x00b', 'a' * 65, '\u00e9'):
+            with self.subTest(name=name), patch.object(state.os.path, 'realpath') as resolve:
+                with self.assertRaisesRegex(ValueError, 'invalid checkpoint name'):
+                    state.checkpoint_path(name)
+                resolve.assert_not_called()
+
+    def test_linked_baseline_root_is_rejected(self):
+        link = self.base / 'linked-baselines'
+        link.symlink_to(self.root, target_is_directory=True)
+        with patch.object(state, 'BASELINES', link):
+            with self.assertRaisesRegex(ValueError, 'linked baseline directory'):
+                state.checkpoint_path('clean')
+
+    def test_linked_checkpoint_names_are_rejected_inside_and_outside_root(self):
+        baselines = self.target.parent
+        baselines.mkdir()
+        outside = self.base / 'baselines-sibling'
+        outside.mkdir()
+        inside = baselines / 'real'
+        inside.mkdir()
+        targets = {'outside': outside, 'inside': inside, 'dangling': baselines / 'missing',
+                   'self': baselines / 'self'}
+        with patch.object(state, 'BASELINES', baselines):
+            for name, target in targets.items():
+                (baselines / name).symlink_to(target, target_is_directory=True)
+                with self.subTest(name=name), self.assertRaises(ValueError):
+                    state.checkpoint_path(name)
+
+    def test_cli_rejects_bad_paths_before_priority_or_state_operations(self):
+        for action in ('checkpoint', 'verify', 'restore'):
+            with self.subTest(action=action), \
+                    patch.object(sys, 'argv', ['windows_qemu_state.py', action, '../outside', '--confirm-restore']), \
+                    patch.object(state, 'background_priority') as priority, \
+                    patch.object(state, 'checkpoint') as checkpoint, patch.object(state, 'verify') as verify, \
+                    patch.object(state, 'restore') as restore, contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    state.main()
+                self.assertEqual(error.exception.code, 2)
+                priority.assert_not_called()
+                checkpoint.assert_not_called()
+                verify.assert_not_called()
+                restore.assert_not_called()
+
+    def test_cli_checkpoint_verify_restore_roundtrip(self):
+        with patch.object(state, 'ROOT', self.root), patch.object(state, 'BASELINES', self.target.parent), \
+                patch.object(state, 'background_priority'):
+            for action in ('checkpoint', 'verify', 'restore'):
+                with self.subTest(action=action), patch.object(
+                        sys, 'argv', ['windows_qemu_state.py', action, 'clean', '--confirm-restore']):
+                    state.main()
+            self.assertEqual(state.inventory(self.root), state.verify(self.target))
 
     def test_checkpoint_restore_retains_current_state_and_baseline(self):
         state.checkpoint(self.root, self.target)
