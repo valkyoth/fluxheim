@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
 import socketserver
@@ -244,7 +245,31 @@ def request_keep_alive(listen):
         connection.close()
 
 
+def validate_container_image(image):
+    if image is None:
+        return None
+    # Restrict the argument alphabet, not the registry choice. Podman validates
+    # the full image-reference grammar and --pull=never requires a local image.
+    if len(image) > 256 or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9./:@_-]*", image):
+        raise ValueError("invalid container image reference")
+    return image
+
+
+def server_command(binary, config_path, root, container_image=None):
+    image = validate_container_image(container_image)
+    if image is None:
+        return [str(binary), "--config", str(config_path)]
+    return ["podman", "run", "--rm", "--pull=never", "--network=host",
+            "--userns=keep-id", "--user", f"{os.getuid()}:{os.getgid()}",
+            "--ulimit", "core=0:0", "--workdir", str(root),
+            "--volume", f"{root}:{root}:Z",
+            "--volume", f"{binary}:/fluxheim:ro,Z",
+            "--entrypoint", "/fluxheim", "--", image,
+            "--config", str(config_path)]
+
+
 def run(binary, container_image=None):
+    container_image = validate_container_image(container_image)
     collector = ThreadingHTTPServer(("127.0.0.1", 0), Collector)
     origin = ThreadingHTTPServer(("127.0.0.1", 0), Origin)
     php = FastCGIServer(("127.0.0.1", 0), FastCGI)
@@ -269,15 +294,7 @@ def run(binary, container_image=None):
                 (root / dest).chmod(0o600)
             config = root / "fluxheim.toml"
             def command(config_path):
-                if not container_image:
-                    return [str(binary), "--config", str(config_path)]
-                return ["podman", "run", "--rm", "--pull=never", "--network=host",
-                        "--userns=keep-id", "--user", f"{os.getuid()}:{os.getgid()}",
-                        "--ulimit", "core=0:0", "--workdir", str(root),
-                        "--volume", f"{root}:{root}:Z",
-                        "--volume", f"{binary}:/fluxheim:ro,Z",
-                        "--entrypoint", "/fluxheim", container_image,
-                        "--config", str(config_path)]
+                return server_command(binary, config_path, root, container_image)
             config.write_text(f'''[server]
 listen = ["127.0.0.1:{public}"]
 tls_listen = ["127.0.0.1:{tls}"]

@@ -164,7 +164,9 @@ fn reserved_overflow_labels_never_create_duplicate_exported_samples() {
 #[test]
 fn full_registry_churn_has_bounded_resident_growth() {
     if std::env::var_os("FLUXHEIM_METRICS_RSS_CHILD").is_none() {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
+        // Execute the running image directly, not a caller-influenced pathname
+        // that could be replaced between discovery and spawning.
+        let output = std::process::Command::new("/proc/self/exe")
             .args([
                 "--exact",
                 "metrics::bounded::tests::full_registry_churn_has_bounded_resident_growth",

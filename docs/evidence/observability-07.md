@@ -173,3 +173,34 @@ The corrected server suite passed on both Linux and Windows without skips.
   clean VM and release-helper integration are planned in Commit 07A, not built
   by this checkpoint. Existing development-VM evidence must not be described as
   production-default Windows security-policy qualification.
+
+## CodeQL Command-Boundary Follow-Up
+
+Review base: `78160020312e3149fd255d4040d1d3f105922888`, for which the user
+reported a clean Critical/High/Medium pentest. GitHub subsequently reported
+command-line alerts 398 (Python container smoke) and 399 (Rust RSS self-test).
+The Python SARIF trace specifically follows `--container-image` into Podman;
+the native `--binary` interface is not the reported flow.
+
+The Linux RSS child now executes the fixed `/proc/self/exe` reference instead
+of discovering and reopening an executable pathname. The test remains a fresh
+subprocess with the same stress workload and memory assertions. The container
+smoke validates a bounded image-reference alphabet before any fixture setup,
+revalidates at command construction, and terminates Podman options with `--`
+before the image. Arguments remain separate, shell-free values, and image pulls
+remain disabled. No alert suppressions or security-check relaxations were added.
+
+Six new Python regression tests cover accepted registry/tag/digest forms,
+leading options, shell metacharacters, whitespace, control/non-ASCII characters,
+length limits, early failure, native path argument boundaries and the Podman
+separator. These tests run in the existing Linux/macOS/Windows correlation jobs.
+Local tests passed, as did all seven bounded-metric tests, strict
+observability/PHP-profile Clippy, formatting and documentation-link checks.
+The actual native and rootless Podman HTTP/1.1, TLS HTTP/2, FastCGI, retry,
+cancellation, WebSocket and exact-metrics smoke passed with the updated command
+builder. RSS remained 31,637,504 bytes after warm-up and subsequent churn.
+
+This follow-up changes test tooling, its CI wiring and evidence only, not the
+production runtime or dependency graph. Native Windows/macOS execution of the
+new Python unit tests and closure of the alerts require the new GitHub run;
+the previous analysis is not proof of closure.
