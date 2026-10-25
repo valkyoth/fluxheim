@@ -13,8 +13,12 @@ if (-not $item.PSIsContainer -or
 }
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $acl = [Security.AccessControl.DirectorySecurity]::new()
-$acl.SetSecurityDescriptorSddlForm("D:P(A;OICI;FA;;;$sid)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
-Set-Acl -LiteralPath $Directory -AclObject $acl
+# Only the DACL is changed; touching audit rules would require SeSecurityPrivilege.
+$acl.SetSecurityDescriptorSddlForm(
+    "D:P(A;OICI;FA;;;$sid)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+    [Security.AccessControl.AccessControlSections]::Access)
+# Windows PowerShell's Set-Acl also attempts to persist the audit section.
+$item.SetAccessControl($acl)
 
 $actual = Get-Acl -LiteralPath $Directory
 $rules = @($actual.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))

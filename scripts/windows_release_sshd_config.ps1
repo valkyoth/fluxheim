@@ -1,3 +1,31 @@
+function Resolve-FluxheimReleaseSshdExecutable {
+    param(
+        [Parameter(Mandatory = $true)][string]$ImagePath,
+        [Parameter(Mandatory = $true)][string]$WindowsDirectory,
+        [Parameter(Mandatory = $true)][string]$ProgramFilesDirectory
+    )
+
+    # Accept only a standard service executable, never command-line arguments
+    # or a PATH-resolved program. Do not switch OpenSSH distributions over SSH.
+    $executable = $ImagePath.Trim()
+    if ($executable -match '^"([^"\r\n]+)"$') {
+        $executable = $Matches[1]
+    } elseif ($executable -match '[\s"]') {
+        throw 'OpenSSH service executable must be quoted when its path contains spaces'
+    }
+    $allowed = @(
+        $WindowsDirectory.TrimEnd('\') + '\System32\OpenSSH\sshd.exe'
+        $ProgramFilesDirectory.TrimEnd('\') + '\OpenSSH\sshd.exe'
+        $ProgramFilesDirectory.TrimEnd('\') + '\OpenSSH-Win64\sshd.exe'
+    )
+    foreach ($candidate in $allowed) {
+        if ([string]::Equals($candidate, $executable, [StringComparison]::OrdinalIgnoreCase)) {
+            return $candidate
+        }
+    }
+    throw 'OpenSSH service must use a supported Windows or Program Files installation without arguments'
+}
+
 function Set-FluxheimReleaseBuilderSshdPolicy {
     param(
         [Parameter(Mandatory = $true)]

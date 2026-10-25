@@ -52,6 +52,7 @@ a guide explicitly says otherwise.
 - [systemd](guides/systemd.md)
 - [Wasm extensibility](guides/wasm-extensibility.md)
 - [Windows release builders](guides/windows-release-builders.md)
+- [Dedicated Windows QEMU VM](guides/windows-qemu.md)
 - [Zero-downtime upgrades](guides/zero-downtime-upgrades.md)
 - [Privacy mode](guides/zero-retention-privacy-mode.md)
 
@@ -102,6 +103,7 @@ a guide explicitly says otherwise.
 - [Observability Commit 05 protected file lifecycle](evidence/observability-05.md)
 - [Observability Commit 06 request and trace correlation](evidence/observability-06.md)
 - [Observability Commit 07 bounded operational metrics](evidence/observability-07.md)
+- [Observability Commit 07A dedicated Windows VM qualification](evidence/observability-07a.md)
 - [Observability Commit 04 fatal-abort remediation](evidence/observability-04-fatal.md)
 - [Observability Commit 04 watchdog and critical-exit retest](evidence/observability-04-watchdog.md)
 - [Observability Commit 04 core dump deployment policy](evidence/observability-04-core-limits.md)

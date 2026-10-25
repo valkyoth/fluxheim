@@ -19,6 +19,7 @@ LINUX_HOST="${FLUXHEIM_AARCH64_LINUX_HOST:-}"
 LINUX_SSH_KEY="${FLUXHEIM_LINUX_SSH_KEY:-}"
 WINDOWS_HOST="${FLUXHEIM_WINDOWS_X64_HOST:-}"
 WINDOWS_SSH_KEY="${FLUXHEIM_WINDOWS_SSH_KEY:-}"
+WINDOWS_SSH_PORT="${FLUXHEIM_WINDOWS_SSH_PORT:-22}"
 MACOS_HOST="${FLUXHEIM_MACOS_HOST:-}"
 MACOS_SSH_CONFIG="${FLUXHEIM_MACOS_SSH_CONFIG:-$HOME/.ssh/config}"
 if [[ -n "${FLUXHEIM_MACOS_SSH_CONFIG:-}" && ! -r "$MACOS_SSH_CONFIG" ]]; then
@@ -44,6 +45,11 @@ fi
 
 case "$RUST_VERSION" in "" | *[!0-9A-Za-z._+-]*) echo "error: unsafe Rust version" >&2; exit 2;; esac
 case "$RELEASE_VERSION" in "" | .* | *..* | *[!0-9A-Za-z._+-]*) echo "error: unsafe release version" >&2; exit 2;; esac
+if [[ ! "$WINDOWS_SSH_PORT" =~ ^[1-9][0-9]{0,4}$ ]] || (( WINDOWS_SSH_PORT > 65535 )); then
+    echo 'error: invalid Windows SSH port' >&2; exit 2
+fi
+WINDOWS_SSH=( -F "$SSH_CONFIG" -i "$WINDOWS_SSH_KEY" -o "Port=$WINDOWS_SSH_PORT"
+    -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 )
 for host in "$LINUX_HOST" "$WINDOWS_HOST"; do
     case "$host" in "") ;; *[!0-9A-Za-z:._-]*) echo "error: unsafe builder host: $host" >&2; exit 2;; esac
 done
@@ -79,7 +85,7 @@ for tool in cargo rustup rustc git python3 sha256sum tar cc pkg-config; do
 done
 PREFLIGHT_LINUX
 if [[ -n "$WINDOWS_HOST" ]]; then
-    ssh -F "$SSH_CONFIG" -o BatchMode=yes -o ConnectTimeout=15 -i "$WINDOWS_SSH_KEY" \
+    ssh "${WINDOWS_SSH[@]}" \
         "$WINDOWS_USER@$WINDOWS_HOST" pwsh.exe -NoProfile -NonInteractive -Command \
         "\"if (-not (Test-Path (Join-Path \$env:ProgramFiles 'FluxheimRustTrusted'))) { throw 'Trusted Windows toolchain missing; run builder provisioning first' }; Write-Output 'Windows builder login: ok'\""
 fi
@@ -246,13 +252,13 @@ normalize_windows_text_evidence() {
 STAGE='Windows build or import'
 if [[ -n "$WINDOWS_HOST" ]]; then
     echo "--- Building Windows x86_64 archives on $WINDOWS_HOST ---"
-    scp -F "$SSH_CONFIG" -i "$WINDOWS_SSH_KEY" scripts/run_windows_release_builder.ps1 \
+    scp "${WINDOWS_SSH[@]}" scripts/run_windows_release_builder.ps1 \
         scripts/windows_release_tag_policy.ps1 "$WINDOWS_USER@$WINDOWS_HOST:"
-    ssh -F "$SSH_CONFIG" -i "$WINDOWS_SSH_KEY" "$WINDOWS_USER@$WINDOWS_HOST" pwsh.exe -NoProfile \
+    ssh "${WINDOWS_SSH[@]}" "$WINDOWS_USER@$WINDOWS_HOST" pwsh.exe -NoProfile \
         -NonInteractive -ExecutionPolicy Bypass -File run_windows_release_builder.ps1 \
         -Version "$RELEASE_VERSION" -RustVersion "$RUST_VERSION" -Architecture x86_64 \
         -ExpectedCommit "$COMMIT_HASH"
-    scp -F "$SSH_CONFIG" -i "$WINDOWS_SSH_KEY" \
+    scp "${WINDOWS_SSH[@]}" \
         "$WINDOWS_USER@$WINDOWS_HOST:/C:/FluxheimBuild/output/$RELEASE_VERSION/x86_64/*" \
         "$OUTPUT_DIR/windows/x86_64/"
 else

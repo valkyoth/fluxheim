@@ -15,16 +15,22 @@ Use a dedicated, disposable or tightly managed Windows build host with:
 - native x86_64 Windows for `x86_64-pc-windows-msvc`;
 - PowerShell 7 (`pwsh.exe`), Git for Windows, Python 3, CMake, and Rustup;
 - Visual Studio Build Tools with the native MSVC C++ toolset and Windows SDK;
-- an Azure NSG or external firewall that permits TCP/22 only from the Linux
-  release host.
+- for cloud builders, an external firewall/security group that permits TCP/22
+  only from the Linux release host; local QEMU uses loopback-only forwarding
+  and a Windows firewall rule for its guest-visible gateway instead.
 
 Windows ARM64 is deferred. Do not generate or publish ARM64 Windows archives
 until the project has sustainable native ARM64 infrastructure and the complete
 runtime and reproducibility matrix passes there.
 
 Official release evidence requires a fresh disposable host provisioned from a
-measured cloud image for that release. The runner rejects toolchains provisioned
-more than 24 hours earlier. Destroy the host after collecting evidence.
+reviewed baseline for that release: a measured cloud image or an isolated working
+copy of the [dedicated local Windows baseline](windows-qemu.md). A local baseline
+must be updated/reviewed before use, restored while powered off, and provisioned
+with fresh tools for the release. The runner rejects toolchains provisioned
+more than 24 hours earlier; restoring a tool-equipped baseline does not renew
+that timestamp. Never edit provisioning dates to bypass this check. Dispose of
+the working copy after collecting evidence (retain the protected baseline).
 Long-lived or reused Windows hosts may be used for development smoke tests, but
 they cannot produce accepted release evidence.
 
@@ -41,9 +47,12 @@ disposable native host after their checksums and native smoke evidence pass.
 
 ## One-Time Preparation
 
-For a disposable Windows Server 2025 Desktop Experience host, first start
-`sshd` and authorize the release machine's key for the initial Administrator
-connection. Then run this from the trusted Linux release machine:
+For a disposable Windows Server 2025 Desktop Experience or Windows 11 Pro host,
+first install OpenSSH if needed, then start `sshd` and authorize the release
+machine's key for the initial administrator connection. Use either the Windows
+optional component or Microsoft's standalone OpenSSH package, not both.
+Preparation requires a registered, working `sshd` service and does not install
+or switch distributions. Run this in the guest:
 
 ```powershell
 # Run once in an elevated PowerShell session on the fresh host.
@@ -75,7 +84,12 @@ scripts/bootstrap_windows_release_builder.sh \
   WINDOWS_HOST ~/.ssh/windows-release-key PUBLIC_IP/32
 ```
 
-The arguments are prompted for when omitted. The bootstrap verifies native
+Supply the host and key explicitly; the optional source CIDR defaults to the
+caller's public IPv4 address with a `/32` prefix. Local QEMU must instead pass
+`10.0.2.2/32`. Before bootstrap, verify the SSH host-key fingerprint through the
+guest console and record that verified key in the Linux client's known-hosts
+file. Unknown or changed host keys are rejected, never accepted automatically.
+The bootstrap verifies native
 x86_64 Windows, derives the SSH public key, creates an allowed-signers policy
 from the repository's configured Git SSH signing key, installs PowerShell 7,
 Git, Python, CMake, the MSVC C++ workload, and pinned Rustup, creates the
@@ -84,8 +98,7 @@ SSH, and firewall policy below. The initial Administrator SSH access is removed
 when that policy takes effect. Before reporting success, bootstrap runs the real
 release runner in `-ValidateBuilderOnly` mode to verify every compiler file,
 directory, hash, ACL, and sanitized compiler selection without requiring a
-release tag. Verify the SSH host-key fingerprint out of band before treating a
-newly created builder as trusted.
+release tag.
 
 Do not create `fluxheim-build` or grant it WMI permissions manually. The tools
 installer creates the account before the policy script uses it, and the release
@@ -95,17 +108,19 @@ packaging; open them only when intentionally running the separate public-network
 HTTP, HTTPS, PHP, or ACME smoke tests, then destroy the disposable host.
 
 Administrator bootstrap files are staged at
-`C:\Users\Administrator\FluxheimBootstrap`, inside the protected profile of
-the initial Administrator account. Provisioning fails if a file, directory,
+`C:\Users\ADMIN_USER\FluxheimBootstrap`, inside the protected profile of
+the initial administrator account. `FLUXHEIM_WINDOWS_ADMIN_USER` defaults to
+`Administrator`; `FLUXHEIM_WINDOWS_SSH_PORT` defaults to `22`. The named profile
+must already exist at that path. Provisioning fails if a file, directory,
 junction, or other object already occupies that path; it never adopts or
 repairs a pre-existing staging directory. The directory is created without
 `-Force` before any upload and is restricted to Administrators and SYSTEM. If
 this check fails, discard the VM instead of deleting the object and retrying on
-the same host. Official provisioning assumes the standard Administrator
-profile path supplied by the required fresh Windows Server image.
+the same host.
 
-The bootstrap uses `winget` and therefore expects Windows Server 2025 Desktop
-Experience rather than Server Core. It downloads Rustup 1.29.1 from the
+The bootstrap uses `winget` and expects Windows Server 2025 Desktop Experience
+or Windows 11 with App Installer available, rather than Server Core. It downloads
+the Rustup version pinned in `install_windows_release_builder_tools.ps1` from the
 official Rust static archive and verifies the pinned SHA-256 before execution.
 Administrator installs the exact pinned Rust toolchain under
 `C:\Program Files\FluxheimRustTrusted`, records hashes for every installed file,
@@ -149,7 +164,7 @@ Replace the documentation address with the Linux release host's real public
 `/32` or a narrowly scoped IPv6 prefix. The script:
 
 - verifies architecture and rejects an administrator build account;
-- installs and enables Windows OpenSSH Server;
+- validates the registered OpenSSH installation and enables its service;
 - prepends a global public-key-only policy, permits SSH login only for the
   dedicated build account with `AllowUsers`, points `AuthorizedKeysFile` at
   administrator-owned `C:\ProgramData\ssh\fluxheim-release\authorized_keys`,
@@ -171,8 +186,9 @@ without one of those destructive rights. The default `C:\FluxheimBuild` layout
 is designed for this policy.
 
 Verify the printed SSH host-key fingerprint out of band before accepting it on
-the Linux release machine. The Azure NSG remains a separate mandatory boundary;
-the local Windows firewall rule is not a replacement for it.
+the Linux release machine. A cloud security group remains a separate boundary;
+the local Windows firewall rule is not a replacement for it. For local QEMU,
+retain loopback-only host forwarding instead of exposing SSH to the LAN.
 
 ## Exact-Tag Build
 

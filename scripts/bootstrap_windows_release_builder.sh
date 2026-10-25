@@ -5,8 +5,10 @@ usage() {
     cat >&2 <<'EOF'
 usage: scripts/bootstrap_windows_release_builder.sh HOST SSH_KEY [SOURCE_CIDR]
 
-The Windows Server 2025 Desktop Experience host must already accept the SSH
-key for Administrator. SOURCE_CIDR defaults to the caller's public IPv4 /32.
+The Windows host must already accept the SSH key for an administrator.
+FLUXHEIM_WINDOWS_ADMIN_USER defaults to Administrator; FLUXHEIM_WINDOWS_SSH_PORT
+defaults to 22. SOURCE_CIDR defaults to the caller's public IPv4 /32. For QEMU
+user networking, explicitly use its guest-visible gateway CIDR (10.0.2.2/32).
 EOF
 }
 
@@ -14,6 +16,8 @@ HOST="${1:-}"
 SSH_KEY="${2:-}"
 SOURCE_CIDR="${3:-}"
 BUILD_USER="${FLUXHEIM_WINDOWS_BUILD_USER:-fluxheim-build}"
+ADMIN_USER="${FLUXHEIM_WINDOWS_ADMIN_USER:-Administrator}"
+SSH_PORT="${FLUXHEIM_WINDOWS_SSH_PORT:-22}"
 KNOWN_HOSTS="${FLUXHEIM_WINDOWS_KNOWN_HOSTS:-$HOME/.ssh/known_hosts}"
 SSH_CONFIG="${FLUXHEIM_WINDOWS_SSH_CONFIG:-/dev/null}"
 RUST_VERSION="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)"
@@ -23,6 +27,10 @@ RUST_VERSION="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)"
 if [[ -z "$HOST" || -z "$SSH_KEY" ]]; then usage; exit 2; fi
 case "$HOST" in *[!0-9A-Za-z:._-]*) echo "unsafe Windows host: $HOST" >&2; exit 2;; esac
 case "$BUILD_USER" in '' | *[!0-9A-Za-z_.-]*) echo "unsafe Windows build user" >&2; exit 2;; esac
+case "$ADMIN_USER" in '' | -* | *[!0-9A-Za-z_.-]*) echo "unsafe Windows admin user" >&2; exit 2;; esac
+if [[ ! "$SSH_PORT" =~ ^[1-9][0-9]{0,4}$ ]] || (( SSH_PORT > 65535 )); then
+    echo 'invalid Windows SSH port' >&2; exit 2
+fi
 [[ -f "$SSH_KEY" ]] || { echo "SSH private key is missing: $SSH_KEY" >&2; exit 2; }
 [[ -r "$SSH_CONFIG" ]] || { echo "SSH client config is not readable: $SSH_CONFIG" >&2; exit 2; }
 if [[ -z "$SOURCE_CIDR" ]]; then
@@ -56,10 +64,13 @@ SSH_OPTIONS=(
     -i "$SSH_KEY"
     -o BatchMode=yes
     -o IdentitiesOnly=yes
-    -o StrictHostKeyChecking=accept-new
+    -o StrictHostKeyChecking=yes
+    -o "Port=$SSH_PORT"
     -o "UserKnownHostsFile=$KNOWN_HOSTS"
 )
-ADMIN_TARGET="Administrator@$HOST"
+ADMIN_TARGET="$ADMIN_USER@$HOST"
+BOOTSTRAP_ROOT="C:\\Users\\$ADMIN_USER\\FluxheimBootstrap"
+BOOTSTRAP_SCP="C:/Users/$ADMIN_USER/FluxheimBootstrap/"
 
 echo "--- Verifying native Windows Administrator SSH access ---"
 ssh "${SSH_OPTIONS[@]}" "$ADMIN_TARGET" \
@@ -67,23 +78,23 @@ ssh "${SSH_OPTIONS[@]}" "$ADMIN_TARGET" \
 
 echo "--- Uploading Fluxheim builder bootstrap ---"
 ssh "${SSH_OPTIONS[@]}" "$ADMIN_TARGET" \
-    'powershell.exe -NoProfile -NonInteractive -Command "$path = '\''C:\Users\Administrator\FluxheimBootstrap'\''; if (Test-Path -LiteralPath $path) { throw '\''bootstrap directory already exists; use a fresh disposable host'\'' }; New-Item -ItemType Directory -Path $path -ErrorAction Stop | Out-Null; & icacls.exe $path /setowner '\''Administrators'\'' | Out-Null; if ($LASTEXITCODE -ne 0) { throw '\''failed to set bootstrap directory owner'\'' }; & icacls.exe $path /inheritance:r /grant:r '\''SYSTEM:(OI)(CI)F'\'' '\''Administrators:(OI)(CI)F'\'' | Out-Null; if ($LASTEXITCODE -ne 0) { throw '\''failed to secure bootstrap directory'\'' }"'
+    "powershell.exe -NoProfile -NonInteractive -Command \"\$path = '$BOOTSTRAP_ROOT'; if (Test-Path -LiteralPath \$path) { throw 'bootstrap directory already exists; use a fresh disposable host' }; New-Item -ItemType Directory -Path \$path -ErrorAction Stop | Out-Null; & icacls.exe \$path /setowner 'Administrators' | Out-Null; if (\$LASTEXITCODE -ne 0) { throw 'failed to set bootstrap directory owner' }; & icacls.exe \$path /inheritance:r /grant:r 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null; if (\$LASTEXITCODE -ne 0) { throw 'failed to secure bootstrap directory' }\""
 scp "${SSH_OPTIONS[@]}" \
     "$ROOT/scripts/install_windows_release_builder_tools.ps1" \
     "$ROOT/scripts/prepare_windows_release_builder.ps1" \
     "$ROOT/scripts/windows_release_sshd_config.ps1" \
     "$WORK/authorized_key" \
     "$WORK/allowed_signers" \
-    "$ADMIN_TARGET:C:/Users/Administrator/FluxheimBootstrap/"
+    "$ADMIN_TARGET:$BOOTSTRAP_SCP"
 
 echo "--- Installing Windows build tools ---"
 ssh "${SSH_OPTIONS[@]}" "$ADMIN_TARGET" \
-    "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\Users\\Administrator\\FluxheimBootstrap\\install_windows_release_builder_tools.ps1 -BuildUser $BUILD_USER -RustVersion $RUST_VERSION"
+    "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $BOOTSTRAP_ROOT\\install_windows_release_builder_tools.ps1 -BuildUser $BUILD_USER -RustVersion $RUST_VERSION"
 
 echo "--- Applying the hardened release-builder policy ---"
 set +e
 ssh "${SSH_OPTIONS[@]}" "$ADMIN_TARGET" \
-    "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\Users\\Administrator\\FluxheimBootstrap\\prepare_windows_release_builder.ps1 -ExpectedArchitecture X64 -BuildUser $BUILD_USER -AuthorizedKeyFile C:\\Users\\Administrator\\FluxheimBootstrap\\authorized_key -AllowedSourceCidr $SOURCE_CIDR -TagAllowedSignersFile C:\\Users\\Administrator\\FluxheimBootstrap\\allowed_signers"
+    "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $BOOTSTRAP_ROOT\\prepare_windows_release_builder.ps1 -ExpectedArchitecture X64 -BuildUser $BUILD_USER -AuthorizedKeyFile $BOOTSTRAP_ROOT\\authorized_key -AllowedSourceCidr $SOURCE_CIDR -TagAllowedSignersFile $BOOTSTRAP_ROOT\\allowed_signers"
 PREPARE_STATUS="$?"
 set -e
 if [[ "$PREPARE_STATUS" -ne 0 ]]; then

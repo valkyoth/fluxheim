@@ -11,6 +11,13 @@ import smoke_log_file_rotation as smoke
 
 
 class FixtureTests(unittest.TestCase):
+    def test_windows_helper_changes_only_access_rules(self):
+        helper = (smoke.ROOT / 'scripts' / 'protect_windows_smoke_directory.ps1').read_text()
+        self.assertIn('[Security.AccessControl.AccessControlSections]::Access)', helper)
+        self.assertIn('$item.SetAccessControl($acl)', helper)
+        self.assertNotIn('Set-Acl -LiteralPath', helper)
+        self.assertIn('if (-not $actual.AreAccessRulesProtected', helper)
+
     def test_arbitrary_quota_path_option_is_rejected(self):
         result = subprocess.run([
             smoke.sys.executable, str(smoke.ROOT / "scripts" / "smoke_log_file_rotation.py"),
@@ -80,6 +87,9 @@ class FixtureTests(unittest.TestCase):
             command = run.call_args.args[0]
             self.assertEqual(command[0], "powershell.exe")
             self.assertNotIn("-Command", command)
+            self.assertEqual(command[command.index("-ExecutionPolicy") + 1], "RemoteSigned")
+            self.assertLess(command.index("-ExecutionPolicy"), command.index("-File"))
+            self.assertNotIn("Bypass", command)
             self.assertEqual(command[-2:], ["-Directory", str(root)])
             self.assertEqual(command[command.index("-File") + 1],
                              str(smoke.ROOT / "scripts" / "protect_windows_smoke_directory.ps1"))

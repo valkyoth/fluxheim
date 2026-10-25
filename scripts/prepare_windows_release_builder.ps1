@@ -39,6 +39,18 @@ if ($actualArchitecture -ne $ExpectedArchitecture) {
     throw "expected $ExpectedArchitecture Windows host, found $actualArchitecture"
 }
 
+# Bootstrap already requires working SSH. Resolve that installation before any
+# policy changes; installing a second distribution can unregister its service.
+$null = Get-Service -Name sshd -ErrorAction Stop
+$sshService = Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\sshd' -Name ImagePath
+$sshdExecutable = Resolve-FluxheimReleaseSshdExecutable `
+    -ImagePath ([Environment]::ExpandEnvironmentVariables($sshService.ImagePath)) `
+    -WindowsDirectory $env:WINDIR `
+    -ProgramFilesDirectory ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles))
+if (-not (Test-Path -LiteralPath $sshdExecutable -PathType Leaf)) {
+    throw 'registered OpenSSH server executable is missing; repair OpenSSH from the console first'
+}
+
 $localUser = Get-LocalUser -Name $BuildUser -ErrorAction Stop
 if (-not $localUser.Enabled) {
     throw "release build account is disabled: $BuildUser"
@@ -60,16 +72,6 @@ if ($openSshMemberSids -notcontains $localUser.SID.Value) {
 $authorizedKey = (Get-Content -LiteralPath $AuthorizedKeyFile -Raw).Trim()
 if ($authorizedKey -notmatch '^ssh-(ed25519|rsa|ecdsa-[^ ]+) [A-Za-z0-9+/=]+(?: .*)?$' -or $authorizedKey.Contains("`n")) {
     throw 'authorized key file must contain exactly one OpenSSH public key'
-}
-
-$capability = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'
-if ($null -eq $capability) {
-    throw 'OpenSSH Server capability is unavailable on this Windows host'
-}
-if ($capability.State -ne 'Installed') {
-    if ($PSCmdlet.ShouldProcess('OpenSSH.Server', 'Install Windows capability')) {
-        Add-WindowsCapability -Online -Name $capability.Name | Out-Null
-    }
 }
 
 $sshTrustRoot = Join-Path $env:ProgramData 'ssh\fluxheim-release'
@@ -137,7 +139,7 @@ $config = Get-Content -LiteralPath $sshdConfig -Raw
 $config = Set-FluxheimReleaseBuilderSshdPolicy -Config $config -BuildUser $BuildUser
 if ($PSCmdlet.ShouldProcess($sshdConfig, 'Restrict release-builder SSH authentication')) {
     Set-Content -LiteralPath $sshdConfig -Value $config -Encoding ascii
-    & "$env:WINDIR\System32\OpenSSH\sshd.exe" -t
+    & $sshdExecutable -t
     if ($LASTEXITCODE -ne 0) { throw 'OpenSSH configuration validation failed' }
     $authorizedKeysPolicy = 'AuthorizedKeysFile __PROGRAMDATA__/ssh/fluxheim-release/authorized_keys'
     $authorizedKeysPolicyIndex = $config.IndexOf($authorizedKeysPolicy)
@@ -152,7 +154,7 @@ if ($PSCmdlet.ShouldProcess($sshdConfig, 'Restrict release-builder SSH authentic
     # administrator. Its vendor Match Group administrators block may override
     # AuthorizedKeysFile, but AllowUsers below still excludes that account.
     $effectiveValidationUser = $env:USERNAME.ToLowerInvariant()
-    $effectiveSshd = (& "$env:WINDIR\System32\OpenSSH\sshd.exe" -T -C "user=$effectiveValidationUser,host=localhost,addr=127.0.0.1") -join "`n"
+    $effectiveSshd = (& $sshdExecutable -T -C "user=$effectiveValidationUser,host=localhost,addr=127.0.0.1") -join "`n"
     if ($LASTEXITCODE -ne 0) { throw 'OpenSSH effective configuration validation failed' }
     foreach ($required in @(
         'passwordauthentication no',

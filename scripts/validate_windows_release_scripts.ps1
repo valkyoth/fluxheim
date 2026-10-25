@@ -612,15 +612,19 @@ foreach ($required in @(
     'FLUXHEIM_WINDOWS_SSH_CONFIG',
     '-F "$SSH_CONFIG"',
     '-RustVersion $RUST_VERSION',
-    "'C:\Users\Administrator\FluxheimBootstrap'",
-    'Test-Path -LiteralPath $path',
-    "throw '\''bootstrap directory already exists; use a fresh disposable host'\''",
-    'New-Item -ItemType Directory -Path $path -ErrorAction Stop',
-    '$ADMIN_TARGET:C:/Users/Administrator/FluxheimBootstrap/',
-    'C:\\Users\\Administrator\\FluxheimBootstrap\\install_windows_release_builder_tools.ps1',
-    'C:\\Users\\Administrator\\FluxheimBootstrap\\prepare_windows_release_builder.ps1',
-    '-AuthorizedKeyFile C:\\Users\\Administrator\\FluxheimBootstrap\\authorized_key',
-    '-TagAllowedSignersFile C:\\Users\\Administrator\\FluxheimBootstrap\\allowed_signers',
+    'FLUXHEIM_WINDOWS_ADMIN_USER',
+    'FLUXHEIM_WINDOWS_SSH_PORT',
+    '-o "Port=$SSH_PORT"',
+    '-o StrictHostKeyChecking=yes',
+    'BOOTSTRAP_ROOT="C:\\Users\\$ADMIN_USER\\FluxheimBootstrap"',
+    'Test-Path -LiteralPath \$path',
+    "throw 'bootstrap directory already exists; use a fresh disposable host'",
+    'New-Item -ItemType Directory -Path \$path -ErrorAction Stop',
+    '$ADMIN_TARGET:$BOOTSTRAP_SCP',
+    '$BOOTSTRAP_ROOT\\install_windows_release_builder_tools.ps1',
+    '$BOOTSTRAP_ROOT\\prepare_windows_release_builder.ps1',
+    '-AuthorizedKeyFile $BOOTSTRAP_ROOT\\authorized_key',
+    '-TagAllowedSignersFile $BOOTSTRAP_ROOT\\allowed_signers',
     "'FluxheimRustTrusted'",
     'rustup\\toolchains\\',
     "'provisioning.json'",
@@ -636,7 +640,7 @@ if ($bootstrap.Contains('C:\FluxheimBootstrap') -or
     $bootstrap.Contains('New-Item -ItemType Directory -Force')) {
     throw 'Windows builder bootstrap must not adopt or repair a preexisting staging directory'
 }
-$bootstrapCreation = $bootstrap.IndexOf('New-Item -ItemType Directory -Path $path -ErrorAction Stop')
+$bootstrapCreation = $bootstrap.IndexOf('New-Item -ItemType Directory -Path \$path -ErrorAction Stop')
 $bootstrapUpload = $bootstrap.IndexOf('scp "${SSH_OPTIONS[@]}"')
 if ($bootstrapCreation -lt 0 -or $bootstrapUpload -lt 0 -or
     $bootstrapCreation -gt $bootstrapUpload) {
@@ -737,7 +741,7 @@ if (-not $preparation.Contains('Set-FluxheimReleaseBuilderSshdPolicy')) {
     throw 'Windows preparation must render its SSH policy through the tested configuration helper'
 }
 foreach ($required in @(
-    'sshd.exe" -T -C',
+    '& $sshdExecutable -T -C',
     '$effectiveValidationUser = $env:USERNAME.ToLowerInvariant()',
     "`$authorizedKeysPolicy = 'AuthorizedKeysFile __PROGRAMDATA__/ssh/fluxheim-release/authorized_keys'",
     "`$firstMatch = [regex]::Match(`$config, '(?im)^\s*Match\s+')",
@@ -752,6 +756,37 @@ foreach ($required in @(
 }
 
 . (Join-Path $root 'scripts/windows_release_sshd_config.ps1')
+foreach ($imagePath in @(
+    'C:\Windows\System32\OpenSSH\sshd.exe',
+    '"C:\Windows\System32\OpenSSH\sshd.exe"',
+    '"C:\Program Files\OpenSSH\sshd.exe"',
+    '"C:\Program Files\OpenSSH-Win64\sshd.exe"'
+)) {
+    $resolved = Resolve-FluxheimReleaseSshdExecutable -ImagePath $imagePath `
+        -WindowsDirectory 'C:\Windows' -ProgramFilesDirectory 'C:\Program Files'
+    if ($resolved -ne $imagePath.Trim('"')) { throw 'wrong OpenSSH executable selected' }
+}
+foreach ($imagePath in @(
+    'C:\Program Files\OpenSSH\sshd.exe',
+    '"C:\Program Files\OpenSSH\sshd.exe" -f C:\untrusted.conf',
+    'C:\Users\builder\sshd.exe',
+    'sshd.exe',
+    '"C:\Program Files\OpenSSH\..\sshd.exe"',
+    '"C:\Program Files\OpenSSH\sshd.exe" & whoami'
+)) {
+    $rejected = $false
+    try {
+        $null = Resolve-FluxheimReleaseSshdExecutable -ImagePath $imagePath `
+            -WindowsDirectory 'C:\Windows' -ProgramFilesDirectory 'C:\Program Files'
+    } catch { $rejected = $true }
+    if (-not $rejected) { throw 'unsafe OpenSSH service command was accepted' }
+}
+if ($preparation.Contains('Add-WindowsCapability') -or $preparation.Contains('Get-WindowsCapability')) {
+    throw 'SSH preparation must not install or switch Windows OpenSSH distributions'
+}
+if ($preparation.IndexOf('Resolve-FluxheimReleaseSshdExecutable') -gt $preparation.IndexOf('Add-LocalGroupMember')) {
+    throw 'SSH installation must be validated before preparation mutates policy'
+}
 $representativeSshdConfig = @"
 PasswordAuthentication yes
 Match Group administrators

@@ -108,6 +108,11 @@ jobs:
           scripts/validate_portable_release_plan.py
           scripts/validate_release_helpers.sh
 
+      - name: Test local Windows VM launcher policy
+        run: |
+          python3 scripts/test_windows_qemu.py
+          python3 scripts/test_windows_qemu_state.py
+
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
 

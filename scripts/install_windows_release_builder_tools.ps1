@@ -22,7 +22,7 @@ if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() -ne 
 
 $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
 if ($null -eq $winget) {
-    throw 'winget.exe is required; use the Windows Server 2025 Desktop Experience image'
+    throw 'winget.exe is required; install App Installer on Windows 11 or use Windows Server 2025 Desktop Experience'
 }
 
 function Install-WinGetPackage {

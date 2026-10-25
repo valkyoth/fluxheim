@@ -17,6 +17,19 @@ def remote_block(marker):
 
 
 class ReleaseHelpers(unittest.TestCase):
+    def test_php_smoke_diagnostics_do_not_replace_original_failure(self):
+        source = (SCRIPTS / 'smoke_windows_public_php.ps1').read_text()
+        cleanup = source.rsplit('} finally {', 1)[1]
+        self.assertIn('Write-Error -ErrorAction Continue', cleanup)
+        self.assertIn('Write-Error "Windows public PHP smoke artifacts kept in $runRoot" -ErrorAction Continue', cleanup)
+
+    def test_php_smoke_uses_archived_checksum_pinned_fixture(self):
+        source = (SCRIPTS / 'smoke_windows_public_php.ps1').read_text()
+        self.assertIn('https://downloads.php.net/~windows/releases/archives/php-8.4.25-nts-Win32-vs17-x64.zip', source)
+        self.assertIn('43a8f67ed2e5223fafb21293c85976361808855405278cef2cf3037c3ae2529c', source)
+        self.assertLess(source.index('if ($actualPhpHash -ne $phpSha256)'),
+                        source.index('Expand-Archive -LiteralPath $phpArchivePath'))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -82,6 +95,74 @@ class ReleaseHelpers(unittest.TestCase):
         self.assertEqual(result.returncode, 41)
         self.assertIn("remote builder preflight", result.stderr)
         self.assertFalse((self.root / "output").exists())
+
+    def test_windows_preflight_uses_explicit_port_and_strict_host_key(self):
+        self.env["FLUXHEIM_WINDOWS_SSH_PORT"] = "2223"
+        self.env["FLUXHEIM_WINDOWS_X64_HOST"] = "127.0.0.1"
+        result = self.run_helper()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        log = (self.root / "ssh.log").read_text()
+        self.assertIn("Port=2223", log)
+        self.assertIn("StrictHostKeyChecking=yes", log)
+        self.assertIn("fluxheim-build@127.0.0.1", log)
+
+    def test_windows_invalid_ports_fail_before_connecting(self):
+        for port in ("0", "65536", "-p22", "22;id", "022", "1 2", "123456789012345"):
+            with self.subTest(port=port):
+                self.env["FLUXHEIM_WINDOWS_SSH_PORT"] = port
+                self.assertNotEqual(self.run_helper().returncode, 0)
+                self.assertFalse((self.root / "ssh.log").exists())
+
+    def test_windows_upload_build_download_share_transport_options(self):
+        source = HELPER.read_text()
+        self.assertEqual(source.count('ssh "${WINDOWS_SSH[@]}"'), 2)
+        self.assertEqual(source.count('scp "${WINDOWS_SSH[@]}"'), 2)
+
+    def test_live_windows_smokes_keep_guest_and_forwarded_ports_separate(self):
+        for name in ("smoke_windows_public_profiles.sh", "smoke_windows_public_php.sh"):
+            with self.subTest(script=name):
+                source = (SCRIPTS / name).read_text()
+                self.assertIn('-o "Port=$SSH_PORT"', source)
+                self.assertIn('-HttpPort $LISTEN_HTTP_PORT -HttpsPort $LISTEN_HTTPS_PORT', source)
+                self.assertIn('"$PUBLIC_NAME:$HTTPS_PORT:$PUBLIC_ADDRESS"', source)
+                for port in ("0", "65536", "022", "22;id"):
+                    env = dict(self.env, FLUXHEIM_WINDOWS_SSH_PORT=port)
+                    args = ["127.0.0.1", str(self.root / "key"), "unused.zip"]
+                    if "profiles" in name:
+                        args += ["unused.zip"] * 3
+                    args += ["fluxheim-qemu.test"]
+                    result = subprocess.run(["/bin/bash", str(SCRIPTS / name), *args], env=env,
+                                            capture_output=True, text=True)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("ports must be", result.stderr)
+                self.assertFalse((self.root / "ssh.log").exists())
+
+    def test_windows_bootstrap_port_and_admin_user(self):
+        for name in ("sed", "sleep"):
+            (self.bin / name).symlink_to(f"/usr/bin/{name}")
+        (self.root / "sign.pub").write_text("ssh-ed25519 AAAA test\n")
+        self.tool("git", f'''case "$*" in
+            'config --get user.signingkey') echo "{self.root}/sign.pub";;
+            'config --get user.email') echo test@example.invalid;;
+            'rev-parse --show-toplevel') echo "{SCRIPTS.parent}";;
+            *) echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;;
+        esac''')
+        self.tool("ssh-keygen", "echo 'ssh-ed25519 AAAA test'")
+        self.tool("scp", 'printf "SCP\\n%s\\n" "$*" >> "$SSH_LOG"')
+        self.tool("ssh", 'printf "SSH\\n%s\\n" "$*" >> "$SSH_LOG"\ncase "$*" in *"exit 0") exit 1;; esac')
+        self.env.update(FLUXHEIM_WINDOWS_ADMIN_USER="fluxheim", FLUXHEIM_WINDOWS_SSH_PORT="2223")
+        result = subprocess.run(["/bin/bash", str(SCRIPTS / "bootstrap_windows_release_builder.sh"),
+                                 "127.0.0.1", str(self.root / "key"), "10.0.2.2/32"],
+                                cwd=SCRIPTS.parent, env=self.env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        commands = (self.root / "ssh.log").read_text().splitlines()
+        for command in commands:
+            if command in ("SSH", "SCP"):
+                continue
+            self.assertIn("Port=2223", command)
+            self.assertIn("StrictHostKeyChecking=yes", command)
+        self.assertIn("fluxheim@127.0.0.1", "\n".join(commands))
+        self.assertIn("C:\\Users\\fluxheim\\FluxheimBootstrap", "\n".join(commands))
 
     def test_existing_output_is_not_deleted(self):
         output = self.root / "output/fluxheim-1.8.3-release-assets"

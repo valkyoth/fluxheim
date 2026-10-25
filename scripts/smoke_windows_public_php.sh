@@ -21,6 +21,9 @@ BUILD_USER="${FLUXHEIM_WINDOWS_BUILD_USER:-fluxheim-build}"
 KNOWN_HOSTS="${FLUXHEIM_WINDOWS_KNOWN_HOSTS:-$HOME/.ssh/known_hosts}"
 HTTP_PORT="${FLUXHEIM_WINDOWS_PUBLIC_HTTP_PORT:-80}"
 HTTPS_PORT="${FLUXHEIM_WINDOWS_PUBLIC_HTTPS_PORT:-443}"
+SSH_PORT="${FLUXHEIM_WINDOWS_SSH_PORT:-22}"
+LISTEN_HTTP_PORT="${FLUXHEIM_WINDOWS_LISTEN_HTTP_PORT:-$HTTP_PORT}"
+LISTEN_HTTPS_PORT="${FLUXHEIM_WINDOWS_LISTEN_HTTPS_PORT:-$HTTPS_PORT}"
 
 if [[ -z "$HOST" || -z "$SSH_KEY" || -z "$ARCHIVE" || -z "$PUBLIC_NAME" ]]; then
     usage
@@ -30,6 +33,14 @@ case "$HOST" in *[!0-9A-Za-z:._-]*) echo "unsafe Windows host: $HOST" >&2; exit 
 case "$PUBLIC_ADDRESS" in *[!0-9A-Za-z:._-]*) echo "unsafe public address: $PUBLIC_ADDRESS" >&2; exit 2;; esac
 case "$PUBLIC_NAME" in *[!0-9A-Za-z.-]* | .* | *. | *..*) echo "unsafe public DNS name: $PUBLIC_NAME" >&2; exit 2;; esac
 case "$BUILD_USER" in '' | *[!0-9A-Za-z_.-]*) echo 'unsafe Windows build user' >&2; exit 2;; esac
+for port in "$SSH_PORT" "$HTTP_PORT" "$HTTPS_PORT" "$LISTEN_HTTP_PORT" "$LISTEN_HTTPS_PORT"; do
+    if [[ ! "$port" =~ ^[1-9][0-9]{0,4}$ ]] || (( port > 65535 )); then
+        echo 'smoke ports must be between 1 and 65535' >&2; exit 2
+    fi
+done
+if [[ "$LISTEN_HTTP_PORT" == "$LISTEN_HTTPS_PORT" ]]; then
+    echo 'guest HTTP and HTTPS ports must differ' >&2; exit 2
+fi
 case "$HTTP_PORT" in '' | *[!0-9]*) echo 'HTTP port must be numeric' >&2; exit 2;; esac
 case "$HTTPS_PORT" in '' | *[!0-9]*) echo 'HTTPS port must be numeric' >&2; exit 2;; esac
 if (( HTTP_PORT < 1 || HTTP_PORT > 65535 || HTTPS_PORT < 1 || HTTPS_PORT > 65535 )); then
@@ -70,6 +81,7 @@ SSH_OPTIONS=(
     -o BatchMode=yes
     -o IdentitiesOnly=yes
     -o StrictHostKeyChecking=yes
+    -o "Port=$SSH_PORT"
     -o "UserKnownHostsFile=$KNOWN_HOSTS"
 )
 TARGET="$BUILD_USER@$HOST"
@@ -108,7 +120,7 @@ scp "${SSH_OPTIONS[@]}" \
     "$TARGET:$REMOTE_ROOT/smoke_windows_public_php.ps1"
 
 ssh "${SSH_OPTIONS[@]}" "$TARGET" \
-    "pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\FluxheimBuild\\runs\\$RUN_ID\\smoke_windows_public_php.ps1 -RunId $RUN_ID -HttpPort $HTTP_PORT -HttpsPort $HTTPS_PORT -PublicName $PUBLIC_NAME" \
+    "pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\FluxheimBuild\\runs\\$RUN_ID\\smoke_windows_public_php.ps1 -RunId $RUN_ID -HttpPort $LISTEN_HTTP_PORT -HttpsPort $LISTEN_HTTPS_PORT -PublicName $PUBLIC_NAME" \
     >"$REMOTE_LOG" 2>&1 &
 SSH_PID="$!"
 

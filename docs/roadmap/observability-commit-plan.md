@@ -801,8 +801,8 @@ collector behavior is not the new required-collector acceptance contract.
 | 04 - Bounded dispatcher | Accepted for progression | User supplied clean pentest, reported GitHub green after follow-ups through ee98efea and authorized the next commit. [Legacy dispatch, bounds and qualification](../evidence/observability-04.md). |
 | 05 - File lifecycle | Accepted for progression | User supplied clean pentest, reported GitHub green after follow-ups through d4a2569b and authorized 06. [Protected file lifecycle and qualification](../evidence/observability-05.md). |
 | 06 - Correlation | Accepted for progression | b563894556fa; user supplied clean incremental pentest, reported GitHub green and authorized 07. [Request correlation and live qualification](../evidence/observability-06.md). |
-| 07 - Metrics | Implemented; review pending | [Bounded metrics and qualification](../evidence/observability-07.md). Linux/container, native macOS and native Windows checks passed. Pentest and exact-SHA CI remain gates. |
-| 07A - Dedicated Windows QEMU builder/test VM | Planned; not implemented | Owner requested a fresh Fluxheim-only VM and local release-helper integration. Preserve other projects and clean backups; native execution and packaging evidence pending. |
+| 07 - Metrics | Accepted for progression | User supplied clean pentest and reported GitHub green through 792b0fdc; CI success verified and owner authorized 07A. [Bounded metrics and qualification](../evidence/observability-07.md). |
+| 07A - Dedicated Windows QEMU builder/test VM | Implemented; pentest/CI pending | [Dedicated VM workflow](../guides/windows-qemu.md) and [qualification evidence](../evidence/observability-07a.md). Installation, activation, two verified offline baselines, builder trust checks, Windows workspace/observability tests, live telemetry, all seven archives, Wasm, downloaded checksums and host-to-guest HTTP/HTTPS/PHP checks passed. Baseline restore, fresh native rebuild/live smoke and 28 Windows security/trust tests passed. |
 | 08 - Export | Not started | Pending |
 | 09 - Read-only API | Not started | Pending |
 | 10 - Live containers/collectors | Not started | Pending |
@@ -810,7 +810,8 @@ collector behavior is not the new required-collector acceptance contract.
 | 12 - Observability docs / candidate qualification | Not started | Pending |
 | 13 - Documentation / final release acceptance | Not started | Pending |
 
-Commit 07 implementation is complete. Stop for pentest,
-green GitHub checks and explicit approval before starting Commit 07A, then
-repeat that acceptance cycle before Commit 08. Adding 07A to this plan does
-not authorize VM provisioning, licensing purchases or changes to shared VMs.
+Commit 07 is accepted; Commit 07A is implemented with local qualification complete. The owner
+completed interactive Windows installation and activation. Native build/package
+and live checks passed, including the baseline restore/rebuild gate. Stop for
+pentest, green GitHub checks and explicit approval before
+Commit 08. No licensing purchase or changes to another project's VM are authorized.

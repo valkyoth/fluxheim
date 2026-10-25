@@ -50,6 +50,7 @@ def protect_directory(root):
     if sys.platform == "win32":
         subprocess.run([
             "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
+            "-ExecutionPolicy", "RemoteSigned",
             "-File", str(ROOT / "scripts" / "protect_windows_smoke_directory.ps1"),
             "-Directory", str(root),
         ], check=True, timeout=30)

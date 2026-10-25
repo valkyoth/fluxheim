@@ -54,7 +54,7 @@ $phpStdoutPath = Join-Path $runRoot 'php-cgi.stdout.log'
 $phpStderrPath = Join-Path $runRoot 'php-cgi.stderr.log'
 
 $phpUrl =
-    'https://downloads.php.net/~windows/releases/php-8.4.25-nts-Win32-vs17-x64.zip'
+    'https://downloads.php.net/~windows/releases/archives/php-8.4.25-nts-Win32-vs17-x64.zip'
 $phpSha256 = '43a8f67ed2e5223fafb21293c85976361808855405278cef2cf3037c3ae2529c'
 $publicName = $PublicName.ToLowerInvariant()
 $phpProcess = $null
@@ -388,8 +388,9 @@ enabled = false
     if (-not $succeeded) {
         if (Test-Path -LiteralPath $fluxheimStderrPath -PathType Leaf) {
             Get-Content -LiteralPath $fluxheimStderrPath -ErrorAction SilentlyContinue |
-                Write-Error
+                Write-Error -ErrorAction Continue
         }
-        Write-Error "Windows public PHP smoke artifacts kept in $runRoot"
+        # Preserve the original failure while reporting retained diagnostics.
+        Write-Error "Windows public PHP smoke artifacts kept in $runRoot" -ErrorAction Continue
     }
 }
