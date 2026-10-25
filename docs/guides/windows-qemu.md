@@ -110,6 +110,9 @@ checking the running VM's name and UUID. Windows can ignore that request or wait
 for an interactive confirmation. Wait for the launcher to exit; otherwise use
 the guest console to shut down. The build account intentionally has no shutdown
 privilege. Checkpoints refuse to copy a VM that is still running.
+Shutdown uses Python's QMP connection directly, without invoking external tools
+or the priority helper. Missing build/viewer utilities cannot block that request;
+VM name and UUID checks still apply.
 
 Later boots omit `--iso`:
 

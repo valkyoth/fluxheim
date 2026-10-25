@@ -289,15 +289,16 @@ def main():
     sub.add_parser("shutdown", help="request normal ACPI shutdown of this exact VM; never force power-off")
     args = parser.parse_args()
     os.umask(0o077)
+    if args.action == "shutdown":
+        shutdown(ROOT)
+        return
     validate_system_tools()
     background_priority()
     if args.action == "init":
         initialize(ROOT, args.firmware_code.resolve(strict=True), args.firmware_vars.resolve(strict=True),
                    args.cpus, args.memory_gib, args.disk_gib)
-    elif args.action == "start":
-        start(ROOT, args.iso.resolve(strict=True) if args.iso else None, args.unthrottled_io)
     else:
-        shutdown(ROOT)
+        start(ROOT, args.iso.resolve(strict=True) if args.iso else None, args.unthrottled_io)
 
 
 if __name__ == "__main__":

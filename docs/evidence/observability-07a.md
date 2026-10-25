@@ -174,3 +174,10 @@ helper's fail-closed behavior, and exact child executable paths with an untruste
 PATH. This follow-up does not change the guest configuration, seccomp policy,
 networking, resource limits or release-provenance boundaries. It does not require
 modifying the running guest or saved baselines.
+
+The low-severity shutdown availability follow-up is also addressed: `shutdown`
+dispatches directly to the existing identity-checked QMP operation before tool
+validation or background-priority setup. Init/start still require the complete
+toolchain. All 31 launcher/checkpoint tests passed, including a regression that
+rejects any external helper execution during shutdown and the existing name/UUID
+mismatch tests. No actual guest shutdown or baseline modification was needed.

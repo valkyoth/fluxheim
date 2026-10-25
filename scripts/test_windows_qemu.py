@@ -137,6 +137,19 @@ class VMTests(unittest.TestCase):
             nice.assert_not_called()
             run.assert_not_called()
 
+    def test_shutdown_needs_no_external_tools_or_priority_helper(self):
+        with patch.object(sys, 'argv', ['windows_qemu.py', 'shutdown']), \
+                patch.object(vm, 'validate_system_tools', side_effect=RuntimeError('missing tools')) as validate, \
+                patch.object(vm, 'background_priority') as priority, \
+                patch.object(vm.subprocess, 'run') as run, patch.object(vm.subprocess, 'Popen') as popen, \
+                patch.object(vm, 'shutdown') as shutdown:
+            vm.main()
+            shutdown.assert_called_once_with(vm.ROOT)
+            validate.assert_not_called()
+            priority.assert_not_called()
+            run.assert_not_called()
+            popen.assert_not_called()
+
     def test_initialize_uses_system_qemu_img(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
