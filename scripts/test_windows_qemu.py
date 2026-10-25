@@ -3,9 +3,10 @@
 import json
 from pathlib import Path
 import socket
+import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import windows_qemu as vm
 
@@ -76,7 +77,6 @@ class VMTests(unittest.TestCase):
 
     def test_kvm_missing_fails_closed(self):
         with patch.object(Path, 'is_file', return_value=True), \
-                patch.object(vm.shutil, "which", return_value="/usr/bin/tool"), \
                 patch.object(vm.os, "access", side_effect=lambda path, mode: str(path) != '/dev/kvm'):
             with self.assertRaisesRegex(RuntimeError, "KVM unavailable"):
                 vm.preflight()
@@ -95,7 +95,7 @@ class VMTests(unittest.TestCase):
                 self.assertTrue(any(value.startswith('e1000e,') for value in command))
 
     def test_missing_system_binary_never_falls_back_to_path(self):
-        for missing in (vm.QEMU, vm.SWTPM):
+        for missing in vm.SYSTEM_TOOLS:
             with self.subTest(missing=missing), \
                     patch.object(Path, 'is_file', autospec=True, side_effect=lambda path: path != missing), \
                     patch.object(vm.os, 'access', return_value=True), \
@@ -105,11 +105,69 @@ class VMTests(unittest.TestCase):
                 which.assert_not_called()
 
     def test_background_priority_is_process_local(self):
-        with patch.object(vm.os, 'nice') as nice, patch.object(vm.os, 'getpid', return_value=123), \
+        with patch.object(vm, 'validate_system_tools') as validate, \
+                patch.object(vm.os, 'nice') as nice, patch.object(vm.os, 'getpid', return_value=123), \
                 patch.object(vm.subprocess, 'run') as run:
             vm.background_priority()
+            validate.assert_called_once_with((vm.IONICE,))
             nice.assert_called_once_with(10)
-            run.assert_called_once_with(['ionice', '-c', '3', '-p', '123'], check=True)
+            run.assert_called_once_with(['/usr/bin/ionice', '-c', '3', '-p', '123'], check=True)
+
+    def test_nonexecutable_system_tools_are_rejected(self):
+        for tool in vm.SYSTEM_TOOLS:
+            with self.subTest(tool=tool), patch.object(Path, 'is_file', return_value=True), \
+                    patch.object(vm.os, 'access', side_effect=lambda path, mode: path != tool):
+                with self.assertRaisesRegex(RuntimeError, 'missing system executable'):
+                    vm.preflight()
+
+    def test_main_validates_tools_before_priority_or_vm_operations(self):
+        with patch.object(sys, 'argv', ['windows_qemu.py', 'start']), \
+                patch.object(vm, 'validate_system_tools', side_effect=RuntimeError('missing tool')), \
+                patch.object(vm, 'background_priority') as priority, patch.object(vm, 'start') as start:
+            with self.assertRaisesRegex(RuntimeError, 'missing tool'):
+                vm.main()
+            priority.assert_not_called()
+            start.assert_not_called()
+
+    def test_missing_ionice_blocks_offline_priority_before_any_execution(self):
+        with patch.object(Path, 'is_file', return_value=False), \
+                patch.object(vm.os, 'nice') as nice, patch.object(vm.subprocess, 'run') as run:
+            with self.assertRaisesRegex(RuntimeError, '/usr/bin/ionice'):
+                vm.background_priority()
+            nice.assert_not_called()
+            run.assert_not_called()
+
+    def test_initialize_uses_system_qemu_img(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            code, variables = root / 'code', root / 'vars'
+            code.write_bytes(b'code')
+            variables.write_bytes(b'vars')
+            with patch.object(vm, 'preflight'), patch.object(vm, 'check_resources'), \
+                    patch.object(vm.subprocess, 'run') as run:
+                vm.initialize(root / 'state', code, variables, 8, 16, 192)
+                run.assert_called_once_with(['/usr/bin/qemu-img', 'create', '-f', 'qcow2',
+                                             str(root / 'state/windows.qcow2'), '192G'], check=True)
+
+    def test_start_uses_system_paths_for_every_child(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'identity.json').write_text(json.dumps(vm.new_identity()))
+            (root / 'settings.json').write_text(json.dumps({'cpus': 8, 'memory_gib': 16}))
+            for name in ('windows.qcow2', 'uefi-code.bin', 'uefi-vars.bin'):
+                (root / name).touch()
+            (root / 'tpm').mkdir()
+            processes = [Mock(), Mock(), Mock()]
+            for process in processes:
+                process.poll.return_value = 0
+                process.wait.return_value = 0
+            with patch.object(vm, 'preflight'), patch.object(vm, 'check_resources'), \
+                    patch.object(vm, 'check_ports'), patch.object(vm, 'wait_socket'), \
+                    patch.dict(vm.os.environ, {'PATH': '/untrusted/helpers'}), \
+                    patch.object(vm.subprocess, 'Popen', side_effect=processes) as popen:
+                vm.start(root, None)
+            self.assertEqual([call.args[0][0] for call in popen.call_args_list],
+                             ['/usr/bin/swtpm', '/usr/bin/qemu-system-x86_64', '/usr/bin/remote-viewer'])
 
     def test_resource_limits(self):
         with patch.object(vm.os, "cpu_count", return_value=32), patch.object(Path, "read_text", return_value="MemAvailable: 104857600 kB\n"), patch.object(vm.shutil, "disk_usage") as disk:

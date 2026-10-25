@@ -159,3 +159,18 @@ Host launcher/checkpoint regressions now total 25 passing tests, including the
 mandatory sandbox/device arguments and rejection of missing system executables
 without PATH fallback. All 21 release-helper tests, four documentation-layout
 tests, PowerShell release-policy validation, doc links and diff checks passed.
+
+### PATH Helper Follow-Up (FH-WIN-001)
+
+The subsequent review identified remaining PATH-selected `ionice`, `qemu-img`
+and `remote-viewer` calls. All now use fixed `/usr/bin` paths. The launcher
+validates all five tools before applying background priority; the shared
+priority helper independently validates `ionice` before execution, covering
+offline checkpoint/restore commands without adding a KVM requirement.
+
+All 30 launcher/checkpoint tests passed. Regressions cover missing and
+non-executable system tools, validation before any launch, the offline priority
+helper's fail-closed behavior, and exact child executable paths with an untrusted
+PATH. This follow-up does not change the guest configuration, seccomp policy,
+networking, resource limits or release-provenance boundaries. It does not require
+modifying the running guest or saved baselines.

@@ -158,8 +158,11 @@ or an independently verified release system. Cargo build scripts and procedural
 macros execute code: a fresh guest and read-only compiler reduce persistence
 opportunities but do not make malicious dependencies safe.
 
-The launcher uses `/usr/bin/qemu-system-x86_64` and `/usr/bin/swtpm` rather than
-PATH-selected copies. QEMU always starts with `-no-user-config`, `-nodefaults`
+The launcher uses fixed `/usr/bin` paths for `qemu-system-x86_64`, `swtpm`,
+`qemu-img`, `remote-viewer` and `ionice`, not PATH-selected copies. It checks
+these executables before starting any helper. Offline checkpoint operations
+check their sole external helper, `/usr/bin/ionice`, before running it; they
+do not require KVM. QEMU always starts with `-no-user-config`, `-nodefaults`
 and `-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny`.
 Required display, storage, network and input devices remain explicitly declared.
 If the installed QEMU cannot apply this policy, startup fails; there is no

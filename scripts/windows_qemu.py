@@ -23,12 +23,24 @@ CPU = "host,hv-relaxed=on,hv-vapic=on,hv-spinlocks=0x1fff,hv-time=on"
 VM_DISK_BYTES_PER_SECOND = 64 * 1024 ** 2
 QEMU = Path('/usr/bin/qemu-system-x86_64')
 SWTPM = Path('/usr/bin/swtpm')
+QEMU_IMG = Path('/usr/bin/qemu-img')
+REMOTE_VIEWER = Path('/usr/bin/remote-viewer')
+IONICE = Path('/usr/bin/ionice')
+SYSTEM_TOOLS = (QEMU, SWTPM, QEMU_IMG, REMOTE_VIEWER, IONICE)
 SANDBOX = 'on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny'
 
 
+def validate_system_tools(tools=SYSTEM_TOOLS):
+    for tool in tools:
+        if not tool.is_file() or not os.access(tool, os.X_OK):
+            raise RuntimeError(f"missing system executable: {tool}")
+
+
 def background_priority():
+    # Also used by offline checkpoint operations, which do not require KVM.
+    validate_system_tools((IONICE,))
     os.nice(10)
-    subprocess.run(["ionice", "-c", "3", "-p", str(os.getpid())], check=True)
+    subprocess.run([str(IONICE), "-c", "3", "-p", str(os.getpid())], check=True)
 
 
 def qemu_path(path):
@@ -76,12 +88,7 @@ def check_resources(root, cpus, memory, minimum_free):
 
 
 def preflight():
-    for tool in (QEMU, SWTPM):
-        if not tool.is_file() or not os.access(tool, os.X_OK):
-            raise RuntimeError(f"missing system executable: {tool}")
-    for tool in ("qemu-img", "remote-viewer", "ionice"):
-        if not shutil.which(tool):
-            raise RuntimeError(f"missing executable: {tool}")
+    validate_system_tools()
     if not os.access("/dev/kvm", os.R_OK | os.W_OK):
         raise RuntimeError("KVM unavailable; software emulation is not permitted")
 
@@ -137,7 +144,7 @@ def initialize(root, firmware_code, firmware_vars, cpus, memory, disk):
         shutil.copyfile(firmware_vars, root / "uefi-vars.bin")
         (root / "uefi-code.bin").chmod(0o400)
         (root / "tpm").mkdir(mode=0o700)
-        subprocess.run(["qemu-img", "create", "-f", "qcow2", qemu_path(root / "windows.qcow2"), f"{disk}G"], check=True)
+        subprocess.run([str(QEMU_IMG), "create", "-f", "qcow2", qemu_path(root / "windows.qcow2"), f"{disk}G"], check=True)
         firmware = {name: hashlib.sha256((root / name).read_bytes()).hexdigest()
                     for name in ("uefi-code.bin", "uefi-vars.bin")}
         (root / "initial-firmware-sha256.json").write_text(json.dumps(firmware, indent=2) + "\n")
@@ -213,10 +220,10 @@ def start(root, iso, unthrottled_io=False):
                     wait_socket(runtime / "spice.sock", guest)
                     uri = "spice+unix://" + str(runtime / "spice.sock")
                     (root / "console-uri.txt").write_text(uri + "\n")
-                    print(f"Console: remote-viewer {uri}", flush=True)
+                    print(f"Console: {REMOTE_VIEWER} {uri}", flush=True)
                     print("Shut down Windows normally. Closing the viewer does not stop the VM.", flush=True)
                     # A viewer can be reopened independently; the launcher owns the VM lifetime.
-                    viewer = subprocess.Popen(["remote-viewer", uri])
+                    viewer = subprocess.Popen([str(REMOTE_VIEWER), uri])
                     result = guest.wait()
                     if viewer.poll() is None:
                         viewer.terminate()
@@ -282,6 +289,7 @@ def main():
     sub.add_parser("shutdown", help="request normal ACPI shutdown of this exact VM; never force power-off")
     args = parser.parse_args()
     os.umask(0o077)
+    validate_system_tools()
     background_priority()
     if args.action == "init":
         initialize(ROOT, args.firmware_code.resolve(strict=True), args.firmware_vars.resolve(strict=True),
