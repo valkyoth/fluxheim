@@ -204,3 +204,28 @@ This follow-up changes test tooling, its CI wiring and evidence only, not the
 production runtime or dependency graph. Native Windows/macOS execution of the
 new Python unit tests and closure of the alerts require the new GitHub run;
 the previous analysis is not proof of closure.
+
+### Remaining Python Alert And Windows Test Follow-Up
+
+GitHub's analysis of `ffef17e1` cleared Rust alert 399, but Python alert 398
+remained: the SARIF flow still followed the image argument through the
+alphabet validator. The smoke now accepts only the tested
+`registry.opensuse.org/opensuse/tumbleweed:latest` runtime and returns that
+literal from the command-boundary validator, rather than forwarding input.
+Both CLI and direct helper calls reject other images. Podman's `--` separator,
+shell-free argv and `--pull=never` remain in place. This restricts test fixture
+selection; it does not authenticate local image contents or change production
+container packaging.
+
+The same CI run exposed a Windows command-test failure because host-native
+`Path` formatting produced backslashes in Linux container arguments. Container
+paths now use POSIX formatting, while native Windows arguments are unchanged.
+Explicit `PureWindowsPath` tests cover both behaviors on every test host;
+this does not claim support for running this host-network Podman smoke on Windows.
+
+Validation: all nine command-boundary tests, the native Linux live smoke,
+the rootless Podman live smoke, documentation links and diff checks passed.
+Both live smokes include HTTP/1.1, TLS HTTP/2, FastCGI, retry, cancellation,
+WebSocket and exact operational-metric checks. Native Windows/macOS CI and
+CodeQL confirmation for this follow-up remain pending. No production Rust or
+dependency changes were needed.

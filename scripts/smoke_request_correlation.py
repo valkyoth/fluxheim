@@ -12,7 +12,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import socket
 import socketserver
@@ -248,11 +247,11 @@ def request_keep_alive(listen):
 def validate_container_image(image):
     if image is None:
         return None
-    # Restrict the argument alphabet, not the registry choice. Podman validates
-    # the full image-reference grammar and --pull=never requires a local image.
-    if len(image) > 256 or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9./:@_-]*", image):
-        raise ValueError("invalid container image reference")
-    return image
+    # Select a fixed tested runtime, never forward caller-supplied command text.
+    # This is a local test fixture, not an image authenticity check.
+    if image == "registry.opensuse.org/opensuse/tumbleweed:latest":
+        return "registry.opensuse.org/opensuse/tumbleweed:latest"
+    raise ValueError("unsupported container smoke image; use registry.opensuse.org/opensuse/tumbleweed:latest")
 
 
 def server_command(binary, config_path, root, container_image=None):
@@ -261,11 +260,11 @@ def server_command(binary, config_path, root, container_image=None):
         return [str(binary), "--config", str(config_path)]
     return ["podman", "run", "--rm", "--pull=never", "--network=host",
             "--userns=keep-id", "--user", f"{os.getuid()}:{os.getgid()}",
-            "--ulimit", "core=0:0", "--workdir", str(root),
-            "--volume", f"{root}:{root}:Z",
-            "--volume", f"{binary}:/fluxheim:ro,Z",
+            "--ulimit", "core=0:0", "--workdir", root.as_posix(),
+            "--volume", f"{root.as_posix()}:{root.as_posix()}:Z",
+            "--volume", f"{binary.as_posix()}:/fluxheim:ro,Z",
             "--entrypoint", "/fluxheim", "--", image,
-            "--config", str(config_path)]
+            "--config", config_path.as_posix()]
 
 
 def run(binary, container_image=None):
@@ -496,6 +495,7 @@ allow_private_tcp_upstreams = true
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
-    parser.add_argument("--container-image", help="Optional already-pulled compatible Linux runtime image; runs the supplied binary in rootless Podman")
+    parser.add_argument("--container-image", choices=["registry.opensuse.org/opensuse/tumbleweed:latest"],
+                        help="Optional already-pulled tested Linux runtime image; runs the supplied binary in rootless Podman")
     args = parser.parse_args()
     run(args.binary.resolve(strict=True), args.container_image)

@@ -150,8 +150,10 @@ gauge. Features absent from the build or unused may have no event series.
 `scripts/smoke_request_correlation.py --binary PATH` starts the real server and
 checks exact request/attempt/byte totals alongside HTTP/1.1, TLS HTTP/2,
 FastCGI, retry, reset and WebSocket behavior. It runs in native Linux, macOS and
-Windows CI. On Linux, `--container-image IMAGE` runs the supplied binary in an
-already-pulled compatible rootless Podman image, using host networking for the
+Windows CI. On Linux,
+`--container-image registry.opensuse.org/opensuse/tumbleweed:latest` runs the
+supplied binary in that already-pulled rootless Podman image. This smoke accepts
+only this tested runtime image, using host networking for the
 loopback fixture and a private writable fixture mount. This is runtime proof,
 not packaging validation of every published image.
 
