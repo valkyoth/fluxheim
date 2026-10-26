@@ -1,1 +1,4 @@
 vendor/** linguist-vendored
+
+# Prometheus wire-format fixtures must retain LF on Windows checkouts.
+tests/fixtures/observability/*.prom text eol=lf

@@ -3,6 +3,10 @@
 
 import http.client
 import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
 import threading
 import unittest
 
@@ -10,6 +14,47 @@ from observability_baseline import CANARY, Fixture, ThreadingHTTPServer, get, pe
 
 
 class BaselineTests(unittest.TestCase):
+    def test_prometheus_fixture_retains_lf_on_windows_style_checkout(self):
+        repository = Path(__file__).resolve().parents[1]
+        fixture = Path("tests/fixtures/observability/metrics.prom")
+        expected = (repository / fixture).read_bytes()
+        self.assertNotIn(b"\r", expected)
+        self.assertTrue(expected.endswith(b"\n"))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            environment = os.environ.copy()
+            for name in tuple(environment):
+                if name.startswith("GIT_"):
+                    del environment[name]
+            environment.update(
+                GIT_CONFIG_GLOBAL=os.devnull,
+                GIT_CONFIG_NOSYSTEM="1",
+                GIT_ATTR_NOSYSTEM="1",
+            )
+
+            def git(*arguments):
+                subprocess.run(
+                    ["git", *arguments], cwd=root, env=environment,
+                    check=True, capture_output=True,
+                )
+
+            git("init", "--quiet")
+            git("config", "core.autocrlf", "true")
+            git("config", "core.attributesFile", os.devnull)
+            (root / ".gitattributes").write_bytes(
+                (repository / ".gitattributes").read_bytes()
+            )
+            (root / fixture).parent.mkdir(parents=True)
+            (root / fixture).write_bytes(expected)
+            control = root / "control.txt"
+            control.write_bytes(b"unprotected text\n")
+            git("add", ".gitattributes", fixture.as_posix(), control.name)
+            (root / fixture).unlink()
+            control.unlink()
+            git("checkout-index", "--force", "--all")
+            self.assertEqual(control.read_bytes(), b"unprotected text\r\n")
+            self.assertEqual((root / fixture).read_bytes(), expected)
+
     def test_nearest_rank_percentile(self):
         self.assertEqual(percentile([3, 1, 2], 0.5), 2)
         self.assertEqual(percentile(list(range(1, 101)), 0.99), 99)

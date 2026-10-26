@@ -147,3 +147,37 @@ Native Windows was not rerun for this shared policy-only remediation. Existing
 Windows CI executes the new unit and binary smoke assertions. Pentest retest and
 exact-commit GitHub acceptance remain pending; prior Windows evidence is not
 presented as a new Windows run.
+
+## CI Follow-Up: Fixture Checkout and Yanked Dependency
+
+The transport-policy pentest retest at `665ea93a` reported no Critical, High or
+Medium findings. GitHub run `40386919769` failed the Windows OTLP metric fixture
+comparison: Git's Windows checkout converted the expected Prometheus payload to
+CRLF, while the encoder correctly emitted LF. Run `40384361853` also reported
+the now-yanked `crypto-bigint 0.7.6` in the dependency-policy gate.
+
+The Prometheus fixtures now have a scoped `text eol=lf` attribute. The exact Rust
+output assertion is unchanged. A temporary Git-repository regression test uses
+`core.autocrlf=true` and an unprotected control file to prove that checkout
+conversion is active but does not alter the protected fixture. It failed before
+the attribute was added and passed afterward. This runs in the existing baseline
+test step without requiring a Windows host.
+
+The lockfile updates only `crypto-bigint` to `0.7.10` and its required `ctutils`
+dependency to `0.4.6`. No application source or dependency-policy exception was
+changed. Validation on Linux on 2026-10-26:
+
+- Full locked workspace tests: passed.
+- All-features observability tests: 72 passed, plus one compile-fail doc test.
+- All-features ACME tests: 88 passed; one privileged mount test remained ignored.
+- Strict ACME and observability/PHP all-targets Clippy: passed.
+- Live exporter lifecycle and request-correlation/operational-metrics smokes:
+  passed against the rebuilt observability/PHP binary.
+- Baseline/checkout tests: four passed. Documentation-layout tests: four passed.
+- Full `cargo deny check`, including yanked-package policy: passed.
+  `cargo audit --deny warnings`: no known vulnerabilities across 449 packages.
+- Formatting, documentation links and diff whitespace checks: passed.
+
+Native Windows execution was not repeated locally for this checkout-only fix;
+the Git conversion regression is not presented as native Windows qualification.
+Exact-commit GitHub acceptance remains required.
