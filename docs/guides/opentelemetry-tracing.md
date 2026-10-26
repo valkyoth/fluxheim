@@ -33,8 +33,9 @@ timeout_secs = 2
 # tls_ca_cert_path = "/etc/fluxheim/otlp-ca.pem"
 ```
 
-Use HTTPS for remote collectors. Without a custom CA bundle, HTTPS uses bundled
-WebPKI roots. Plain HTTP to non-loopback collectors produces a startup warning.
+HTTPS is required for non-loopback collectors, including private addresses and
+DNS names. Without a custom CA bundle, HTTPS uses bundled WebPKI roots. Plain
+HTTP is accepted only for numeric loopback addresses, not `localhost`.
 The exporter has a bounded queue and drops new spans when full. Request tasks
 never wait for collector network I/O. Export is best effort, not durable audit
 storage: shutdown/crash can lose queued spans. gRPC export, advanced sampling

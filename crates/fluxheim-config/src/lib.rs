@@ -91,8 +91,7 @@ pub mod config_wasm;
 pub mod config_web;
 pub mod fs_trust;
 pub mod internal_crypto;
-#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
-mod otlp_http;
+pub mod otlp_http;
 pub mod reload;
 #[cfg(all(test, feature = "load-balancer"))]
 mod reload_load_balancer_tests;

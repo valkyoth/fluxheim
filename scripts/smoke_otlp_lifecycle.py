@@ -78,6 +78,33 @@ def sampled_request(public):
         connection.close()
 
 
+def validate_transport_policy(binary, config, root, image, collector_port):
+    original = config.read_text()
+    try:
+        for signal in ("metrics", "traces"):
+            needle = f'endpoint = "http://127.0.0.1:{collector_port}/v1/{signal}"'
+            assert needle in original
+            for endpoint, accepted in (
+                ("http://localhost:4318/v1/export", False),
+                ("http://10.0.0.10/v1/export", False),
+                ("http://[fd00::1]/v1/export", False),
+                ("http://collector.example.test/v1/export", False),
+                ("http://[::1]:4318/v1/export", True),
+                ("https://collector.example.test/v1/export", True),
+                ("https://10.0.0.10/v1/export", True),
+            ):
+                config.write_text(original.replace(needle, f'endpoint = "{endpoint}"'))
+                result = subprocess.run(
+                    server_command(binary, config, root, image) + ["--validate-config"],
+                    cwd=root, capture_output=True, text=True, timeout=15, check=False,
+                )
+                assert (result.returncode == 0) == accepted, (signal, endpoint, result.stderr)
+                if not accepted:
+                    assert "requires HTTPS" in result.stderr + result.stdout
+    finally:
+        config.write_text(original)
+
+
 def run(binary, image=None):
     image = validate_container_image(image)
     collector = ThreadingHTTPServer(("127.0.0.1", 0), Collector)
@@ -122,6 +149,7 @@ hosts = ["rotation.test"]
 [vhosts.web]
 root = "{root.as_posix()}"
 ''')
+            validate_transport_policy(binary, config, root, image, collector.server_port)
             output_path = root / "process.log"
             with output_path.open("wb") as output:
                 process = subprocess.Popen(server_command(binary, config, root, image), cwd=root,
@@ -172,7 +200,7 @@ root = "{root.as_posix()}"
         collector.shutdown()
         collector.server_close()
         thread.join(timeout=5)
-    print("OTLP lifecycle: serving/scrape isolation, failure/recovery, bounds and secret canary: ok")
+    print("OTLP lifecycle: transport policy, serving/scrape isolation, failure/recovery, bounds and secret canary: ok")
 
 
 if __name__ == "__main__":

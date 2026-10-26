@@ -155,7 +155,12 @@ impl MetricsOtlpExportConfig {
                     reason: "OTLP metrics export requires an http://host[:port]/path or https://host[:port]/path endpoint without query, fragment, or credentials",
                 });
             }
-            warn_plaintext_remote_otlp_endpoint("metrics.otlp.endpoint", &self.endpoint);
+            if !crate::otlp_http::endpoint_transport_is_secure(&self.endpoint) {
+                return Err(ConfigError::InvalidMetricsPolicy {
+                    field: "metrics.otlp.endpoint",
+                    reason: "OTLP export requires HTTPS except for numeric loopback collectors",
+                });
+            }
             if self.bearer_token_file.is_some() && !self.endpoint.starts_with("https://") {
                 return Err(ConfigError::InvalidMetricsPolicy {
                     field: "metrics.otlp.bearer_token_file",
@@ -341,7 +346,12 @@ impl OtlpTraceExportConfig {
                     reason: "OTLP trace export requires an http://host[:port]/path or https://host[:port]/path endpoint without query, fragment, or credentials",
                 });
             }
-            warn_plaintext_remote_otlp_endpoint("tracing.otlp.endpoint", &self.endpoint);
+            if !crate::otlp_http::endpoint_transport_is_secure(&self.endpoint) {
+                return Err(ConfigError::InvalidTracingPolicy {
+                    field: "tracing.otlp.endpoint",
+                    reason: "OTLP export requires HTTPS except for numeric loopback collectors",
+                });
+            }
             if self.bearer_token_file.is_some() && !self.endpoint.starts_with("https://") {
                 return Err(ConfigError::InvalidTracingPolicy {
                     field: "tracing.otlp.bearer_token_file",
@@ -429,13 +439,4 @@ fn default_otlp_timeout_secs() -> u64 {
 
 fn default_true() -> bool {
     true
-}
-
-#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
-fn warn_plaintext_remote_otlp_endpoint(field: &str, endpoint: &str) {
-    if crate::otlp_http::plaintext_non_loopback_endpoint(endpoint) {
-        log::warn!(
-            "{field} uses plaintext HTTP to a non-loopback host; use https:// or restrict OTLP export to a local collector"
-        );
-    }
 }

@@ -8,8 +8,19 @@ local metrics listener unready. Backend/dashboard qualification is Commit 10.
 ## Configure A Collector
 
 `profile-observability` includes `metrics-otlp` and `otel-otlp`. A local collector
-can receive plaintext HTTP on loopback. Explicitly configured private addresses
-remain supported; the operator is responsible for collector/network trust.
+can receive plaintext HTTP only at a numeric loopback address (`127.0.0.0/8`
+or `::1`). All other collectors require HTTPS, including private/LAN addresses
+and DNS names. `http://localhost/...` is rejected: DNS resolution is not a
+plaintext trust exception. Explicitly configured private collectors remain
+supported over HTTPS with certificate and server-name verification.
+
+Migration from older configurations: replace remote `http://` endpoints with
+`https://` and configure a trusted CA where needed, or export to a same-host
+collector at `http://127.0.0.1/...` or `http://[::1]/...` and secure its onward
+connection. This is enforced at config validation and exporter construction,
+not merely warned about. No insecure override is provided. Bearer tokens still
+require HTTPS even for loopback collectors. Existing stricter FIPS restrictions
+are unchanged; see [FIPS](fips.md).
 
 ```toml
 [metrics]

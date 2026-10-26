@@ -332,11 +332,11 @@ overflow_bucket = "overflow"
 
 ```
 
-The OTLP metrics exporter accepts `http://` and `https://` endpoints. Use
-loopback HTTP for same-host collectors and HTTPS for remote collectors.
+The OTLP metrics exporter permits HTTP only for numeric loopback collectors;
+all other endpoints require HTTPS, including private addresses and DNS names.
 `metrics.otlp.tls_ca_cert_path` can point at a PEM CA bundle for private PKI
-collectors; otherwise the HTTPS client uses the bundled WebPKI roots. Plaintext
-HTTP to a non-loopback collector logs a startup warning.
+collectors; otherwise the HTTPS client uses the bundled WebPKI roots. Remote
+plaintext endpoints and `http://localhost/...` are rejected, not merely warned.
 
 ## Implementation Stages
 

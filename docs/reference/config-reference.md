@@ -944,11 +944,11 @@ timeout_secs = 2
 
 The `metrics` compile-time feature is not part of `profile-privacy`.
 `metrics.otlp.enabled = true` requires the `metrics-otlp` feature. The exporter
-sends OTLP/HTTP JSON to `http://` or `https://` endpoints. Prefer local
-loopback HTTP for same-host collectors and HTTPS for remote collectors.
+sends OTLP/HTTP JSON. HTTP is permitted only for numeric loopback addresses;
+HTTPS is required for all other addresses, including private networks and DNS
+names. `http://localhost/...` is rejected.
 `metrics.otlp.tls_ca_cert_path` can point at a PEM CA bundle for private PKI
-collectors; when omitted, the bundled WebPKI roots are used. Plaintext HTTP to
-non-loopback collectors logs a warning. When enabled,
+collectors; when omitted, the bundled WebPKI roots are used. When enabled,
 `fluxheim_metrics_otlp_exports_total{outcome}` records bounded exporter success
 and failure batches through the local Prometheus metrics surface. See
 [OTLP lifecycle](../guides/otlp-export.md) for protected bearer authentication,
@@ -994,9 +994,9 @@ from a trusted peer; generated roots remain unsampled. See the
 [tracing guide](../guides/opentelemetry-tracing.md) for implemented attributes,
 trust and sampling, and [export policy](../guides/otlp-export.md) for failure semantics.
 `tracing.otlp.tls_ca_cert_path` can point at a PEM CA bundle for private PKI
-collectors; when omitted, the bundled WebPKI roots are used. Prefer loopback
-HTTP for local collectors and HTTPS for remote collectors; plaintext HTTP to a
-non-loopback collector logs a warning. When Fluxheim is built with the `cache`
+collectors; when omitted, the bundled WebPKI roots are used. HTTP is accepted
+only for numeric loopback addresses; HTTPS is required for private/remote
+addresses and DNS names, including `localhost`. When Fluxheim is built with the `cache`
 feature, exported request spans include bounded cache attributes for the cache
 phase plus cache lookup and request-collapsing wait durations. They do not
 include cache keys, paths beyond the normal HTTP span name, query strings,

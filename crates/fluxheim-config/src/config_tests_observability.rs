@@ -143,6 +143,41 @@ fn otlp_credentials_require_https_and_endpoints_are_bounded() {
     }
 }
 
+#[cfg(all(
+    feature = "metrics-otlp",
+    feature = "otel-otlp",
+    feature = "otel-tracing",
+    not(feature = "privacy-mode")
+))]
+#[test]
+fn otlp_transport_policy_applies_to_both_enabled_signals() {
+    for signal in ["metrics", "tracing"] {
+        for (endpoint, accepted) in [
+            ("http://127.0.0.1:4318/v1/export", true),
+            ("http://[::1]:4318/v1/export", true),
+            ("http://127.12.34.56/v1/export", true),
+            ("https://collector.example.test/v1/export", true),
+            ("https://10.0.0.10/v1/export", true),
+            ("https://[fd00::1]/v1/export", true),
+            ("http://localhost:4318/v1/export", false),
+            ("http://collector.example.test/v1/export", false),
+            ("http://10.0.0.10/v1/export", false),
+            ("http://[fd00::1]/v1/export", false),
+            ("http://[::ffff:127.0.0.1]/v1/export", false),
+        ] {
+            let text = format!(
+                "[{signal}]\nenabled = true\n[{signal}.otlp]\nenabled = true\nendpoint = '{endpoint}'\n"
+            );
+            let config: Config = toml::from_str(&text).unwrap();
+            let result = config.validate();
+            assert_eq!(result.is_ok(), accepted, "{signal}: {endpoint}: {result:?}");
+            if !accepted {
+                assert!(result.unwrap_err().to_string().contains("requires HTTPS"));
+            }
+        }
+    }
+}
+
 #[cfg(feature = "metrics-otlp")]
 #[test]
 fn accepts_https_otlp_metrics_endpoint() {

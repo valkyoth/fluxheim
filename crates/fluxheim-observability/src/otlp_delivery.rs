@@ -60,6 +60,12 @@ impl Delivery {
     ) -> io::Result<Self> {
         crate::OtlpHttpEndpoint::parse(endpoint)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid OTLP endpoint"))?;
+        if !fluxheim_config::otlp_http::endpoint_transport_is_secure(endpoint) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "OTLP export requires HTTPS except for numeric loopback collectors",
+            ));
+        }
         if token.is_some() && !endpoint.starts_with("https://") {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -202,6 +208,39 @@ fn parse_response(body: &[u8], signal: ExportSignal) -> ExportOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn transport_policy_is_enforced_without_top_level_config_validation() {
+        for signal in [ExportSignal::Traces, ExportSignal::Metrics] {
+            for endpoint in [
+                "http://localhost:4318/v1/export",
+                "http://secret-canary.example.test/v1/export",
+                "http://10.0.0.10/v1/export",
+                "http://192.168.0.10/v1/export",
+                "http://[fd00::1]/v1/export",
+                "http://[::ffff:127.0.0.1]/v1/export",
+                "http://0.0.0.0/v1/export",
+                "http://127.0.0.1.example.test/v1/export",
+            ] {
+                for token in [None, Some(Path::new("missing-secret-canary"))] {
+                    let error = Delivery::new(endpoint, None, token, signal).err().unwrap();
+                    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+                    assert!(error.to_string().contains("requires HTTPS"));
+                    assert!(!error.to_string().contains("secret-canary"));
+                }
+            }
+            for endpoint in [
+                "http://127.0.0.1:4318/v1/export",
+                "http://[::1]:4318/v1/export",
+                "http://127.12.34.56/v1/export",
+                "https://collector.example.test/v1/export",
+                "https://10.0.0.10/v1/export",
+                "https://[fd00::1]/v1/export",
+            ] {
+                assert!(Delivery::new(endpoint, None, None, signal).is_ok());
+            }
+        }
+    }
+
     #[test]
     fn diagnostic_suppression_is_scoped_and_thread_local() {
         assert!(!export_diagnostics_suppressed());

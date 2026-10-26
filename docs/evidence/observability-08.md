@@ -107,3 +107,43 @@ passed; strict Clippy passed. The smoke used an isolated Python 3.14.8 environme
 with the unchanged pinned requirements; Apple's Python 3.9 cannot install the
 pinned `h2`, which requires Python 3.10 or newer. No global toolchain, Python
 installation or other project's build directory was modified.
+
+## Pentest Follow-Up: Collector Transport
+
+The review of `2c383562..64306e33` identified the inherited warning-only policy
+for remote plaintext OTLP as unsuitable for confidential telemetry. This is now
+a fail-closed policy for both metrics and traces: HTTPS is required except for
+numeric loopback HTTP (`127.0.0.0/8` and `::1`). DNS names, including `localhost`,
+private networks, IPv4-mapped IPv6 and ambiguous numeric forms do not receive
+the plaintext exception. Private collectors remain supported over verified HTTPS.
+
+Config validation and direct exporter construction call the same shared rule.
+Runtime rejection occurs before credential-file access, DNS or worker creation.
+Bearer credentials still require HTTPS even on loopback. FIPS restrictions,
+certificate verification, redirect refusal and existing queue/deadline policies
+are unchanged. No dependency or lockfile changed. This intentionally requires
+operators of remote HTTP collectors to migrate; the migration is documented in
+the [export guide](../guides/otlp-export.md).
+
+Validation of the remediation on 2026-10-26:
+
+- Full locked Linux workspace tests: passed.
+- Observability all-features tests on Linux and native Apple Silicon macOS:
+  72 passed plus one compile-fail doc test each. OTLP config tests: eight passed.
+- Observability/PHP profile tests: Linux 293 and macOS 289 passed.
+- Strict Clippy: passed for the Linux all-features observability crate and
+  Linux/macOS observability/PHP profiles. Standalone `otlp-http` compilation passed.
+- Live Linux and macOS exporter lifecycle and correlation smokes: passed.
+  The lifecycle smoke now also executes binary config validation for both signals,
+  asserting rejection of remote/private/DNS HTTP and acceptance of numeric
+  loopback HTTP and private/DNS HTTPS, without contacting those remote endpoints.
+- The expanded lifecycle smoke also passed in the rootless Linux container.
+- `cargo audit --deny warnings` and `cargo deny check advisories`: passed;
+  449 locked packages, zero known vulnerabilities.
+- Formatting, documentation links/layout, Python compilation, modularity and
+  diff checks: passed.
+
+Native Windows was not rerun for this shared policy-only remediation. Existing
+Windows CI executes the new unit and binary smoke assertions. Pentest retest and
+exact-commit GitHub acceptance remain pending; prior Windows evidence is not
+presented as a new Windows run.

@@ -522,6 +522,8 @@ Deliver:
 - Validate collector TLS/authentication, redirect policy and credential
   forwarding; retain approved local/private collectors rather than blindly
   rejecting operator-configured private addresses.
+  Require HTTPS except for numeric loopback HTTP; DNS names (including
+  `localhost`) and private-network collectors do not get a plaintext exception.
 - Expose local export health even when the remote collector is unavailable.
   Never log recursively through the failing exporter.
 
