@@ -66,11 +66,13 @@ fn storage_bin_manifest_rejects_special_file_without_blocking() {
 
     let root = tempfile::tempdir().unwrap();
     let mut plan = storage_bin_plan();
-    plan.path = root.path().join("cache");
+    // macOS's temporary directory can be reached through the /var symlink.
+    plan.path = root.path().canonicalize().unwrap().join("cache");
     let layout = StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
     prepare_storage_bin_layout(&layout).unwrap();
     let manifest = layout.root.join(STORAGE_BIN_MANIFEST_FILENAME);
     std::fs::remove_file(&manifest).unwrap();
+    #[cfg(not(target_os = "macos"))]
     rustix::fs::mknodat(
         rustix::fs::CWD,
         &manifest,
@@ -79,6 +81,15 @@ fn storage_bin_manifest_rejects_special_file_without_blocking() {
         0,
     )
     .unwrap();
+    #[cfg(target_os = "macos")]
+    assert!(
+        std::process::Command::new("/usr/bin/mkfifo")
+            .args(["-m", "600"])
+            .arg(&manifest)
+            .status()
+            .unwrap()
+            .success()
+    );
     assert!(
         std::fs::symlink_metadata(&manifest)
             .unwrap()

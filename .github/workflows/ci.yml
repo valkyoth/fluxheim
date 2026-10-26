@@ -350,6 +350,11 @@ jobs:
       - name: Run macOS native parity smoke
         run: sh scripts/smoke_macos_native_parity.sh
 
+      - name: Test macOS filesystem trust fixtures
+        run: |
+          cargo test --locked -p fluxheim-config fs_trust::tests
+          cargo test --locked -p fluxheim-cache storage_bin_manifest_rejects_special_file_without_blocking
+
       - name: Test macOS bounded logging and real pipe backpressure
         run: |
           cargo test --locked -p fluxheim-common fatal::tests

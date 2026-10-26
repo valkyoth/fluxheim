@@ -74,5 +74,36 @@ lock. Expected connection-reset diagnostics from the older Windows HTTP fixture
 did not fail its assertions.
 
 Linux, macOS and Windows CI run the OTLP-specific Rust suite and live lifecycle
-smoke. Local evidence is not a substitute for the exact-SHA CI gate. Native
-macOS and collector product/dashboard compatibility remain later qualifications.
+smoke. Local evidence is not a substitute for the exact-SHA CI gate. Collector
+product/dashboard compatibility remains a later qualification.
+
+## Native macOS Follow-Up
+
+On 2026-10-26, native Apple Silicon macOS 27.0.1 (26A434), Rust 1.99.1:
+
+- A fresh private build directory used a verified source archive of
+  `3281b8a3321da7af765d1f2bb0952128fd383b24`, followed by the test-only fixes below.
+  No production code or dependencies changed during this follow-up.
+- All-features observability tests: 71 passed, plus one compile-fail doc test.
+- OTLP config tests: seven passed. Filesystem trust tests: six passed.
+  Cache manifest FIFO rejection: passed.
+- Observability/PHP profile library tests: 289 passed.
+- Strict observability/PHP all-targets Clippy and native binary build: passed.
+- Live OTLP failure/recovery smoke: passed, including local serving/scraping,
+  bounded export and collector-secret canary checks.
+- Existing live correlation smoke: passed, including HTTP/1.1, TLS HTTP/2,
+  FastCGI, WebSocket, retry/cancellation, exact spans and operational metrics.
+
+The new config-test compilation exposed pre-existing macOS test portability
+issues. Config/cache FIFO fixtures now use the fixed `/usr/bin/mkfifo` executable
+on macOS, and verify that the fixture really is a FIFO. The depth fixture uses
+short components to reach Fluxheim's depth limit before macOS's pathname limit.
+The cache fixture canonicalizes its temporary root to avoid the system `/var`
+symlink. Production symlink rejection and the rejection assertions are unchanged.
+These filesystem tests now have an explicit macOS CI step.
+
+Linux config/cache regression suites after these fixture fixes: 436 and 67 tests
+passed; strict Clippy passed. The smoke used an isolated Python 3.14.8 environment
+with the unchanged pinned requirements; Apple's Python 3.9 cannot install the
+pinned `h2`, which requires Python 3.10 or newer. No global toolchain, Python
+installation or other project's build directory was modified.

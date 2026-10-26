@@ -156,6 +156,10 @@ metrics success/failure; partial replies count as failure there.
 
 ## Exercise Failure And Recovery
 
+Use Python 3.10 or newer for the pinned smoke-test dependencies. On macOS,
+`/usr/bin/python3` may still be Python 3.9; select a newer installed interpreter
+when creating the virtual environment rather than changing the system Python.
+
 ```sh
 cargo test --locked -p fluxheim-observability --all-features otlp_
 cargo build --locked --no-default-features --features profile-observability,php-fpm --bin fluxheim

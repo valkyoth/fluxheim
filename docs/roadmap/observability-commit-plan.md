@@ -803,7 +803,7 @@ collector behavior is not the new required-collector acceptance contract.
 | 06 - Correlation | Accepted for progression | b563894556fa; user supplied clean incremental pentest, reported GitHub green and authorized 07. [Request correlation and live qualification](../evidence/observability-06.md). |
 | 07 - Metrics | Accepted for progression | User supplied clean pentest and reported GitHub green through 792b0fdc; CI success verified and owner authorized 07A. [Bounded metrics and qualification](../evidence/observability-07.md). |
 | 07A - Dedicated Windows QEMU builder/test VM | Accepted for progression | Owner confirmed clean pentest, green GitHub and resolved 25 code-scanning alerts through 2c383562; authorized 08. [Qualification evidence](../evidence/observability-07a.md). |
-| 08 - Export | Implemented; pentest/CI pending | [Exporter policy](../guides/otlp-export.md) and [checkpoint evidence](../evidence/observability-08.md). Linux workspace, native Windows profile/OTLP tests, live Linux/container/Windows failure-recovery and correlation smokes passed. Pentest and exact-commit CI pending. |
+| 08 - Export | Implemented; pentest/CI pending | [Exporter policy](../guides/otlp-export.md) and [checkpoint evidence](../evidence/observability-08.md). Linux workspace, native Windows and Apple Silicon macOS profile/OTLP tests, live Linux/container/Windows/macOS failure-recovery and correlation smokes passed. Pentest and exact-commit CI pending. |
 | 09 - Read-only API | Not started | Pending |
 | 10 - Live containers/collectors | Not started | Pending |
 | 11 - Native archives | Not started | Pending |

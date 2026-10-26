@@ -279,7 +279,8 @@ mod tests {
     fn rejects_excessive_path_depth_for_permission_checks() {
         let mut current = PathBuf::from("missing-root");
         for _ in 0..=super::MAX_PERMISSION_INSPECTION_DEPTH {
-            current.push("missing");
+            // Exercise our depth limit before macOS's smaller pathname limit.
+            current.push("x");
         }
 
         let error = existing_path_has_insecure_write_permissions(&current).unwrap_err();
@@ -312,6 +313,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
         let fifo = root.join("upstreams.txt");
+        #[cfg(not(target_os = "macos"))]
         rustix::fs::mknodat(
             rustix::fs::CWD,
             &fifo,
@@ -320,6 +322,22 @@ mod tests {
             0,
         )
         .unwrap();
+        #[cfg(target_os = "macos")]
+        assert!(
+            std::process::Command::new("/usr/bin/mkfifo")
+                .args(["-m", "600"])
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        use std::os::unix::fs::FileTypeExt as _;
+        assert!(
+            std::fs::symlink_metadata(&fifo)
+                .unwrap()
+                .file_type()
+                .is_fifo()
+        );
 
         let (sender, receiver) = std::sync::mpsc::channel();
         std::thread::spawn(move || sender.send(open_regular_file(&fifo)).unwrap());
