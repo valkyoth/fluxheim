@@ -107,6 +107,8 @@ pub struct MetricsOtlpExportConfig {
     pub timeout_secs: u64,
     #[serde(default)]
     pub tls_ca_cert_path: Option<PathBuf>,
+    #[serde(default)]
+    pub bearer_token_file: Option<PathBuf>,
 }
 
 impl Default for MetricsOtlpExportConfig {
@@ -118,12 +120,18 @@ impl Default for MetricsOtlpExportConfig {
             interval_secs: default_metrics_otlp_interval_secs(),
             timeout_secs: default_metrics_otlp_timeout_secs(),
             tls_ca_cert_path: None,
+            bearer_token_file: None,
         }
     }
 }
 
 impl MetricsOtlpExportConfig {
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(path) = &mut self.bearer_token_file
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
         if let Some(path) = &mut self.tls_ca_cert_path
             && path.is_relative()
         {
@@ -141,13 +149,27 @@ impl MetricsOtlpExportConfig {
 
         #[cfg(feature = "metrics-otlp")]
         {
-            if !valid_http_otlp_endpoint(&self.endpoint) {
+            if self.endpoint.len() > 2048 || !valid_http_otlp_endpoint(&self.endpoint) {
                 return Err(ConfigError::InvalidMetricsPolicy {
                     field: "metrics.otlp.endpoint",
                     reason: "OTLP metrics export requires an http://host[:port]/path or https://host[:port]/path endpoint without query, fragment, or credentials",
                 });
             }
             warn_plaintext_remote_otlp_endpoint("metrics.otlp.endpoint", &self.endpoint);
+            if self.bearer_token_file.is_some() && !self.endpoint.starts_with("https://") {
+                return Err(ConfigError::InvalidMetricsPolicy {
+                    field: "metrics.otlp.bearer_token_file",
+                    reason: "OTLP bearer authentication requires HTTPS",
+                });
+            }
+            validate_otlp_ca_cert_path(
+                "metrics.otlp.bearer_token_file",
+                self.bearer_token_file.as_deref(),
+            )
+            .map_err(|reason| ConfigError::InvalidMetricsPolicy {
+                field: "metrics.otlp.bearer_token_file",
+                reason,
+            })?;
             validate_otlp_ca_cert_path(
                 "metrics.otlp.tls_ca_cert_path",
                 self.tls_ca_cert_path.as_deref(),
@@ -271,6 +293,8 @@ pub struct OtlpTraceExportConfig {
     pub timeout_secs: u64,
     #[serde(default)]
     pub tls_ca_cert_path: Option<PathBuf>,
+    #[serde(default)]
+    pub bearer_token_file: Option<PathBuf>,
 }
 
 impl Default for OtlpTraceExportConfig {
@@ -282,12 +306,18 @@ impl Default for OtlpTraceExportConfig {
             queue_size: default_otlp_queue_size(),
             timeout_secs: default_otlp_timeout_secs(),
             tls_ca_cert_path: None,
+            bearer_token_file: None,
         }
     }
 }
 
 impl OtlpTraceExportConfig {
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(path) = &mut self.bearer_token_file
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
         if let Some(path) = &mut self.tls_ca_cert_path
             && path.is_relative()
         {
@@ -305,13 +335,27 @@ impl OtlpTraceExportConfig {
 
         #[cfg(feature = "otel-otlp")]
         {
-            if !valid_http_otlp_endpoint(&self.endpoint) {
+            if self.endpoint.len() > 2048 || !valid_http_otlp_endpoint(&self.endpoint) {
                 return Err(ConfigError::InvalidTracingPolicy {
                     field: "tracing.otlp.endpoint",
                     reason: "OTLP trace export requires an http://host[:port]/path or https://host[:port]/path endpoint without query, fragment, or credentials",
                 });
             }
             warn_plaintext_remote_otlp_endpoint("tracing.otlp.endpoint", &self.endpoint);
+            if self.bearer_token_file.is_some() && !self.endpoint.starts_with("https://") {
+                return Err(ConfigError::InvalidTracingPolicy {
+                    field: "tracing.otlp.bearer_token_file",
+                    reason: "OTLP bearer authentication requires HTTPS",
+                });
+            }
+            validate_otlp_ca_cert_path(
+                "tracing.otlp.bearer_token_file",
+                self.bearer_token_file.as_deref(),
+            )
+            .map_err(|reason| ConfigError::InvalidTracingPolicy {
+                field: "tracing.otlp.bearer_token_file",
+                reason,
+            })?;
             validate_otlp_ca_cert_path(
                 "tracing.otlp.tls_ca_cert_path",
                 self.tls_ca_cert_path.as_deref(),

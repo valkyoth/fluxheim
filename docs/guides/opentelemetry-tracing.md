@@ -34,11 +34,14 @@ timeout_secs = 2
 ```
 
 Use HTTPS for remote collectors. Without a custom CA bundle, HTTPS uses bundled
-WebPKI roots. Plain HTTP produces a startup warning, including loopback.
+WebPKI roots. Plain HTTP to non-loopback collectors produces a startup warning.
 The exporter has a bounded queue and drops new spans when full. Request tasks
 never wait for collector network I/O. Export is best effort, not durable audit
 storage: shutdown/crash can lose queued spans. gRPC export, advanced sampling
 and durable acknowledgement are not implemented by this commit.
+
+See [OTLP export lifecycle](otlp-export.md) for protected bearer-token files,
+byte/queue limits, retry and partial-success policy, local health and shutdown.
 
 ## Trust And Sampling
 

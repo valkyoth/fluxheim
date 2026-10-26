@@ -225,6 +225,10 @@ impl Logger {
 
 impl log::Log for Logger {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
+        if fluxheim_observability::export_diagnostics_suppressed() {
+            return false;
+        }
         self.matcher.enabled(metadata)
     }
     fn log(&self, record: &log::Record<'_>) {

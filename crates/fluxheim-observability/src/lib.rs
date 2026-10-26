@@ -47,7 +47,17 @@ pub mod operational;
 pub mod event_test_support;
 
 #[cfg(feature = "otlp-http")]
+mod otlp_delivery;
+#[cfg(feature = "otlp-http")]
 mod otlp_http;
+#[cfg(feature = "otlp-http")]
+mod otlp_resolver;
+#[cfg(feature = "otlp-http")]
+mod otlp_worker;
+#[cfg(feature = "otlp-http")]
+pub use otlp_delivery::{ExportOutcome, ExportSignal, export_diagnostics_suppressed};
+#[cfg(feature = "otlp-http")]
+pub use otlp_worker::{ExportOptions, ExportWorker, export_health_text, shutdown_exports};
 
 #[cfg(feature = "metrics-secret")]
 mod metrics_secret;

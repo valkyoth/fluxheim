@@ -251,10 +251,7 @@ async fn run_native_runtime_async(
                     ),
                 );
             }
-            log::info!(
-                "OTLP metrics export enabled to {}",
-                config.metrics.otlp.endpoint
-            );
+            log::info!("OTLP metrics export enabled");
         }
     }
 
@@ -391,7 +388,10 @@ async fn run_native_runtime_async(
         "native runtime draining established work; timeout={}s",
         drain_timeout.as_secs()
     );
-    runtime_tasks.drain(drain_timeout).await
+    let result = runtime_tasks.drain(drain_timeout).await;
+    #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
+    let _ = tokio::task::spawn_blocking(fluxheim_observability::shutdown_exports).await;
+    result
 }
 
 #[cfg(feature = "proxy")]

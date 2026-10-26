@@ -938,6 +938,8 @@ interval_secs = 15
 timeout_secs = 2
 # Optional PEM CA bundle for private-PKI HTTPS collectors.
 # tls_ca_cert_path = "/etc/fluxheim/otlp-ca.pem"
+# HTTPS only; owner-private token file, not a literal token in this config.
+# bearer_token_file = "/run/secrets/collector-token"
 ```
 
 The `metrics` compile-time feature is not part of `profile-privacy`.
@@ -948,7 +950,9 @@ loopback HTTP for same-host collectors and HTTPS for remote collectors.
 collectors; when omitted, the bundled WebPKI roots are used. Plaintext HTTP to
 non-loopback collectors logs a warning. When enabled,
 `fluxheim_metrics_otlp_exports_total{outcome}` records bounded exporter success
-and failure attempts through the local Prometheus metrics surface.
+and failure batches through the local Prometheus metrics surface. See
+[OTLP lifecycle](../guides/otlp-export.md) for protected bearer authentication,
+queue/byte limits, retries, local export health and bounded shutdown.
 
 ## Tracing
 
@@ -971,6 +975,7 @@ queue_size = 8192
 timeout_secs = 2
 # Optional PEM CA bundle for private-PKI HTTPS collectors.
 # tls_ca_cert_path = "/etc/fluxheim/otlp-ca.pem"
+# bearer_token_file = "/run/secrets/collector-token" # requires HTTPS
 ```
 
 Accepted values and current native behavior:
@@ -978,15 +983,16 @@ Accepted values and current native behavior:
 - `mode = "propagate_only"` validates W3C `traceparent`, generates a trace
   context when needed, and forwards a normalized `traceparent` to upstreams.
 - `traceparent = true` enables inbound/outbound W3C Trace Context propagation.
-- `log_trace_id = true` is accepted configuration, but native access-log
-  correlation is not wired yet.
+- `log_trace_id = true` includes permitted trace/span identifiers in native
+  structured access events.
 
 `tracing.enabled = true` is rejected when Fluxheim is built without
 `otel-tracing`. `tracing.otlp.enabled = true` requires the `otel-otlp` feature.
-The library exporter supports OTLP/HTTP JSON over `http://` or `https://`,
-but native request processing does not yet submit spans to it. The remaining
-attribute descriptions are library capabilities, not proof of live export.
-See the [current inventory](../evidence/observability-baseline.md).
+The exporter supports OTLP/HTTP JSON over `http://` or `https://`. Native request
+completion and upstream attempts submit spans only for sampled context accepted
+from a trusted peer; generated roots remain unsampled. See the
+[tracing guide](../guides/opentelemetry-tracing.md) for implemented attributes,
+trust and sampling, and [export policy](../guides/otlp-export.md) for failure semantics.
 `tracing.otlp.tls_ca_cert_path` can point at a PEM CA bundle for private PKI
 collectors; when omitted, the bundled WebPKI roots are used. Prefer loopback
 HTTP for local collectors and HTTPS for remote collectors; plaintext HTTP to a

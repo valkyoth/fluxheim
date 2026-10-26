@@ -1,7 +1,7 @@
 # 1.9.0 Observability Commit Plan
 
-Status: Commits 01-06 accepted for progression; Commit 07 implemented, awaiting
-pentest and exact-SHA GitHub acceptance, 2026-10-25.
+Status: Commits 01-07 and 07A accepted for progression; Commit 08 implemented,
+awaiting pentest and exact-SHA GitHub acceptance, 2026-10-26.
 Main stays at **1.9.0
 (unreleased)**. This document replaces the earlier ten-checkpoint outline;
 no previously accepted implementation checkpoint is being renumbered.
@@ -802,16 +802,14 @@ collector behavior is not the new required-collector acceptance contract.
 | 05 - File lifecycle | Accepted for progression | User supplied clean pentest, reported GitHub green after follow-ups through d4a2569b and authorized 06. [Protected file lifecycle and qualification](../evidence/observability-05.md). |
 | 06 - Correlation | Accepted for progression | b563894556fa; user supplied clean incremental pentest, reported GitHub green and authorized 07. [Request correlation and live qualification](../evidence/observability-06.md). |
 | 07 - Metrics | Accepted for progression | User supplied clean pentest and reported GitHub green through 792b0fdc; CI success verified and owner authorized 07A. [Bounded metrics and qualification](../evidence/observability-07.md). |
-| 07A - Dedicated Windows QEMU builder/test VM | Implemented; pentest/CI pending | [Dedicated VM workflow](../guides/windows-qemu.md) and [qualification evidence](../evidence/observability-07a.md). Installation, activation, two verified offline baselines, builder trust checks, Windows workspace/observability tests, live telemetry, all seven archives, Wasm, downloaded checksums and host-to-guest HTTP/HTTPS/PHP checks passed. Baseline restore, fresh native rebuild/live smoke and 28 Windows security/trust tests passed. |
-| 08 - Export | Not started | Pending |
+| 07A - Dedicated Windows QEMU builder/test VM | Accepted for progression | Owner confirmed clean pentest, green GitHub and resolved 25 code-scanning alerts through 2c383562; authorized 08. [Qualification evidence](../evidence/observability-07a.md). |
+| 08 - Export | Implemented; pentest/CI pending | [Exporter policy](../guides/otlp-export.md) and [checkpoint evidence](../evidence/observability-08.md). Linux workspace, native Windows profile/OTLP tests, live Linux/container/Windows failure-recovery and correlation smokes passed. Pentest and exact-commit CI pending. |
 | 09 - Read-only API | Not started | Pending |
 | 10 - Live containers/collectors | Not started | Pending |
 | 11 - Native archives | Not started | Pending |
 | 12 - Observability docs / candidate qualification | Not started | Pending |
 | 13 - Documentation / final release acceptance | Not started | Pending |
 
-Commit 07 is accepted; Commit 07A is implemented with local qualification complete. The owner
-completed interactive Windows installation and activation. Native build/package
-and live checks passed, including the baseline restore/rebuild gate. Stop for
-pentest, green GitHub checks and explicit approval before
-Commit 08. No licensing purchase or changes to another project's VM are authorized.
+Commits 07 and 07A are accepted for progression. Commit 08 is the current checkpoint.
+Stop for pentest, green GitHub checks and explicit approval before Commit 09.
+No licensing purchase or changes to another project's VM are authorized.

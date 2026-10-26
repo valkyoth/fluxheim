@@ -13,7 +13,7 @@ structured-events = ["dep:serde", "dep:serde_json", "dep:tokio"]
 test-support = ["structured-events"]
 privacy-mode = []
 metrics-secret = ["dep:fluxheim-config", "dep:rustix", "dep:sanitization", "dep:zeroize"]
-otlp-http = ["dep:rustix", "dep:ureq"]
+otlp-http = ["dep:rustix", "dep:ureq", "dep:fluxheim-config", "dep:serde_json", "dep:zeroize"]
 otlp-metrics = ["dep:prometheus", "dep:serde_json"]
 otlp-trace = ["dep:fluxheim-config", "dep:serde_json", "otlp-http"]
 
@@ -33,3 +33,5 @@ zeroize = { version = "1.9.1", features = ["derive"], optional = true }
 [dev-dependencies]
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }
 proptest = "1.12.0"
+rcgen = { version = "0.14.10", default-features = false, features = ["pem", "ring"] }
+rustls = { version = "0.23.46", default-features = false, features = ["std", "ring", "tls12"] }

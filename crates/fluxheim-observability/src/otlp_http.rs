@@ -1,12 +1,6 @@
-use std::fs::OpenOptions;
 use std::io::{self, Read};
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::time::Duration;
-
-#[cfg(unix)]
-const O_NOFOLLOW: i32 = rustix::fs::OFlags::NOFOLLOW.bits() as i32;
 
 const MAX_OTLP_CA_CERT_BYTES: u64 = 1024 * 1024;
 
@@ -20,6 +14,19 @@ pub struct OtlpHttpEndpoint {
 
 impl OtlpHttpEndpoint {
     pub fn parse(endpoint: &str) -> Option<Self> {
+        if endpoint.len() > 2048
+            || endpoint.bytes().any(|b| {
+                b.is_ascii_whitespace()
+                    || b.is_ascii_control()
+                    || matches!(b, b'@' | b'?' | b'#' | b'\\')
+            })
+        {
+            return None;
+        }
+        let uri = endpoint.parse::<ureq::http::Uri>().ok()?;
+        if uri.host()?.len() > 255 {
+            return None;
+        }
         let (rest, default_port) = if let Some(rest) = endpoint.strip_prefix("http://") {
             (rest, 80)
         } else {
@@ -45,6 +52,7 @@ fn parse_authority(authority: &str, default_port: u16) -> Option<(String, u16)> 
         if host.is_empty() {
             return None;
         }
+        host.parse::<std::net::Ipv6Addr>().ok()?;
         let port = if tail.is_empty() {
             default_port
         } else {
@@ -66,6 +74,8 @@ fn parse_authority(authority: &str, default_port: u16) -> Option<(String, u16)> 
 pub fn agent(timeout: Duration, tls_ca_cert_path: Option<&Path>) -> io::Result<ureq::Agent> {
     let mut builder = ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
+        .proxy(None)
+        .max_response_header_size(16 * 1024)
         .max_redirects(0)
         .http_status_as_error(false);
 
@@ -78,15 +88,15 @@ pub fn agent(timeout: Duration, tls_ca_cert_path: Option<&Path>) -> io::Result<u
         );
     }
 
-    Ok(builder.build().into())
+    Ok(ureq::Agent::with_parts(
+        builder.build(),
+        ureq::unversioned::transport::DefaultConnector::default(),
+        crate::otlp_resolver::BoundedResolver,
+    ))
 }
 
 fn load_ca_certificates(path: &Path) -> io::Result<Vec<ureq::tls::Certificate<'static>>> {
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    options.custom_flags(O_NOFOLLOW);
-    let file = options.open(path).map_err(|error| {
+    let file = fluxheim_config::fs_trust::open_regular_file(path).map_err(|error| {
         io::Error::new(
             error.kind(),
             format!(
@@ -170,6 +180,26 @@ mod tests {
     use super::OtlpHttpEndpoint;
     #[cfg(unix)]
     use super::load_ca_certificates;
+
+    #[test]
+    fn endpoints_reject_credentials_controls_and_oversized_inputs() {
+        for endpoint in [
+            "http://user:secret@localhost/v1/traces",
+            "http://localhost/v1/traces?secret=x",
+            "http://localhost/v1/traces#secret",
+            "http://localhost/\r\nheader",
+            "http://[invalid]/v1/traces",
+            "http://localhost:0/v1/traces",
+            "http://localhost\\evil/v1/traces",
+        ] {
+            assert!(OtlpHttpEndpoint::parse(endpoint).is_none(), "{endpoint:?}");
+        }
+        assert!(
+            OtlpHttpEndpoint::parse(&format!("http://localhost/{}", "a".repeat(2048))).is_none()
+        );
+        assert!(OtlpHttpEndpoint::parse("http://10.0.0.1/v1/traces").is_some());
+        assert!(OtlpHttpEndpoint::parse("http://[::1]/v1/traces").is_some());
+    }
 
     #[test]
     fn parses_prometheus_otlp_endpoint() {

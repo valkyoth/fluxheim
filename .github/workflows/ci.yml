@@ -186,6 +186,9 @@ jobs:
           cargo test --locked -p fluxheim-server --features otel-otlp,php-fpm native_request_telemetry
           cargo build --locked --no-default-features --features profile-observability,php-fpm --bin fluxheim
           target/correlation-venv/bin/python scripts/smoke_request_correlation.py --binary target/debug/fluxheim
+          cargo test --locked -p fluxheim-observability --all-features otlp_
+          cargo test --locked -p fluxheim-config --features metrics-otlp,otel-otlp,otel-tracing otlp_
+          target/correlation-venv/bin/python scripts/smoke_otlp_lifecycle.py --binary target/debug/fluxheim
 
       - name: Test standalone systemd boundary without workspace feature unification
         run: |
@@ -366,6 +369,9 @@ jobs:
           cargo test --locked -p fluxheim-server --features otel-otlp,php-fpm native_request_telemetry
           cargo build --locked --no-default-features --features profile-observability,php-fpm --bin fluxheim
           target/correlation-venv/bin/python scripts/smoke_request_correlation.py --binary target/debug/fluxheim
+          cargo test --locked -p fluxheim-observability --all-features otlp_
+          cargo test --locked -p fluxheim-config --features metrics-otlp,otel-otlp,otel-tracing otlp_
+          target/correlation-venv/bin/python scripts/smoke_otlp_lifecycle.py --binary target/debug/fluxheim
 
       - name: Build all macOS portable archives
         run: |
@@ -429,6 +435,9 @@ jobs:
           cargo test --locked -p fluxheim-server --features otel-otlp,php-fpm native_request_telemetry
           cargo build --locked --no-default-features --features profile-observability,php-fpm --bin fluxheim
           target/correlation-venv/Scripts/python.exe scripts/smoke_request_correlation.py --binary target/debug/fluxheim.exe
+          cargo test --locked -p fluxheim-observability --all-features otlp_
+          cargo test --locked -p fluxheim-config --features metrics-otlp,otel-otlp,otel-tracing otlp_
+          target/correlation-venv/Scripts/python.exe scripts/smoke_otlp_lifecycle.py --binary target/debug/fluxheim.exe
 
       - name: Build and test Windows portable archives
         shell: pwsh

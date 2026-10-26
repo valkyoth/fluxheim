@@ -119,6 +119,30 @@ fn parses_otlp_metrics_export_config() {
     assert_eq!(config.metrics.otlp.interval_secs, 1);
 }
 
+#[cfg(all(
+    feature = "metrics-otlp",
+    feature = "otel-otlp",
+    feature = "otel-tracing",
+    not(feature = "privacy-mode")
+))]
+#[test]
+fn otlp_credentials_require_https_and_endpoints_are_bounded() {
+    for signal in ["metrics", "tracing"] {
+        let text = format!(
+            "[{signal}]\nenabled = true\n[{signal}.otlp]\nenabled = true\nendpoint = 'http://127.0.0.1:4318/v1/{signal}'\nbearer_token_file = 'collector-token'\n"
+        );
+        let config: Config = toml::from_str(&text).unwrap();
+        assert!(config.validate().is_err());
+        let config: Config = toml::from_str(&text.replace("http://", "https://")).unwrap();
+        config.validate().unwrap();
+        let text = text
+            .replace("bearer_token_file = 'collector-token'", "")
+            .replace("127.0.0.1:4318", &"a".repeat(2050));
+        let config: Config = toml::from_str(&text).unwrap();
+        assert!(config.validate().is_err());
+    }
+}
+
 #[cfg(feature = "metrics-otlp")]
 #[test]
 fn accepts_https_otlp_metrics_endpoint() {

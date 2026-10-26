@@ -6,7 +6,10 @@ use serde_json::json;
 pub fn build_metrics_payload(
     families: Vec<prometheus::proto::MetricFamily>,
     service_name: &str,
-) -> String {
+) -> Option<String> {
+    if !bounded_input(&families, service_name) {
+        return None;
+    }
     let time_unix_nanos = unix_time_nanos().to_string();
     let mut metrics = Vec::new();
 
@@ -69,24 +72,61 @@ pub fn build_metrics_payload(
         }
     }
 
-    json!({
-        "resourceMetrics": [{
-            "resource": {
-                "attributes": [
-                    string_attr("service.name", service_name),
-                    string_attr("service.version", env!("CARGO_PKG_VERSION")),
-                ]
-            },
-            "scopeMetrics": [{
-                "scope": {
-                    "name": "fluxheim",
-                    "version": env!("CARGO_PKG_VERSION")
+    Some(
+        json!({
+            "resourceMetrics": [{
+                "resource": {
+                    "attributes": [
+                        string_attr("service.name", service_name),
+                        string_attr("service.version", env!("CARGO_PKG_VERSION")),
+                    ]
                 },
-                "metrics": metrics
+                "scopeMetrics": [{
+                    "scope": {
+                        "name": "fluxheim",
+                        "version": env!("CARGO_PKG_VERSION")
+                    },
+                    "metrics": metrics
+                }]
             }]
-        }]
-    })
-    .to_string()
+        })
+        .to_string(),
+    )
+}
+
+// Bound the intermediate JSON tree before copying labels, descriptions or buckets.
+// Six-fold escaping plus numeric overhead stays below the 4 MiB wire cap.
+fn bounded_input(families: &[prometheus::proto::MetricFamily], service: &str) -> bool {
+    if service.is_empty() || service.len() > 128 || families.len() > 1024 {
+        return false;
+    }
+    let mut budget: usize = 512 * 1024;
+    for family in families {
+        if family.name().len() > 256 || family.help().len() > 1024 {
+            return false;
+        }
+        let Some(left) = budget.checked_sub(512 + family.name().len() + family.help().len()) else {
+            return false;
+        };
+        budget = left;
+        for metric in family.get_metric() {
+            if metric.get_label().len() > 16 || metric.get_histogram().get_bucket().len() > 128 {
+                return false;
+            }
+            let mut weight = 512 + metric.get_histogram().get_bucket().len() * 64;
+            for label in metric.get_label() {
+                if label.name().len() > 128 || label.value().len() > 256 {
+                    return false;
+                }
+                weight += 64 + label.name().len() + label.value().len();
+            }
+            let Some(left) = budget.checked_sub(weight) else {
+                return false;
+            };
+            budget = left;
+        }
+    }
+    true
 }
 
 fn number_data_point(
@@ -170,6 +210,18 @@ mod tests {
     use super::build_metrics_payload;
 
     #[test]
+    fn oversized_metric_labels_and_snapshots_are_rejected_before_encoding() {
+        let registry = prometheus::Registry::new();
+        let counter = CounterVec::new(Opts::new("test_total", "test"), &["name"]).unwrap();
+        counter.with_label_values(&[&"x".repeat(257)]).inc();
+        registry.register(Box::new(counter)).unwrap();
+        assert!(build_metrics_payload(registry.gather(), "test").is_none());
+        let family = prometheus::proto::MetricFamily::default();
+        assert!(build_metrics_payload(vec![family; 1025], "test").is_none());
+        assert!(build_metrics_payload(Vec::new(), &"x".repeat(129)).is_none());
+    }
+
+    #[test]
     fn metric_units_follow_prometheus_names() {
         assert_eq!(
             super::metric_unit("fluxheim_http_response_body_bytes_total"),
@@ -213,7 +265,7 @@ mod tests {
             .register(Box::new(histogram))
             .expect("histogram should register");
 
-        let payload = build_metrics_payload(registry.gather(), "fluxheim-test");
+        let payload = build_metrics_payload(registry.gather(), "fluxheim-test").unwrap();
 
         let decoded: serde_json::Value = serde_json::from_str(&payload).unwrap();
         let metrics = decoded["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]

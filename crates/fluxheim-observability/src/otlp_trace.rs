@@ -1,4 +1,3 @@
-use std::sync::mpsc::{SyncSender, sync_channel};
 use std::time::Duration;
 
 use serde_json::json;
@@ -7,7 +6,8 @@ use fluxheim_config::OtlpTraceExportConfig;
 
 #[derive(Debug, Clone)]
 pub struct TraceExporter {
-    sender: SyncSender<TraceSpan>,
+    worker: crate::ExportWorker,
+    service_name: String,
 }
 
 impl TraceExporter {
@@ -16,50 +16,64 @@ impl TraceExporter {
             return Ok(None);
         }
 
-        let endpoint = HttpEndpoint::parse(&config.endpoint).ok_or_else(|| {
-            std::io::Error::new(
+        if config.service_name.is_empty()
+            || config.service_name.len() > 128
+            || !config
+                .service_name
+                .bytes()
+                .all(|b| b.is_ascii_graphic() || b == b' ')
+        {
+            return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "invalid OTLP trace endpoint",
-            )
-        })?;
-        if endpoint.url.starts_with("http://") {
-            log::warn!(
-                target: "fluxheim::security",
-                "OTLP trace endpoint uses plaintext HTTP for host {}; use HTTPS to protect trace metadata in transit",
-                endpoint.host
-            );
+                "invalid OTLP service name",
+            ));
         }
         let service_name = config.service_name.clone();
         let timeout = Duration::from_secs(config.timeout_secs);
-        let agent = crate::agent(timeout, config.tls_ca_cert_path.as_deref())?;
-        let (sender, receiver) = sync_channel(config.queue_size);
-
-        std::thread::Builder::new()
-            .name("Fluxheim OTLP".to_owned())
-            .spawn(move || {
-                while let Ok(span) = receiver.recv() {
-                    if let Err(error) =
-                        post_otlp_trace(&agent, &endpoint, build_trace_payload(span, &service_name))
-                    {
-                        log::debug!("OTLP trace export failed: {error}");
-                    }
-                }
-            })
-            .map_err(|error| {
-                std::io::Error::new(
-                    error.kind(),
-                    format!("failed to spawn OTLP trace exporter: {error}"),
-                )
-            })?;
-
-        Ok(Some(Self { sender }))
+        let worker = crate::ExportWorker::new(crate::ExportOptions {
+            endpoint: &config.endpoint,
+            ca: config.tls_ca_cert_path.as_deref(),
+            token: config.bearer_token_file.as_deref(),
+            signal: crate::ExportSignal::Traces,
+            queue_size: config.queue_size,
+            timeout,
+            on_complete: None,
+        })?;
+        Ok(Some(Self {
+            worker,
+            service_name,
+        }))
     }
 
     pub fn try_export(&self, span: TraceSpan) {
-        if let Err(error) = self.sender.try_send(span) {
-            log::debug!("dropping OTLP trace span: {error}");
+        if !bounded_span(&span) {
+            self.worker.record_drop();
+            return;
         }
+        self.worker
+            .try_export(build_trace_payload(span, &self.service_name));
     }
+}
+
+fn bounded_span(span: &TraceSpan) -> bool {
+    let required = [
+        &span.trace_id,
+        &span.span_id,
+        &span.name,
+        &span.method,
+        &span.vhost,
+    ];
+    let optional = [
+        &span.parent_span_id,
+        &span.route,
+        &span.load_balancer_upstream_alias,
+        &span.cache_phase,
+        &span.compression_encoding,
+        &span.php_runtime,
+        &span.php_outcome,
+    ];
+    required.into_iter().all(|v| v.len() <= 256)
+        && optional.into_iter().flatten().all(|v| v.len() <= 256)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -87,61 +101,6 @@ pub struct TraceSpan {
     pub compression_encoding: Option<String>,
     pub php_runtime: Option<String>,
     pub php_outcome: Option<String>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct HttpEndpoint {
-    url: String,
-    host: String,
-    port: u16,
-    path: String,
-    authority: String,
-}
-
-impl HttpEndpoint {
-    fn parse(endpoint: &str) -> Option<Self> {
-        let (rest, default_port) = if let Some(rest) = endpoint.strip_prefix("http://") {
-            (rest, 80)
-        } else {
-            (endpoint.strip_prefix("https://")?, 443)
-        };
-        let (authority, path) = rest.split_once('/')?;
-        if authority.is_empty() || path.is_empty() {
-            return None;
-        }
-        let (host, port) = parse_authority(authority, default_port)?;
-        Some(Self {
-            url: endpoint.to_owned(),
-            host,
-            port,
-            path: format!("/{path}"),
-            authority: authority.to_owned(),
-        })
-    }
-}
-
-fn parse_authority(authority: &str, default_port: u16) -> Option<(String, u16)> {
-    if let Some(stripped) = authority.strip_prefix('[') {
-        let (host, tail) = stripped.split_once(']')?;
-        if host.is_empty() {
-            return None;
-        }
-        let port = if tail.is_empty() {
-            default_port
-        } else {
-            tail.strip_prefix(':')?.parse::<u16>().ok()?
-        };
-        return (port != 0).then(|| (host.to_owned(), port));
-    }
-
-    let Some((host, port)) = authority.rsplit_once(':') else {
-        return Some((authority.to_owned(), default_port));
-    };
-    if host.is_empty() {
-        return None;
-    }
-    let port = port.parse::<u16>().ok()?;
-    (port != 0).then(|| (host.to_owned(), port))
 }
 
 fn build_trace_payload(span: TraceSpan, service_name: &str) -> String {
@@ -334,33 +293,10 @@ fn safe_low_cardinality_name(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
-fn post_otlp_trace(
-    agent: &ureq::Agent,
-    endpoint: &HttpEndpoint,
-    body: String,
-) -> std::io::Result<()> {
-    let response = agent
-        .post(&endpoint.url)
-        .header("content-type", "application/json")
-        .send(body.as_str())
-        .map_err(otlp_trace_io_error)?;
-    let status = response.status().as_u16();
-    if (200..300).contains(&status) {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!(
-            "OTLP endpoint returned HTTP {status}"
-        )))
-    }
-}
-
-fn otlp_trace_io_error(error: ureq::Error) -> std::io::Error {
-    std::io::Error::other(error.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::OtlpHttpEndpoint as HttpEndpoint;
 
     #[test]
     fn parses_http_otlp_endpoint() {

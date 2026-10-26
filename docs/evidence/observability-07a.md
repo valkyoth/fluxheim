@@ -1,7 +1,9 @@
 # Commit 07A: Dedicated Windows QEMU Workflow
 
 Status: local qualification complete, including baseline restore and fresh
-native rebuild. Pentest and exact-commit CI pending. Not release acceptance.
+native rebuild. Owner confirmed clean pentest, green GitHub and resolved
+code-scanning alerts through `2c383562`, and authorized Commit 08. Accepted for
+progression, not release acceptance.
 Date: 2026-10-25. Application source under test:
 `792b0fdc1805cd7a2ec66350877e72e30a789bd7`.
 

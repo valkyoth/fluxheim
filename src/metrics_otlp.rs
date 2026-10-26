@@ -1,14 +1,15 @@
 use std::time::Duration;
 
-use fluxheim_observability::{OtlpHttpEndpoint, agent, build_metrics_payload};
+use fluxheim_observability::{
+    ExportOptions, ExportOutcome, ExportSignal, ExportWorker, build_metrics_payload,
+};
 
 use crate::config::MetricsOtlpExportConfig;
 
 pub struct MetricsOtlpExporter {
-    endpoint: OtlpHttpEndpoint,
+    worker: ExportWorker,
     service_name: String,
     interval: Duration,
-    agent: ureq::Agent,
 }
 
 impl MetricsOtlpExporter {
@@ -17,17 +18,36 @@ impl MetricsOtlpExporter {
             return Ok(None);
         }
 
-        let endpoint = parse_endpoint(config)?;
+        if !(1..=3600).contains(&config.interval_secs)
+            || config.service_name.is_empty()
+            || config.service_name.len() > 128
+            || !config
+                .service_name
+                .bytes()
+                .all(|b| b.is_ascii_graphic() || b == b' ')
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid OTLP metrics policy",
+            ));
+        }
         let service_name = config.service_name.clone();
         let interval = Duration::from_secs(config.interval_secs);
         let timeout = Duration::from_secs(config.timeout_secs);
-        let agent = agent(timeout, config.tls_ca_cert_path.as_deref())?;
+        let worker = ExportWorker::new(ExportOptions {
+            endpoint: &config.endpoint,
+            ca: config.tls_ca_cert_path.as_deref(),
+            token: config.bearer_token_file.as_deref(),
+            signal: ExportSignal::Metrics,
+            queue_size: 1,
+            timeout,
+            on_complete: Some(record_outcome),
+        })?;
 
         Ok(Some(Self {
-            endpoint,
+            worker,
             service_name,
             interval,
-            agent,
         }))
     }
 
@@ -36,49 +56,24 @@ impl MetricsOtlpExporter {
     }
 
     pub fn export_once(&self) {
-        let payload = build_metrics_payload(prometheus::gather(), &self.service_name);
-        match post_otlp_metrics(&self.agent, &self.endpoint, payload) {
-            Ok(()) => crate::metrics::record_metrics_otlp_export("success"),
-            Err(error) => {
-                crate::metrics::record_metrics_otlp_export("failure");
-                log::debug!("OTLP metrics export failed: {error}");
+        match build_metrics_payload(prometheus::gather(), &self.service_name) {
+            Some(payload) => {
+                self.worker.try_export(payload);
             }
+            None => self.worker.record_drop(),
         }
     }
-}
-
-fn parse_endpoint(config: &MetricsOtlpExportConfig) -> std::io::Result<OtlpHttpEndpoint> {
-    let endpoint = OtlpHttpEndpoint::parse(&config.endpoint).ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "invalid OTLP metrics endpoint",
-        )
-    })?;
-    Ok(endpoint)
-}
-
-fn post_otlp_metrics(
-    agent: &ureq::Agent,
-    endpoint: &OtlpHttpEndpoint,
-    body: String,
-) -> std::io::Result<()> {
-    let response = agent
-        .post(&endpoint.url)
-        .header("content-type", "application/json")
-        .send(body.as_str())
-        .map_err(otlp_metrics_io_error)?;
-    let status = response.status().as_u16();
-    if (200..300).contains(&status) {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!(
-            "OTLP metrics endpoint returned HTTP {status}"
-        )))
+    pub fn shutdown(&self) {
+        self.worker.shutdown();
     }
 }
 
-fn otlp_metrics_io_error(error: ureq::Error) -> std::io::Error {
-    std::io::Error::other(error.to_string())
+fn record_outcome(outcome: ExportOutcome) {
+    crate::metrics::record_metrics_otlp_export(if outcome == ExportOutcome::Success {
+        "success"
+    } else {
+        "failure"
+    });
 }
 
 #[cfg(test)]

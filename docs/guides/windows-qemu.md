@@ -1,7 +1,8 @@
 # Dedicated Windows QEMU VM
 
-Status: Commit 07A local qualification complete; pentest and exact-commit CI
-pending. Installation and baseline creation alone are not evidence that Windows
+Status: Commit 07A accepted for progression after owner-confirmed clean pentest,
+green GitHub checks and resolved code-scanning alerts through `2c383562`.
+Installation and baseline creation alone are not evidence that Windows
 tests or release packaging have passed. The existing cloud builder remains supported.
 See the [qualification record](../evidence/observability-07a.md) for completed
 native checks and the remaining gates.

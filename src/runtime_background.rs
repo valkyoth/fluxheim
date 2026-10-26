@@ -366,6 +366,7 @@ impl crate::background::FluxBackgroundTask for MetricsOtlpBackgroundService {
             }
             self.exporter.export_once();
         }
+        self.exporter.shutdown();
     }
 }
 

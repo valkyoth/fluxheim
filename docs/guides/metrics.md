@@ -20,6 +20,9 @@ this checkpoint does not relax that boundary. In metrics-enabled builds,
 request/trace IDs, raw Host values, paths, queries, bodies, certificates and
 client IPs are never new metric labels.
 Access-log filtering and sampled tracing do not disable aggregate measurements.
+See [OTLP export lifecycle](otlp-export.md) for collector authentication, byte
+limits, retries, shutdown and local exporter-health metrics. Oversized export
+snapshots are rejected without disabling local scraping.
 
 ## Request And Connection Measurements
 
@@ -140,7 +143,7 @@ largest finite bucket lose tail resolution. Failure count is not a unique-error
 rate and summed dispatcher stages are not a unique-drop count.
 
 Explicitly unavailable panels: complete per-backend active-health state, TLS
-certificate-expiry gauges, trace-export queue/drops (Commit 08), kernel/wire byte
+certificate-expiry gauges, kernel/wire byte
 accounting, database queries, and app-internal PHP spans. Show existing passive
 ejection/selection events as events, not as a substitute for an active-health
 gauge. Features absent from the build or unused may have no event series.

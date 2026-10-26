@@ -58,6 +58,8 @@ pub fn prometheus_text() -> Result<Vec<u8>, prometheus::Error> {
     let metric_families = prometheus::gather();
     let mut output = Vec::new();
     prometheus::TextEncoder::new().encode(&metric_families, &mut output)?;
+    #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
+    output.extend_from_slice(fluxheim_observability::export_health_text().as_bytes());
     Ok(output)
 }
 
