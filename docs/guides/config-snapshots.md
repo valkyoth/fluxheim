@@ -264,6 +264,10 @@ cleartext networks.
 
 Implemented endpoints:
 
+- `GET /_fluxheim/operational-status`: bounded read-only projection; an optional
+  `admin.operational_token_file` grants access to this endpoint only. Use a
+  distinct credential for monitoring rather than distributing the full admin
+  token. See [Operational Status](operational-status.md) for permissions and examples.
 - `GET /_fluxheim/status`
 - `GET /_fluxheim/health`
 - `GET /_fluxheim/snapshots`

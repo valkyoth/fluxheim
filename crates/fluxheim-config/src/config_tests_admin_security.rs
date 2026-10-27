@@ -1,6 +1,46 @@
 use super::*;
 
 #[test]
+fn operational_observer_credential_change_requires_process_upgrade() {
+    use crate::reload::{ReloadImpact, ReloadReason, classify_reload};
+    let old = Config::default();
+    let mut new = old.clone();
+    new.admin.operational_token_file = Some("observer-token".into());
+    assert_eq!(
+        classify_reload(&old, &new),
+        ReloadImpact::ProcessUpgrade {
+            reasons: vec![ReloadReason::AdminServiceChanged]
+        }
+    );
+}
+
+#[test]
+fn operational_observer_config_merges_resolves_and_rejects_empty_paths() {
+    let root = secure_test_dir("observer-config");
+    let mut fragment: crate::config_admin::AdminConfigFragment =
+        toml::from_str("operational_token_file = 'observer-token'").unwrap();
+    fragment.resolve_relative_paths(&root);
+    let mut admin = AdminConfig::default();
+    admin.merge(fragment);
+    assert_eq!(
+        admin.operational_token_file,
+        Some(root.join("observer-token"))
+    );
+    admin.validate().unwrap();
+    let mut direct: AdminConfig =
+        toml::from_str("operational_token_file = 'observer-token'").unwrap();
+    direct.resolve_relative_paths(&root);
+    assert_eq!(direct.operational_token_file, admin.operational_token_file);
+    direct.operational_token_file = Some("".into());
+    assert_eq!(
+        direct.validate(),
+        Err(ConfigError::EmptyAdminPath {
+            field: "admin.operational_token_file"
+        })
+    );
+}
+
+#[test]
 fn rejects_remote_metrics_listener_by_default() {
     let config = Config {
         metrics: MetricsConfig {

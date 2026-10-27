@@ -1,6 +1,20 @@
 use super::*;
 
 impl AdminApp {
+    fn route_authorized(&self, method: &str, path: &str, header: Option<&str>) -> bool {
+        // Always evaluate both digests; route selection must not skip a comparison.
+        let control = authorized(header, &self.token);
+        let observer = authorized(
+            header,
+            self.operational_token.as_ref().unwrap_or(&self.token),
+        );
+        control
+            | (observer
+                & self.operational_token.is_some()
+                & (method == "GET")
+                & (path == "/_fluxheim/operational-status"))
+    }
+
     #[cfg(test)]
     pub(super) fn handle(
         &self,
@@ -111,7 +125,7 @@ impl AdminApp {
             }
         }
 
-        if !authorized(authorization_header(headers), &self.token) {
+        if !self.route_authorized(method, path, authorization_header(headers)) {
             fluxheim_observability::operational::security(
                 fluxheim_observability::event::SecurityReason::AuthenticationRejected,
             );
@@ -448,8 +462,9 @@ impl AdminApp {
                 path,
                 "/_fluxheim/snapshots" | "/_fluxheim/operational-status"
             ))
-            && !headers
-                .is_some_and(|headers| authorized(authorization_header(headers), &self.token))
+            && !headers.is_some_and(|headers| {
+                self.route_authorized(method, path, authorization_header(headers))
+            })
         {
             return json_response(StatusCode::UNAUTHORIZED, br#"{"error":"unauthorized"}"#);
         }

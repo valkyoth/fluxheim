@@ -551,6 +551,8 @@ Deliver:
   do not invent a second complete API family just for observability.
 - Keep old routes compatible. Do not add config drafts/CRUD, token role
   management, arbitrary history queries or a GUI in this checkpoint.
+- Provide a separate optional status-only token file so monitoring does not
+  require mutation authority; reject a credential shared with the control plane.
 - Distinguish telemetry degradation from readiness failure. Status collection
   must not initiate new operations. Preserve existing recovery enforcement
   semantics until explicitly reviewed; do not bypass failed rollback.

@@ -10,8 +10,8 @@ It does not enable a listener, provide a GUI, or implement full server managemen
 Use the existing [admin and snapshot configuration](config-snapshots.md).
 Keep the admin listener on loopback; tunnel to it or use a properly secured TLS
 management gateway. Never expose a plaintext admin bearer token to the network.
-The same bearer token and configured client-certificate policy apply as for other
-admin routes. The new route always requires a token, even when health is public
+The configured client-certificate policy applies as for other admin routes.
+The new route always requires a token, even when health is public
 or the Unix operations socket permits other tokenless local reads.
 
 An API-only example client needs Python's standard library, not server-file access:
@@ -27,9 +27,34 @@ line. It verifies HTTPS certificates, refuses redirects, limits the response to
 have a five-second timeout. An HTTPS management gateway may require additional
 client-certificate support beyond this small example client.
 
-**This is not a read-only credential.** Existing admin tokens still authorize
-mutations on other routes. Do not place one in an untrusted browser application.
-Role-scoped credentials and complete management workflows are future work.
+Give monitoring consumers a separate, status-only credential:
+
+```toml
+[admin]
+enabled = true
+listen = "127.0.0.1:9090"
+token_file = "/etc/fluxheim/secrets/admin-token"
+operational_token_file = "/etc/fluxheim/secrets/observer-token"
+snapshot_store = "/var/lib/fluxheim/snapshots"
+```
+
+`operational_token_file` is optional. It authorizes **only GET on this exact
+endpoint**, not legacy status, snapshot, recovery, reload, cache or load-balancer
+routes. Both listener and Unix socket enforce this restriction. Existing tokenless
+local reads on the Unix socket remain governed by its existing configuration.
+The full control-plane token still works here, but do not distribute it to
+monitoring consumers. Client-certificate policy and HTTP authentication throttling
+also apply to observer requests.
+
+Create an independent random token, not a copy of the admin token. The server
+rejects identical credentials (including after whitespace trimming), empty or
+oversized credentials and unsafe secret paths. On Unix the observer file must be
+root- or service-owned, readable by the service, with no group/other permissions
+(normally `0600`); parent directories must be trusted. Windows uses the existing
+confidential-file ACL policy. Symlinks and non-regular files are rejected. Secret
+contents are read with a bound, zeroized after loading and retained only as a MAC.
+Changing the file or configured path requires restarting the admin service;
+reload cannot rotate credentials. Full role management remains future work.
 
 ## Contract
 

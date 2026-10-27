@@ -16,6 +16,8 @@ behavior when the change improves security or project direction.
   last admin change and local telemetry health. Publish its OpenAPI/JSON Schema
   contract and an API-only client. Preserve existing routes and failed-rollback
   enforcement; status polling does not trigger recovery or perform probes.
+- Add an optional, distinct `admin.operational_token_file` credential limited to
+  operational-status GET requests, and hash-lock the wheel-only API test tooling.
 - Add process-wide request/attempt latency, completion, connection admission,
   TLS handshake, typed operational failure and dispatcher-health metrics.
   Bound configured metric identities across reloads, including histogram sample

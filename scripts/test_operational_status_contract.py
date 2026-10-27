@@ -2,8 +2,14 @@
 """Validate the OpenAPI document and positive/negative response fixtures."""
 import copy
 import json
+import hashlib
 from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
 import unittest
+import zipfile
 
 from jsonschema import Draft202012Validator, ValidationError
 from openapi_spec_validator import validate
@@ -16,6 +22,51 @@ VALIDATOR = Draft202012Validator(SCHEMA)
 
 
 class ContractTests(unittest.TestCase):
+    def test_wheel_lock_and_all_ci_installs_enforce_hashes(self):
+        lock = (ROOT / "scripts/operational_status_requirements.txt").read_text()
+        self.assertIn("--require-hashes", lock)
+        self.assertIn("--only-binary=:all:", lock)
+        entries = lock.replace("\\\n", " ").splitlines()
+        count = 0
+        for entry in entries:
+            if not entry or entry.startswith(("#", "--")):
+                continue
+            self.assertRegex(entry, r"^[\w-]+==[\d.]+")
+            hashes = re.findall(r"--hash=sha256:([0-9a-f]{64})(?:\s|$)", entry)
+            self.assertTrue(hashes)
+            count += 1
+        self.assertEqual(count, 19)
+        commands = [line for line in (ROOT / ".github/workflows/ci.yml").read_text().splitlines()
+                    if "pip install" in line and "operational_status_requirements.txt" in line]
+        self.assertEqual(len(commands), 3)
+        for command in commands:
+            self.assertIn("--require-hashes --only-binary=:all:", command)
+            self.assertIn("--force-reinstall", command)
+
+    def test_pip_rejects_substituted_wheel_and_unhashed_dependency(self):
+        # An offline synthetic wheel exercises pip itself, without installing code.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            wheel = root / "fluxheim_hash_fixture-1.0-py3-none-any.whl"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr("fluxheim_hash_fixture-1.0.dist-info/METADATA",
+                                 "Metadata-Version: 2.1\nName: fluxheim-hash-fixture\nVersion: 1.0\n")
+                archive.writestr("fluxheim_hash_fixture-1.0.dist-info/WHEEL",
+                                 "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
+            digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+            requirement = root / "requirements.txt"
+            command = [sys.executable, "-m", "pip", "--isolated", "--disable-pip-version-check",
+                       "download", "--no-index", "--no-deps", "--no-cache-dir",
+                       "--require-hashes", "--only-binary=:all:", "--find-links", str(root),
+                       "--dest", str(root / "output"), "-r", str(requirement)]
+            for hash_value, success in [(digest, True), ("0" * 64, False), (None, False)]:
+                requirement.write_text("fluxheim-hash-fixture==1.0" +
+                                       (f" --hash=sha256:{hash_value}" if hash_value else "") + "\n")
+                result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
+                if not success:
+                    self.assertIn("hash", result.stderr.lower())
+
     def test_openapi_and_schema(self):
         Draft202012Validator.check_schema(SCHEMA)
         validate(API, base_uri=(ROOT / "docs/reference/operational-status.openapi.json").as_uri())

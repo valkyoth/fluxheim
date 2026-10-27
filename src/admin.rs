@@ -79,6 +79,7 @@ pub struct AdminApp {
     #[cfg(test)]
     audit_dispatcher: Option<Arc<fluxheim_observability::operational::Dispatcher>>,
     token: AdminToken,
+    operational_token: Option<AdminToken>,
     client_certificate: AdminClientCertificatePolicy,
     store: SnapshotStore,
     current_config: Arc<ArcSwap<Config>>,
@@ -176,6 +177,11 @@ impl AdminApp {
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let token_secret = load_admin_token(&config.admin)?;
         let token = AdminToken::new(&token_secret, config.tls.compliance_mode().required());
+        let operational_token = load_operational_token(
+            &config.admin,
+            &token,
+            config.tls.compliance_mode().required(),
+        )?;
         let snapshot_store = config
             .admin
             .snapshot_store
@@ -212,6 +218,7 @@ impl AdminApp {
             #[cfg(test)]
             audit_dispatcher: None,
             token,
+            operational_token,
             client_certificate: AdminClientCertificatePolicy::from_config(&config.admin),
             store,
             current_config: Arc::new(ArcSwap::from_pointee(config.clone())),
@@ -415,6 +422,8 @@ mod tests {
     mod lb_status;
     #[path = "admin_tests_lb_validation.rs"]
     mod lb_validation;
+    #[path = "admin_tests_observer_token.rs"]
+    mod observer_token;
     #[path = "admin_tests_operational.rs"]
     mod operational;
     #[path = "admin_tests_self_heal_progress.rs"]

@@ -14,6 +14,26 @@ use crate::config::AdminConfig;
 
 use super::{MAX_ADMIN_TOKEN_BYTES, MAX_ADMIN_TOKEN_FILE_BYTES};
 
+pub(in crate::admin) fn load_operational_token(
+    config: &AdminConfig,
+    control: &super::AdminToken,
+    compliance_required: bool,
+) -> Result<Option<super::AdminToken>, Box<dyn Error + Send + Sync>> {
+    let Some(path) = config.operational_token_file.as_deref() else {
+        return Ok(None);
+    };
+    let file = fluxheim_config::fs_trust::open_confidential_file(path)?;
+    let raw = read_bounded_secret_file(file, path, MAX_ADMIN_TOKEN_FILE_BYTES)?;
+    let value = raw.trim();
+    if value.is_empty() || value.len() > MAX_ADMIN_TOKEN_BYTES {
+        return Err("operational token is empty or exceeds the token size limit".into());
+    }
+    if super::constant_time_eq(value.as_bytes(), control) {
+        return Err("operational token must differ from the control-plane token".into());
+    }
+    Ok(Some(super::AdminToken::new(value, compliance_required)))
+}
+
 pub(in crate::admin) fn load_admin_token(
     config: &AdminConfig,
 ) -> Result<Zeroizing<String>, Box<dyn Error + Send + Sync>> {

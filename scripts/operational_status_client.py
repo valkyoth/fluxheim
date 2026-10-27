@@ -41,4 +41,4 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("origin", help="HTTPS admin origin or a loopback SSH tunnel")
     args = parser.parse_args()
-    print(json.dumps(read_status(args.origin, getpass.getpass("Admin bearer token: ")), indent=2))
+    print(json.dumps(read_status(args.origin, getpass.getpass("Operational observer token: ")), indent=2))

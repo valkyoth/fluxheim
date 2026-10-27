@@ -51,6 +51,7 @@ pub(super) fn app_with_config_and_self_healing(
             .unwrap(),
         )),
         token: AdminToken::new("secret-token", false),
+        operational_token: None,
         client_certificate,
         store: SnapshotStore::new(store),
         current_config: Arc::new(ArcSwap::from_pointee(config)),

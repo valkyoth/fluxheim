@@ -17,6 +17,7 @@ from smoke_operational_events import port
 from test_operational_status_contract import VALIDATOR
 
 CANARY = "operational-private-secret-canary"
+OBSERVER = "operational-observer-secret-canary"
 
 
 class Collector(BaseHTTPRequestHandler):
@@ -44,6 +45,9 @@ def run(binary, reduced=False):
         with private_fixture(fixture_parent(False)) as root:
             public, admin, metrics = port(), port(), port()
             token, key = root / "token", root / "key"
+            observer = root / "observer-token"
+            observer.write_text(OBSERVER)
+            observer.chmod(0o600)
             token.write_text(CANARY)
             key.write_text("0123456789abcdef0123456789abcdef")
             token.chmod(0o600)
@@ -66,6 +70,7 @@ format = "json"
 enabled = true
 listen = "127.0.0.1:{admin}"
 token_file = "{token.as_posix()}"
+operational_token_file = "{observer.as_posix()}"
 snapshot_store = "{(root / 'snapshots').as_posix()}"
 snapshot_integrity_key_file = "{key.as_posix()}"
 '''
@@ -95,10 +100,10 @@ root = "{root.as_posix()}"
             origin = f"http://127.0.0.1:{admin}"
 
             def sample():
-                value = read_status(origin, CANARY)
+                value = read_status(origin, OBSERVER)
                 VALIDATOR.validate(value)
                 text = json.dumps(value)
-                assert CANARY not in text and str(root) not in text and "rotation.test" not in text
+                assert CANARY not in text and OBSERVER not in text and str(root) not in text and "rotation.test" not in text
                 return value
 
             with (root / "process.log").open("wb") as output:
@@ -124,6 +129,11 @@ root = "{root.as_posix()}"
                     assert initial["configuration"]["generation"] == 1
                     assert initial["configuration"]["last_change"] is None
                     assert request(admin, PATH)[0] == 401
+                    assert request(admin, PATH, OBSERVER)[0] == 200
+                    for route, method in (("snapshots", "GET"), ("snapshot", "POST"),
+                                          ("reload", "POST"), ("rollback", "POST")):
+                        assert request(admin, "/_fluxheim/" + route, OBSERVER, method)[0] == 401
+                    assert sample()["configuration"]["last_change"] is None
                     assert request(admin, PATH, CANARY, "POST")[0] == 405
                     assert request(admin, PATH + "?secret=" + CANARY, CANARY)[0] == 400
                     assert request(public, "/") == (200, b"ready")

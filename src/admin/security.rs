@@ -14,6 +14,7 @@ use super::unix_secs;
 
 mod token_store;
 pub(in crate::admin) use token_store::load_admin_token;
+pub(in crate::admin) use token_store::load_operational_token;
 #[cfg(test)]
 pub(in crate::admin) use token_store::{read_bounded_secret_file, read_secret_file};
 

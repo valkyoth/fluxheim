@@ -13,7 +13,9 @@ The new `GET /_fluxheim/operational-status` uses the existing admin listener,
 bearer authentication and HTTP client-certificate policy. It has no unauthenticated
 health exception, including when the configured public health path collides.
 The Unix operations socket requires a bearer token for this route even when other
-local reads do not. This does not create a limited-role credential.
+local reads do not. The pentest follow-up adds an optional distinct status-only
+credential; see the follow-up verification below. Full role management remains
+outside this checkpoint.
 
 The observer uses cached, fixed-size configuration counts and short nonblocking
 reads. It does not enumerate snapshot files, contact backends/collectors or mutate
@@ -42,6 +44,48 @@ See the [operator contract and limitations](../guides/operational-status.md),
 pinned Python development tooling only. No Rust manifest or lockfile changed.
 
 ## Verification
+
+### Pentest Follow-Up (2026-10-27)
+
+The review of `6e6b003f` identified excess privilege for monitoring consumers
+and version-only Python dependency pinning. Both are addressed:
+
+- Optional `admin.operational_token_file` uses the existing confidential-file
+  trust boundary, bounded reads and zeroized plaintext. Startup rejects the same
+  credential as the control-plane token. Unix permits root or the service owner,
+  not arbitrary owners; Windows enforces confidential ACLs. This supports rootless
+  deployment without weakening the existing secret-file policy.
+- Both token comparisons are evaluated before route authorization. Only the exact
+  GET observer route accepts the limited credential. Other protected routes,
+  mutation admission and recovery enforcement are unchanged. Client-certificate
+  policy and failed-authentication throttling still apply. Public health and
+  explicitly tokenless Unix socket reads retain their existing public/local policy.
+- Configuration merging, relative path resolution, missing/empty/large/duplicate
+  tokens, Unix public permissions/symlinks, Windows Everyone-read ACLs, HTTP/socket
+  authorization, expired recovery and throttle/certificate policy have regressions.
+- Python tooling now has a wheel-only SHA-256 lock for CPython 3.10-3.14 on the
+  supported host architectures. CI requires hashes and reinstalls the locked
+  artifacts rather than trusting already-installed distributions. The additional
+  typing-extensions pin closes referencing's Python-before-3.13 dependency.
+  Hashes establish artifact consistency, not proof of trustworthy upstream code.
+- Six Python contract/security tests pass, including offline pip rejection of a
+  substituted wheel and an unhashed dependency. Hash-enforced fresh installs passed
+  on Linux, native macOS and native Windows; Linux CPython 3.12 wheel resolution
+  also passed.
+- Full locked Linux workspace, strict observability/PHP Clippy, privacy tests,
+  documentation checks, Windows release-policy validator, RustSec audit and
+  cargo-deny passed. No Cargo manifest/lockfile changes.
+- Updated live API tests passed on Linux, Apple Silicon macOS and Windows x64:
+  observer reads succeed, observer mutations/snapshot reads fail, and control
+  reload/rollback plus telemetry failure/recovery still work.
+- Native Windows library suite: 284 passed, including all four applicable observer
+  security tests and the confidential ACL rejection. Native macOS library suite:
+  306 passed, plus strict Clippy and live API. macOS became unreachable for the
+  final test-only rerun (additional throttle case and a narrowed Windows path
+  assertion); production code was unchanged from its successful run. Exact-SHA
+  native CI and a fresh pentest remain acceptance gates.
+
+### Initial Commit Qualification
 
 - Full locked Linux workspace: passed after the final code/test changes.
 - Observability/PHP profile library tests: Linux 306, native macOS 302 and

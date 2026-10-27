@@ -32,6 +32,8 @@ pub struct AdminConfig {
     #[serde(default)]
     pub token_file: Option<PathBuf>,
     #[serde(default)]
+    pub operational_token_file: Option<PathBuf>,
+    #[serde(default)]
     pub snapshot_store: Option<PathBuf>,
     #[serde(default)]
     pub snapshot_integrity_key_file: Option<PathBuf>,
@@ -57,6 +59,7 @@ pub struct AdminConfigFragment {
     require_loopback: Option<bool>,
     token_env: Option<String>,
     token_file: Option<PathBuf>,
+    operational_token_file: Option<PathBuf>,
     snapshot_store: Option<PathBuf>,
     snapshot_integrity_key_file: Option<PathBuf>,
     transport: Option<AdminTransportConfigFragment>,
@@ -75,6 +78,7 @@ impl Default for AdminConfig {
             require_loopback: default_admin_require_loopback(),
             token_env: None,
             token_file: None,
+            operational_token_file: None,
             snapshot_store: None,
             snapshot_integrity_key_file: None,
             transport: AdminTransportConfig::default(),
@@ -103,6 +107,9 @@ impl AdminConfig {
         }
         if let Some(token_file) = fragment.token_file {
             self.token_file = Some(token_file);
+        }
+        if let Some(path) = fragment.operational_token_file {
+            self.operational_token_file = Some(path);
         }
         if let Some(snapshot_store) = fragment.snapshot_store {
             self.snapshot_store = Some(snapshot_store);
@@ -135,6 +142,11 @@ impl AdminConfig {
     }
 
     pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(path) = &mut self.operational_token_file
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
         if let Some(token_file) = &mut self.token_file
             && token_file.is_relative()
         {
@@ -162,6 +174,18 @@ impl AdminConfig {
 
         validate_optional_env("admin.token_env", self.token_env.as_deref())?;
         reject_empty_admin_path("admin.token_file", self.token_file.as_deref())?;
+        reject_empty_admin_path(
+            "admin.operational_token_file",
+            self.operational_token_file.as_deref(),
+        )?;
+        validate_path(
+            "admin.operational_token_file",
+            self.operational_token_file.as_deref(),
+        )?;
+        validate_non_world_writable_parent(
+            "admin.operational_token_file",
+            self.operational_token_file.as_deref(),
+        )?;
         reject_empty_admin_path("admin.snapshot_store", self.snapshot_store.as_deref())?;
         reject_empty_admin_path(
             "admin.snapshot_integrity_key_file",
@@ -249,6 +273,11 @@ impl AdminConfig {
 
 impl AdminConfigFragment {
     pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(path) = &mut self.operational_token_file
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
         if let Some(token_file) = &mut self.token_file
             && token_file.is_relative()
         {

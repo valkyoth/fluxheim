@@ -3,7 +3,7 @@
   "info": {
     "title": "Fluxheim Read-Only Operational Status",
     "version": "1.0.0",
-    "description": "A bounded projection on the existing authenticated admin listener. Legacy routes are documented in operational-status.md and remain unchanged. No full management API is claimed."
+    "description": "A bounded projection on the existing authenticated admin listener. Accepts the control-plane token or the separate operational_token_file credential, which authorizes only this GET endpoint. Configured client-certificate policy still applies. Legacy routes are documented in operational-status.md and remain unchanged. No full management API is claimed."
   },
   "security": [
     {

@@ -192,7 +192,7 @@ jobs:
 
       - name: Test Linux operational API contract
         run: |
-          target/correlation-venv/bin/python -m pip install -r scripts/operational_status_requirements.txt
+          target/correlation-venv/bin/python -m pip install --require-hashes --only-binary=:all: --force-reinstall -r scripts/operational_status_requirements.txt
           target/correlation-venv/bin/python scripts/test_operational_status_contract.py
           cargo test --locked --lib --no-default-features --features profile-observability,php-fpm admin::
           target/correlation-venv/bin/python scripts/smoke_operational_status.py --binary target/debug/fluxheim
@@ -390,7 +390,7 @@ jobs:
 
       - name: Test macOS operational API contract
         run: |
-          target/correlation-venv/bin/python -m pip install -r scripts/operational_status_requirements.txt
+          target/correlation-venv/bin/python -m pip install --require-hashes --only-binary=:all: --force-reinstall -r scripts/operational_status_requirements.txt
           target/correlation-venv/bin/python scripts/test_operational_status_contract.py
           cargo test --locked --lib --no-default-features --features profile-observability,php-fpm admin::
           target/correlation-venv/bin/python scripts/smoke_operational_status.py --binary target/debug/fluxheim
@@ -466,7 +466,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
-          target/correlation-venv/Scripts/python.exe -m pip install -r scripts/operational_status_requirements.txt
+          target/correlation-venv/Scripts/python.exe -m pip install --require-hashes --only-binary=:all: --force-reinstall -r scripts/operational_status_requirements.txt
           target/correlation-venv/Scripts/python.exe scripts/test_operational_status_contract.py
           cargo test --locked --lib --no-default-features --features profile-observability,php-fpm admin::
           target/correlation-venv/Scripts/python.exe scripts/smoke_operational_status.py --binary target/debug/fluxheim.exe
