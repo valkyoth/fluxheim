@@ -41,6 +41,15 @@ impl AdminApp {
         target: Option<&str>,
         live_apply: bool,
     ) -> AdminResponse {
+        let response = self.rollback_response_inner(target, live_apply);
+        if live_apply {
+            self.operational
+                .record_attempt("rollback", response.status.is_success());
+        }
+        response
+    }
+
+    fn rollback_response_inner(&self, target: Option<&str>, live_apply: bool) -> AdminResponse {
         if !live_apply {
             return match self.store.rollback_target(target) {
                 Ok(snapshot) => json_response_value(
@@ -83,6 +92,13 @@ impl AdminApp {
     }
 
     pub(super) fn reload_response(&self) -> AdminResponse {
+        let response = self.reload_response_inner();
+        self.operational
+            .record_attempt("reload", response.status.is_success());
+        response
+    }
+
+    fn reload_response_inner(&self) -> AdminResponse {
         let verified = match self.store.current_verified_snapshot() {
             Ok(Some(verified)) => verified,
             Ok(None) => {
@@ -138,6 +154,7 @@ impl AdminApp {
             return Err(internal_error_response(&error));
         }
         self.current_config.store(Arc::new(new_config));
+        self.operational.publish(&self.current_config.load());
 
         let impact = impact.kind().to_owned();
         if mode != SnapshotApplyMode::SelfHealRollback {
@@ -295,6 +312,17 @@ impl AdminApp {
     }
 
     pub(super) fn rollback_pending_validation(
+        &self,
+        pending: &PendingValidation,
+        reason: &str,
+    ) -> AdminResponse {
+        let response = self.rollback_pending_validation_inner(pending, reason);
+        self.operational
+            .record_attempt("self_heal_rollback", response.status.is_success());
+        response
+    }
+
+    fn rollback_pending_validation_inner(
         &self,
         pending: &PendingValidation,
         reason: &str,

@@ -86,6 +86,12 @@ pub(crate) struct Status {
 
 struct Producer(Arc<Counters>);
 
+impl Status {
+    pub(crate) fn operational_health(&self) -> (bool, u64, u64) {
+        (self.worker_alive, self.sink_errors, self.pending)
+    }
+}
+
 #[cfg(feature = "metrics")]
 impl Status {
     pub(crate) fn metric_gauges(&self) -> [(&'static str, u64); 4] {

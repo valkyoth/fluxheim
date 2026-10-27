@@ -190,6 +190,16 @@ jobs:
           cargo test --locked -p fluxheim-config --features metrics-otlp,otel-otlp,otel-tracing otlp_
           target/correlation-venv/bin/python scripts/smoke_otlp_lifecycle.py --binary target/debug/fluxheim
 
+      - name: Test Linux operational API contract
+        run: |
+          target/correlation-venv/bin/python -m pip install -r scripts/operational_status_requirements.txt
+          target/correlation-venv/bin/python scripts/test_operational_status_contract.py
+          cargo test --locked --lib --no-default-features --features profile-observability,php-fpm admin::
+          target/correlation-venv/bin/python scripts/smoke_operational_status.py --binary target/debug/fluxheim
+          cargo test --locked --lib --no-default-features --features proxy,web operational_
+          cargo build --locked --no-default-features --features proxy,web --bin fluxheim
+          target/correlation-venv/bin/python scripts/smoke_operational_status.py --binary target/debug/fluxheim --reduced
+
       - name: Test standalone systemd boundary without workspace feature unification
         run: |
           cargo test --locked -p fluxheim-systemd --all-targets
@@ -378,6 +388,14 @@ jobs:
           cargo test --locked -p fluxheim-config --features metrics-otlp,otel-otlp,otel-tracing otlp_
           target/correlation-venv/bin/python scripts/smoke_otlp_lifecycle.py --binary target/debug/fluxheim
 
+      - name: Test macOS operational API contract
+        run: |
+          target/correlation-venv/bin/python -m pip install -r scripts/operational_status_requirements.txt
+          target/correlation-venv/bin/python scripts/test_operational_status_contract.py
+          cargo test --locked --lib --no-default-features --features profile-observability,php-fpm admin::
+          target/correlation-venv/bin/python scripts/smoke_operational_status.py --binary target/debug/fluxheim
+          cargo test --locked --lib --no-default-features --features proxy,web operational_
+
       - name: Build all macOS portable archives
         run: |
           version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | sed -n '1p')"
@@ -443,6 +461,18 @@ jobs:
           cargo test --locked -p fluxheim-observability --all-features otlp_
           cargo test --locked -p fluxheim-config --features metrics-otlp,otel-otlp,otel-tracing otlp_
           target/correlation-venv/Scripts/python.exe scripts/smoke_otlp_lifecycle.py --binary target/debug/fluxheim.exe
+
+      - name: Test Windows operational API contract
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          target/correlation-venv/Scripts/python.exe -m pip install -r scripts/operational_status_requirements.txt
+          target/correlation-venv/Scripts/python.exe scripts/test_operational_status_contract.py
+          cargo test --locked --lib --no-default-features --features profile-observability,php-fpm admin::
+          target/correlation-venv/Scripts/python.exe scripts/smoke_operational_status.py --binary target/debug/fluxheim.exe
+          cargo test --locked --lib --no-default-features --features proxy,web operational_
+          cargo build --locked --no-default-features --features proxy,web --bin fluxheim
+          target/correlation-venv/Scripts/python.exe scripts/smoke_operational_status.py --binary target/debug/fluxheim.exe --reduced
 
       - name: Build and test Windows portable archives
         shell: pwsh

@@ -1,0 +1,587 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Fluxheim operational status v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "version",
+    "instance_id",
+    "sampled_unix_secs",
+    "uptime_secs",
+    "consistency",
+    "stale",
+    "health",
+    "readiness",
+    "configuration",
+    "capabilities",
+    "platform",
+    "telemetry"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "version": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "instance_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "sampled_unix_secs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "uptime_secs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "consistency": {
+      "const": "best_effort"
+    },
+    "stale": {
+      "type": "boolean"
+    },
+    "health": {
+      "const": "responding"
+    },
+    "readiness": {
+      "enum": [
+        "ready",
+        "validating",
+        "recovery_required"
+      ]
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generation",
+        "updated_unix_secs",
+        "inventory",
+        "last_change"
+      ],
+      "properties": {
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "updated_unix_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "inventory": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "complete",
+            "inspected_scopes",
+            "vhosts",
+            "listeners",
+            "upstreams",
+            "cache",
+            "php",
+            "acme",
+            "metrics_otlp",
+            "traces_otlp"
+          ],
+          "properties": {
+            "complete": {
+              "type": "boolean"
+            },
+            "inspected_scopes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024
+            },
+            "vhosts": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "listeners": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "configured_sections",
+                "configured_items",
+                "runtime"
+              ],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "not_compiled",
+                    "disabled",
+                    "configured"
+                  ]
+                },
+                "configured_sections": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "configured_items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "runtime": {
+                  "const": "unavailable"
+                }
+              }
+            },
+            "upstreams": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "configured_sections",
+                "configured_items",
+                "runtime"
+              ],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "not_compiled",
+                    "disabled",
+                    "configured"
+                  ]
+                },
+                "configured_sections": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "configured_items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "runtime": {
+                  "const": "unavailable"
+                }
+              }
+            },
+            "cache": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "configured_sections",
+                "configured_items",
+                "runtime"
+              ],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "not_compiled",
+                    "disabled",
+                    "configured"
+                  ]
+                },
+                "configured_sections": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "configured_items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "runtime": {
+                  "const": "unavailable"
+                }
+              }
+            },
+            "php": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "configured_sections",
+                "configured_items",
+                "runtime"
+              ],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "not_compiled",
+                    "disabled",
+                    "configured"
+                  ]
+                },
+                "configured_sections": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "configured_items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "runtime": {
+                  "const": "unavailable"
+                }
+              }
+            },
+            "acme": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "configured_sections",
+                "configured_items",
+                "runtime"
+              ],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "not_compiled",
+                    "disabled",
+                    "configured"
+                  ]
+                },
+                "configured_sections": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "configured_items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "runtime": {
+                  "const": "unavailable"
+                }
+              }
+            },
+            "metrics_otlp": {
+              "type": "boolean"
+            },
+            "traces_otlp": {
+              "type": "boolean"
+            }
+          }
+        },
+        "last_change": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "operation",
+                "outcome",
+                "completed_unix_secs"
+              ],
+              "properties": {
+                "operation": {
+                  "enum": [
+                    "reload",
+                    "rollback",
+                    "self_heal_rollback"
+                  ]
+                },
+                "outcome": {
+                  "enum": [
+                    "succeeded",
+                    "failed"
+                  ]
+                },
+                "completed_unix_secs": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "proxy",
+        "web",
+        "cache",
+        "load_balancer",
+        "php",
+        "acme",
+        "wasm",
+        "metrics",
+        "metrics_otlp",
+        "traces_otlp",
+        "privacy_mode",
+        "tls_rustls",
+        "tls_openssl",
+        "stream",
+        "udp"
+      ],
+      "properties": {
+        "proxy": {
+          "type": "boolean"
+        },
+        "web": {
+          "type": "boolean"
+        },
+        "cache": {
+          "type": "boolean"
+        },
+        "load_balancer": {
+          "type": "boolean"
+        },
+        "php": {
+          "type": "boolean"
+        },
+        "acme": {
+          "type": "boolean"
+        },
+        "wasm": {
+          "type": "boolean"
+        },
+        "metrics": {
+          "type": "boolean"
+        },
+        "metrics_otlp": {
+          "type": "boolean"
+        },
+        "traces_otlp": {
+          "type": "boolean"
+        },
+        "privacy_mode": {
+          "type": "boolean"
+        },
+        "tls_rustls": {
+          "type": "boolean"
+        },
+        "tls_openssl": {
+          "type": "boolean"
+        },
+        "stream": {
+          "type": "boolean"
+        },
+        "udp": {
+          "type": "boolean"
+        }
+      }
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "os",
+        "arch",
+        "managed_php",
+        "ops_socket"
+      ],
+      "properties": {
+        "os": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "arch": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "managed_php": {
+          "type": "boolean"
+        },
+        "ops_socket": {
+          "type": "boolean"
+        }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "logging",
+        "events",
+        "metrics",
+        "traces"
+      ],
+      "properties": {
+        "logging": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "failed_total",
+            "pending"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "unavailable",
+                "observed",
+                "degraded"
+              ]
+            },
+            "failed_total": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "pending": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          }
+        },
+        "events": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "failed_total",
+            "pending"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "unavailable",
+                "observed",
+                "degraded"
+              ]
+            },
+            "failed_total": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "pending": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "last_outcome",
+            "failed_total",
+            "dropped_total",
+            "queued_bytes",
+            "active_requests"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "not_compiled",
+                "disabled",
+                "unavailable",
+                "observed",
+                "degraded"
+              ]
+            },
+            "last_outcome": {
+              "enum": [
+                "unknown",
+                "success",
+                "partial",
+                "failed"
+              ]
+            },
+            "failed_total": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "dropped_total": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "queued_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "active_requests": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          }
+        },
+        "traces": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "last_outcome",
+            "failed_total",
+            "dropped_total",
+            "queued_bytes",
+            "active_requests"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "not_compiled",
+                "disabled",
+                "unavailable",
+                "observed",
+                "degraded"
+              ]
+            },
+            "last_outcome": {
+              "enum": [
+                "unknown",
+                "success",
+                "partial",
+                "failed"
+              ]
+            },
+            "failed_total": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "dropped_total": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "queued_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "active_requests": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          }
+        }
+      }
+    }
+  }
+}

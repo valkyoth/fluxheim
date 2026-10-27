@@ -19,6 +19,7 @@ static WORKERS: Mutex<Vec<Weak<State>>> = Mutex::new(Vec::new());
 
 #[derive(Default)]
 struct Health {
+    last_outcome: AtomicU64,
     accepted: AtomicU64,
     dropped: AtomicU64,
     success: AtomicU64,
@@ -33,6 +34,7 @@ static METRICS: Health = Health::new();
 impl Health {
     const fn new() -> Self {
         Self {
+            last_outcome: AtomicU64::new(0),
             accepted: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
             success: AtomicU64::new(0),
@@ -42,6 +44,34 @@ impl Health {
             queued_bytes: AtomicU64::new(0),
             active: AtomicU64::new(0),
         }
+    }
+}
+
+/// Fixed-size, lock-free process counters; not a collector reachability probe.
+pub struct ExportHealth {
+    pub last_outcome: &'static str,
+    pub failed: u64,
+    pub dropped: u64,
+    pub queued_bytes: u64,
+    pub active_requests: u64,
+}
+
+pub fn export_health(signal: ExportSignal) -> ExportHealth {
+    let health = match signal {
+        ExportSignal::Metrics => &METRICS,
+        ExportSignal::Traces => &TRACE,
+    };
+    ExportHealth {
+        last_outcome: match health.last_outcome.load(Ordering::Relaxed) {
+            1 => "success",
+            2 => "partial",
+            3 => "failed",
+            _ => "unknown",
+        },
+        failed: health.failed.load(Ordering::Relaxed),
+        dropped: health.dropped.load(Ordering::Relaxed),
+        queued_bytes: health.queued_bytes.load(Ordering::Relaxed),
+        active_requests: health.active.load(Ordering::Relaxed),
     }
 }
 fn add(counter: &AtomicU64, value: u64) {
@@ -257,6 +287,14 @@ fn run(state: Arc<State>, delivery: Delivery, on_complete: Option<fn(ExportOutco
             payload
         };
         let outcome = deliver(&state, &delivery, &payload.payload, payload.deadline);
+        state.health.last_outcome.store(
+            match outcome {
+                ExportOutcome::Success => 1,
+                ExportOutcome::Partial => 2,
+                _ => 3,
+            },
+            Ordering::Relaxed,
+        );
         match outcome {
             ExportOutcome::Success => add(&state.health.success, 1),
             ExportOutcome::Partial => add(&state.health.partial, 1),

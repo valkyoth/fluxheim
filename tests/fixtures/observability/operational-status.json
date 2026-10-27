@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "version": "1.9.0",
+  "instance_id": "00000000000000000000000000000001",
+  "sampled_unix_secs": 1793059200,
+  "uptime_secs": 12,
+  "consistency": "best_effort",
+  "stale": false,
+  "health": "responding",
+  "readiness": "ready",
+  "configuration": {
+    "generation": 1,
+    "updated_unix_secs": 1793059188,
+    "inventory": {
+      "complete": true,
+      "inspected_scopes": 1,
+      "vhosts": 0,
+      "listeners": {
+        "state": "configured",
+        "configured_sections": 1,
+        "configured_items": 1,
+        "runtime": "unavailable"
+      },
+      "upstreams": {
+        "state": "disabled",
+        "configured_sections": 0,
+        "configured_items": 0,
+        "runtime": "unavailable"
+      },
+      "cache": {
+        "state": "disabled",
+        "configured_sections": 0,
+        "configured_items": 0,
+        "runtime": "unavailable"
+      },
+      "php": {
+        "state": "not_compiled",
+        "configured_sections": 0,
+        "configured_items": 0,
+        "runtime": "unavailable"
+      },
+      "acme": {
+        "state": "not_compiled",
+        "configured_sections": 0,
+        "configured_items": 0,
+        "runtime": "unavailable"
+      },
+      "metrics_otlp": false,
+      "traces_otlp": false
+    },
+    "last_change": null
+  },
+  "capabilities": {
+    "proxy": true,
+    "web": true,
+    "cache": true,
+    "load_balancer": false,
+    "php": false,
+    "acme": false,
+    "wasm": false,
+    "metrics": true,
+    "metrics_otlp": true,
+    "traces_otlp": true,
+    "privacy_mode": false,
+    "tls_rustls": true,
+    "tls_openssl": false,
+    "stream": false,
+    "udp": false
+  },
+  "platform": {
+    "os": "linux",
+    "arch": "x86_64",
+    "managed_php": false,
+    "ops_socket": true
+  },
+  "telemetry": {
+    "logging": {
+      "state": "observed",
+      "failed_total": 0,
+      "pending": 0
+    },
+    "events": {
+      "state": "observed",
+      "failed_total": 0,
+      "pending": 0
+    },
+    "metrics": {
+      "state": "disabled",
+      "last_outcome": "unknown",
+      "failed_total": null,
+      "dropped_total": null,
+      "queued_bytes": null,
+      "active_requests": null
+    },
+    "traces": {
+      "state": "disabled",
+      "last_outcome": "unknown",
+      "failed_total": null,
+      "dropped_total": null,
+      "queued_bytes": null,
+      "active_requests": null
+    }
+  }
+}

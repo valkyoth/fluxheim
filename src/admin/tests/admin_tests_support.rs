@@ -39,6 +39,7 @@ pub(super) fn app_with_config_and_self_healing(
     let health_unauthenticated = config.admin.health.unauthenticated;
     let health_response = config.admin.health.response;
     AdminApp {
+        operational: Arc::new(super::super::operational_status::Operational::new(&config).unwrap()),
         audit_dispatcher: Some(Arc::new(
             fluxheim_observability::operational::Dispatcher::new(
                 fluxheim_observability::event::EventFormat::Json,

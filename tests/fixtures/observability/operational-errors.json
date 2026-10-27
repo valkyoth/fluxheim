@@ -1,0 +1,29 @@
+[
+  {
+    "error": "unauthorized"
+  },
+  {
+    "error": "admin_auth_throttled"
+  },
+  {
+    "error": "admin_client_certificate_required"
+  },
+  {
+    "error": "admin_client_certificate_denied"
+  },
+  {
+    "error": "method_not_allowed"
+  },
+  {
+    "error": "query_not_supported"
+  },
+  {
+    "error": "operational_status_unavailable"
+  },
+  {
+    "error": "path_too_large"
+  },
+  {
+    "error": "query_too_large"
+  }
+]

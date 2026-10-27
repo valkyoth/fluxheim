@@ -57,7 +57,9 @@ mod otlp_worker;
 #[cfg(feature = "otlp-http")]
 pub use otlp_delivery::{ExportOutcome, ExportSignal, export_diagnostics_suppressed};
 #[cfg(feature = "otlp-http")]
-pub use otlp_worker::{ExportOptions, ExportWorker, export_health_text, shutdown_exports};
+pub use otlp_worker::{
+    ExportHealth, ExportOptions, ExportWorker, export_health, export_health_text, shutdown_exports,
+};
 
 #[cfg(feature = "metrics-secret")]
 mod metrics_secret;

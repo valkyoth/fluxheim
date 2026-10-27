@@ -1,7 +1,7 @@
 # 1.9.0 Observability Commit Plan
 
-Status: Commits 01-07 and 07A accepted for progression; Commit 08 implemented,
-awaiting pentest and exact-SHA GitHub acceptance, 2026-10-26.
+Status: Commits 01-08 and 07A accepted for progression; Commit 09 implemented,
+awaiting pentest and exact-SHA GitHub acceptance, 2026-10-27.
 Main stays at **1.9.0
 (unreleased)**. This document replaces the earlier ten-checkpoint outline;
 no previously accepted implementation checkpoint is being renumbered.
@@ -805,13 +805,13 @@ collector behavior is not the new required-collector acceptance contract.
 | 06 - Correlation | Accepted for progression | b563894556fa; user supplied clean incremental pentest, reported GitHub green and authorized 07. [Request correlation and live qualification](../evidence/observability-06.md). |
 | 07 - Metrics | Accepted for progression | User supplied clean pentest and reported GitHub green through 792b0fdc; CI success verified and owner authorized 07A. [Bounded metrics and qualification](../evidence/observability-07.md). |
 | 07A - Dedicated Windows QEMU builder/test VM | Accepted for progression | Owner confirmed clean pentest, green GitHub and resolved 25 code-scanning alerts through 2c383562; authorized 08. [Qualification evidence](../evidence/observability-07a.md). |
-| 08 - Export | Implemented; pentest/CI pending | [Exporter policy](../guides/otlp-export.md) and [checkpoint evidence](../evidence/observability-08.md). Linux workspace, native Windows and Apple Silicon macOS profile/OTLP tests, live Linux/container/Windows/macOS failure-recovery and correlation smokes passed. Pentest and exact-commit CI pending. |
-| 09 - Read-only API | Not started | Pending |
+| 08 - Export | Accepted for progression | User supplied clean pentest through fa2f5381; Rust CI run 40390306858 and code-scanning workflow green on that SHA; user authorized 09. [Exporter evidence](../evidence/observability-08.md). |
+| 09 - Read-only API | Implemented; pentest/CI pending | [Operational contract](../guides/operational-status.md) and [qualification evidence](../evidence/observability-09.md). New bounded observer preserves legacy routes and recovery enforcement. No complete management API or UI is claimed. |
 | 10 - Live containers/collectors | Not started | Pending |
 | 11 - Native archives | Not started | Pending |
 | 12 - Observability docs / candidate qualification | Not started | Pending |
 | 13 - Documentation / final release acceptance | Not started | Pending |
 
-Commits 07 and 07A are accepted for progression. Commit 08 is the current checkpoint.
-Stop for pentest, green GitHub checks and explicit approval before Commit 09.
+Commit 08 is accepted for progression. Commit 09 is the current checkpoint.
+Stop for pentest, green GitHub checks and explicit approval before Commit 10.
 No licensing purchase or changes to another project's VM are authorized.

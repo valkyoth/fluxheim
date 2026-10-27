@@ -24,7 +24,8 @@ impl AdminApp {
             return json_response(StatusCode::URI_TOO_LONG, br#"{"error":"path_too_large"}"#);
         }
 
-        let health_request = path == self.health_path;
+        let operational_request = path == "/_fluxheim/operational-status";
+        let health_request = path == self.health_path && !operational_request;
         if health_request && self.health_unauthenticated {
             if method != "GET" {
                 return json_response(
@@ -135,6 +136,11 @@ impl AdminApp {
             return json_response(StatusCode::UNAUTHORIZED, br#"{"error":"unauthorized"}"#);
         }
         self.auth_throttle.record_success(source);
+        // This observer never drives recovery. Existing routes and the watchdog
+        // retain their authenticated fail-closed recovery enforcement below.
+        if operational_request {
+            return self.operational_response(method, query);
+        }
         let operation = operational_events::operation(method, path);
         let audit_permit = match operation {
             Some(operation) => match self.reserve_audit(
@@ -421,6 +427,7 @@ impl AdminApp {
         let known_read_only_path = matches!(
             path,
             "/_fluxheim/status"
+                | "/_fluxheim/operational-status"
                 | "/_fluxheim/cache/status"
                 | "/_fluxheim/load-balancer/status"
                 | "/_fluxheim/udp/status"
@@ -436,7 +443,11 @@ impl AdminApp {
                 json_response(StatusCode::NOT_FOUND, br#"{"error":"not_found"}"#)
             };
         }
-        if (require_bearer_token || path == "/_fluxheim/snapshots")
+        if (require_bearer_token
+            || matches!(
+                path,
+                "/_fluxheim/snapshots" | "/_fluxheim/operational-status"
+            ))
             && !headers
                 .is_some_and(|headers| authorized(authorization_header(headers), &self.token))
         {
@@ -444,6 +455,7 @@ impl AdminApp {
         }
 
         match path {
+            "/_fluxheim/operational-status" => self.operational_response(method, query),
             "/_fluxheim/status" => self.status_response(),
             "/_fluxheim/cache/status" => self.cache_status_response(),
             "/_fluxheim/load-balancer/status" => self.load_balancer_status_response(),

@@ -43,6 +43,9 @@ use misc_helpers::*;
 mod load_balancer_mutations;
 mod load_balancer_status;
 mod operational_events;
+mod operational_inventory;
+mod operational_status;
+mod operational_telemetry;
 mod request_router;
 mod snapshot_runtime;
 
@@ -90,6 +93,7 @@ pub struct AdminApp {
     state: Arc<Mutex<SnapshotRuntimeState>>,
     validation_deadline: Arc<Mutex<Option<Instant>>>,
     auth_throttle: AdminAuthThrottle,
+    operational: Arc<operational_status::Operational>,
 }
 
 pub(crate) struct NativeAdminServices {
@@ -204,6 +208,7 @@ impl AdminApp {
         });
 
         let app = Self {
+            operational: Arc::new(operational_status::Operational::new(config)?),
             #[cfg(test)]
             audit_dispatcher: None,
             token,
@@ -410,6 +415,8 @@ mod tests {
     mod lb_status;
     #[path = "admin_tests_lb_validation.rs"]
     mod lb_validation;
+    #[path = "admin_tests_operational.rs"]
+    mod operational;
     #[path = "admin_tests_self_heal_progress.rs"]
     mod self_heal_progress;
     #[path = "admin_tests_self_heal_rollback.rs"]
