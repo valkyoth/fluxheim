@@ -87,6 +87,16 @@ and version-only Python dependency pinning. Both are addressed:
 
 ### Initial Commit Qualification
 
+GitHub follow-up: Rust CI run `40530075647` on `6e6b003f` passed Linux,
+macOS and container-policy jobs. Windows failed before running the operational
+contract commands: its step inherited Bash but began with PowerShell preference
+assignments (`=: command not found`, exit 127). The step now explicitly selects
+`pwsh`, preserving both terminating PowerShell errors and native-command failure
+propagation. A structured-YAML regression test failed on the original workflow
+and passes with the fix; all seven contract/security tests pass locally. No Rust
+or dependency versions changed in this CI follow-up. Exact-SHA GitHub rerun is
+still required.
+
 - Full locked Linux workspace: passed after the final code/test changes.
 - Observability/PHP profile library tests: Linux 306, native macOS 302 and
   native Windows 280 passed. Native platform counts differ because Unix-only and

@@ -11,6 +11,8 @@ import tempfile
 import unittest
 import zipfile
 
+import yaml
+
 from jsonschema import Draft202012Validator, ValidationError
 from openapi_spec_validator import validate
 from operational_status_client import read_status
@@ -22,6 +24,16 @@ VALIDATOR = Draft202012Validator(SCHEMA)
 
 
 class ContractTests(unittest.TestCase):
+    def test_windows_contract_step_uses_powershell_with_fail_fast(self):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+        steps = [step for job in workflow["jobs"].values() for step in job.get("steps", [])
+                 if step.get("name") == "Test Windows operational API contract"]
+        self.assertEqual(len(steps), 1)
+        step = steps[0]
+        self.assertEqual(step.get("shell"), "pwsh")
+        self.assertIn("$ErrorActionPreference = 'Stop'", step["run"])
+        self.assertIn("$PSNativeCommandUseErrorActionPreference = $true", step["run"])
+
     def test_wheel_lock_and_all_ci_installs_enforce_hashes(self):
         lock = (ROOT / "scripts/operational_status_requirements.txt").read_text()
         self.assertIn("--require-hashes", lock)
