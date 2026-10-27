@@ -45,6 +45,44 @@ pinned Python development tooling only. No Rust manifest or lockfile changed.
 
 ## Verification
 
+### Cross-Role Throttle Retest (2026-10-27)
+
+Base: `7a06bf070078841554c4513877ddd85ef141a099`. The retest reproduced a
+Medium issue: observer successes removed the shared source record and therefore
+erased failed control-token guesses. The new regression failed before the fix
+(the tenth guess returned 401 instead of 429) and passes afterward.
+
+Authorization now retains the matched credential role. Only a successful control
+credential clears source failures. Observer success leaves them untouched; a valid
+observer outside its scope returns fixed `403 forbidden` without adding or
+removing authentication failures. Both credential comparisons still run before
+role selection. HTTP and protected Unix-socket GETs use the same authorization
+decision; unsupported socket methods retain their existing 404/405 responses.
+
+Deliberately retain one bounded failure table, not buckets selected by endpoint:
+the control credential is accepted on the observer endpoint too. An invalid
+credential there can be a control-token guess, so allowing an observer success
+to clear that route's failures would recreate the bypass. Shared admission means
+a source lockout affects both roles. The documented global invalid-attempt policy
+is unchanged: valid operators remain usable for incident response; this is not a
+global pre-authentication CPU limiter. Source-capacity and memory bounds are
+unchanged, and no credential success clears global failure accounting.
+
+Validation:
+- Full locked Linux workspace and strict observability/PHP Clippy passed.
+- Admin suite: 122 passed; reduced proxy/web admin suite: 83 passed.
+- Privacy observer security tests: 9 passed.
+- Native macOS observability/PHP library suite: 311 passed, plus strict Clippy.
+- Native Windows library suite: 288 passed.
+- Live operational API smoke passed on Linux, macOS and Windows, including mixed
+  route guesses interleaved with successful observer requests and eventual 429.
+- Seven contract/hash-lock tests, documentation checks, RustSec and cargo-deny
+  passed. No dependency or Windows filesystem-policy changes.
+
+Native transfer input SHA-256:
+`96ebed6448dde220d8c3da9ea7c15dfba9e2f76e114292a5e0486b92c63169ab`.
+Fresh pentest and exact-SHA GitHub checks remain required before Commit 10.
+
 ### Pentest Follow-Up (2026-10-27)
 
 The review of `6e6b003f` identified excess privilege for monitoring consumers

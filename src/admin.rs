@@ -422,6 +422,8 @@ mod tests {
     mod lb_status;
     #[path = "admin_tests_lb_validation.rs"]
     mod lb_validation;
+    #[path = "admin_tests_observer_throttle.rs"]
+    mod observer_throttle;
     #[path = "admin_tests_observer_token.rs"]
     mod observer_token;
     #[path = "admin_tests_operational.rs"]

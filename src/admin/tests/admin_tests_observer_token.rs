@@ -35,14 +35,8 @@ fn operational_observer_obeys_certificate_policy_and_auth_throttle() {
     });
     let source = Some("127.0.0.1".parse().unwrap());
     assert_eq!(
-        app.handle_with_source(
-            "POST",
-            "/_fluxheim/reload",
-            None,
-            &observer_headers(),
-            source
-        )
-        .status,
+        app.handle_with_source("POST", "/_fluxheim/reload", None, &HeaderMap::new(), source)
+            .status,
         StatusCode::TOO_MANY_REQUESTS
     );
     assert_eq!(
@@ -151,13 +145,13 @@ fn operational_observer_is_limited_to_exact_get_route_before_recovery() {
                 None,
                 &observer_headers(),
             );
-            assert_eq!(response.status, StatusCode::UNAUTHORIZED, "{method} {path}");
+            assert_eq!(response.status, StatusCode::FORBIDDEN, "{method} {path}");
         }
     }
     for method in ["POST", "PUT", "DELETE", "HEAD"] {
         assert_eq!(
             app.handle(method, PATH, None, &observer_headers()).status,
-            StatusCode::UNAUTHORIZED
+            StatusCode::FORBIDDEN
         );
     }
     assert_eq!(app.runtime_state(), before);
@@ -189,7 +183,7 @@ fn operational_observer_socket_cannot_read_snapshots_or_mutate() {
                 require
             )
             .status,
-            StatusCode::UNAUTHORIZED
+            StatusCode::FORBIDDEN
         );
         assert!(
             !app.handle_ops_socket(
@@ -212,7 +206,7 @@ fn operational_observer_socket_cannot_read_snapshots_or_mutate() {
             true
         )
         .status,
-        StatusCode::UNAUTHORIZED
+        StatusCode::FORBIDDEN
     );
     assert_eq!(
         app.handle_ops_socket(

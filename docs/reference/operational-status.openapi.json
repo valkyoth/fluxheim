@@ -69,7 +69,7 @@
             }
           },
           "403": {
-            "description": "Client certificate policy rejected the request",
+            "description": "Client certificate policy or credential scope rejected the request",
             "headers": {
               "Cache-Control": {
                 "schema": {
@@ -175,6 +175,7 @@
           "error": {
             "enum": [
               "unauthorized",
+              "forbidden",
               "admin_auth_throttled",
               "admin_client_certificate_required",
               "admin_client_certificate_denied",

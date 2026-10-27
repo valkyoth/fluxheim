@@ -3,6 +3,9 @@
     "error": "unauthorized"
   },
   {
+    "error": "forbidden"
+  },
+  {
     "error": "admin_auth_throttled"
   },
   {

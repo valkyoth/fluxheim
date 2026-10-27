@@ -878,6 +878,13 @@ the in-memory per-source failure table. With metrics enabled,
 admin authentication events, and security logs are emitted without reflecting
 the attempted token.
 
+The optional `admin.operational_token_file` credential grants only operational
+status GET access. Its successful requests never clear source failures protecting
+the control token. Invalid guesses share the same budget even if they target the
+operational endpoint. A valid observer credential on a forbidden route returns
+`403` without modifying the failure budget. See
+[Operational Status](../guides/operational-status.md).
+
 The protected cache purge endpoints accept the optional `vhost` and `route`
 query parameters, or `x-fluxheim-cache-vhost` and
 `x-fluxheim-cache-route` headers, to target either a vhost cache policy or a

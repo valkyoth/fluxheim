@@ -35,6 +35,37 @@ pub(super) enum AdminClientCertificateDecision {
     Denied,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum AdminAuthorization {
+    Control,
+    Observer,
+    ForbiddenObserver,
+    Invalid,
+}
+
+pub(super) fn authorize_admin_route(
+    method: &str,
+    path: &str,
+    header: Option<&str>,
+    token: &AdminToken,
+    operational_token: Option<&AdminToken>,
+) -> AdminAuthorization {
+    // Neither credential comparison depends on the other's result or the route.
+    let control = authorized(header, token);
+    let observer =
+        authorized(header, operational_token.unwrap_or(token)) & operational_token.is_some();
+    match (
+        control,
+        observer,
+        method == "GET" && path == "/_fluxheim/operational-status",
+    ) {
+        (true, _, _) => AdminAuthorization::Control,
+        (false, true, true) => AdminAuthorization::Observer,
+        (false, true, false) => AdminAuthorization::ForbiddenObserver,
+        _ => AdminAuthorization::Invalid,
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 enum AdminClientCertificateHeader {
     Missing,

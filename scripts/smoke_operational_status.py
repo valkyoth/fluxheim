@@ -132,7 +132,7 @@ root = "{root.as_posix()}"
                     assert request(admin, PATH, OBSERVER)[0] == 200
                     for route, method in (("snapshots", "GET"), ("snapshot", "POST"),
                                           ("reload", "POST"), ("rollback", "POST")):
-                        assert request(admin, "/_fluxheim/" + route, OBSERVER, method)[0] == 401
+                        assert request(admin, "/_fluxheim/" + route, OBSERVER, method)[0] == 403
                     assert sample()["configuration"]["last_change"] is None
                     assert request(admin, PATH, CANARY, "POST")[0] == 405
                     assert request(admin, PATH + "?secret=" + CANARY, CANARY)[0] == 400
@@ -177,6 +177,14 @@ root = "{root.as_posix()}"
                         if status == 200:
                             VALIDATOR.validate(json.loads(body))
                     assert sample()["configuration"]["generation"] == 3
+                    # A lower-privilege success must not reset control-token guesses,
+                    # including guesses sent through the observer endpoint itself.
+                    for attempt in range(9):
+                        target = PATH if attempt % 2 else "/_fluxheim/status"
+                        assert request(admin, target, "incorrect-control-token")[0] == 401
+                        sample()
+                    assert request(admin, PATH, "incorrect-control-token")[0] == 429
+                    assert request(admin, PATH, OBSERVER)[0] == 429
                 finally:
                     stop(process)
                 process = launch()

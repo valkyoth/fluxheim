@@ -46,6 +46,15 @@ The full control-plane token still works here, but do not distribute it to
 monitoring consumers. Client-certificate policy and HTTP authentication throttling
 also apply to observer requests.
 
+An observer success does not reset failed-token attempts. Invalid credentials
+share one bounded per-source budget across all protected routes, since a control
+token can also authenticate on the observer route. Only a successful control-token
+request clears that source's failures. A valid observer token used outside its
+scope returns `403 forbidden` without clearing or incrementing this budget.
+Source lockout still blocks both roles until expiry. The existing global
+invalid-attempt lockout continues to permit valid credentials for incident
+response; it is not a pre-authentication CPU-rate limit.
+
 Create an independent random token, not a copy of the admin token. The server
 rejects identical credentials (including after whitespace trimming), empty or
 oversized credentials and unsafe secret paths. On Unix the observer file must be
@@ -145,7 +154,7 @@ An expired/failed recovery remains visible as `recovery_required`. The watchdog
 and **all existing routes retain their previous recovery enforcement**. Existing
 mutations still cannot confirm a candidate past a failed rollback.
 
-Errors: `400` unsupported query; `401` missing/incorrect token; `403` certificate
+Errors: `400` unsupported query; `401` missing/incorrect token; `403` credential scope or certificate
 policy; `405` method; `414` existing request-target bounds; `429` authentication
 throttling; `503` unavailable/busy/over-budget sample. Retry 503 with client-side
 backoff rather than a tight loop. No new CORS policy or unauthenticated exception
