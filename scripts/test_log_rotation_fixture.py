@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Fixture setup must fail closed before writing configuration or launching Fluxheim."""
 from pathlib import Path
+import os
+import shutil
 import subprocess
 from types import SimpleNamespace
 import tempfile
@@ -11,6 +13,34 @@ import smoke_log_file_rotation as smoke
 
 
 class FixtureTests(unittest.TestCase):
+    def test_windows_child_does_not_inherit_other_powershell_editions_modules(self):
+        inherited = {"PSModulePath": "foreign-edition-modules", "psmodulepath": "other-case",
+                     "SystemRoot": "C:\\Windows", "PATH": "system-tools"}
+        with patch.object(smoke.sys, "platform", "win32"), \
+             patch.dict(smoke.os.environ, inherited, clear=True), \
+             patch.object(smoke.subprocess, "run") as run:
+            smoke.protect_directory(Path("fixture"))
+            environment = run.call_args.kwargs.get("env", dict(smoke.os.environ))
+            self.assertFalse(any(key.lower() == "psmodulepath" for key in environment))
+            normalized = {key.upper(): value for key, value in environment.items()}
+            self.assertEqual(normalized["SYSTEMROOT"], "C:\\Windows")
+            self.assertEqual(normalized["PATH"], "system-tools")
+            self.assertIn("PSModulePath", smoke.os.environ)
+
+    @unittest.skipUnless(smoke.sys.platform == "win32", "native Windows module loading")
+    def test_private_fixture_from_powershell_core_environment(self):
+        executable = shutil.which("pwsh.exe")
+        if executable is None:
+            self.skipTest("PowerShell 7 is not installed")
+        modules = Path(executable).resolve().parent / "Modules"
+        self.assertTrue((modules / "Microsoft.PowerShell.Security").is_dir())
+        with patch.dict(os.environ, {"PSModulePath": str(modules)}):
+            with tempfile.TemporaryDirectory() as parent:
+                with smoke.private_fixture(Path(parent)) as root:
+                    (root / "child").write_bytes(b"fixture")
+                    self.assertEqual((root / "child").read_bytes(), b"fixture")
+                self.assertFalse(root.exists())
+
     def test_windows_helper_changes_only_access_rules(self):
         helper = (smoke.ROOT / 'scripts' / 'protect_windows_smoke_directory.ps1').read_text()
         self.assertIn('[Security.AccessControl.AccessControlSections]::Access)', helper)
@@ -93,7 +123,10 @@ class FixtureTests(unittest.TestCase):
             self.assertEqual(command[-2:], ["-Directory", str(root)])
             self.assertEqual(command[command.index("-File") + 1],
                              str(smoke.ROOT / "scripts" / "protect_windows_smoke_directory.ps1"))
-            self.assertEqual(run.call_args.kwargs, {"check": True, "timeout": 30})
+            self.assertTrue(run.call_args.kwargs["check"])
+            self.assertEqual(run.call_args.kwargs["timeout"], 30)
+            self.assertFalse(any(key.casefold() == "psmodulepath"
+                                 for key in run.call_args.kwargs["env"]))
             run.side_effect = subprocess.CalledProcessError(1, command)
             with self.assertRaises(subprocess.CalledProcessError):
                 smoke.protect_directory(root)

@@ -45,6 +45,30 @@ pinned Python development tooling only. No Rust manifest or lockfile changed.
 
 ## Verification
 
+### Windows CI Module Isolation (2026-10-27)
+
+Rust CI run `40557886325`, Windows job `122378726781`, failed on `a7a6de0e`
+before the operational smoke could start Fluxheim. The Python fixture launcher
+inherited PowerShell 7's `PSModulePath` and passed it to Windows PowerShell 5.1.
+That process selected an incompatible `Microsoft.PowerShell.Security` module,
+so the mandatory `Get-Acl` readback failed. The same error was reproduced on the
+native Windows VM with the PowerShell 7 module directory explicitly inherited.
+
+The fixture launcher now removes `PSModulePath` case-insensitively from a copy
+of the child environment, allowing Windows PowerShell to initialize its own
+module paths. The parent environment is untouched. The ACL helper, protected
+inheritance/readback checks, execution policy, timeout and fail-closed error
+propagation are unchanged. No Rust or dependency files changed.
+
+The new unit regression fails before the fix and passes afterward. All 12 fixture
+tests pass natively on Windows, including actual module loading under the Core
+environment; Linux passes the 11 applicable tests with that native case skipped.
+Seven contract tests, PowerShell release validation, Python compilation and Linux
+reduced-profile live operational smoke also pass. Exact-SHA GitHub checks remain
+required; local qualification is not a claim that the remote run has recovered.
+Native Windows log-rotation, OTLP lifecycle and operational-status live smoke
+tests all pass under the explicitly contaminated PowerShell 7 parent environment.
+
 ### Cross-Role Throttle Retest (2026-10-27)
 
 Base: `7a06bf070078841554c4513877ddd85ef141a099`. The retest reproduced a

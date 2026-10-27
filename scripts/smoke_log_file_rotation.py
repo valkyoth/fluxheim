@@ -48,12 +48,16 @@ def fixture_parent(quota):
 
 def protect_directory(root):
     if sys.platform == "win32":
+        # Windows PowerShell must discover its own modules, not inherit PowerShell
+        # 7's incompatible Security module through a CI parent process.
+        environment = {key: value for key, value in os.environ.items()
+                       if key.casefold() != "psmodulepath"}
         subprocess.run([
             "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
             "-ExecutionPolicy", "RemoteSigned",
             "-File", str(ROOT / "scripts" / "protect_windows_smoke_directory.ps1"),
             "-Directory", str(root),
-        ], check=True, timeout=30)
+        ], check=True, timeout=30, env=environment)
 
 
 @contextmanager
