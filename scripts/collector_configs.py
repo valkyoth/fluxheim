@@ -1,16 +1,11 @@
 """Small, explicit single-host fixture configuration; never production defaults."""
-import shutil
 from collector_stack import ROOT, write
 
 
 def fixtures(root):
-    logs = root / "logs"
-    logs.mkdir(mode=0o700)
-    (root / "cache").mkdir(mode=0o700)
     write(root, "index.php", "<?php header('Content-Type: text/plain'); echo 'collector-proof-php';")
     for source, dest in (("localhost-cert.pem", "cert.pem"), ("localhost-key.pem", "key.pem")):
-        shutil.copyfile(ROOT / "tests/fixtures/tls" / source, root / dest)
-        (root / dest).chmod(0o600)
+        write(root, dest, (ROOT / "tests/fixtures/tls" / source).read_text(), private=True)
     write(root, "php.conf", """[global]
 error_log = /proc/self/fd/2
 daemonize = no
@@ -26,9 +21,9 @@ tls_listen = ["0.0.0.0:8443"]
 trusted_proxies = ["127.0.0.1/32"]
 [server.process]
 threads = 2
-pid_file = "/fixture/fluxheim.pid"
-upgrade_sock = "/fixture/upgrade.sock"
-certificate_reload_sock = "/fixture/reload.sock"
+pid_file = "/fixture/state/fluxheim.pid"
+upgrade_sock = "/fixture/state/upgrade.sock"
+certificate_reload_sock = "/fixture/state/reload.sock"
 grace_period_seconds = 1
 graceful_shutdown_timeout_seconds = 3
 [logging]
@@ -126,7 +121,7 @@ def collector(root, signoz=False):
     exporters = {"otlphttp/jaeger": {"endpoint": "http://127.0.0.1:4319"},
                  "prometheus": {"endpoint": "127.0.0.1:9464", "translation_strategy": "NoTranslation",
                                 "resource_to_telemetry_conversion": {"enabled": True}},
-                 "file": {"path": "/fixture/logs/collected.json"}}
+                 "file": {"path": "/fixture/collected/collected.json"}}
     if signoz:
         exporters["otlphttp/signoz"] = {"endpoint": "http://127.0.0.1:4321"}
     pipelines = {}
@@ -140,20 +135,22 @@ def collector(root, signoz=False):
         "exporters": exporters, "service": {"telemetry": {"metrics": {"level": "none"}}, "pipelines": pipelines}})
 
 
-def grafana_stack(stack, password):
-    root = stack.root
+def grafana_configs(root, password):
     write(root, "prometheus.json", {"global": {"scrape_interval": "1s"}, "scrape_configs": [
         {"job_name": "fluxheim-scrape", "static_configs": [{"targets": ["127.0.0.1:9091"]}]},
         {"job_name": "fluxheim-otlp", "static_configs": [{"targets": ["127.0.0.1:9464"]}]}]})
-    stack.backend("prometheus", ["--config.file=/etc/prometheus.json", "--storage.tsdb.path=/prometheus"],
-                  stack.mount("prometheus.json"))
     write(root, "jaeger.json", {"extensions": {"jaeger_storage": {"backends": {"memory": {"memory": {"max_traces": 5000}}}},
                                "jaeger_query": {"storage": {"traces": "memory"}, "http": {"endpoint": "0.0.0.0:16686"}}},
         "receivers": {"otlp": {"protocols": {"http": {"endpoint": "127.0.0.1:4319"}}}},
         "exporters": {"jaeger_storage_exporter": {"trace_storage": "memory"}},
         "service": {"extensions": ["jaeger_storage", "jaeger_query"],
                     "pipelines": {"traces": {"receivers": ["otlp"], "exporters": ["jaeger_storage_exporter"]}}}})
-    stack.backend("jaeger", ["--config=/etc/jaeger.json"], stack.mount("jaeger.json"))
     write(root, "grafana.env", "GF_SECURITY_ADMIN_USER=fluxheim\nGF_SECURITY_ADMIN_PASSWORD=" + password +
           "\nGF_USERS_ALLOW_SIGN_UP=false\nGF_AUTH_ANONYMOUS_ENABLED=false\nGF_ANALYTICS_REPORTING_ENABLED=false\n", private=True)
-    stack.backend("grafana", options=["--env-file", str(root / "grafana.env")])
+
+
+def grafana_stack(stack):
+    stack.backend("prometheus", ["--config.file=/etc/prometheus.json", "--storage.tsdb.path=/prometheus"],
+                  stack.mount("prometheus.json"))
+    stack.backend("jaeger", ["--config=/etc/jaeger.json"], stack.mount("jaeger.json"))
+    stack.backend("grafana", options=["--env-file", str(stack.root / "grafana.env")])

@@ -2,12 +2,13 @@
 import json
 import time
 from collector_stack import LIMIT, poll
+from collector_files import open_runtime_file
 
 CANARY = "collector-proof-secret-canary"
 
 
 def read_private(path):
-    with path.open("rb") as stream:
+    with open_runtime_file(path) as stream:
         data = stream.read(LIMIT + 1)
     assert len(data) <= LIMIT, "telemetry fixture exceeded evidence bound"
     text = data.decode()
@@ -16,10 +17,11 @@ def read_private(path):
 
 
 def records(path):
-    if not path.exists():
+    try:
+        text = read_private(path)
+    except FileNotFoundError:
         return []
     # The exporter appends complete JSON lines. Ignore only the final partial line.
-    text = read_private(path)
     lines = text.splitlines()
     if text and not text.endswith("\n"):
         lines.pop()
@@ -28,8 +30,8 @@ def records(path):
 
 
 def verify(stack, observations):
-    path = stack.root / "logs/collected.json"
-    source = [json.loads(line) for line in read_private(stack.root / "logs/events.log").splitlines()]
+    path = stack.data / "collected/collected.json"
+    source = [json.loads(line) for line in read_private(stack.data / "logs/events.log").splitlines()]
     for trace, request_id in observations:
         event = next(e for e in source if e.get("correlation", {}).get("request_id") == request_id
                      and e.get("data", {}).get("kind") == "access")
@@ -43,7 +45,7 @@ def verify(stack, observations):
     # Separate parser fixture: proves embedded newlines stay inside one record.
     # This is not a claim that Fluxheim emits arbitrary multiline messages.
     fixture = {"timestamp_unix_nanos": time.time_ns(), "level": "warn", "message": "collector fixture\nsecond line"}
-    with (stack.root / "logs/events.log").open("a") as stream:
+    with open_runtime_file(stack.data / "logs/events.log", "a") as stream:
         stream.write(json.dumps(fixture) + "\n")
     record = poll(lambda: next((r for r in records(path) if
                   json.loads(r["body"]["stringValue"]).get("message") == fixture["message"]), None),

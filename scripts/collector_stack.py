@@ -6,8 +6,10 @@ from pathlib import Path
 import re
 import secrets
 import signal
+import stat
 import subprocess
 import time
+from collector_files import component, write
 
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "examples/observability"
@@ -50,14 +52,6 @@ def poll(check, label, seconds=90):
     raise RuntimeError(f"timed out: {label}")
 
 
-def write(root, name, content, private=False):
-    path = root / name
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content if isinstance(content, str) else json.dumps(content, indent=2) + "\n")
-    path.chmod(0o600 if private else 0o644)
-    return path
-
-
 def run_browser(arguments, timeout=150):
     # A timed-out Node driver must not leave its Chromium children behind.
     with subprocess.Popen(arguments, start_new_session=True) as process:
@@ -83,6 +77,7 @@ class Stack:
         if runtime not in ("podman", "docker"):
             raise ValueError("unsupported container runtime")
         self.runtime, self.root = runtime, root
+        self.data = root.parent / "runtime"
         self.prefix = "fh-collectors-" + secrets.token_hex(6)
         self.names = {}
         self.ports = {}
@@ -133,8 +128,21 @@ class Stack:
     def backend(self, role, args=(), options=(), **kwargs):
         return self.start(role, self.images[role]["image"], args, options, **kwargs)
 
-    def mount(self, name, dest=None, writable=False):
-        return ["-v", f"{self.root / name}:{dest or '/etc/' + name}:{'rw' if writable else 'ro'},z"]
+    def mount(self, name, dest=None):
+        path = self.root / component(name)
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ValueError("control mounts must be regular host-owned files")
+        # Neither this directory nor any ancestor is mounted into a container.
+        return ["-v", f"{path}:{dest or '/etc/' + name}:ro,z"]
+
+    def runtime_mount(self, name, writable=False):
+        if name not in ("logs", "collected", "cache", "state"):
+            raise ValueError("unknown runtime mount")
+        path = self.data / name
+        if not stat.S_ISDIR(path.lstat().st_mode):
+            raise ValueError("runtime mount must be a real directory")
+        return ["-v", f"{path}:/fixture/{name}:{'rw' if writable else 'ro'},z"]
 
     def stop(self, role):
         self.command("stop", "--time=8", self.names[role], timeout=20)

@@ -7,13 +7,12 @@ import math
 import os
 from pathlib import Path
 import secrets
-import shutil
 import subprocess
 import tempfile
 from urllib.parse import urlencode
 
 from collector_stack import ASSETS, ROOT, Stack, api, http, poll, run_browser, write
-from collector_configs import fixtures, collector, grafana_stack
+from collector_configs import fixtures, collector, grafana_configs, grafana_stack
 from generate_observability_dashboards import PANELS
 import collector_signoz
 import collector_lifecycle
@@ -53,10 +52,11 @@ def traces(stack, trace):
 
 
 def events(stack):
-    path = stack.root / "logs/events.log"
-    if not path.exists():
+    path = stack.data / "logs/events.log"
+    try:
+        text = collector_logs.read_private(path)
+    except FileNotFoundError:
         return []
-    text = collector_logs.read_private(path)
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
@@ -152,36 +152,55 @@ def main():
     os.umask(0o077)
     args.output.mkdir(parents=True, exist_ok=False)
     with tempfile.TemporaryDirectory(prefix="fh-collectors-") as directory:
-        root = Path(directory)
+        root = Path(directory) / "control"
+        private = Path(directory) / "private"
+        root.mkdir(mode=0o700)
+        private.mkdir(mode=0o700)
         stack = Stack(args.runtime, root)
+        stack.data.mkdir(mode=0o700)
+        for name in ("logs", "collected", "cache", "state"):
+            (stack.data / name).mkdir(mode=0o700)
         password = "Aa1!" + secrets.token_urlsafe(32)
         try:
             image = stack.candidate(args.image)
             fixtures(root)
             for name in ("origin.py", "request.py"):
-                shutil.copyfile(ASSETS / name, root / name)
-            for file in root.glob("*.py"):
-                file.chmod(0o644)
+                write(root, name, (ASSETS / name).read_text())
+            grafana_configs(root, password)
+            collector(root, signoz=args.stack == "both")
+            if args.stack == "both":
+                collector_signoz.configs(root)
+            # Every control file exists before the first container. Only
+            # individual files are mounted, always read-only; never their root.
             stack.backend("php", ["php-fpm", "-F", "-y", "/fixture/php.conf"],
-                          stack.mount("", "/fixture", True), owner=True, ports=PORTS)
-            stack.backend("origin", ["python", "/fixture/origin.py"], stack.mount("", "/fixture"), owner=True)
-            grafana_stack(stack, password)
+                          stack.mount("php.conf", "/fixture/php.conf") + stack.mount("index.php", "/fixture/index.php"),
+                          owner=True, ports=PORTS)
+            origin_mounts = sum((stack.mount(name, "/fixture/" + name)
+                                 for name in ("origin.py", "request.py", "cert.pem", "key.pem")), [])
+            stack.backend("origin", ["python", "/fixture/origin.py"], origin_mounts, owner=True)
+            grafana_stack(stack)
             if args.stack == "both":
                 collector_signoz.start(stack)
-            collector(root, signoz=args.stack == "both")
             stack.backend("collector", ["--config=/etc/collector.json"],
-                          stack.mount("collector.json") + stack.mount("", "/fixture", True), owner=True)
+                          stack.mount("collector.json") + stack.runtime_mount("logs") +
+                          stack.runtime_mount("collected", writable=True), owner=True)
+            server_mounts = sum((stack.mount(name, "/fixture/" + name)
+                                 for name in ("fluxheim.toml", "cert.pem", "key.pem", "index.php")), [])
+            server_mounts += sum((stack.runtime_mount(name, writable=True) for name in ("logs", "cache", "state")), [])
             stack.start("fluxheim", image, ["--config", "/fixture/fluxheim.toml"],
-                        stack.mount("", "/fixture", True), owner=True)
+                        server_mounts, owner=True)
             observations = verify(stack, password)
             if args.stack == "both":
                 dashboard_id = collector_signoz.verify(stack, password, observations)
-            browser_input = write(root, "browser.json", {"grafana": stack.ports[3000],
+            browser_input = write(private, "browser.json", {"grafana": stack.ports[3000],
                 "jaeger": stack.ports[16686], "trace": observations[0][0],
                 "signoz": stack.ports[8080] if args.stack == "both" else None,
                 "dashboard": dashboard_id if args.stack == "both" else None,
                 "password": password, "output": str(args.output.resolve())}, private=True)
-            run_browser(["node", str(ROOT / "tools/collector-browser/check.cjs"), str(browser_input)])
+            try:
+                run_browser(["node", str(ROOT / "tools/collector-browser/check.cjs"), str(browser_input)])
+            finally:
+                browser_input.unlink()
             collector_lifecycle.verify(stack, request, metric)
             assert CANARY not in stack.command("logs", stack.names["fluxheim"])
             write(args.output, "summary.json", {"schema": 1, "passed": True, "stack": args.stack,

@@ -15,8 +15,7 @@ def has_chart_points(response, minimum=1):
                )
 
 
-def start(stack):
-    root = stack.root
+def configs(root):
     write(root, "clickhouse.xml", '''<clickhouse>
   <listen_host replace="replace">0.0.0.0</listen_host>
   <tcp_port>9002</tcp_port>
@@ -36,15 +35,6 @@ def start(stack):
   <logger><level>warning</level><console>1</console></logger>
 </clickhouse>
 ''')
-    stack.backend("clickhouse", options=stack.mount("clickhouse.xml", "/etc/clickhouse-server/config.d/fluxheim.xml") +
-                  ["-e", "CLICKHOUSE_SKIP_USER_SETUP=1"])
-    poll(lambda: http(stack.ports[8123], "/ping")[0] == 200, "ClickHouse ready")
-    for operation in (("bootstrap",), ("sync", "up"), ("async", "up")):
-        role = "migrate-" + operation[0]
-        stack.start(role, stack.images["ingester"]["image"],
-                    ["migrate", *operation, "--clickhouse-dsn=tcp://127.0.0.1:9002"])
-        result = stack.command("wait", stack.names[role], timeout=300)
-        assert result == "0", "SigNoz schema migration failed: " + role
     exporters = {
         "clickhousetraces": {"datasource": "tcp://127.0.0.1:9002/signoz_traces", "use_new_schema": True},
         "clickhouselogsexporter": {"dsn": "tcp://127.0.0.1:9002/signoz_logs", "use_new_schema": True},
@@ -57,6 +47,18 @@ def start(stack):
     write(root, "signoz-collector.json", {"receivers": {"otlp": {"protocols": {"http": {"endpoint": "127.0.0.1:4321"}}}},
         "processors": {"batch": {"timeout": "1s", "send_batch_size": 128, "send_batch_max_size": 512}},
         "exporters": exporters, "service": {"telemetry": {"metrics": {"level": "none"}}, "pipelines": pipelines}})
+
+
+def start(stack):
+    stack.backend("clickhouse", options=stack.mount("clickhouse.xml", "/etc/clickhouse-server/config.d/fluxheim.xml") +
+                  ["-e", "CLICKHOUSE_SKIP_USER_SETUP=1"])
+    poll(lambda: http(stack.ports[8123], "/ping")[0] == 200, "ClickHouse ready")
+    for operation in (("bootstrap",), ("sync", "up"), ("async", "up")):
+        role = "migrate-" + operation[0]
+        stack.start(role, stack.images["ingester"]["image"],
+                    ["migrate", *operation, "--clickhouse-dsn=tcp://127.0.0.1:9002"])
+        result = stack.command("wait", stack.names[role], timeout=300)
+        assert result == "0", "SigNoz schema migration failed: " + role
     stack.backend("ingester", ["--config=/etc/signoz-collector.json", "--copy-path=/tmp/config.yaml"],
                   stack.mount("signoz-collector.json"))
     stack.backend("signoz", options=["-e", "SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN=tcp://127.0.0.1:9002",

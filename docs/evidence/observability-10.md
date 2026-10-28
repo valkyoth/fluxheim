@@ -125,3 +125,48 @@ and matched explicitly. It is not proof of application-internal tracing.
 
 See [Collectors And Dashboards](../guides/collector-integrations.md) for commands,
 filters, transport rules and the backend upgrade procedure.
+
+## Pentest Follow-Up: Bind-Mount Boundary
+
+Review of `4f9191fe` confirmed a host-side symlink-following vulnerability in
+the integration harness: containers could modify the shared fixture directory
+before the host wrote configuration or browser credentials there. This was
+not a Rust webserver vulnerability, but could affect the operator running the
+gate and required remediation.
+
+The follow-up separates host-only controls/private browser input from runtime
+data. All container controls are generated before startup and mounted only as
+individual read-only files. No container receives the host control directory,
+its parent, or the browser/evidence directories. Runtime mounts are a closed
+set: server logs/cache/state and a separate Collector output directory. The
+Collector's source log mount is read-only.
+
+Control creation uses descriptor-relative exclusive/no-follow opens and
+descriptor-based permissions. Guest-writable log reads, synthetic appends and
+permission-failure injection also pin validated single-link regular handles,
+rejecting symlinks and special files without blocking on FIFOs. Browser input
+is removed before container cleanup even if the browser fails.
+
+Regression tests cover existing/dangling symlinks, hard links, linked parents,
+filename traversal, file swaps before chmod/append, special files, read-only
+mount enforcement, all-controls-before-start ordering and credential cleanup.
+The complete rootless Podman wrapper passed again on 2026-10-28:
+
+```sh
+sh scripts/check_collectors.sh release-reports/observability-10-pentest-20261028
+```
+
+The ignored output directory contains the success summary and four browser
+screenshots. Live mount inspection confirmed individual read-only controls,
+only logs/cache/state writable by Fluxheim, and a read-only source log plus
+separate writable output for the Collector. All stored-signal, browser,
+outage/recovery, sink-failure and shutdown assertions passed unchanged.
+
+Follow-up validation: 38 collector regressions; 72 observability unit tests
+and its compile-fail doc test; 4 observability baseline tests; strict
+all-feature observability Clippy; Python compilation; dashboard drift;
+documentation layout/links; diff checks; and Cargo audit (449 dependencies,
+no reported advisories). No Rust, Cargo manifest/lockfile or image pin changed.
+The processed pentest file was removed after qualification.
+The original Docker collector job passed in GitHub run `40736944356`; that
+does not substitute for rerunning CI on the remediation commit.

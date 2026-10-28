@@ -1,27 +1,30 @@
 """Observable sink failure and bounded graceful exit under real HTTP traffic."""
 import json
+import os
 import threading
 import time
 
 from collector_stack import http, poll
+from collector_files import open_runtime_file
 
 
 def verify(stack, request, metric):
-    path = stack.root / "logs/events.log"
+    path = stack.data / "logs/events.log"
     before = metric(stack, "fluxheim_log_dispatch_events_total",
                     'job="fluxheim-scrape",lane="ordinary",outcome="sink_errors"') or 0
-    path.chmod(0o644)
-    try:
-        def failed():
-            assert request(stack)[2]["status"] == 200
-            return (metric(stack, "fluxheim_log_dispatch_events_total",
-                           'job="fluxheim-scrape",lane="ordinary",outcome="sink_errors"') or 0) > before
-        poll(failed, "observed confidential log sink failure")
-    finally:
-        path.chmod(0o600)
-    size = path.stat().st_size
-    assert request(stack)[2]["status"] == 200
-    assert path.stat().st_size == size, "failed sink silently resumed"
+    with open_runtime_file(path) as log:
+        os.fchmod(log.fileno(), 0o644)
+        try:
+            def failed():
+                assert request(stack)[2]["status"] == 200
+                return (metric(stack, "fluxheim_log_dispatch_events_total",
+                               'job="fluxheim-scrape",lane="ordinary",outcome="sink_errors"') or 0) > before
+            poll(failed, "observed confidential log sink failure")
+        finally:
+            os.fchmod(log.fileno(), 0o600)
+        size = os.fstat(log.fileno()).st_size
+        assert request(stack)[2]["status"] == 200
+        assert os.fstat(log.fileno()).st_size == size, "failed sink silently resumed"
 
     stop, served = threading.Event(), threading.Event()
     def traffic():

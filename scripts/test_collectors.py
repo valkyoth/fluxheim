@@ -9,13 +9,180 @@ import unittest
 from unittest.mock import Mock, patch
 
 import collector_configs
+import collector_files
 import collector_logs
 import collector_signoz
 import collector_stack as stack
 import generate_observability_dashboards as dashboards
+import smoke_collectors
 
 
 class CollectorTests(unittest.TestCase):
+    def test_control_creation_never_overwrites_existing_files_or_links(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "outside"
+            target.write_text("untouched")
+            target.chmod(0o640)
+            control = root / "control"
+            control.mkdir()
+            (control / "browser.json").symlink_to(target)
+            (control / "dangling.json").symlink_to(root / "must-not-exist")
+            os.link(target, control / "hardlink.json")
+            (control / "existing.json").write_text("keep")
+            for name in ("browser.json", "dangling.json", "hardlink.json", "existing.json"):
+                with self.subTest(name=name), self.assertRaises(FileExistsError):
+                    stack.write(control, name, "replacement", private=True)
+            self.assertEqual(target.read_text(), "untouched")
+            self.assertEqual(target.stat().st_mode & 0o777, 0o640)
+            self.assertFalse((root / "must-not-exist").exists())
+            self.assertEqual((control / "existing.json").read_text(), "keep")
+
+    def test_control_names_and_linked_root_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("", ".", "..", "../outside", "/tmp/outside", "a/b", "a\\b", "a\n", "x" * 129):
+                with self.subTest(name=name), self.assertRaises(ValueError):
+                    stack.write(root, name, "data")
+            (root / "alias").symlink_to(root, target_is_directory=True)
+            with self.assertRaises(OSError):
+                stack.write(root / "alias", "outside", "data")
+            self.assertFalse((root / "outside").exists())
+
+    def test_control_permissions_use_created_handle_despite_leaf_swap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "outside"
+            target.write_text("untouched")
+            target.chmod(0o640)
+            original = os.fchmod
+            def swap(fd, mode):
+                (root / "browser.json").unlink()
+                (root / "browser.json").symlink_to(target)
+                original(fd, mode)
+            with patch.object(collector_files.os, "fchmod", side_effect=swap):
+                stack.write(root, "browser.json", "credential", private=True)
+            self.assertEqual(target.read_text(), "untouched")
+            self.assertEqual(target.stat().st_mode & 0o777, 0o640)
+
+    def test_runtime_links_and_special_files_are_rejected_without_side_effects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "outside"
+            target.write_text("untouched")
+            target.chmod(0o640)
+            (root / "link").symlink_to(target)
+            os.link(target, root / "hardlink")
+            os.mkfifo(root / "pipe")
+            (root / "dir").mkdir()
+            for name in ("link", "hardlink", "pipe", "dir"):
+                for mode in ("rb", "a"):
+                    with self.subTest(name=name, mode=mode), self.assertRaises((OSError, ValueError)):
+                        with collector_files.open_runtime_file(root / name, mode):
+                            self.fail("unsafe evidence was opened")
+            self.assertEqual(target.read_text(), "untouched")
+            self.assertEqual(target.stat().st_mode & 0o777, 0o640)
+
+    def test_runtime_handle_survives_leaf_swap_without_following_new_link(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "outside"
+            target.write_text("untouched")
+            target.chmod(0o640)
+            log = root / "events.log"
+            log.write_text("original")
+            with collector_files.open_runtime_file(log, "a") as stream:
+                log.rename(root / "pinned.log")
+                log.symlink_to(target)
+                os.fchmod(stream.fileno(), 0o600)
+                stream.write(" appended")
+            self.assertEqual((root / "pinned.log").read_text(), "original appended")
+            self.assertEqual(target.read_text(), "untouched")
+            self.assertEqual(target.stat().st_mode & 0o777, 0o640)
+            with self.assertRaises(OSError):
+                collector_logs.read_private(log)
+
+    def test_control_mounts_are_individual_readonly_files_not_shared_parents(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "control"
+            root.mkdir()
+            fixture = stack.Stack("podman", root)
+            stack.write(root, "collector.json", {})
+            self.assertEqual(fixture.mount("collector.json"), ["-v", f"{root}/collector.json:/etc/collector.json:ro,z"])
+            for name in ("", ".", "..", "../private/browser.json"):
+                with self.assertRaises(ValueError):
+                    fixture.mount(name)
+            with self.assertRaises(TypeError):
+                fixture.mount("collector.json", writable=True)
+            (root / "linked.json").symlink_to(root / "collector.json")
+            with self.assertRaises(ValueError):
+                fixture.mount("linked.json")
+            fixture.data.mkdir()
+            (fixture.data / "logs").mkdir()
+            self.assertEqual(fixture.runtime_mount("logs", writable=True),
+                             ["-v", f"{fixture.data}/logs:/fixture/logs:rw,z"])
+            (fixture.data / "cache").symlink_to(root, target_is_directory=True)
+            with self.assertRaises(ValueError):
+                fixture.runtime_mount("cache", writable=True)
+            for name in ("", "control", "../control", "private"):
+                with self.assertRaises(ValueError):
+                    fixture.runtime_mount(name, writable=True)
+
+    def test_host_only_credentials_ignore_container_planted_browser_link(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime, private = root / "runtime", root / "private"
+            runtime.mkdir()
+            private.mkdir()
+            target = root / "outside"
+            target.write_text("untouched")
+            (runtime / "browser.json").symlink_to(target)
+            credential = stack.write(private, "browser.json", {"password": "test-only"}, private=True)
+            self.assertEqual(credential.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(target.read_text(), "untouched")
+            credential.unlink()
+            self.assertFalse(credential.exists())
+
+    def test_all_controls_exist_before_first_container_starts(self):
+        def first_backend(fixture, *args, **kwargs):
+            for name in ("prometheus.json", "jaeger.json", "grafana.env", "clickhouse.xml",
+                         "signoz-collector.json", "collector.json", "php.conf", "fluxheim.toml"):
+                self.assertTrue((fixture.root / name).is_file(), name)
+            self.assertFalse((fixture.root / "browser.json").exists())
+            raise RuntimeError("stop before containers")
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(os.sys, "argv", ["smoke", "--image", "test", "--output", directory + "/result"]), \
+                patch.object(stack.Stack, "candidate", return_value="sha256:" + "a" * 64), \
+                patch.object(stack.Stack, "backend", first_backend), patch.object(stack.Stack, "close"):
+            with self.assertRaisesRegex(RuntimeError, "stop before containers"):
+                smoke_collectors.main()
+
+    def test_browser_failure_removes_host_only_credentials_before_container_cleanup(self):
+        captured = []
+        def candidate(fixture, reference):
+            fixture.ports = {port: 12345 for port in smoke_collectors.PORTS}
+            return "sha256:" + "a" * 64
+        def browser(arguments):
+            path = Path(arguments[-1])
+            self.assertEqual(path.parent.name, "private")
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertIn("password", json.loads(path.read_text()))
+            captured.append(path)
+            raise RuntimeError("browser failed")
+        def cleanup(fixture):
+            self.assertEqual(len(captured), 1)
+            self.assertFalse(captured[0].exists())
+            self.assertTrue(captured[0].parent.exists())  # Not TemporaryDirectory cleanup.
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(os.sys, "argv", ["smoke", "--image", "test", "--output", directory + "/result"]), \
+                patch.object(stack.Stack, "candidate", candidate), patch.object(stack.Stack, "backend"), \
+                patch.object(stack.Stack, "start"), patch.object(stack.Stack, "close", cleanup), \
+                patch.object(collector_signoz, "start"), patch.object(collector_signoz, "verify", return_value="dashboard"), \
+                patch.object(smoke_collectors, "verify", return_value=[("a" * 32, "request")]), \
+                patch.object(smoke_collectors, "run_browser", browser):
+            with self.assertRaisesRegex(RuntimeError, "browser failed"):
+                smoke_collectors.main()
+
     def test_images_are_digest_pinned(self):
         fixture = stack.Stack("podman", Path("/tmp/fixture"))
         self.assertEqual(len(fixture.images), 9)

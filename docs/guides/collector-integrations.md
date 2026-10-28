@@ -61,6 +61,21 @@ chosen by the container engine. No production services, public CA or user data
 are involved. Cleanup removes only containers created by this run and their
 anonymous volumes. Image caches remain available for later runs.
 
+The host generates all control files before starting any container. Only
+individual read-only configuration, certificate and fixture files are mounted;
+their parent directories are never exposed. Writable mounts are limited to
+separate runtime log, collected-output, cache and process-state directories.
+The Collector reads Fluxheim logs read-only and writes into its own output
+directory. Browser credentials remain in an unmounted private directory and
+are removed after the browser exits, including on failure.
+
+Host file creation is exclusive and no-follow. Host reads/appends and permission
+fault injection on guest-writable logs use validated regular-file descriptors,
+not a later pathname reopen or chmod. Symlinks, hard-linked evidence and special
+files are rejected. These controls prevent guest-planted paths from redirecting
+host operations; they do not replace the container engine's isolation or make
+this fixture a general-purpose hostile-code sandbox.
+
 Checks include actual HTTP/HTTPS and PHP responses, cache misses and hits,
 untrusted upstream certificates, failed FastCGI connections, stored request
 counters and latency histograms, and structured events linked to stored traces.
