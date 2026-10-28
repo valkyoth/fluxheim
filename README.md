@@ -654,7 +654,15 @@ load-balancer, cache, WordPress, database health checks, privacy mode, Wasm,
 observability, containers, and RPM builds without memorizing every script name.
 The observability smoke starts disposable Prometheus and Jaeger containers by
 default unless `FLUXHEIM_PROMETHEUS_URL` or `FLUXHEIM_JAEGER_URL` point at
-already-running services:
+already-running services.
+
+For mandatory stored-signal and dashboard verification, use the
+[required collector gate](docs/guides/collector-integrations.md). It builds a
+packaged server and tests Grafana/Prometheus/Jaeger and SigNoz, including real
+PHP, failure/recovery and log-to-trace correlation. Missing collectors fail this
+gate; a quick smoke that skips them is not release qualification.
+
+Other focused workflows:
 
 ```bash
 scripts/test_starter.py --list

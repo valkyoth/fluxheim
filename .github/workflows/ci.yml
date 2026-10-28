@@ -20,6 +20,37 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  collectors:
+    name: Required real collector workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate collector fixtures and dashboards
+        run: |
+          python3 scripts/test_collectors.py
+          python3 scripts/generate_observability_dashboards.py --check
+      - name: Install pinned browser driver
+        run: |
+          npm ci --ignore-scripts --prefix tools/collector-browser
+          tools/collector-browser/node_modules/.bin/playwright install --with-deps chromium
+      - name: Build packaged server and require stored signals
+        env:
+          FLUXHEIM_CONTAINER_RUNTIME: docker
+        run: sh scripts/check_collectors.sh release-reports/collectors
+      - name: Upload sanitized success evidence
+        if: success()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: collector-proof
+          path: |
+            release-reports/collectors/summary.json
+            release-reports/collectors/grafana.png
+            release-reports/collectors/signoz.png
+            release-reports/collectors/jaeger-trace.png
+            release-reports/collectors/signoz-trace.png
+          retention-days: 14
+
   container-refresh-policy:
     name: Container refresh policy regressions
     runs-on: ubuntu-latest

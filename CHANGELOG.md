@@ -11,6 +11,10 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- Add importable Grafana and SigNoz dashboards and a required packaged-container
+  collector gate covering stored metrics/traces/logs, real PHP, TLS/cache faults,
+  collector recovery, confidential sink failure and graceful shutdown under
+  traffic. Keep backend-specific tooling outside the webserver dependency graph.
 - Add an authenticated, bounded `/_fluxheim/operational-status` observer with
   compiled capabilities, redacted configuration counts, recovery readiness,
   last admin change and local telemetry health. Publish its OpenAPI/JSON Schema

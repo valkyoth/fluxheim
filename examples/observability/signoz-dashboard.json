@@ -1,0 +1,738 @@
+{
+  "schemaVersion": "v6",
+  "name": "fluxheim-operations-v1",
+  "tags": [],
+  "spec": {
+    "display": {
+      "name": "Fluxheim operations",
+      "description": "Fluxheim boundary telemetry; application-internal spans require application instrumentation."
+    },
+    "duration": "15m",
+    "refreshInterval": "5s",
+    "variables": [
+      {
+        "kind": "TextVariable",
+        "spec": {
+          "name": "service",
+          "value": "fluxheim-collector-proof"
+        }
+      },
+      {
+        "kind": "TextVariable",
+        "spec": {
+          "name": "vhost",
+          "value": ".*"
+        }
+      }
+    ],
+    "links": [],
+    "panels": {
+      "panel-1": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Requests / second",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "none"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "sum(rate(fluxheim_http_requests_total{\"service.name\"=~\"$service\"}[1m]))"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "panel-2": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "HTTP 5xx / second",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "none"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "sum(rate(fluxheim_http_requests_total{\"service.name\"=~\"$service\",status_class=\"5xx\"}[1m]))"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "panel-3": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Request p95 seconds",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "s"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "histogram_quantile(0.95, sum by (le) (rate({\"fluxheim_http_request_duration_seconds.bucket\",\"service.name\"=~\"$service\"}[1m])))"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "panel-4": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Active requests",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "none"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "sum(fluxheim_http_requests_active{\"service.name\"=~\"$service\"})"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "panel-5": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Active connections",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "none"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "sum(fluxheim_listener_connections_active{\"service.name\"=~\"$service\"})"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "panel-6": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Upstream attempts / second",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "none"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "sum by (outcome) (rate(fluxheim_upstream_attempts_total{\"service.name\"=~\"$service\"}[1m]))"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "panel-7": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Failures by reason",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "none"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "sum by (reason) (fluxheim_operational_failures_total{\"service.name\"=~\"$service\"})"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "panel-8": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Cache operations / second",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "none"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "sum by (phase) (rate({\"fluxheim_cache_operation_duration_seconds.count\",\"service.name\"=~\"$service\",vhost=~\"$vhost\"}[1m]))"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "panel-9": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "PHP requests / second",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "none"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "sum(rate(fluxheim_php_requests_total{\"service.name\"=~\"$service\",vhost=~\"$vhost\"}[1m]))"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "panel-10": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "TLS handshakes",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "none"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "sum by (outcome) (fluxheim_downstream_tls_handshakes_total{\"service.name\"=~\"$service\"})"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "panel-11": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "ACME events (when enabled)",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "none"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "sum by (event) (fluxheim_acme_events_total{\"service.name\"=~\"$service\",event!=\"overflow\"})"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "panel-12": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Exporter failures",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "none"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "sum by (signal) (fluxheim_otlp_failed_total{\"service.name\"=~\"$service\"})"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "panel-13": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Connection admission",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "none"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "sum by (outcome) (fluxheim_listener_connections_total{\"service.name\"=~\"$service\"})"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "panel-14": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Admin operations / reloads",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "none"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "sum by (operation, outcome) (fluxheim_admin_operations_total{\"service.name\"=~\"$service\"})"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "panel-15": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Log sink errors",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "none"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "sum by (lane) (fluxheim_log_dispatch_events_total{\"service.name\"=~\"$service\",outcome=\"sink_errors\"})"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "panel-16": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Metric cardinality overflow",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "none"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "sum(fluxheim_metric_series_overflow_total{\"service.name\"=~\"$service\"})"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "panel-17": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Load balancer events (when enabled)",
+            "description": "Missing measurements are unavailable, not healthy zero."
+          },
+          "links": [],
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "none"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/PromQLQuery",
+                  "spec": {
+                    "name": "A",
+                    "query": "sum by (event) (fluxheim_load_balancer_events_total{\"service.name\"=~\"$service\",vhost=~\"$vhost\",event!=\"overflow\"})"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-1"
+              }
+            },
+            {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-2"
+              }
+            },
+            {
+              "x": 0,
+              "y": 8,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-3"
+              }
+            },
+            {
+              "x": 6,
+              "y": 8,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-4"
+              }
+            },
+            {
+              "x": 0,
+              "y": 16,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-5"
+              }
+            },
+            {
+              "x": 6,
+              "y": 16,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-6"
+              }
+            },
+            {
+              "x": 0,
+              "y": 24,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-7"
+              }
+            },
+            {
+              "x": 6,
+              "y": 24,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-8"
+              }
+            },
+            {
+              "x": 0,
+              "y": 32,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-9"
+              }
+            },
+            {
+              "x": 6,
+              "y": 32,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-10"
+              }
+            },
+            {
+              "x": 0,
+              "y": 40,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-11"
+              }
+            },
+            {
+              "x": 6,
+              "y": 40,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-12"
+              }
+            },
+            {
+              "x": 0,
+              "y": 48,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-13"
+              }
+            },
+            {
+              "x": 6,
+              "y": 48,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-14"
+              }
+            },
+            {
+              "x": 0,
+              "y": 56,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-15"
+              }
+            },
+            {
+              "x": 6,
+              "y": 56,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-16"
+              }
+            },
+            {
+              "x": 0,
+              "y": 64,
+              "width": 6,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/panel-17"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

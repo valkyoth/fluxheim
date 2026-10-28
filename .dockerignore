@@ -1,0 +1,11 @@
+.git
+.cargo
+target
+**/target
+docs
+examples/public
+*.log
+*.tmp
+tmp
+release-reports
+**/node_modules

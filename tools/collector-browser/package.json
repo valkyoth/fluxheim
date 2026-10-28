@@ -1,0 +1,7 @@
+{
+  "name": "fluxheim-collector-browser-proof",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Isolated browser qualification for imported backend dashboards",
+  "devDependencies": {"playwright": "1.60.0"}
+}

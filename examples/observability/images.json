@@ -1,0 +1,11 @@
+{
+  "php": {"version": "8.4-fpm-bookworm", "image": "docker.io/library/php@sha256:1b6bb4f3d32dfbcd1e159d7bd47caa8852507f61666db7731d73f34acec781b6"},
+  "origin": {"version": "3.13-slim-bookworm", "image": "docker.io/library/python@sha256:281d39ff02e3b389401586134ff9e6572954687822a58055ec07a60ded4e0b7f"},
+  "prometheus": {"version": "3.15.1", "image": "docker.io/prom/prometheus@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2"},
+  "grafana": {"version": "13.2.4", "image": "docker.io/grafana/grafana@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f"},
+  "jaeger": {"version": "2.22.0", "image": "docker.io/jaegertracing/jaeger@sha256:836b967b5abcf1f7758066aa6b348619267a2f1459f72d472840570f9bd88a17"},
+  "collector": {"version": "0.163.2", "image": "docker.io/otel/opentelemetry-collector-contrib@sha256:7f22d2a6748110ffb6a59bc0df448bccbf501cdb667d610ede4c61d3863d5849"},
+  "signoz": {"version": "0.148.0", "image": "docker.io/signoz/signoz@sha256:6585f5cd48cc00b7718435379ebe69b78949c5a3ba4b5a3aabf166d4d321e505"},
+  "ingester": {"version": "0.144.15", "image": "docker.io/signoz/signoz-otel-collector@sha256:22d722ef43373ec89f612b6c8535189aded062f2dae34ae78a248edf5f674841"},
+  "clickhouse": {"version": "25.12.5", "image": "docker.io/clickhouse/clickhouse-server@sha256:10f54f04de6c61b756c4eaf9f1d17464a4ac3e1f94b5b410e0dec92a24dbeda8"}
+}

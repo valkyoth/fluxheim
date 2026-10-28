@@ -32,3 +32,8 @@ FLUXHEIM_GATE_FRAMING="${FLUXHEIM_GATE_FRAMING:-1}" \
 FLUXHEIM_GATE_FUZZ_CHECK="${FLUXHEIM_GATE_FUZZ_CHECK:-1}" \
 FLUXHEIM_GATE_ACME_MOUNT_BOUNDARY="${FLUXHEIM_GATE_ACME_MOUNT_BOUNDARY:-1}" \
 scripts/stable_release_gate.sh "$mode"
+
+if [ "$mode" = "release" ]; then
+    # Unlike the quick local smoke, this release check cannot skip collectors.
+    sh scripts/check_collectors.sh "${FLUXHEIM_COLLECTOR_EVIDENCE:-release-reports/collectors-$(date -u +%Y%m%dT%H%M%SZ)}"
+fi

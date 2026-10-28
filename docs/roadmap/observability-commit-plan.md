@@ -1,7 +1,7 @@
 # 1.9.0 Observability Commit Plan
 
-Status: Commits 01-08 and 07A accepted for progression; Commit 09 implemented,
-awaiting pentest and exact-SHA GitHub acceptance, 2026-10-27.
+Status: Commits 01-09 and 07A accepted for progression; Commit 10 implemented
+and locally qualified, awaiting pentest and GitHub acceptance, 2026-10-28.
 Main stays at **1.9.0
 (unreleased)**. This document replaces the earlier ten-checkpoint outline;
 no previously accepted implementation checkpoint is being renumbered.
@@ -808,12 +808,12 @@ collector behavior is not the new required-collector acceptance contract.
 | 07 - Metrics | Accepted for progression | User supplied clean pentest and reported GitHub green through 792b0fdc; CI success verified and owner authorized 07A. [Bounded metrics and qualification](../evidence/observability-07.md). |
 | 07A - Dedicated Windows QEMU builder/test VM | Accepted for progression | Owner confirmed clean pentest, green GitHub and resolved 25 code-scanning alerts through 2c383562; authorized 08. [Qualification evidence](../evidence/observability-07a.md). |
 | 08 - Export | Accepted for progression | User supplied clean pentest through fa2f5381; Rust CI run 40390306858 and code-scanning workflow green on that SHA; user authorized 09. [Exporter evidence](../evidence/observability-08.md). |
-| 09 - Read-only API | Implemented; pentest/CI pending | [Operational contract](../guides/operational-status.md) and [qualification evidence](../evidence/observability-09.md). New bounded observer preserves legacy routes and recovery enforcement. No complete management API or UI is claimed. |
-| 10 - Live containers/collectors | Not started | Pending |
+| 09 - Read-only API | Accepted for progression | Owner reported clean retest and green GitHub on `76faa3ca`. [Operational contract](../guides/operational-status.md) and [qualification evidence](../evidence/observability-09.md). No complete management API or UI is claimed. |
+| 10 - Live containers/collectors | Implemented; acceptance pending | Rootless Podman packaged-server and both live collector/browser workflows passed. [Collector integration guide](../guides/collector-integrations.md), importable dashboards and [qualification evidence](../evidence/observability-10.md). Required Docker CI and pentest remain pending. |
 | 11 - Native archives | Not started | Pending |
 | 12 - Observability docs / candidate qualification | Not started | Pending |
 | 13 - Documentation / final release acceptance | Not started | Pending |
 
-Commit 08 is accepted for progression. Commit 09 is the current checkpoint.
-Stop for pentest, green GitHub checks and explicit approval before Commit 10.
+Commit 09 is accepted for progression. Commit 10 is the current checkpoint.
+Stop for pentest, green GitHub checks and explicit approval before Commit 11.
 No licensing purchase or changes to another project's VM are authorized.

@@ -2,6 +2,10 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+if [ "${1:-}" = "--required-collectors" ]; then
+    shift
+    exec python3 "$ROOT_DIR/scripts/smoke_collectors.py" "$@"
+fi
 SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh")
 tmp="$(mktemp -d "$SMOKE_TMP_ROOT/fluxheim-observability-smoke.XXXXXX")"
 config="$tmp/fluxheim.toml"
