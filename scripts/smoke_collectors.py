@@ -17,6 +17,7 @@ from generate_observability_dashboards import PANELS
 import collector_signoz
 import collector_lifecycle
 import collector_logs
+from collector_files import checked_directory
 
 CANARY = "collector-proof-secret-canary"
 PORTS = (8088, 8443, 9090, 16686, 3000, 8080, 8123)
@@ -150,8 +151,9 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     os.umask(0o077)
+    args.output = checked_directory(args.output)
     args.output.mkdir(parents=True, exist_ok=False)
-    with tempfile.TemporaryDirectory(prefix="fh-collectors-") as directory:
+    with tempfile.TemporaryDirectory(prefix="fh-collectors-", dir="/tmp") as directory:
         root = Path(directory) / "control"
         private = Path(directory) / "private"
         root.mkdir(mode=0o700)
@@ -198,7 +200,7 @@ def main():
                 "dashboard": dashboard_id if args.stack == "both" else None,
                 "password": password, "output": str(args.output.resolve())}, private=True)
             try:
-                run_browser(["node", str(ROOT / "tools/collector-browser/check.cjs"), str(browser_input)])
+                run_browser(["node", str(ROOT / "tools/collector-browser/check.cjs")], cwd=private)
             finally:
                 browser_input.unlink()
             collector_lifecycle.verify(stack, request, metric)

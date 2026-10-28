@@ -1,8 +1,23 @@
 """Host file access across the disposable collector bind-mount boundary."""
 import json
 import os
+from pathlib import Path
 import re
 import stat
+
+EVIDENCE_ROOT = Path(__file__).resolve().parent.parent / "release-reports"
+
+
+def checked_directory(path):
+    """Limit Linux harness I/O to new evidence/run directories, never aliases."""
+    requested = os.path.abspath(path)
+    resolved = os.path.realpath(requested)
+    if resolved != requested:
+        raise ValueError("linked collector directory is not allowed")
+    for base in (str(EVIDENCE_ROOT), "/tmp"):
+        if resolved.startswith(base + os.sep):
+            return Path(resolved)
+    raise ValueError("collector directory must be below release-reports or /tmp")
 
 
 def component(name):
@@ -12,7 +27,8 @@ def component(name):
 
 
 def directory_fd(path):
-    return os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    checked = checked_directory(path)
+    return os.open(checked, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
 
 
 def write(root, name, content, private=False):

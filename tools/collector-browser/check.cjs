@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
+const { readInput } = require('./input.cjs');
 assert.equal(require('playwright/package.json').version, require('./package.json').devDependencies.playwright);
 let stage = 'browser startup';
 
@@ -21,7 +22,8 @@ async function plotted(page) {
 }
 
 (async () => {
-  const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+  assert.equal(process.argv.length, 2, 'browser driver does not accept input paths');
+  const input = readInput();
   for (const port of [input.grafana, input.signoz, input.jaeger].filter(Boolean)) {
     assert(Number.isInteger(port) && port > 0 && port < 65536);
   }

@@ -29,6 +29,7 @@ jobs:
       - name: Validate collector fixtures and dashboards
         run: |
           python3 scripts/test_collectors.py
+          node --test tools/collector-browser/input.test.cjs
           python3 scripts/generate_observability_dashboards.py --check
       - name: Install pinned browser driver
         run: |

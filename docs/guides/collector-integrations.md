@@ -16,7 +16,10 @@ tools/collector-browser/node_modules/.bin/playwright install chromium
 sh scripts/check_collectors.sh /tmp/fluxheim-collector-proof
 ```
 
-Use a new output directory for each run. On a supported Linux distribution,
+Use a new output directory below the repository's `release-reports/` or `/tmp`
+for each run. Linked directories and destinations outside those roots are
+rejected before creation. Run-state directories are always created in `/tmp`,
+independently of `TMPDIR`. On a supported Linux distribution,
 `playwright install --with-deps chromium` can install missing system browser
 libraries, but requires administrator privileges. The CI job uses Docker:
 
@@ -68,6 +71,9 @@ separate runtime log, collected-output, cache and process-state directories.
 The Collector reads Fluxheim logs read-only and writes into its own output
 directory. Browser credentials remain in an unmounted private directory and
 are removed after the browser exits, including on failure.
+The browser opens only `browser.json` in that private working directory, not a
+command-line filename. Its no-follow reader requires a private, single-link
+regular file owned by the current user and caps input at 64 KiB.
 
 Host file creation is exclusive and no-follow. Host reads/appends and permission
 fault injection on guest-writable logs use validated regular-file descriptors,

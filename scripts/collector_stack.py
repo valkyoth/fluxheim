@@ -52,9 +52,9 @@ def poll(check, label, seconds=90):
     raise RuntimeError(f"timed out: {label}")
 
 
-def run_browser(arguments, timeout=150):
+def run_browser(arguments, timeout=150, cwd=None):
     # A timed-out Node driver must not leave its Chromium children behind.
-    with subprocess.Popen(arguments, start_new_session=True) as process:
+    with subprocess.Popen(arguments, start_new_session=True, cwd=cwd) as process:
         try:
             code = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:

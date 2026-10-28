@@ -208,3 +208,36 @@ passed. Cargo audit reported no advisories across 449 dependencies.
 No Rust runtime, dependency or image changes were required. `PENTEST.md` was
 removed after qualification. Exact-commit GitHub checks and pentest retest
 remain required before progressing to Commit 11.
+
+## CodeQL Follow-Up: Explicit Path Boundaries
+
+Alerts `#429` (`py/path-injection`) and `#425` (`js/path-injection`) on
+`00dc656b` identified a CLI-influenced directory open and browser input read.
+The harness now validates directory containment below the repository's
+`release-reports/` or `/tmp`, with separator-aware boundaries and rejection of
+linked aliases. Output validation precedes directory creation; run-state
+allocation uses the explicit `/tmp` root. No-follow/exclusive opens and pinned
+log identity checks remain in place.
+
+The browser no longer accepts an input filename. Its caller supplies an
+unmounted private working directory; the driver reads only fixed-name
+`browser.json` with no-follow/nonblocking open, single-link regular-file,
+ownership/permission checks, and a 64 KiB limit. Descriptor cleanup runs on
+parse errors too. Credentials remain outside every container mount and are
+removed after browser completion/failure.
+
+Regression coverage includes path-root/sibling/traversal rejection, linked
+directories, child-only working-directory selection, fixed filename behavior,
+private file validation, input bounds and descriptor cleanup. The existing
+host-overwrite and stale-inode tests are retained. Exact-commit CodeQL results
+are still required; no alert suppression or dismissal is part of the fix.
+
+Local qualification passed on 2026-10-28: 45 Python collector regressions,
+8 Node input-reader tests, Python/JavaScript syntax, workflow YAML,
+documentation layout/links, dashboard drift and diff checks. Cargo audit
+(449 dependencies) and npm audit reported no vulnerabilities. The complete
+rootless Podman wrapper passed with evidence under
+`release-reports/observability-10-codeql-20261028`, including both dashboard
+and trace browsers, stored signals, sink faults, collector recovery and
+graceful shutdown. All owned containers were removed. No Rust, Cargo/npm
+dependency lockfile or image pin changed.

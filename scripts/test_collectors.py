@@ -19,6 +19,34 @@ import smoke_collectors
 
 
 class CollectorTests(unittest.TestCase):
+    def test_collector_directories_are_bounded_by_real_directory_boundaries(self):
+        for path in ("/", "/etc", "/home", "/tmp", "/tmp-evil/run", "/tmp/../../etc",
+                     collector_files.EVIDENCE_ROOT, str(collector_files.EVIDENCE_ROOT) + "-evil/run"):
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                collector_files.checked_directory(path)
+        self.assertEqual(collector_files.checked_directory("/tmp/collector-proof"), Path("/tmp/collector-proof"))
+        self.assertEqual(collector_files.checked_directory(collector_files.EVIDENCE_ROOT / "proof"),
+                         collector_files.EVIDENCE_ROOT / "proof")
+
+    def test_linked_collector_directory_cannot_redirect_host_io(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "alias").symlink_to("/etc", target_is_directory=True)
+            with self.assertRaises(ValueError):
+                collector_files.checked_directory(root / "alias/proof")
+
+    def test_browser_cwd_is_explicit_and_does_not_change_the_parent(self):
+        process = Mock()
+        process.wait.return_value = 0
+        context = Mock()
+        context.__enter__ = Mock(return_value=process)
+        context.__exit__ = Mock(return_value=False)
+        before = Path.cwd()
+        with patch.object(stack.subprocess, "Popen", return_value=context) as popen:
+            stack.run_browser(["node", "fixture"], cwd=Path("/tmp/host-only"))
+        self.assertEqual(popen.call_args.kwargs["cwd"], Path("/tmp/host-only"))
+        self.assertEqual(Path.cwd(), before)
+
     def test_current_log_identity_accepts_unchanged_regular_file(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "events.log"
@@ -118,7 +146,7 @@ class CollectorTests(unittest.TestCase):
                 with self.subTest(name=name), self.assertRaises(ValueError):
                     stack.write(root, name, "data")
             (root / "alias").symlink_to(root, target_is_directory=True)
-            with self.assertRaises(OSError):
+            with self.assertRaises(ValueError):
                 stack.write(root / "alias", "outside", "data")
             self.assertFalse((root / "outside").exists())
 
@@ -235,8 +263,9 @@ class CollectorTests(unittest.TestCase):
         def candidate(fixture, reference):
             fixture.ports = {port: 12345 for port in smoke_collectors.PORTS}
             return "sha256:" + "a" * 64
-        def browser(arguments):
-            path = Path(arguments[-1])
+        def browser(arguments, cwd):
+            self.assertEqual(len(arguments), 2)
+            path = cwd / "browser.json"
             self.assertEqual(path.parent.name, "private")
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertIn("password", json.loads(path.read_text()))
