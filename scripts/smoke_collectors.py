@@ -151,8 +151,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     os.umask(0o077)
-    args.output = checked_directory(args.output)
-    args.output.mkdir(parents=True, exist_ok=False)
+    output = checked_directory(args.output)
+    output.mkdir(parents=True, exist_ok=False)
     with tempfile.TemporaryDirectory(prefix="fh-collectors-", dir="/tmp") as directory:
         root = Path(directory) / "control"
         private = Path(directory) / "private"
@@ -198,24 +198,24 @@ def main():
                 "jaeger": stack.ports[16686], "trace": observations[0][0],
                 "signoz": stack.ports[8080] if args.stack == "both" else None,
                 "dashboard": dashboard_id if args.stack == "both" else None,
-                "password": password, "output": str(args.output.resolve())}, private=True)
+                "password": password, "output": str(output)}, private=True)
             try:
                 run_browser(["node", str(ROOT / "tools/collector-browser/check.cjs")], cwd=private)
             finally:
                 browser_input.unlink()
             collector_lifecycle.verify(stack, request, metric)
             assert CANARY not in stack.command("logs", stack.names["fluxheim"])
-            write(args.output, "summary.json", {"schema": 1, "passed": True, "stack": args.stack,
+            write(output, "summary.json", {"schema": 1, "passed": True, "stack": args.stack,
                 "images": stack.images, "candidate_image": image, "correlated_traces": len(observations),
                 "sink_failure_observed": True, "graceful_shutdown_under_traffic": True})
             print("required collector gate: passed")
         except Exception as error:
             if isinstance(error, subprocess.CalledProcessError):
-                write(args.output, "command.private.log", (error.stderr or "").replace(password, "[redacted]").replace(CANARY, "[canary]"), private=True)
+                write(output, "command.private.log", (error.stderr or "").replace(password, "[redacted]").replace(CANARY, "[canary]"), private=True)
             for role, name in stack.names.items():
                 try:
                     log = stack.command("logs", name)
-                    write(args.output, role + ".private.log", log.replace(password, "[redacted]").replace(CANARY, "[canary]"), private=True)
+                    write(output, role + ".private.log", log.replace(password, "[redacted]").replace(CANARY, "[canary]"), private=True)
                 except (OSError, subprocess.SubprocessError):
                     pass
             raise

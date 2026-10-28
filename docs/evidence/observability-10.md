@@ -241,3 +241,16 @@ rootless Podman wrapper passed with evidence under
 and trace browsers, stored signals, sink faults, collector recovery and
 graceful shutdown. All owned containers were removed. No Rust, Cargo/npm
 dependency lockfile or image pin changed.
+
+GitHub subsequently marked `#425` and `#429` fixed on `5479c99d`. Its Python
+analysis reported follow-up warnings `#430`/`#431` at output-directory creation
+and redundant path resolution. The validated output is now kept in a separate
+local variable, never assigned back onto the raw CLI namespace, and its already
+absolute value is passed directly to the browser. A new regression confirms
+unapproved output paths are rejected before any mkdir or candidate access.
+No path restrictions or earlier symlink/inode protections were relaxed.
+
+The follow-up passed 46 Python regressions, 8 Node input tests, compilation
+and diff/link checks, and another complete live wrapper run. Its summary and
+four browser screenshots are in the ignored directory
+`release-reports/observability-10-codeql-output-20261028`.

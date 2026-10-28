@@ -19,6 +19,14 @@ import smoke_collectors
 
 
 class CollectorTests(unittest.TestCase):
+    def test_unapproved_output_is_rejected_before_mkdir_or_container_access(self):
+        with patch.object(os.sys, "argv", ["smoke", "--image", "test", "--output", "/tmp-escape/proof"]), \
+                patch.object(Path, "mkdir") as mkdir, patch.object(stack.Stack, "candidate") as candidate:
+            with self.assertRaises(ValueError):
+                smoke_collectors.main()
+        mkdir.assert_not_called()
+        candidate.assert_not_called()
+
     def test_collector_directories_are_bounded_by_real_directory_boundaries(self):
         for path in ("/", "/etc", "/home", "/tmp", "/tmp-evil/run", "/tmp/../../etc",
                      collector_files.EVIDENCE_ROOT, str(collector_files.EVIDENCE_ROOT) + "-evil/run"):
