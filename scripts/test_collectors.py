@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 
 import collector_configs
 import collector_files
+import collector_lifecycle
 import collector_logs
 import collector_signoz
 import collector_stack as stack
@@ -18,6 +19,78 @@ import smoke_collectors
 
 
 class CollectorTests(unittest.TestCase):
+    def test_current_log_identity_accepts_unchanged_regular_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.log"
+            path.write_text("original")
+            with collector_files.open_runtime_file(path) as stream:
+                collector_files.assert_current_runtime_file(path, stream)
+
+    def test_current_log_identity_rejects_replacement_and_unsafe_leaves(self):
+        for replacement in ("regular", "symlink", "hardlink", "fifo", "directory", "missing"):
+            with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path = root / "events.log"
+                path.write_text("original")
+                outside = root / "outside"
+                outside.write_text("untouched")
+                outside.chmod(0o640)
+                with collector_files.open_runtime_file(path) as stream:
+                    path.rename(root / "old.log")
+                    if replacement == "regular":
+                        path.write_text("original")  # Equal content/size is not identity.
+                    elif replacement == "symlink":
+                        path.symlink_to(outside)
+                    elif replacement == "hardlink":
+                        os.link(root / "old.log", path)
+                    elif replacement == "fifo":
+                        os.mkfifo(path)
+                    elif replacement == "directory":
+                        path.mkdir()
+                    with self.assertRaises(AssertionError):
+                        collector_files.assert_current_runtime_file(path, stream)
+                self.assertEqual(outside.read_text(), "untouched")
+                self.assertEqual(outside.stat().st_mode & 0o777, 0o640)
+
+    def test_lifecycle_rejects_log_replacement_during_fault_and_recovery(self):
+        for swap_request in (1, 2):
+            with self.subTest(swap_request=swap_request), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "logs").mkdir()
+                path = root / "logs/events.log"
+                path.write_text("original")
+                path.chmod(0o600)
+                fixture = Mock(data=root)
+                calls = []
+                def request(_):
+                    calls.append(1)
+                    if len(calls) == swap_request:
+                        path.rename(root / "logs/old.log")
+                        path.write_text("candidate resumed on a new log")
+                    return "trace", "request", {"status": 200}
+                with self.assertRaisesRegex(AssertionError, "pathname was replaced"):
+                    collector_lifecycle.verify(fixture, request, Mock(side_effect=[0, 1]))
+                self.assertEqual((root / "logs/old.log").read_text(), "original")
+                self.assertEqual((root / "logs/old.log").stat().st_mode & 0o777, 0o600)
+                self.assertEqual(path.read_text(), "candidate resumed on a new log")
+                fixture.stop.assert_not_called()
+
+    def test_lifecycle_still_rejects_growth_of_the_original_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "logs").mkdir()
+            path = root / "logs/events.log"
+            path.write_text("original")
+            calls = []
+            def request(_):
+                calls.append(1)
+                if len(calls) == 2:
+                    with path.open("a") as stream:
+                        stream.write(" resumed")
+                return "trace", "request", {"status": 200}
+            with self.assertRaisesRegex(AssertionError, "failed sink silently resumed"):
+                collector_lifecycle.verify(Mock(data=root), request, Mock(side_effect=[0, 1]))
+
     def test_control_creation_never_overwrites_existing_files_or_links(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

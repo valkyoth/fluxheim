@@ -55,3 +55,21 @@ def open_runtime_file(path, mode="rb"):
     except BaseException:
         os.close(fd)
         raise
+
+
+def assert_current_runtime_file(path, stream):
+    """Reject stale-descriptor evidence without following the current leaf."""
+    component(path.name)
+    try:
+        parent = directory_fd(path.parent)
+        try:
+            current = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        finally:
+            os.close(parent)
+    except OSError as error:
+        raise AssertionError("runtime log pathname cannot be verified") from error
+    pinned = os.fstat(stream.fileno())
+    if any(not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 for info in (current, pinned)):
+        raise AssertionError("runtime log was replaced by an unsafe object")
+    if (current.st_dev, current.st_ino) != (pinned.st_dev, pinned.st_ino):
+        raise AssertionError("runtime log pathname was replaced")

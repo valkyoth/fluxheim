@@ -170,3 +170,41 @@ no reported advisories). No Rust, Cargo manifest/lockfile or image pin changed.
 The processed pentest file was removed after qualification.
 The original Docker collector job passed in GitHub run `40736944356`; that
 does not substitute for rerunning CI on the remediation commit.
+
+## Pentest Follow-Up: Log Identity
+
+Retest of `5170d330` confirmed the host-overwrite fix but identified stale-inode
+evidence in the sink-failure check. The pinned handle was safe to modify, yet
+an unchanged old file could hide resumed logging to a replaced `events.log`.
+
+The harness now checks the current leaf without following symlinks, verifies
+single-link regular-file metadata and compares device/inode with the pinned
+descriptor around fault/recovery observations. Missing paths fail immediately.
+The existing size check remains, and all permission changes still use the
+validated descriptor. No pathname-based write/chmod or writable control mount
+was reintroduced.
+
+Regression coverage includes unchanged files, equal-content replacement files,
+symlinks, hard links, FIFOs, directories, missing paths, replacement during both
+fault and recovery requests, and resumed writes to the original inode. These
+are bounded checks of observed behavior, not continuous filesystem monitoring
+or independent provenance for a hostile candidate.
+
+Qualification on 2026-10-28:
+
+```sh
+sh scripts/check_collectors.sh release-reports/observability-10-inode-retest-20261028
+```
+
+Both real collector/browser stacks, stored signals, fault/recovery checks,
+the strengthened log-sink check and graceful shutdown under traffic passed.
+The ignored evidence directory contains the summary and four screenshots;
+all owned containers were removed. The 42 collector regressions (including
+the earlier host-file protection tests), 72 observability unit tests and
+compile-fail doc test, 4 baseline tests, strict observability Clippy, Python
+compilation, dashboard drift, documentation layout/links and diff checks
+passed. Cargo audit reported no advisories across 449 dependencies.
+
+No Rust runtime, dependency or image changes were required. `PENTEST.md` was
+removed after qualification. Exact-commit GitHub checks and pentest retest
+remain required before progressing to Commit 11.

@@ -75,6 +75,12 @@ not a later pathname reopen or chmod. Symlinks, hard-linked evidence and special
 files are rejected. These controls prevent guest-planted paths from redirecting
 host operations; they do not replace the container engine's isolation or make
 this fixture a general-purpose hostile-code sandbox.
+The sink-failure check also compares the current log pathname's device/inode
+with its pinned handle around fault/recovery observations. Missing, replaced
+or unsafe leaves fail qualification, rather than treating an unchanged old
+inode as proof that logging did not resume. Permission changes remain
+handle-based. These are bounded observations, not continuous filesystem
+monitoring or independent proof against a deliberately deceptive candidate.
 
 Checks include actual HTTP/HTTPS and PHP responses, cache misses and hits,
 untrusted upstream certificates, failed FastCGI connections, stored request
