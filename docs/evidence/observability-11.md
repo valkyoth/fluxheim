@@ -182,3 +182,36 @@ one. Commit 12 must rerun affected native/container gates on the final candidate
 Commit 13 documentation acceptance, independent pentest and green exact-SHA CI
 are still required. No new security, signing, durable-audit or reproducibility
 guarantee is inferred from a successful build or its checksum.
+
+## Code Scanning Follow-Up
+
+CodeQL alerts 433 through 441 reported a dynamic regular expression and
+CLI-derived paths reaching native executable inspection and process launch.
+The expected archive bundle name now identifies input members only: verified
+payloads are extracted beneath a fixed `payload` directory in the private test
+fixture. Executable selection accepts only the six literal Fluxheim filenames
+and rejects non-regular or multiply linked files before architecture inspection.
+Profile directories come from the fixed profile list. Commit identity matching
+uses a fixed regular expression followed by plain string comparison.
+
+No alert suppression, shell execution, archive-validation relaxation, Rust
+source change, or dependency update is involved. Traversal/link rejection,
+TAR/ZIP equivalence, extraction rehashing, exclusive creation, size bounds and
+native architecture checks remain enforced. The host owner and qualified build
+inputs remain trusted; these tests do not sandbox arbitrary executable payloads.
+
+Follow-up validation against the same `4b4864c0` runtime archives passed:
+
+- 20 archive/controller regression tests on Linux x86_64, Linux ARM64, macOS
+  Apple Silicon and native Windows x86_64.
+- All seven extracted profiles on each of those four platforms.
+- Eight real collector tests: full and Wasm on every platform, including
+  collector stop/restart and fresh stored metrics/traces after recovery.
+- Real external PHP-FPM over HTTP and HTTPS on Linux x86_64, Linux ARM64 and
+  macOS using the extracted PHP archive.
+- 46 collector-harness tests, 12 rotation-fixture tests (one Windows-only case
+  skipped in the Linux unit run), four documentation-layout tests, portable-plan
+  and PowerShell release-policy validation, and Python compilation.
+
+Exact-SHA GitHub CodeQL remains the authority for confirming alert closure;
+the native checks above validate behavior, not the analyzer's classification.

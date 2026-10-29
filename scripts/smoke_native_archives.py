@@ -225,6 +225,12 @@ def live(binary, profile):
         other.join(timeout=5)
 
 
+def matches_identity(identity, version, commit):
+    return (re.fullmatch(r"[0-9a-f]{40}", commit) is not None
+            and identity.startswith(f"fluxheim {version} (") and "dirty" not in identity
+            and commit[:8] in re.findall(r"g([0-9a-f]{8})(?=[)-]|$)", identity))
+
+
 def run(args):
     label = TARGET_LABELS[args.target]
     host = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}[platform.system()]
@@ -233,11 +239,11 @@ def run(args):
         raise ValueError("qualification must run on the matching native host")
     if not re.fullmatch(r"[0-9a-f]{40}", args.commit):
         raise ValueError("expected full candidate commit")
-    rows = release_plan(args.version, host, args.target)
     report = {"commit": args.commit, "version": args.version, "target": args.target,
               "host": platform.platform(), "profiles": {}}
     with private_fixture(fixture_parent(False)) as root:
-        for profile, (bundle, _, binaries) in zip(PROFILES, rows):
+        for profile in PROFILES:
+            bundle, _, binaries = release_plan(args.version, host, args.target, profile)[0]
             tar, zip_ = args.dist / (bundle + ".tar.gz"), args.dist / (bundle + ".zip")
             extracted = extract_pair(tar, zip_, bundle, root / profile)
             identities = {}
@@ -246,8 +252,7 @@ def run(args):
                 result = subprocess.run([str(binary), "--version"], check=True, text=True,
                                         capture_output=True, timeout=20)
                 identity = result.stdout.strip()
-                if (not identity.startswith(f"fluxheim {args.version} (") or "dirty" in identity
-                        or not re.search(r"g" + args.commit[:8] + r"(?:[)-]|$)", identity)):
+                if not matches_identity(identity, args.version, args.commit):
                     raise ValueError("archive version or commit identity mismatch: " + identity)
                 identities[name] = identity
             if profile == "config-tester":
@@ -261,7 +266,7 @@ def run(args):
                 validate(binary, config, False)
                 proof = {"config_validation": True}
             else:
-                binary = extracted / ("fluxheim.exe" if host == "windows" else "fluxheim")
+                binary = executable(extracted, "fluxheim.exe" if host == "windows" else "fluxheim", label)
                 proof = {"platform": live(binary, profile), "http_https": True,
                          "capabilities": True, "unsupported_config": True,
                          "graceful_stop_with_traffic": True,

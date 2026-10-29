@@ -12,6 +12,14 @@ MAX_FILES = 4096
 MAX_FILE = 512 * 1024 * 1024
 MAX_TOTAL = 2 * 1024 * 1024 * 1024
 RESERVED = re.compile(r"(?:con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\..*)?", re.I)
+EXECUTABLES = {
+    "fluxheim": "fluxheim",
+    "fluxheim-acme": "fluxheim-acme",
+    "fluxheim-config-tester": "fluxheim-config-tester",
+    "fluxheim.exe": "fluxheim.exe",
+    "fluxheim-acme.exe": "fluxheim-acme.exe",
+    "fluxheim-config-tester.exe": "fluxheim-config-tester.exe",
+}
 
 
 def member_path(name, bundle):
@@ -67,6 +75,8 @@ def inventory(archive, bundle):
                 size = entry.size
             if directory:
                 continue
+            if len(relative.parts) < 2:
+                raise ValueError("archive root must be a directory")
             total += size
             if total > MAX_TOTAL:
                 raise ValueError("archive exceeds total size limit")
@@ -83,6 +93,10 @@ def extract_pair(tar_path, zip_path, bundle, destination):
     if inventory(zip_path, bundle) != expected:
         raise ValueError("tar/ZIP payload mismatch")
     destination.mkdir(mode=0o700)  # Must be a fresh, caller-owned private directory.
+    # The archive's CLI-derived bundle name identifies input content only. Never
+    # carry it into the directory from which we select and execute programs.
+    payload = destination / "payload"
+    payload.mkdir(mode=0o700)
     with zipfile.ZipFile(zip_path) as source:
         seen = set()
         for entry in source.infolist():
@@ -93,7 +107,7 @@ def extract_pair(tar_path, zip_path, bundle, destination):
             if key not in expected or key in seen or entry.file_size != expected[key][0]:
                 raise ValueError("ZIP changed during verification")
             seen.add(key)
-            target = destination / relative
+            target = payload.joinpath(*relative.parts[1:])
             target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             value = hashlib.sha256()
             remaining = entry.file_size
@@ -110,7 +124,7 @@ def extract_pair(tar_path, zip_path, bundle, destination):
             target.chmod(0o600)
         if seen != set(expected):
             raise ValueError("ZIP lost members during verification")
-    return destination / bundle
+    return payload
 
 
 def architecture(binary):
@@ -134,7 +148,12 @@ def architecture(binary):
 
 
 def executable(bundle, name, label):
-    binary = bundle / name
+    if name not in EXECUTABLES:
+        raise ValueError("unexpected archive executable name")
+    binary = bundle / EXECUTABLES[name]
+    info = binary.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise ValueError("archive executable must be a single-link regular file")
     if architecture(binary) != label:
         raise ValueError("archive executable architecture mismatch")
     if os.name != "nt":

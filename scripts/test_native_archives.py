@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Negative archive fixtures must fail before executing their payloads."""
 import io
+import os
 from pathlib import Path
 import stat
 import struct
@@ -11,7 +12,7 @@ from unittest.mock import patch
 import zipfile
 
 import native_archive as archive
-from smoke_native_archives import CAPABILITIES
+from smoke_native_archives import CAPABILITIES, matches_identity
 from portable_release_plan import PROFILES
 from smoke_native_collector import acknowledged
 
@@ -36,7 +37,62 @@ class Archives(unittest.TestCase):
     def test_equivalent_payload_extracts(self):
         self.pair()
         result = archive.extract_pair(self.tar, self.zip, self.bundle, self.root / "extracted")
+        self.assertEqual(result, self.root / "extracted" / "payload")
         self.assertEqual((result / "fluxheim").read_bytes(), b"fixture")
+
+    def test_bundle_name_does_not_select_execution_directory(self):
+        self.bundle = "fluxheim-1.9.0-full-test"
+        self.pair(name=self.bundle + "/fluxheim")
+        result = archive.extract_pair(self.tar, self.zip, self.bundle, self.root / "extracted")
+        self.assertEqual(result, self.root / "extracted" / "payload")
+        self.assertFalse((self.root / "extracted" / self.bundle).exists())
+
+    def test_root_cannot_be_a_regular_file(self):
+        self.pair(name=self.bundle)
+        for path in (self.tar, self.zip):
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, "root"):
+                archive.inventory(path, self.bundle)
+
+    def test_executable_names_are_literal_and_checked_before_access(self):
+        for name in ("../fluxheim", "/fluxheim", "fluxheim --version", "cmd.exe", "Fluxheim.exe", "fluxheim:stream"):
+            with self.subTest(name=name), patch.object(archive, "architecture") as inspect:
+                with self.assertRaisesRegex(ValueError, "unexpected"):
+                    archive.executable(self.root / "missing", name, "x86_64-linux")
+                inspect.assert_not_called()
+
+    def test_executable_rejects_directory_and_hard_link(self):
+        binary = self.root / "fluxheim"
+        binary.mkdir()
+        with self.assertRaisesRegex(ValueError, "regular file"):
+            archive.executable(self.root, "fluxheim", "x86_64-linux")
+        binary.rmdir()
+        binary.write_bytes(b"fixture")
+        os.link(binary, self.root / "alias")
+        with self.assertRaisesRegex(ValueError, "single-link"):
+            archive.executable(self.root, "fluxheim", "x86_64-linux")
+
+    def test_all_allowed_executables_are_architecture_checked(self):
+        for name in archive.EXECUTABLES:
+            (self.root / name).write_bytes(b"fixture")
+            with self.subTest(name=name), patch.object(archive, "architecture", return_value="x86_64-linux") as inspect:
+                self.assertEqual(archive.executable(self.root, name, "x86_64-linux"), self.root / name)
+                inspect.assert_called_once_with(self.root / name)
+            with patch.object(archive, "architecture", return_value="aarch64-linux"):
+                with self.assertRaisesRegex(ValueError, "architecture mismatch"):
+                    archive.executable(self.root, name, "x86_64-linux")
+
+    def test_identity_comparison_never_interprets_commit_as_regex(self):
+        commit = "a" * 40
+        identity = "fluxheim 1.9.0 (qualification-gaaaaaaaa)"
+        self.assertTrue(matches_identity(identity, "1.9.0", commit))
+        for bad in (".*", "a" * 8 + "." * 32, "b" * 40, "a" * 41, "A" * 40):
+            with self.subTest(commit=bad):
+                self.assertFalse(matches_identity(identity, "1.9.0", bad))
+        for bad in ("fluxheim 1.8.3 (qualification-gaaaaaaaa)",
+                    "fluxheim 1.9.0 (qualification-gaaaaaaaa-dirty)",
+                    "fluxheim 1.9.0 (qualification-gaaaaaaaaa)"):
+            with self.subTest(identity=bad):
+                self.assertFalse(matches_identity(bad, "1.9.0", commit))
 
     def test_changed_payload_rejected(self):
         self.pair(zip_content=b"changed")
