@@ -1,7 +1,7 @@
 # 1.9.0 Observability Commit Plan
 
-Status: Commits 01-10 and 07A accepted for progression; Commit 10A implemented
-and locally qualified, awaiting pentest and GitHub acceptance, 2026-10-29.
+Status: Commits 01-10, 07A and 10A accepted for progression; Commit 11 implemented
+and natively qualified, awaiting pentest and GitHub acceptance, 2026-10-29.
 Main stays at **1.9.0
 (unreleased)**. This document replaces the earlier ten-checkpoint outline;
 no previously accepted implementation checkpoint is being renumbered.
@@ -597,9 +597,9 @@ sanitized failure evidence without dumping secrets.
 
 Suggested subject: `fix(acme): scope renewal validation and enforce server feature parity`.
 
-Status: implemented after Commit 10 acceptance, with local packaged renewal
-proof on 2026-10-29. Pentest and exact-SHA GitHub acceptance remain required;
-see [evidence](../evidence/observability-10a.md). Keep this checkpoint before
+Status: accepted for progression through `4b4864c0` after the owner reported
+clean pentest and green GitHub and authorized Commit 11 on 2026-10-29.
+See [evidence](../evidence/observability-10a.md). Keep this checkpoint before
 Commit 11 native qualification; do not renumber existing checkpoints.
 
 Operator value: renew certificates using the server configuration without
@@ -867,12 +867,12 @@ collector behavior is not the new required-collector acceptance contract.
 | 08 - Export | Accepted for progression | User supplied clean pentest through fa2f5381; Rust CI run 40390306858 and code-scanning workflow green on that SHA; user authorized 09. [Exporter evidence](../evidence/observability-08.md). |
 | 09 - Read-only API | Accepted for progression | Owner reported clean retest and green GitHub on `76faa3ca`. [Operational contract](../guides/operational-status.md) and [qualification evidence](../evidence/observability-09.md). No complete management API or UI is claimed. |
 | 10 - Live containers/collectors | Accepted for progression | Owner reported clean pentest, green GitHub and resolved scanning alerts through `76c938bc`, then authorized 10A. [Collector integration guide](../guides/collector-integrations.md), importable dashboards and [qualification evidence](../evidence/observability-10.md). |
-| 10A - ACME validation scope / server feature parity | Implemented; acceptance pending | Released-image failures reproduced; four packaged renewals with real HTTP-01 validation passed locally. [Evidence](../evidence/observability-10a.md). Pentest and exact-SHA CI remain required before Commit 11 qualification. |
-| 11 - Native archives | Not started | Pending |
+| 10A - ACME validation scope / server feature parity | Accepted for progression | Owner reported clean pentest and green GitHub through `4b4864c0`, then authorized Commit 11. [Evidence](../evidence/observability-10a.md). |
+| 11 - Native archives | Implemented; acceptance pending | All seven profiles built/extracted/executed on four native targets; real collector outage/recovery, external PHP and packaged Wasm passed. [Evidence and scope](../evidence/observability-11.md). Pentest and exact-SHA CI remain required. |
 | 12 - Observability docs / candidate qualification | Not started | Pending |
 | 13 - Documentation / final release acceptance | Not started | Pending |
 
-Commit 10 is accepted for progression. Commit 10A is the current checkpoint.
+Commit 10A is accepted for progression. Commit 11 is the current checkpoint.
 Stop for pentest, green GitHub checks and explicit approval before proceeding
-to Commit 11.
+to Commit 12.
 No licensing purchase or changes to another project's VM are authorized.

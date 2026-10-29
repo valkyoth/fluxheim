@@ -113,6 +113,8 @@ a guide explicitly says otherwise.
 - [Observability Commit 09 operational API qualification](evidence/observability-09.md)
 - [Observability Commit 10 collector qualification](evidence/observability-10.md)
 - [Commit 10A ACME scope and packaged renewal qualification](evidence/observability-10a.md)
+- [Commit 11 native packages and real collector qualification](evidence/observability-11.md)
+- [Commit 11 native archive identities and checksums](evidence/observability-11-archives.json)
 - [Observability Commit 04 fatal-abort remediation](evidence/observability-04-fatal.md)
 - [Observability Commit 04 watchdog and critical-exit retest](evidence/observability-04-watchdog.md)
 - [Observability Commit 04 core dump deployment policy](evidence/observability-04-core-limits.md)
