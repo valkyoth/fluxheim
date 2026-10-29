@@ -18,7 +18,9 @@ PYTHON = "docker.io/library/python@sha256:281d39ff02e3b389401586134ff9e657295468
 
 
 def command(args, *, check=True, data=None, timeout=180):
-    result = subprocess.run(args, input=data, text=True, capture_output=True, timeout=timeout)
+    executable = {"podman": "podman", "docker": "docker", "openssl": "openssl"}[args[0]]
+    result = subprocess.run([executable, *args[1:]], input=data, text=True,
+                            capture_output=True, timeout=timeout)
     if check and result.returncode:
         raise RuntimeError(f"command failed ({result.returncode}): {result.stdout}\n{result.stderr}")
     return result
@@ -135,7 +137,7 @@ class Smoke:
     def image(self, value):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9./_:@-]{0,255}", value):
             raise ValueError("invalid image reference")
-        identity = json.loads(command([self.runtime, "image", "inspect", value]).stdout)[0]["Id"]
+        identity = json.loads(command([self.runtime, "image", "inspect", "--", value]).stdout)[0]["Id"]
         if not re.fullmatch(r"(?:sha256:)?[0-9a-f]{64}", identity):
             raise ValueError("container engine did not return an immutable image ID")
         return identity

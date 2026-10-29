@@ -92,10 +92,26 @@ class AcmeSmokeTests(unittest.TestCase):
 
     def test_helpers_use_timeout_and_never_invoke_a_shell(self):
         with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "ok", "")) as run:
-            smoke.command(["tool", "literal argument"])
-            self.assertEqual(run.call_args.args[0], ["tool", "literal argument"])
+            smoke.command(["openssl", "literal argument"])
+            self.assertEqual(run.call_args.args[0], ["openssl", "literal argument"])
             self.assertEqual(run.call_args.kwargs["timeout"], 180)
             self.assertNotIn("shell", run.call_args.kwargs)
+
+    def test_command_boundary_rejects_unlisted_executables(self):
+        with patch.object(smoke.subprocess, "run") as run:
+            for executable in ("sh", "/tmp/docker", "docker --privileged", "openssl\n"):
+                with self.assertRaises(KeyError):
+                    smoke.command([executable, "argument"])
+            run.assert_not_called()
+
+    def test_image_reference_is_only_an_operand_and_returns_engine_identity(self):
+        instance = self.instance()
+        identity = "sha256:" + "a" * 64
+        with patch.object(smoke, "command", return_value=subprocess.CompletedProcess(
+                [], 0, json.dumps([{"Id": identity}]), "")) as run:
+            self.assertEqual(instance.image("registry.test/image:tag"), identity)
+        self.assertEqual(run.call_args.args[0],
+                         ["podman", "image", "inspect", "--", "registry.test/image:tag"])
 
     def test_ca_evidence_requires_distinct_challenges_and_success(self):
         attempts = ["Attempting to validate w/ HTTP: http://scope.example.test:5002/"

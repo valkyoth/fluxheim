@@ -158,3 +158,20 @@ HTTP-01 issuances using the previously qualified packaged binaries and the
 revised fixture layout. Exact-follow-up-SHA Docker CI and CodeQL results remain
 required; this does not claim a local Docker execution. No Rust source or
 dependency changed in this follow-up.
+
+### Command Boundary Follow-Up
+
+The Python SARIF analysis for `4cb9432e` retained alert 432 and identifies both
+CLI image references flowing through `image inspect` into the generic command
+helper. The constructor's runtime allowlist remains useful, but did not close
+this remaining flow. The helper now independently selects its executable from
+the literal `podman`, `docker` and `openssl` allowlist and constructs the command
+with that selected executable. Image inspection also places `--` before the
+validated image operand. Neither image regex nor returned immutable-ID checks
+are relaxed, and shell evaluation remains disabled.
+
+Fifteen harness tests and all four live rootless Podman HTTP-01 renewals passed
+with this follow-up. Added tests exercise rejection at the subprocess boundary
+and the image operand separator. No Rust or dependency changes are involved.
+The exact-commit scanner result must confirm alert closure; local tests alone
+are not evidence of CodeQL acceptance.
