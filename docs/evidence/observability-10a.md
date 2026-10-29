@@ -126,3 +126,35 @@ focused profile/config tests. Local evidence uses Podman, not Docker. Native
 Windows/macOS and extracted archive qualification are not claimed here; the
 existing CI gates and Commit 11 platform matrix remain required. No Cargo
 manifest, lockfile or third-party runtime dependency changed.
+
+## CI Fixture Follow-Up
+
+The owner reported a clean pentest for `76c938bc..5e00d08b`. The subsequent
+GitHub Docker gate correctly rejected a fixture bind-mounted from the runner:
+rootful Docker preserves the host file owner, which is neither container root
+nor the service UID. The expected missing-cache diagnostic was therefore never
+reached. Rootless Podman had mapped the host owner to container root, hiding
+this fixture difference locally. Production path checks were not changed.
+
+The harness now copies its four config/CA inputs into an owned engine volume
+using a network-disabled initializer running as container root, without
+preserving the host owner. Its only host mounts are individual read-only inputs;
+the initializer cannot modify host control files. Server and renewal containers
+mount the populated control volume read-only and still run as UID 65532.
+The live gate asserts config/CA ownership and mode `644:0`, in addition to the
+existing `600:65532` private-key assertion. Cleanup covers both owned volumes.
+
+CodeQL alert 432 also identified the CLI runtime selector reaching command
+execution. The constructor now maps that selector to the literal `podman` or
+`docker` executable; unsupported selectors fail before fixture/tool execution,
+including when callers bypass argparse. Image-reference and immutable-ID
+validation remain intact. No alert suppression or production security exception
+was added.
+
+Follow-up validation: 13 harness tests passed, including selector rejection,
+copy ownership semantics, read-only/non-root consumer mounts and cleanup after
+a container error. The live rootless Podman workflow passed all four fresh
+HTTP-01 issuances using the previously qualified packaged binaries and the
+revised fixture layout. Exact-follow-up-SHA Docker CI and CodeQL results remain
+required; this does not claim a local Docker execution. No Rust source or
+dependency changed in this follow-up.

@@ -102,22 +102,35 @@ def fixtures(root):
 
 class Smoke:
     def __init__(self, runtime, root):
-        self.runtime = runtime
+        self.runtime = {"podman": "podman", "docker": "docker"}[runtime]
         self.control = fixtures(root)
         self.prefix = "fh-acme-scope-" + secrets.token_hex(6)
         self.names = []
         self.anchor = self.prefix + "-ca"
         self.volume = self.prefix + "-state"
-        self.volume_created = False
+        self.control_volume = self.prefix + "-control"
+        self.volumes = []
 
     def prepare_state(self, image):
-        command([self.runtime, "volume", "create", self.volume])
-        self.volume_created = True
+        for volume in (self.volume, self.control_volume):
+            command([self.runtime, "volume", "create", volume])
+            self.volumes.append(volume)
         name = self.prefix + "-permissions"
         self.names.append(name)
         command([self.runtime, "run", "--name", name, "--network=none", "--user=0",
                  "--entrypoint=/bin/chown", "-v", f"{self.volume}:/state",
                  image, "65532:65532", "/state"])
+        # Rootful Docker preserves the host UID on bind mounts. Copy (without
+        # preserving ownership) into an engine volume, then mount it read-only.
+        name = self.prefix + "-fixtures"
+        self.names.append(name)
+        sources = ("renew.toml", "server.toml", "cache.toml", "ca.pem")
+        mounts = [argument for source in sources
+                  for argument in self.mount(source, "/input/" + source)]
+        command([self.runtime, "run", "--name", name, "--network=none", "--user=0",
+                 "--security-opt", "no-new-privileges", "--entrypoint=/bin/cp",
+                 *mounts, "-v", f"{self.control_volume}:/control", image, "--",
+                 *["/input/" + source for source in sources], "/control/"])
 
     def image(self, value):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9./_:@-]{0,255}", value):
@@ -149,9 +162,9 @@ class Smoke:
                 for source in ("frontend.py", "ca.pem", "server.pem", "server.key"):
                     cmd += self.mount(source, "/fixture/" + source)
             else:
-                cmd += self.mount(config, "/etc/fluxheim/test.toml")
-                cmd += self.mount("ca.pem", "/etc/fluxheim/ca.pem")
-                cmd += ["-v", f"{self.volume}:/var/lib/fluxheim/acme"]
+                cmd += ["-v", f"{self.control_volume}:/etc/fluxheim:ro",
+                        "-v", f"{self.volume}:/var/lib/fluxheim/acme"]
+                args = ["--config", "/etc/fluxheim/" + config, *args]
         if entry:
             cmd += ["--entrypoint", entry]
         command([*cmd, image, *args])
@@ -168,10 +181,13 @@ class Smoke:
                 command([self.runtime, "rm", "-f", "-v", name], timeout=30)
             except (OSError, subprocess.SubprocessError, RuntimeError):
                 failures.append(name)
-        if self.volume_created:
-            command([self.runtime, "volume", "rm", self.volume], timeout=30)
+        for volume in reversed(self.volumes):
+            try:
+                command([self.runtime, "volume", "rm", volume], timeout=30)
+            except (OSError, subprocess.SubprocessError, RuntimeError):
+                failures.append(volume)
         if failures:
-            raise RuntimeError("failed to clean owned containers: " + ", ".join(failures))
+            raise RuntimeError("failed to clean owned resources: " + ", ".join(failures))
 
 
 def expect_failure(result, fragment):
@@ -216,11 +232,10 @@ def qualify(smoke, full, php, legacy):
     # Detect unexpected CA terms rather than silently accepting changes.
     if directory["meta"]["termsOfService"] != "https://localhost:14000/terms":
         raise AssertionError(f"unexpected test CA terms: {directory['meta']['termsOfService']}")
-    base = ["--config", "/etc/fluxheim/test.toml"]
     if legacy:
-        expect_failure(smoke.launch("legacy-full", full, [*base, "acme-renew"]), "php_fpm_binary")
-        expect_failure(smoke.launch("legacy-php", php, [*base, "acme-renew"]), "cache module not compiled")
-        gateway = smoke.launch("legacy-gateway", php, base, wait=False)
+        expect_failure(smoke.launch("legacy-full", full, ["acme-renew"]), "php_fpm_binary")
+        expect_failure(smoke.launch("legacy-php", php, ["acme-renew"]), "cache module not compiled")
+        gateway = smoke.launch("legacy-gateway", php, [], wait=False)
         http_port = int(info["NetworkSettings"]["Ports"]["5002/tcp"][0]["HostPort"])
         for _ in range(100):
             connection = http.client.HTTPConnection("127.0.0.1", http_port, timeout=2)
@@ -240,11 +255,15 @@ def qualify(smoke, full, php, legacy):
             raise AssertionError("legacy startup did not serve PHP: " + logs.stdout + logs.stderr)
         print("released-image renewal failures reproduced; legacy PHP gateway serves the same config", flush=True)
         return
-    gateway = smoke.launch("gateway", full, base, config="server.toml", wait=False)
+    gateway = smoke.launch("gateway", full, [], config="server.toml", wait=False)
+    ownership = command([smoke.runtime, "exec", gateway, "stat", "-c", "%a:%u",
+                         "/etc/fluxheim/server.toml", "/etc/fluxheim/ca.pem"]).stdout.splitlines()
+    if ownership != ["644:0", "644:0"]:
+        raise AssertionError("config/CA fixtures must be root-owned and not group/world writable")
     for index, flags in enumerate(([], ["--validate-config"], ["--check-config"])):
-        expect_failure(smoke.launch(f"server-cache-{index}", php, [*base, *flags], config="cache.toml"),
+        expect_failure(smoke.launch(f"server-cache-{index}", php, flags, config="cache.toml"),
                        "cache module not compiled")
-        expect_failure(smoke.launch(f"server-php-{index}", full, [*base, *flags]), "php_fpm_binary")
+        expect_failure(smoke.launch(f"server-php-{index}", full, flags), "php_fpm_binary")
     serials = set()
     segment = "scope-" + hashlib.sha256(b"scope").hexdigest()[:16]
     certificate_dir = "/var/lib/fluxheim/acme/certificates/" + segment
@@ -254,7 +273,7 @@ def qualify(smoke, full, php, legacy):
         (full, "/usr/local/bin/fluxheim-acme", ["renew", "--force-renew", "--no-reload"]),
         (php, "/usr/local/bin/fluxheim-acme", ["renew", "--force-renew", "--no-reload"]),
     )):
-        code, logs = smoke.launch(f"renew-{index}", image, [*base, *args], entry=entry)
+        code, logs = smoke.launch(f"renew-{index}", image, args, entry=entry)
         if code or "renewed: scope" not in logs or "challenges=1" not in logs:
             raise AssertionError(f"renewal {index} failed: {code}\n{logs}")
         certificate = command([smoke.runtime, "exec", gateway, "cat", certificate_dir + "/fullchain.pem"]).stdout
@@ -268,7 +287,7 @@ def qualify(smoke, full, php, legacy):
         if mode != "600:65532":
             raise AssertionError("installed private key permissions changed")
         print(f"renewal {index}: issued and installed, real HTTP-01 challenge passed", flush=True)
-    code, logs = smoke.launch("not-due", full, [*base, "acme-renew"])
+    code, logs = smoke.launch("not-due", full, ["acme-renew"])
     if code or "acme attempted: 0" not in logs:
         raise AssertionError("installed certificate was not observed as valid")
     ca_logs = command([smoke.runtime, "logs", smoke.anchor])

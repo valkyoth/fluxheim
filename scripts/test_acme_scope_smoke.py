@@ -13,6 +13,57 @@ import smoke_acme_scope as smoke
 
 
 class AcmeSmokeTests(unittest.TestCase):
+    def instance(self, runtime="podman"):
+        with patch.object(smoke, "fixtures", return_value=Path("/fixture-input")):
+            return smoke.Smoke(runtime, Path("/unused"))
+
+    def test_runtime_is_selected_from_literals_before_fixture_execution(self):
+        for runtime in ("podman", "docker"):
+            self.assertEqual(self.instance(runtime).runtime, runtime)
+        with patch.object(smoke, "fixtures") as fixtures:
+            for runtime in ("sh", "/tmp/docker", "docker --privileged", "podman\n"):
+                with self.assertRaises(KeyError):
+                    smoke.Smoke(runtime, Path("/unused"))
+            fixtures.assert_not_called()
+
+    def test_fixture_copy_does_not_preserve_host_owner_or_modify_host_files(self):
+        instance = self.instance()
+        with patch.object(smoke, "command") as run:
+            instance.prepare_state("sha256:" + "a" * 64)
+        args = run.call_args.args[0]
+        self.assertIn("--network=none", args)
+        self.assertIn("--user=0", args)
+        self.assertIn("--entrypoint=/bin/cp", args)
+        self.assertNotIn("-p", args)
+        self.assertNotIn("-a", args)
+        self.assertEqual(args[-5:], ["/input/renew.toml", "/input/server.toml",
+                                    "/input/cache.toml", "/input/ca.pem", "/control/"])
+        host_mounts = [arg for arg in args if arg.startswith("/fixture-input/")]
+        self.assertEqual(len(host_mounts), 4)
+        self.assertTrue(all(arg.endswith(":ro,z") for arg in host_mounts))
+        self.assertEqual(instance.volumes, [instance.volume, instance.control_volume])
+
+    def test_server_uses_read_only_control_volume_and_non_root_identity(self):
+        instance = self.instance("docker")
+        with patch.object(smoke, "command") as run:
+            instance.launch("gateway", "candidate", [], config="server.toml", wait=False)
+        args = run.call_args.args[0]
+        self.assertIn(instance.control_volume + ":/etc/fluxheim:ro", args)
+        self.assertIn("65532:65532", args)
+        self.assertEqual(args[-2:], ["--config", "/etc/fluxheim/server.toml"])
+        self.assertFalse(any(arg.startswith("/fixture-input/") for arg in args))
+
+    def test_cleanup_attempts_both_owned_volumes_after_container_failure(self):
+        instance = self.instance()
+        instance.names = [instance.prefix + "-failed"]
+        instance.volumes = [instance.volume, instance.control_volume]
+        with patch.object(smoke, "command", side_effect=[RuntimeError("failed"), None, None]) as run:
+            with self.assertRaises(RuntimeError):
+                instance.close()
+        self.assertEqual(run.call_args_list[-2].args[0],
+                         ["podman", "volume", "rm", instance.control_volume])
+        self.assertEqual(run.call_args_list[-1].args[0], ["podman", "volume", "rm", instance.volume])
+
     def test_renewal_fixture_keeps_both_reported_requirements(self):
         config = tomllib.loads(smoke.configuration())
         self.assertTrue(config["cache"]["enabled"])
