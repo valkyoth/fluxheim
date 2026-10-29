@@ -1,7 +1,7 @@
 # 1.9.0 Observability Commit Plan
 
-Status: Commits 01-09 and 07A accepted for progression; Commit 10 implemented
-and locally qualified, awaiting pentest and GitHub acceptance, 2026-10-28.
+Status: Commits 01-10 and 07A accepted for progression; Commit 10A implemented
+and locally qualified, awaiting pentest and GitHub acceptance, 2026-10-29.
 Main stays at **1.9.0
 (unreleased)**. This document replaces the earlier ten-checkpoint outline;
 no previously accepted implementation checkpoint is being renumbered.
@@ -593,6 +593,63 @@ Missing services, unsupported tooling or skipped collector assertions make
 this release gate incomplete. Cleanup owns only the test's resources; retain
 sanitized failure evidence without dumping secrets.
 
+## Commit 10A - Operation-Scoped ACME Validation And Server Feature Parity
+
+Suggested subject: `fix(acme): scope renewal validation and enforce server feature parity`.
+
+Status: implemented after Commit 10 acceptance, with local packaged renewal
+proof on 2026-10-29. Pentest and exact-SHA GitHub acceptance remain required;
+see [evidence](../evidence/observability-10a.md). Keep this checkpoint before
+Commit 11 native qualification; do not renumber existing checkpoints.
+
+Operator value: renew certificates using the server configuration without
+installing unrelated PHP runtimes or compiling cache into the renewal tool,
+while refusing unsupported enabled features when actually starting a server.
+
+Deliver:
+- Reproduce both reported failures: the full Wolfi renewal image rejects a
+  missing managed PHP-FPM executable, and the PHP image/custom WordPress
+  binary rejects enabled cache configuration. Compare normal startup,
+  validation-only commands, `fluxheim acme-renew` and `fluxheim-acme renew`.
+  Establish actual startup behavior before claiming cache was active or ignored.
+- Introduce explicit validation scopes, not a blanket bypass or silent config
+  rewrite. Keep parsing, includes and their trust checks intact. ACME operations
+  must validate all inputs they consume: selected targets, issuer/endpoints,
+  account/EAB secrets, certificate/key storage, challenge publication paths,
+  permissions and TLS policy. Unrelated server-runtime prerequisites such as
+  a PHP executable or compiled cache support must not block renewal.
+- Apply shared compiled-feature checks consistently to normal server startup
+  and explicit server validation before serving traffic. Retain existing
+  reload compatibility and security checks; audit any shared validation callers.
+  Distinguish renewal from commands that also request server reload/control.
+- Document image/profile differences, required mounts and secret permissions,
+  the dedicated renewal workflow, and actionable missing-feature diagnostics.
+  Do not recommend weakening filesystem checks or editing live PHP/cache
+  settings merely to renew a certificate.
+
+Regression and acceptance requirements:
+- Preserve existing ACME, PHP, cache, config/include, filesystem, secret-reading
+  and reload regressions. Add positive renewal tests with PHP/cache-enabled
+  server configs but without PHP binaries/cache compilation, and negative
+  server-start/validation tests for the same unsupported configuration.
+- Exercise both renewal entry points with a local ACME test service, proving
+  issuance/renewal and challenge/storage behavior, not just successful parsing.
+  Retain rejection tests for unsafe paths/symlinks, secret permissions, malformed
+  inputs and missing ACME capabilities. Use synthetic credentials, never a
+  production CA or the operator's live configuration/state.
+- Do not delete, ignore or relax tests simply to obtain green results. If an
+  existing test asserts the old overbroad renewal behavior, record the deliberate
+  contract change and preserve its original security property with an explicit
+  server-scope regression plus the corresponding ACME-scope safety regression.
+- Run affected feature/profile tests, container renewal smokes and the normal
+  pentest/exact-SHA CI cycle. Keep earlier evidence historical; refresh affected
+  validation/runtime results rather than relabeling old tests as new proof.
+
+Exit: both renewal entry points work in their documented minimal environment,
+server feature mismatches fail consistently, and original security properties
+remain covered. This is a bounded maintenance correction, not a new ACME
+protocol feature or permission to alter release gates.
+
 ## Commit 11 - Native Platforms And Extracted Archives
 
 Suggested subject: `Observability commit 11: qualify native release profiles`.
@@ -809,11 +866,13 @@ collector behavior is not the new required-collector acceptance contract.
 | 07A - Dedicated Windows QEMU builder/test VM | Accepted for progression | Owner confirmed clean pentest, green GitHub and resolved 25 code-scanning alerts through 2c383562; authorized 08. [Qualification evidence](../evidence/observability-07a.md). |
 | 08 - Export | Accepted for progression | User supplied clean pentest through fa2f5381; Rust CI run 40390306858 and code-scanning workflow green on that SHA; user authorized 09. [Exporter evidence](../evidence/observability-08.md). |
 | 09 - Read-only API | Accepted for progression | Owner reported clean retest and green GitHub on `76faa3ca`. [Operational contract](../guides/operational-status.md) and [qualification evidence](../evidence/observability-09.md). No complete management API or UI is claimed. |
-| 10 - Live containers/collectors | Implemented; acceptance pending | Rootless Podman packaged-server and both live collector/browser workflows passed, including the bind-mount security remediation. Original Docker collector job passed; exact-remediation-SHA CI and pentest retest remain pending. [Collector integration guide](../guides/collector-integrations.md), importable dashboards and [qualification evidence](../evidence/observability-10.md). |
+| 10 - Live containers/collectors | Accepted for progression | Owner reported clean pentest, green GitHub and resolved scanning alerts through `76c938bc`, then authorized 10A. [Collector integration guide](../guides/collector-integrations.md), importable dashboards and [qualification evidence](../evidence/observability-10.md). |
+| 10A - ACME validation scope / server feature parity | Implemented; acceptance pending | Released-image failures reproduced; four packaged renewals with real HTTP-01 validation passed locally. [Evidence](../evidence/observability-10a.md). Pentest and exact-SHA CI remain required before Commit 11 qualification. |
 | 11 - Native archives | Not started | Pending |
 | 12 - Observability docs / candidate qualification | Not started | Pending |
 | 13 - Documentation / final release acceptance | Not started | Pending |
 
-Commit 09 is accepted for progression. Commit 10 is the current checkpoint.
-Stop for pentest, green GitHub checks and explicit approval before Commit 11.
+Commit 10 is accepted for progression. Commit 10A is the current checkpoint.
+Stop for pentest, green GitHub checks and explicit approval before proceeding
+to Commit 11.
 No licensing purchase or changes to another project's VM are authorized.

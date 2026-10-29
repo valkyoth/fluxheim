@@ -83,14 +83,13 @@ fn validate_config_rejects_enabled_cache_when_cache_module_is_absent() {
     let dir = TestDir::new("cli-no-cache-module");
     let config = dir.cache_module_config("cache-disabled.toml");
 
-    let error = run_from_args([
-        "fluxheim",
-        "--config",
-        config.to_str().unwrap(),
-        "--validate-config",
-    ])
-    .unwrap_err();
-
+    for flag in ["--validate-config", "--check-config"] {
+        let error =
+            run_from_args(["fluxheim", "--config", config.to_str().unwrap(), flag]).unwrap_err();
+        assert!(error.to_string().contains("cache module not compiled"));
+    }
+    let config = crate::config::Config::load(Some(&config)).unwrap();
+    let error = crate::runtime::run(config).unwrap_err();
     assert!(error.to_string().contains("cache module not compiled"));
 }
 

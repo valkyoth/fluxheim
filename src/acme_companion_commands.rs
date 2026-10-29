@@ -50,6 +50,7 @@ pub(super) fn run_revoke(
     crate::tls::install_rustls_crypto_provider()?;
     let config = load_validated_config(config_path)?;
     ensure_acme_target_exists(&config, vhost)?;
+    config.validate_certificate_reload_path()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -287,6 +288,10 @@ pub(super) fn run_renew(
     let config = load_validated_config(config_path)?;
     if let Some(vhost) = vhost {
         ensure_acme_target_exists(&config, vhost)?;
+    }
+
+    if reload_after_renewal && config.tls.acme.renewal.reload_after_renewal {
+        config.validate_certificate_reload_path()?;
     }
 
     let runtime = tokio::runtime::Builder::new_current_thread()

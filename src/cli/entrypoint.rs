@@ -49,6 +49,7 @@ where
     config.validate()?;
 
     if cli.check_config {
+        super::validate_compiled_module_config(&config)?;
         println!("{config:#?}");
         return Ok(());
     }

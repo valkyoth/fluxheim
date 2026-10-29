@@ -65,7 +65,7 @@ impl VhostConfig {
         }
     }
 
-    pub(crate) fn validate(&self, regex_enabled: bool) -> Result<(), ConfigError> {
+    pub(crate) fn validate_identity(&self) -> Result<(), ConfigError> {
         if self.name.trim().is_empty() {
             return Err(ConfigError::EmptyVhostName);
         }
@@ -86,6 +86,19 @@ impl VhostConfig {
             self.hosts.len(),
             MAX_VHOST_HOSTS,
         )?;
+        for host in &self.hosts {
+            if normalize_host_pattern(host).is_none() {
+                return Err(ConfigError::InvalidVhostHost {
+                    vhost: self.name.clone(),
+                    host: host.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate(&self, regex_enabled: bool) -> Result<(), ConfigError> {
+        self.validate_identity()?;
         validate_config_list_len(
             format!("vhost {:?}.routes", self.name),
             self.routes.len(),
@@ -165,15 +178,6 @@ impl VhostConfig {
                 vhost: self.name.clone(),
                 field: "max_request_body_bytes",
             });
-        }
-
-        for host in &self.hosts {
-            if normalize_host_pattern(host).is_none() {
-                return Err(ConfigError::InvalidVhostHost {
-                    vhost: self.name.clone(),
-                    host: host.clone(),
-                });
-            }
         }
 
         Ok(())

@@ -249,8 +249,8 @@ mod tests {
         use std::io::{Read, Write};
 
         let root = tempfile::Builder::new()
-            .prefix("fh-acme-reload-")
-            .tempdir()
+            .prefix("ar-")
+            .tempdir_in(std::fs::canonicalize("target").unwrap())
             .unwrap();
         let socket = root.path().join("reload.sock");
         let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
@@ -275,8 +275,8 @@ mod tests {
         use std::io::{Read, Write};
 
         let root = tempfile::Builder::new()
-            .prefix("fh-acme-bounded-")
-            .tempdir()
+            .prefix("ab-")
+            .tempdir_in(std::fs::canonicalize("target").unwrap())
             .unwrap();
         let socket = root.path().join("reload.sock");
         let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();

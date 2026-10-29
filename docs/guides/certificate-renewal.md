@@ -574,8 +574,55 @@ manager or container orchestrator supervise the companion.
 Runtime images include both `/usr/local/bin/fluxheim` and
 `/usr/local/bin/fluxheim-acme`. The companion can run inside the already running
 gateway container with `podman exec`, or as a separate one-shot container. In
-both cases it must see the same config, ACME storage, secrets, and
-`/run/fluxheim` directory as the gateway.
+both cases it must see the same config, ACME storage and referenced secrets.
+Commands that request certificate reload also need the gateway's
+`/run/fluxheim` directory.
+
+### Renewal And Server Validation
+
+Starting with **1.9.0 (currently unreleased)**, `fluxheim acme-renew` and the
+`fluxheim-acme` commands validate the certificate operation rather than all
+server runtime prerequisites. A renewal container can read the unchanged
+gateway configuration even when it contains managed PHP-FPM or enabled cache:
+the renewal container does not need the PHP executable or compiled cache support.
+This correction is not present in the released 1.8.3 images.
+
+This does not bypass configuration parsing or certificate security checks.
+Includes, vhost identities, TLS policy, issuer URLs, ACME storage and referenced
+CA/secret paths are still checked. The ACME engine retains its protected secret
+reads, challenge publication and certificate installation checks. Referenced
+static TLS material must also remain accessible. Unknown fields and malformed
+TOML still fail. Reload/control operations additionally validate the control
+socket path before use; renew/revoke commands that request reload validate it
+before certificate mutation.
+
+For a one-shot renewal-only container, mount:
+
+- The config file and its includes read-only, preserving their relative layout.
+- The same ACME state directory as the gateway, read-write and owned by the
+  service identity. HTTP-01 must remain reachable through the running gateway;
+  the renewal process alone is not an HTTP challenge server.
+- Any configured EAB files, credential directories and CA/TLS files at their
+  configured paths. Keep secrets private to the service user, not world-readable.
+- The private runtime directory only when requesting certificate reload.
+
+PHP document roots, PHP-FPM executables, cache volumes and ordinary server log
+directories are not required merely to renew. A full Wolfi image can therefore
+renew for a PHP gateway without bundling PHP. `fluxheim-acme renew --no-reload`
+installs certificates without activating them in the running server;
+`fluxheim acme-renew` also does not send a reload request. Arrange certificate
+reload separately or use the companion's default reload behavior.
+
+Normal server startup, `--validate-config` and `--check-config` still require
+the enabled features and runtime prerequisites. In particular, the packaged
+PHP profile does **not** include cache, and the full Wolfi runtime does **not**
+bundle PHP-FPM. A server reporting `cache module not compiled` needs a build
+with cache support or an intentionally cache-disabled server configuration.
+A missing managed PHP executable requires a PHP-capable image/configuration.
+Do not weaken permissions or remove live PHP/cache settings just to make a
+certificate-only command succeed.
+
+### Sharing The Reload Socket
 
 The gateway and companion must share `server.process.certificate_reload_sock`.
 The packaged container configs use:
@@ -614,23 +661,26 @@ podman exec fluxheim_gateway \
 
 `podman exec` naturally shares the gateway container filesystem, secrets, and
 reload socket. It is useful for manual checks, but scheduled renewals are often
-cleaner as a one-shot companion container:
+cleaner as a one-shot companion container. For the 1.9.0 workflow below, set
+`FLUXHEIM_RENEWAL_IMAGE` to a tested image containing this correction (prefer
+an immutable digest); do not assume a currently published `latest` image has it.
+On SELinux hosts, use shared `:z` labeling for mounts shared by the gateway and
+companion. Private `:Z` relabeling can deny access to the already running
+gateway. Prepare ownership once for their common service UID; do not recursively
+chown live state as part of each renewal.
 
 ```bash
 podman run --rm --ulimit core=0:0 \
   --name fluxheim_acme_due \
   --network gateway_net \
   --entrypoint /usr/local/bin/fluxheim-acme \
-  -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
-  -v /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z \
-  -v /srv/infra/fluxheim/run:/run/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/html:/srv/fluxheim:ro,Z \
-  -v /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro \
-  -v /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro \
-  ghcr.io/valkyoth/fluxheim:latest-wolfi \
+  -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,z \
+  -v /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,z \
+  -v /srv/infra/fluxheim/run:/run/fluxheim:z \
+  -v /srv/infra/fluxheim/state:/var/lib/fluxheim:z \
+  -v /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro,z \
+  -v /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro,z \
+  "${FLUXHEIM_RENEWAL_IMAGE:?Set a tested renewal image}" \
   --config /etc/fluxheim/fluxheim.toml \
   renew
 ```
@@ -641,13 +691,12 @@ Use `status` before `renew` when testing a new mount layout:
 podman run --rm --ulimit core=0:0 \
   --network gateway_net \
   --entrypoint /usr/local/bin/fluxheim-acme \
-  -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
-  -v /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z \
-  -v /srv/infra/fluxheim/run:/run/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro \
-  -v /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro \
-  ghcr.io/valkyoth/fluxheim:latest-wolfi \
+  -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,z \
+  -v /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,z \
+  -v /srv/infra/fluxheim/state:/var/lib/fluxheim:z \
+  -v /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro,z \
+  -v /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro,z \
+  "${FLUXHEIM_RENEWAL_IMAGE:?Set a tested renewal image}" \
   --config /etc/fluxheim/fluxheim.toml \
   status
 ```

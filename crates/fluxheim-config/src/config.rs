@@ -105,6 +105,7 @@ pub use crate::config_proxy::{
 };
 #[cfg(test)]
 pub use crate::config_proxy::{MAX_PROXY_ERROR_PAGES, MAX_PROXY_UPSTREAMS};
+pub use crate::config_root_validate::ValidationScope;
 pub use crate::config_route::{
     GrpcRouteConfig, RouteConfig, RouteRedirectConfig, VhostRedirectConfig,
 };

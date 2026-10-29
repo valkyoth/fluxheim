@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use crate::config::{Config, ConfigError};
+use crate::config::{Config, ConfigError, ValidationScope};
 use crate::config_fragment::ConfigFragment;
 use crate::config_loader::{
     ConfigLoadError, canonical_config_source, config_directory_files, toml_files,
@@ -9,11 +9,18 @@ use crate::config_loader::{
 
 impl Config {
     pub fn load(path: Option<&Path>) -> Result<Self, ConfigLoadError> {
-        Self::load_with_runtime_path_validation(path, true)
+        Self::load_for_scope(path, ValidationScope::Server)
+    }
+
+    pub fn load_for_scope(
+        path: Option<&Path>,
+        scope: ValidationScope,
+    ) -> Result<Self, ConfigLoadError> {
+        Self::load_with_runtime_path_validation(path, true, scope)
     }
 
     pub fn load_without_runtime_paths(path: Option<&Path>) -> Result<Self, ConfigLoadError> {
-        Self::load_with_runtime_path_validation(path, false)
+        Self::load_with_runtime_path_validation(path, false, ValidationScope::Server)
     }
 
     pub fn load_snapshot_bytes(bytes: &[u8]) -> Result<Self, ConfigLoadError> {
@@ -32,6 +39,7 @@ impl Config {
     fn load_with_runtime_path_validation(
         path: Option<&Path>,
         validate_runtime_paths: bool,
+        scope: ValidationScope,
     ) -> Result<Self, ConfigLoadError> {
         let mut config = match path {
             Some(path) => {
@@ -46,9 +54,13 @@ impl Config {
         };
 
         config.apply_presets();
-        config
-            .validate_with_runtime_path_validation(validate_runtime_paths)
-            .map_err(ConfigLoadError::Validate)?;
+        match scope {
+            ValidationScope::Server => {
+                config.validate_with_runtime_path_validation(validate_runtime_paths)
+            }
+            ValidationScope::Acme => config.validate_for_scope(scope),
+        }
+        .map_err(ConfigLoadError::Validate)?;
         Ok(config)
     }
 

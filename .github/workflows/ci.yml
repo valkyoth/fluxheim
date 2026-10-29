@@ -20,6 +20,24 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  acme-operation-scope:
+    name: Packaged ACME renewal and server feature parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test operation scopes without workspace feature unification
+        run: |
+          cargo test --locked -p fluxheim-config --features acme acme_scope
+          cargo test --locked -p fluxheim-config --no-default-features acme_scope
+          cargo test --locked --no-default-features --features profile-web-server,php-fpm,acme-client --lib cli::
+          cargo test --locked --no-default-features --features proxy,tls-rustls,acme-client --lib cli::
+          python3 scripts/test_acme_scope_smoke.py
+      - name: Build Wolfi images and renew through both entry points
+        env:
+          FLUXHEIM_CONTAINER_RUNTIME: docker
+        run: sh scripts/check_acme_scope.sh
+
   collectors:
     name: Required real collector workflows
     runs-on: ubuntu-latest

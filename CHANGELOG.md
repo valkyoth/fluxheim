@@ -11,6 +11,12 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- Scope certificate-only commands to ACME/TLS configuration, so renewal does not
+  require unrelated managed PHP executables or compiled cache support. Preserve
+  configuration/include, secret, storage and reload-control trust checks.
+  Enforce compiled-feature validation consistently during server startup and
+  explicit config checks; unsupported enabled cache now fails before serving.
+  Add real local-CA renewal gates for both full and PHP Wolfi images.
 - Add importable Grafana and SigNoz dashboards and a required packaged-container
   collector gate covering stored metrics/traces/logs, real PHP, TLS/cache faults,
   collector recovery, confidential sink failure and graceful shutdown under

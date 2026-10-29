@@ -107,6 +107,21 @@ or implemented in this release.
 
 ## Implemented Maintenance
 
+Commit 10A corrects operation-scoped ACME validation:
+
+- Both renewal commands can use a PHP/cache-enabled server config without
+  requiring those unrelated runtime capabilities in the renewal container.
+- Server startup, `--validate-config` and `--check-config` consistently reject
+  unsupported enabled features. The PHP package still excludes cache; the full
+  Wolfi package still does not install PHP-FPM.
+- ACME/TLS, include, secret and storage checks remain enforced. Reload/control
+  commands separately validate the control socket. Certificate installation
+  alone does not imply activation in an already running gateway.
+- Both commands pass real local HTTP-01 issuance in full and PHP images.
+  See [renewal guidance](../docs/guides/certificate-renewal.md#renewal-and-server-validation)
+  and [qualification evidence](../docs/evidence/observability-10a.md).
+  This fix is not present in released 1.8.3 images.
+
 Post-1.8.3 security maintenance:
 
 - Update the locked ACME cryptography dependency `ctutils` from 0.4.3 to 0.4.4

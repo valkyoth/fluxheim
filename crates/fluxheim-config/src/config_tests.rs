@@ -28,6 +28,8 @@ use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path}
 #[cfg(unix)]
 use crate::test_support::{unique_group_writable_child, unique_world_writable_child};
 
+#[path = "config_tests_acme_scope.rs"]
+mod acme_scope;
 #[path = "config_tests_admin.rs"]
 mod admin;
 #[path = "config_tests_admin_security.rs"]

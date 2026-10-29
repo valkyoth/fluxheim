@@ -14,6 +14,7 @@ pub(super) fn request_certificate_reload(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     use std::io::{Read, Write};
 
+    config.validate_certificate_reload_path()?;
     let path = &config.server.process.certificate_reload_sock;
     let mut stream = std::os::unix::net::UnixStream::connect(path)?;
     stream.write_all(b"reload-certificates\n")?;

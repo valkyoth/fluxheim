@@ -1,9 +1,7 @@
 use std::error::Error;
 
 #[cfg(feature = "acme-client")]
-use crate::cli::validate_compiled_module_config;
-#[cfg(feature = "acme-client")]
-use crate::config::Config;
+use crate::config::{Config, ValidationScope};
 
 #[cfg(feature = "acme-client")]
 pub(super) fn run_acme_renew_command(
@@ -13,9 +11,7 @@ pub(super) fn run_acme_renew_command(
     #[cfg(feature = "tls-rustls-backend")]
     crate::tls::install_rustls_crypto_provider()?;
 
-    let config = Config::load(config_path)?;
-    config.validate()?;
-    validate_compiled_module_config(&config)?;
+    let config = Config::load_for_scope(config_path, ValidationScope::Acme)?;
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

@@ -8,9 +8,44 @@ use crate::config_http::{
     fips_allowed_local_otlp_endpoint,
 };
 
+/// Validation follows the operation, not the features compiled into its tool.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ValidationScope {
+    Server,
+    Acme,
+}
+
 impl Config {
     pub fn validate(&self) -> Result<(), ConfigError> {
         self.validate_with_runtime_path_validation(true)
+    }
+
+    pub fn validate_for_scope(&self, scope: ValidationScope) -> Result<(), ConfigError> {
+        match scope {
+            ValidationScope::Server => self.validate(),
+            ValidationScope::Acme => {
+                #[cfg(not(feature = "acme"))]
+                if self.tls.acme.enabled || self.vhosts.iter().any(|vhost| vhost.tls.acme.enabled) {
+                    return Err(ConfigError::InvalidTlsPolicy {
+                        field: "tls.acme.enabled",
+                        reason: "ACME operations require the acme feature",
+                    });
+                }
+                self.tls.validate()?;
+                self.validate_acme_compliance()?;
+                self.validate_acme_challenge_runtime()?;
+                self.validate_vhosts(ValidationScope::Acme)
+            }
+        }
+    }
+
+    /// Certificate-only control operations do not start a server, but must
+    /// validate the control socket before any certificate mutation occurs.
+    pub fn validate_certificate_reload_path(&self) -> Result<(), ConfigError> {
+        crate::config_path::validate_required_process_path(
+            "server.process.certificate_reload_sock",
+            &self.server.process.certificate_reload_sock,
+        )
     }
 
     pub(crate) fn validate_with_runtime_path_validation(
@@ -38,7 +73,7 @@ impl Config {
         self.stream.validate()?;
         self.udp.validate()?;
         self.wasm.validate()?;
-        self.validate_vhosts()?;
+        self.validate_vhosts(ValidationScope::Server)?;
         self.validate_request_body_budget()?;
         self.validate_wasm_attachments()?;
         self.validate_geoip_policy()?;
@@ -114,12 +149,7 @@ impl Config {
             });
         }
 
-        if self.tls.acme.enabled {
-            return Err(ConfigError::InvalidCompliancePolicy {
-                field: "tls.acme.enabled",
-                reason: "FIPS/ISO-required mode currently rejects managed ACME because account key generation, JWS account signing, EAB handling, outbound ACME HTTPS transport, and TLS-ALPN challenge certificate generation are not fully routed through the selected validated provider; use externally issued static certificates or an externally evidenced renewal process for the FIPS evidence boundary",
-            });
-        }
+        self.validate_acme_compliance()?;
 
         if self.metrics.otlp.enabled
             && !fips_allowed_local_otlp_endpoint(&self.metrics.otlp.endpoint)
@@ -275,32 +305,28 @@ impl Config {
         false
     }
 
-    fn validate_vhosts(&self) -> Result<(), ConfigError> {
+    fn validate_acme_compliance(&self) -> Result<(), ConfigError> {
+        if self.tls.compliance_mode().required() && self.tls.acme.enabled {
+            return Err(ConfigError::InvalidCompliancePolicy {
+                field: "tls.acme.enabled",
+                reason: "FIPS/ISO-required mode currently rejects managed ACME because account key generation, JWS account signing, EAB handling, outbound ACME HTTPS transport, and TLS-ALPN challenge certificate generation are not fully routed through the selected validated provider; use externally issued static certificates or an externally evidenced renewal process for the FIPS evidence boundary",
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_vhosts(&self, scope: ValidationScope) -> Result<(), ConfigError> {
         validate_config_list_len("vhosts", self.vhosts.len(), MAX_VHOSTS)?;
 
         let mut seen_names = std::collections::HashSet::new();
         let mut seen_hosts = std::collections::HashSet::new();
 
         for vhost in &self.vhosts {
-            vhost.validate(self.server.regex_enabled)?;
-            let vhost_headers = self.headers.with_vhost_overlay(&vhost.headers);
-            vhost_headers
-                .validate()
-                .map_err(|source| ConfigError::VhostSection {
-                    vhost: vhost.name.clone(),
-                    section: "headers",
-                    source: Box::new(source),
-                })?;
-            for route in &vhost.routes {
-                vhost_headers
-                    .with_vhost_overlay(&route.headers)
-                    .validate()
-                    .map_err(|source| ConfigError::RouteSection {
-                        vhost: vhost.name.clone(),
-                        route: route.name.clone(),
-                        section: "headers",
-                        source: Box::new(source),
-                    })?;
+            if scope == ValidationScope::Acme {
+                vhost.validate_identity()?;
+                vhost.acme_challenge.validate(&vhost.name)?;
+            } else {
+                self.validate_server_vhost(vhost)?;
             }
             vhost
                 .validate_tls(&self.tls, self.vhost_has_shared_managed_acme_source(vhost))
@@ -338,6 +364,30 @@ impl Config {
             });
         }
 
+        Ok(())
+    }
+
+    fn validate_server_vhost(&self, vhost: &VhostConfig) -> Result<(), ConfigError> {
+        vhost.validate(self.server.regex_enabled)?;
+        let vhost_headers = self.headers.with_vhost_overlay(&vhost.headers);
+        vhost_headers
+            .validate()
+            .map_err(|source| ConfigError::VhostSection {
+                vhost: vhost.name.clone(),
+                section: "headers",
+                source: Box::new(source),
+            })?;
+        for route in &vhost.routes {
+            vhost_headers
+                .with_vhost_overlay(&route.headers)
+                .validate()
+                .map_err(|source| ConfigError::RouteSection {
+                    vhost: vhost.name.clone(),
+                    route: route.name.clone(),
+                    section: "headers",
+                    source: Box::new(source),
+                })?;
+        }
         Ok(())
     }
 

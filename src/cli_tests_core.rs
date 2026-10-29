@@ -185,6 +185,73 @@ fn acme_renew_requires_acme_client_feature() {
     assert!(error.to_string().contains("acme-client"));
 }
 
+#[cfg(feature = "acme-client")]
+#[test]
+fn acme_commands_ignore_unrelated_managed_php_and_cache_requirements() {
+    let dir = TestDir::new("cli-acme-operation-scope");
+    let path = dir.path.join("fluxheim.toml");
+    std::fs::write(
+        &path,
+        r#"
+        [cache]
+        enabled = true
+        [cache.memory]
+        enabled = true
+        [[vhosts]]
+        name = "php"
+        hosts = ["php.example.test"]
+        [vhosts.php]
+        enabled = true
+        [vhosts.php.fpm]
+        mode = "managed"
+        php_fpm_binary = "/missing/php-fpm"
+        socket_dir = "/missing/php"
+    "#,
+    )
+    .unwrap();
+    let config_path = path.to_str().unwrap();
+    run_from_args(["fluxheim", "--config", config_path, "acme-renew"]).unwrap();
+    crate::acme_companion::run_from_args([
+        "fluxheim-acme",
+        "--config",
+        config_path,
+        "renew",
+        "--no-reload",
+    ])
+    .unwrap();
+    assert!(crate::config::Config::load(Some(&path)).is_err());
+}
+
+#[cfg(all(feature = "acme-client", unix))]
+#[test]
+fn companion_reload_validation_is_required_only_for_control_operations() {
+    use std::os::unix::fs::symlink;
+
+    let dir = TestDir::new("cli-acme-control-scope");
+    let real = dir.dir("real", 0o700);
+    let link = dir.path.join("link");
+    symlink(&real, &link).unwrap();
+    let path = dir.path.join("fluxheim.toml");
+    std::fs::write(
+        &path,
+        format!(
+            "[server.process]\ncertificate_reload_sock = {}\n",
+            toml_path_literal(&link.join("reload.sock"))
+        ),
+    )
+    .unwrap();
+    let base = ["fluxheim-acme", "--config", path.to_str().unwrap()];
+    crate::acme_companion::run_from_args(base.into_iter().chain(["renew", "--no-reload"])).unwrap();
+    for operation in ["renew", "reload"] {
+        let error =
+            crate::acme_companion::run_from_args(base.into_iter().chain([operation])).unwrap_err();
+        assert!(
+            error.to_string().contains("certificate_reload_sock"),
+            "{error}"
+        );
+    }
+}
+
 #[cfg(not(feature = "acme-client"))]
 #[test]
 fn acme_init_requires_acme_client_feature() {
