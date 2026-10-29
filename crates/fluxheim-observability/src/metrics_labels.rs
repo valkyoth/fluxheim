@@ -193,6 +193,7 @@ pub fn metrics_otlp_export_outcome_label(outcome: &str) -> &'static str {
 
 pub fn metrics_php_outcome_label(outcome: &str) -> &'static str {
     match outcome {
+        "cancelled" => "cancelled",
         "declined" => "declined",
         "redirect" => "redirect",
         "forbidden" => "forbidden",

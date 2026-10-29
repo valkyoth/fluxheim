@@ -96,6 +96,10 @@ def verify(stack, password, observations):
         return bool(numbers) and all(math.isfinite(v) for v in numbers) and (minimum is None or sum(numbers) >= minimum)
     poll(lambda: populated('fluxheim_http_requests_total{%s}', 6), "SigNoz stored request count")
     poll(lambda: populated('fluxheim_http_request_duration_seconds_count{%s}', 6), "SigNoz stored histogram count")
+    for vhost, status, minimum in (("php", "2xx", 2), ("php-failure", "5xx", 1)):
+        for name in ("fluxheim_php_requests_total", "fluxheim_php_request_duration_seconds_count"):
+            expression = name + '{%s,vhost="' + vhost + '",method="GET",status_class="' + status + '",outcome="response"}'
+            poll(lambda: populated(expression, minimum), "SigNoz PHP handler sample " + vhost + " " + name)
     for _, expression, _ in PANELS[:3]:
         poll(lambda: populated(expression), "SigNoz finite traffic/error/latency panel")
     for _, expression, _ in PANELS:

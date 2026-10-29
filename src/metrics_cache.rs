@@ -175,6 +175,9 @@ impl fluxheim_server::NativeWasmMetricsRecorder for NativeWasmPrometheusRecorder
 
 #[cfg(feature = "proxy")]
 pub fn install_native_cache_metrics_recorder() {
+    #[cfg(feature = "php-fpm")]
+    let _ =
+        fluxheim_server::install_native_php_metrics_recorder(Arc::new(NativePhpPrometheusRecorder));
     let _ = fluxheim_server::install_native_cache_metrics_recorder(Arc::new(
         NativeCachePrometheusRecorder,
     ));
@@ -185,6 +188,23 @@ pub fn install_native_cache_metrics_recorder() {
     let _ = fluxheim_server::install_native_wasm_metrics_recorder(Arc::new(
         NativeWasmPrometheusRecorder,
     ));
+}
+
+#[cfg(all(feature = "proxy", feature = "php-fpm"))]
+struct NativePhpPrometheusRecorder;
+
+#[cfg(all(feature = "proxy", feature = "php-fpm"))]
+impl fluxheim_server::NativePhpMetricsRecorder for NativePhpPrometheusRecorder {
+    fn record_request(
+        &self,
+        vhost: &str,
+        method: &str,
+        status: Option<u16>,
+        outcome: &'static str,
+        duration: Duration,
+    ) {
+        record_php_request(vhost, method, status, outcome, duration);
+    }
 }
 
 pub fn record_cache_operation_duration(

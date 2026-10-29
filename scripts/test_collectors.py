@@ -458,6 +458,8 @@ class CollectorTests(unittest.TestCase):
         self.assertIn('{"fluxheim_http_request_duration_seconds.bucket",%s}', converted)
         self.assertNotIn("seconds_bucket", converted)
         self.assertEqual(dashboards.signoz_query('fluxheim_http_requests_total{%s}'), 'fluxheim_http_requests_total{%s}')
+        self.assertEqual(dashboards.signoz_query('fluxheim_php_request_duration_seconds_count{%s}'),
+                         '{"fluxheim_php_request_duration_seconds.count",%s}')
 
     def test_empty_or_nonfinite_chart_is_not_proof(self):
         for result in (None, [], [{"aggregations": None}], [{"aggregations": [{"series": None}]}],

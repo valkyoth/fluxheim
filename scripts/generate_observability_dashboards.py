@@ -34,7 +34,8 @@ def selector_for(query, base):
 
 def signoz_query(query):
     # These are known dashboard templates, not a general PromQL rewriter.
-    for metric in ("fluxheim_http_request_duration_seconds", "fluxheim_cache_operation_duration_seconds"):
+    for metric in ("fluxheim_http_request_duration_seconds", "fluxheim_cache_operation_duration_seconds",
+                   "fluxheim_php_request_duration_seconds"):
         for component in ("bucket", "count", "sum"):
             query = query.replace(metric + "_" + component + "{", '{"' + metric + "." + component + '",')
     return query

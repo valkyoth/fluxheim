@@ -95,6 +95,8 @@ mod native_http2_error;
 mod native_http2_response;
 mod native_http2_route_adapter;
 mod native_http2_stack;
+#[cfg(feature = "php-fpm")]
+mod native_php_metrics;
 mod native_request_telemetry;
 mod native_runtime_http1_proxy;
 mod native_runtime_launch_plan;
@@ -175,6 +177,8 @@ pub use native_http2_stack::{
     NativeHttp2Handler, NativeHttp2Request, NativeHttp2Response, native_http2_stack_probe,
     native_http2_stack_probe_with_response, serve_native_http2_connection,
 };
+#[cfg(feature = "php-fpm")]
+pub use native_php_metrics::{NativePhpMetricsRecorder, install_native_php_metrics_recorder};
 pub use native_runtime_http1_proxy::{
     NativeHttp1ProxyRuntime, NativeHttp1ProxyRuntimeError, NativeHttp1ProxyRuntimeHandle,
 };

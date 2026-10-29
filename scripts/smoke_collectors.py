@@ -105,6 +105,11 @@ def verify(stack, password):
         assert log["correlation"]["trace_id"] == trace
         assert any(span["spanID"] == log["correlation"]["span_id"] for span in traces(stack, trace)[0]["spans"])
     for source in ("fluxheim-scrape", "fluxheim-otlp"):
+        for vhost, status, minimum in (("php", "2xx", 2), ("php-failure", "5xx", 1)):
+            labels = f'job="{source}",vhost="{vhost}",method="GET",status_class="{status}",outcome="response"'
+            for name in ("fluxheim_php_requests_total", "fluxheim_php_request_duration_seconds_count"):
+                poll(lambda: (metric(stack, name, labels) or 0) >= minimum,
+                     "stored PHP handler sample " + source + " " + vhost + " " + name)
         poll(lambda: (metric(stack, "fluxheim_http_requests_total", f'job="{source}"') or 0) >= 6,
              "stored " + source + " request counter")
         poll(lambda: bool(query(stack, 'fluxheim_http_request_duration_seconds_bucket{job="' + source + '"}')),

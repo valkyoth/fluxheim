@@ -62,6 +62,20 @@ Do not sum them with `fluxheim_proxy_requests_total` or
 They are not additional traffic. FastCGI protocol fixtures prove the boundary,
 not PHP application or database-internal instrumentation.
 
+PHP handler counters and duration histograms count direct and fallback PHP
+dispatch once, including rejected requests and gateway errors. `outcome=response`
+means the handler produced a response, not that PHP or the downstream write
+succeeded; use `status_class` to distinguish HTTP errors. Dropping an active
+handler reports `outcome=cancelled,status_class=unknown`. Static files and
+FastCGI retries are not additional PHP requests. Duration ends when the handler
+returns, before downstream response delivery.
+
+A zero **Log sink errors** or **Metric cardinality overflow** panel is expected
+in a healthy deployment. **Active requests** is an instantaneous gauge: short
+requests can finish between scrapes and leave a flat zero despite nonzero request
+rates. **PHP requests / second** should increase during sustained PHP traffic;
+missing PHP instrumentation is not evidence of an idle application.
+
 ## Failures And Telemetry Health
 
 | Metric | Meaning |

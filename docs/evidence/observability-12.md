@@ -1,9 +1,11 @@
 # Commit 12: Operator Documentation And Refreshed Candidate
 
-Date: 2026-10-29. Status: candidate checks completed with the approved generic
+Date: 2026-10-29. Status: initial candidate checks completed with the approved generic
 RPM scope and measurement limits below; independent pentest and
 exact-checkpoint GitHub acceptance pending. This is not release authorization.
 Commit 13's whole-product documentation and website work is still required.
+The PHP dashboard follow-up below changes runtime inputs after that initial
+qualification; the archive matrix below does not qualify the follow-up.
 
 ## Candidate Identity
 
@@ -11,7 +13,7 @@ The owner approved compatible dependency updates in this checkpoint. Runtime
 candidate **babbe3e71e439e6c9f8cbf626dfc50493c0794bf**, Rust **1.99.1**, updates
 27 production lockfile packages and the corresponding fuzz dependencies.
 Wasmtime/WASI stays at 50.0.0. No production Rust implementation was changed.
-The later checkpoint adds operator documentation, example tests, alerts and a
+Checkpoint `3c6fb41c` adds operator documentation, example tests, alerts and a
 performance-harness correction; it does not change those runtime build inputs.
 
 All remote builds used a clean checkout of that candidate. Local builds used
@@ -24,6 +26,8 @@ Final publication must package the accepted documentation, and runtime/build
 input changes require affected qualification again.
 
 ## Native And Collector Results
+
+These results describe the initial candidate, before the PHP follow-up below.
 
 | Qualification | Result |
 | --- | --- |
@@ -44,6 +48,38 @@ correlated traces, observed sink failure and graceful shutdown under traffic.
 Grafana and SigNoz screenshots were also inspected for populated panels.
 Backend versions and immutable images remain in
 [`images.json`](../../examples/observability/images.json).
+
+## PHP Dashboard Follow-Up
+
+Interactive WordPress traffic exposed a missing production caller for the PHP
+request counter: its preallocated overflow series remained zero even while PHP
+served requests. The handler now reports request count and duration through
+the existing bounded registry, once for direct or fallback dispatch, with a
+drop guard for cancellation. Vhost labels come from configuration, methods are
+bucketed, and response status is separated from cancellation. No HTTP handling,
+FastCGI retry policy, dependencies or telemetry transport policy changed.
+
+The collector gate now requires nonzero success and gateway-error PHP counters
+and histogram counts from actual requests in both Prometheus scrape/OTLP and
+SigNoz. SigNoz's histogram-name conversion includes the PHP duration family.
+It no longer accepts an unconnected overflow-only PHP counter as sufficient
+coverage. The local WordPress preview showed about 1.3-1.4 PHP requests/second
+in both imported dashboards after rebuilding the production container.
+
+Validation: locked workspace library tests with `profile-observability,php-fpm`,
+strict workspace Clippy, direct/fallback/rejection/cancellation regression,
+bounded label tests, collector Python regressions, and PHP-without-metrics
+compilation passed on Linux. Preview log sink errors and cardinality overflow
+were zero; active requests briefly reached one between short requests.
+The complete isolated collector gate passed, including stored PHP samples in
+both backends, browser rendering, outage/recovery and graceful shutdown under
+traffic. Local evidence is in
+`release-reports/commit12-php-metrics-collectors-v2`; tested image ID is
+`d7d68d9b550d14ad639b459efd86fdc5e71a7e35930a9c23ff8d70f3c93ef922`.
+
+The follow-up still requires native-platform qualification, exact-checkpoint
+CI and pentest acceptance. Do not reuse the initial archive hashes or native
+results as proof for the modified runtime.
 
 ## Operator Examples And Regression Checks
 

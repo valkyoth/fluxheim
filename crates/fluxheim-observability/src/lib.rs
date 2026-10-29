@@ -194,6 +194,7 @@ mod tests {
             "connect_timeout"
         );
         assert_eq!(metrics_php_outcome_label("surprise"), "other");
+        assert_eq!(metrics_php_outcome_label("cancelled"), "cancelled");
         assert_eq!(
             metrics_php_fpm_retry_reason_label("connection_error"),
             "connection_error"

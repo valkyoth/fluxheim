@@ -5,6 +5,9 @@ use std::sync::atomic::AtomicUsize;
 
 use tokio::sync::Semaphore;
 
+#[cfg(test)]
+#[path = "native_http1_route_php/metrics_tests.rs"]
+mod metrics_tests;
 mod paths;
 
 use crate::native_http1_php::{
@@ -118,6 +121,14 @@ impl NativePhpFpmRoute {
     }
 
     pub(crate) async fn handle(&self, request: NativeHttp1Request) -> NativeHttp1Response {
+        let metrics =
+            crate::native_php_metrics::PhpRequestMetrics::start(&self.vhost_name, &request.method);
+        let response = self.handle_inner(request).await;
+        metrics.finish(response.status());
+        response
+    }
+
+    async fn handle_inner(&self, request: NativeHttp1Request) -> NativeHttp1Response {
         if !native_php_method_allowed(&request.method) {
             return NativeHttp1Response::new(405, "Method Not Allowed", b"method not allowed\n")
                 .with_header("allow", "GET, HEAD, POST")
@@ -128,10 +139,23 @@ impl NativePhpFpmRoute {
                 .close_connection();
         };
         let resolved = self.files.resolve_php_script(&self.config, &path, true);
-        self.handle_resolved(request, path, resolved).await
+        self.handle_resolved_inner(request, path, resolved).await
     }
 
     pub(crate) async fn handle_resolved(
+        &self,
+        request: NativeHttp1Request,
+        path: String,
+        resolved: io::Result<NativePhpScriptResolve>,
+    ) -> NativeHttp1Response {
+        let metrics =
+            crate::native_php_metrics::PhpRequestMetrics::start(&self.vhost_name, &request.method);
+        let response = self.handle_resolved_inner(request, path, resolved).await;
+        metrics.finish(response.status());
+        response
+    }
+
+    async fn handle_resolved_inner(
         &self,
         request: NativeHttp1Request,
         path: String,
@@ -425,7 +449,7 @@ mod tests {
         assert!(matches!(resolved, Some(Err(_))));
     }
 
-    fn test_php_route(root: &Path) -> NativePhpFpmRoute {
+    pub(super) fn test_php_route(root: &Path) -> NativePhpFpmRoute {
         let files = NativeHttp1StaticWeb::from_config(&fluxheim_config::WebConfig {
             root: Some(root.to_path_buf()),
             index_files: vec!["index.php".to_owned()],
