@@ -157,6 +157,12 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Thu Oct 29 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.9.0-1
+- Qualify bounded logging, confidential rotation, correlation, operational metrics
+  and OTLP delivery; document the read-only observer API and collector dashboards.
+- Refresh compatible dependencies while retaining the exact Rust 1.99.1 minimum.
+- Keep development release metadata unreleased pending final acceptance.
+
 * Thu Oct 22 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.9.0-1
 - Focus the unreleased 1.9.0 plan on logging, metrics and operational visibility.
   Preserve HTTP/3 qualification as deferred, manually invoked research.

@@ -62,6 +62,8 @@ mod loader_source_safety;
 mod logging;
 #[path = "config_tests_observability.rs"]
 mod observability;
+#[path = "config_tests_observability_examples.rs"]
+mod observability_examples;
 #[path = "config_tests_parse_hints.rs"]
 mod parse_hints;
 #[path = "config_tests_php.rs"]

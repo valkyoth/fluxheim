@@ -4,7 +4,13 @@
 it from the latest published release, v1.8.3. No 1.9.0 release tag or published
 archives exist yet.
 
-## Planned Outcome
+## Release Outcome
+
+Fluxheim 1.9.0 adds bounded local diagnostics, request correlation, operational
+metrics, resilient OTLP/HTTP export and an authenticated read-only status API.
+Use the [operator walkthrough](../docs/guides/observability.md) for working
+configurations, alerts, troubleshooting, restart rules and privacy boundaries.
+No collector, new management listener or GUI is enabled by default.
 
 Packaged systemd services and container deployment examples now disable core
 files with zero soft/hard limits. Existing deployments must restart services or
@@ -20,18 +26,22 @@ The [observability commit plan](../docs/roadmap/observability-commit-plan.md) de
 logging, metrics and operational visibility as this release's scope:
 actionable diagnostics, bounded logging/export, request correlation,
 low-cardinality metrics and authenticated status. These implementation
-checkpoints begin with the Commit 01 inventory and baseline. New telemetry must preserve privacy and existing
+checkpoints preserve privacy and existing
 configuration; collectors are not mandatory to run Fluxheim.
 
 The thirteen checkpoints include a documented read-only operational API contract
 and a final whole-product documentation review with tested configuration recipes
-and publication on fluxheim.eu. These documentation deliverables are planned,
-not yet completed.
+and publication on fluxheim.eu. The whole-product Commit 13 review is still
+required; the observability guides and dashboard integration are implemented.
 A full transactional management API and separate UI are
 [proposed for later work](../docs/ideas/management-api-direction.md), not promised
 or implemented in this release.
 
 ## Commit 01 Preparation
+
+The numbered summaries below record implementation history. Statements about
+later checkpoints describe the state at that checkpoint, not missing current
+features; the implemented 05-11 summary follows them.
 
 - Organize documentation into indexed guides, reference, architecture, roadmap,
   ideas and evidence; update packaging/tooling references without deleting history.
@@ -105,6 +115,47 @@ or implemented in this release.
   facade. No new tracing bridge, duplicate completion producer, collector or
   queue-sizing configuration is introduced. See [evidence and limits](../docs/evidence/observability-04.md).
 
+## Implemented Commits 05-11
+
+- Confidential file logging supports safe rename/reopen, recovery from rejected
+  replacement files and terminal failure on active sink trust/write loss.
+  Rotation must preserve 0600/private ACLs; readable collector files are rejected.
+- Native HTTP/1.1 and HTTP/2 requests have one completion outcome, optional
+  request correlation and sampled server/upstream-attempt spans. Only trusted
+  direct peers can supply accepted IDs/trace parents. Local roots stay unsampled.
+- Metrics distinguish logical requests, retries, active connections, handshake
+  results, module failures and telemetry health. Global cardinality is bounded
+  to 20,000 exported samples with explicit overflow behavior across reloads.
+- Optional OTLP/HTTP metrics/traces use bounded queues, retries, response limits
+  and shutdown. Plain HTTP is allowed only for numeric loopback collectors;
+  remote/private/DNS collectors and bearer tokens require verified HTTPS.
+- GET `/_fluxheim/operational-status` exposes bounded capabilities, configuration
+  counts, recovery readiness and telemetry health. Its optional observer token
+  cannot invoke mutations or reset control-token authentication failures.
+- Importable Grafana and SigNoz dashboards are qualified against actual stored
+  metrics/traces and externally collected JSON logs. They observe Fluxheim;
+  application/database instrumentation remains outside its request boundary.
+- Native qualification covers seven archive profiles on Linux x86_64/ARM64,
+  macOS Apple Silicon and Windows x86_64. A local dedicated Windows QEMU VM
+  is supported for testing/building within its documented single-owner model.
+
+## Upgrade Notes And Limits
+
+- Logging sink/filter, metrics/export, tracing and admin settings require a
+  restart or process upgrade. Access-log routing policy remains snapshot-safe.
+  Token-file replacement is not live credential rotation.
+- Structured events have a closed schema distinct from legacy diagnostic JSON;
+  update collector parsers for both timestamp formats and preserve correlation.
+- Logging/audit admission and OTLP are best effort. Sink failure, saturation,
+  expiry or process death can lose records; retries can duplicate accepted data.
+  No durable audit journal, export spool or exactly-once claim is introduced.
+- Keep INFO audit outcomes enabled. Failed admission blocks mutations with
+  `audit_unavailable`; post-mutation delivery failure can report
+  `operation_may_have_completed`. Inspect state before retrying.
+- Privacy-mode restrictions remain compile-time enforced. Windows PHP remains
+  external TCP FastCGI; no Windows managed PHP, Windows ARM64 or macOS Intel
+  support is added. HTTP/3 remains deferred; full management and UI are future work.
+
 ## Implemented Maintenance
 
 Commit 10A corrects operation-scoped ACME validation:
@@ -124,9 +175,13 @@ Commit 10A corrects operation-scoped ACME validation:
 
 Post-1.8.3 security maintenance:
 
-- Update the locked ACME cryptography dependency `ctutils` from 0.4.3 to 0.4.4
-  to address RUSTSEC-2026-0385 (non-constant-time mask generation and `u128`
-  comparisons). No ACME configuration or protocol behavior changes.
+- Retain the ACME cryptography fixes for RUSTSEC-2026-0385 and
+  RUSTSEC-2026-0387; qualification now locks `ctutils` 0.4.7 and
+  `crypto-bigint` 0.7.10.
+- Refresh 27 compatible production lockfile packages and two fuzz packages for
+  candidate qualification, including AWS-LC, Brotli, rustix, ICU and WebPKI roots.
+  Rust remains 1.99.1 and Wasmtime/WASI remains 50.0.0. The refresh requires new
+  native/archive and collector evidence, not reuse of older binary checksums.
 
 The shared 1.8.3 maintenance is retained, not a new 1.9 observability feature.
 Production runtime sources and normalized dependency manifests were compared

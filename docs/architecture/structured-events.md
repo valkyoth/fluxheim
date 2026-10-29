@@ -15,7 +15,8 @@ decision. It neither writes files nor logs, queues, starts threads, contacts
 collectors or reads environment variables. `structured-events` enables this API;
 without it, standalone observability consumers do not acquire serde dependencies.
 The application and native server enable it. Operational callers use a narrower
-API accepting only finite event data, with no request correlation or resources.
+API accepting finite event data. Native request owners install validated local
+correlation context; automatic/background operations do not inherit it.
 
 There is deliberately no arbitrary field map, message string, URL, path, host,
 IP, HTTP header, query value, body, credential or `Display`/`Error` input. Owners
@@ -59,7 +60,8 @@ a monotonic clock by the producer. `bytes_sent` counts bytes accepted by the
 downstream write interface, not proof the client consumed them. `attempts`
 counts upstream attempts (0 if none); a logical request emits one access outcome.
 Per-attempt error events use one-based attempt numbers when known. Native
-completion/cancellation accounting remains Commit 06 work.
+completion/cancellation accounting is implemented; see the
+[request lifecycle](../guides/opentelemetry-tracing.md#completion-and-attempts).
 
 ## Policy And Redaction
 
@@ -137,8 +139,9 @@ quota, hold its admission lock or occupy its queue. Boundary-adjacent bursts
 can total 200 per lane. Contention/poisoning, rate exhaustion and full queues
 drop without waiting for capacity. Admission precedes capture/encoding and I/O.
 
-Only finite `EventData` and a timestamp enter a channel, without heap-backed
-strings. Queue payload storage is `128 * size_of::<Pending>()` per lane plus
+Finite `EventData`, a timestamp, policy and fixed-capacity validated correlation
+enter a channel, without heap-backed strings. Queue payload storage is
+`128 * size_of::<Pending>()` per lane plus
 fixed channel bookkeeping. Each worker retains at most one in-flight event and
 encodes only the configured format, with the existing 8 KiB limit. Exactly three
 threads are created at initialization, not per event. Their stacks and the
@@ -208,5 +211,5 @@ admin mutations and automatic recovery as described above.
 Automatic ACME renewal outcomes now omit legacy raw domain/error text in favor
 of typed events. Other legacy messages remain and must not be mistaken for
 sanitized events. Incremental pentest, exact-SHA GitHub checks and user approval
-are required before Commit 04. Native Windows/macOS execution must be supplied
+are required at each checkpoint. Native Windows/macOS execution must be supplied
 by CI or native hosts, not inferred from Linux or cross-compilation.

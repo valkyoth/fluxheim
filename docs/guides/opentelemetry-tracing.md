@@ -1,8 +1,9 @@
 # OpenTelemetry Tracing
 
 Unreleased 1.9.0 adds native request completion and upstream-attempt spans.
-Tracing is optional and vendor-neutral. Collector/backend ingestion is a later
-gate in the [observability plan](../roadmap/observability-commit-plan.md).
+Tracing is optional and vendor-neutral. Real collector/backend ingestion is
+covered by the [integration guide](collector-integrations.md) and
+[native qualification](../evidence/observability-11.md).
 
 ## Configuration
 

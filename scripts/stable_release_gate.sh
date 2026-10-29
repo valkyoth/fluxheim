@@ -168,7 +168,7 @@ if [ "${FLUXHEIM_GATE_RPM_BUILD:-0}" = "1" ]; then
         echo "stable release gate: failed to determine RPM version from Cargo.toml" >&2
         exit 1
     fi
-    scripts/build_fluxheim_rpm.py "$rpm_version" native \
+    scripts/build_fluxheim_rpm.py "$rpm_version" "${FLUXHEIM_GATE_RPM_BUILD_TYPE:-generic}" \
         --target "${FLUXHEIM_GATE_RPM_TARGET:-fedora-44}" \
         --local-source
 else

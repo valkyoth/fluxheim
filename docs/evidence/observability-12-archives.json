@@ -1,0 +1,664 @@
+{
+  "qualification_date": "2026-10-29",
+  "runtime_commit": "babbe3e71e439e6c9f8cbf626dfc50493c0794bf",
+  "toolchain": "1.99.1",
+  "publication_authorized": false,
+  "reports": [
+    {
+      "commit": "babbe3e71e439e6c9f8cbf626dfc50493c0794bf",
+      "version": "1.9.0",
+      "target": "x86_64-unknown-linux-gnu",
+      "host": "Linux-7.2.11-1-default-x86_64-with-glibc2.44",
+      "profiles": {
+        "full": {
+          "checks": {
+            "platform": {
+              "arch": "x86_64",
+              "managed_php": false,
+              "ops_socket": true,
+              "os": "linux"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-full-x86_64-linux.tar.gz": "bfc37c8488301268944cb0587a80b7710c0badf0c8974b3567f44189ece00f34",
+            "fluxheim-1.9.0-full-x86_64-linux.zip": "a483df6be194463776d872abbb849ba562559d598cfbee7332f84fa036b26979"
+          }
+        },
+        "wasm": {
+          "checks": {
+            "platform": {
+              "arch": "x86_64",
+              "managed_php": false,
+              "ops_socket": true,
+              "os": "linux"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-wasm-x86_64-linux.tar.gz": "c91a673276f211c0c96562f7b087007a2c0f8c547fd43bd10691f1f71e5f126f",
+            "fluxheim-1.9.0-wasm-x86_64-linux.zip": "b7b68a0fd2f06368896e40b192ffd1c241d317936b044daf9ca83de39e22a6c4"
+          }
+        },
+        "cache": {
+          "checks": {
+            "platform": {
+              "arch": "x86_64",
+              "managed_php": false,
+              "ops_socket": true,
+              "os": "linux"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-cache-x86_64-linux.tar.gz": "331d1a8c2858e1a786e446095609a1995d448109ef82809169e8088f21f3e71b",
+            "fluxheim-1.9.0-cache-x86_64-linux.zip": "434262b614739cbdf45bfa8f912a626c8506002602929d8847e1eccba49de3ab"
+          }
+        },
+        "proxy": {
+          "checks": {
+            "platform": {
+              "arch": "x86_64",
+              "managed_php": false,
+              "ops_socket": true,
+              "os": "linux"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-proxy-x86_64-linux.tar.gz": "46adfb274d16feb6678685c281cc083e307d626ec92e123ae66bba6b4201602f",
+            "fluxheim-1.9.0-proxy-x86_64-linux.zip": "54e7eb46f9b832f4764d9e26388aaa6253ec9b7669ebd108afcb6c4fae288e0e"
+          }
+        },
+        "load-balancer": {
+          "checks": {
+            "platform": {
+              "arch": "x86_64",
+              "managed_php": false,
+              "ops_socket": true,
+              "os": "linux"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-load-balancer-x86_64-linux.tar.gz": "65eae39f8109a6578da65b88574c4bd3ec9ae02a8f79925a28fa24821fb84dc4",
+            "fluxheim-1.9.0-load-balancer-x86_64-linux.zip": "936339fd39ecc5f7cb707c1ab0738a86ae58ab3a2748e9b81549ae938d61af19"
+          }
+        },
+        "php": {
+          "checks": {
+            "platform": {
+              "arch": "x86_64",
+              "managed_php": true,
+              "ops_socket": true,
+              "os": "linux"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-php-x86_64-linux.tar.gz": "9873a2655e59cd3dba62116205c0104a1ad0de701b469572e7c1625d2dbb51ef",
+            "fluxheim-1.9.0-php-x86_64-linux.zip": "ae2647b0365f9559ee48aab4170966faaa5cda844b77d621ee4ac6b4278d3042"
+          }
+        },
+        "config-tester": {
+          "checks": {
+            "config_validation": true
+          },
+          "identities": {
+            "fluxheim-config-tester": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-config-tester-x86_64-linux.tar.gz": "10b458649b8919848883a96dd8cc879781b2e6716f9dc7ae5fa5eb6449d4a794",
+            "fluxheim-1.9.0-config-tester-x86_64-linux.zip": "563961f9cc39da5f7ad928b7d6b3ef36390dc85ff28e55f759f0a46461e8b56f"
+          }
+        }
+      }
+    },
+    {
+      "commit": "babbe3e71e439e6c9f8cbf626dfc50493c0794bf",
+      "version": "1.9.0",
+      "target": "aarch64-unknown-linux-gnu",
+      "host": "Linux-7.0.0-1014-aws-aarch64-with-glibc2.43",
+      "profiles": {
+        "full": {
+          "checks": {
+            "platform": {
+              "arch": "aarch64",
+              "managed_php": false,
+              "ops_socket": true,
+              "os": "linux"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-full-aarch64-linux.tar.gz": "a3d14b0da7ecc4dd6adbd507414fc38402042c6a255cd6052c38b552387ecfd4",
+            "fluxheim-1.9.0-full-aarch64-linux.zip": "f3ac63b3b4c544563313150ddbad7f81a6c12236b7365dde6e40b7324456481f"
+          }
+        },
+        "wasm": {
+          "checks": {
+            "platform": {
+              "arch": "aarch64",
+              "managed_php": false,
+              "ops_socket": true,
+              "os": "linux"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-wasm-aarch64-linux.tar.gz": "d5112e8f314360fd2b7a25053e20fa60b5ca91c29496a6f84170ebfba722e19f",
+            "fluxheim-1.9.0-wasm-aarch64-linux.zip": "6b4ae4db35e7e57e887c3da89494140cc1271b2b913051b17151db99f79a46d7"
+          }
+        },
+        "cache": {
+          "checks": {
+            "platform": {
+              "arch": "aarch64",
+              "managed_php": false,
+              "ops_socket": true,
+              "os": "linux"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-cache-aarch64-linux.tar.gz": "5aa824127dfa7e83458460a852b0f72ab1bcec7a788861d46d5b97d953528f71",
+            "fluxheim-1.9.0-cache-aarch64-linux.zip": "664d9523e44cb69b37028279f82142e8aabc221ee2b049c8f1c8e57f8299f98b"
+          }
+        },
+        "proxy": {
+          "checks": {
+            "platform": {
+              "arch": "aarch64",
+              "managed_php": false,
+              "ops_socket": true,
+              "os": "linux"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-proxy-aarch64-linux.tar.gz": "9f8a193b29020068e053c5db283a64f3c485ef8b0864ac197bfff5435b612258",
+            "fluxheim-1.9.0-proxy-aarch64-linux.zip": "ab92ad0b9227f1be64c08e297aa07e7dc4286b25af50ed7bc9cf1868ecc7b879"
+          }
+        },
+        "load-balancer": {
+          "checks": {
+            "platform": {
+              "arch": "aarch64",
+              "managed_php": false,
+              "ops_socket": true,
+              "os": "linux"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-load-balancer-aarch64-linux.tar.gz": "9a143d765e037cbecdcf7d03384417df9c8fb4ae5c0085e39af3c9d7feebf975",
+            "fluxheim-1.9.0-load-balancer-aarch64-linux.zip": "1d5247109d6bcf76b351de298d441350edab33a795f3b7e055a77a9235c8e8b7"
+          }
+        },
+        "php": {
+          "checks": {
+            "platform": {
+              "arch": "aarch64",
+              "managed_php": true,
+              "ops_socket": true,
+              "os": "linux"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-php-aarch64-linux.tar.gz": "6caf061e6dd459eb7bfc7fc0eb4ef48551bf8591d857ab108f7eab1b6ec351c5",
+            "fluxheim-1.9.0-php-aarch64-linux.zip": "dc7cb8a716f50288ddb81f86bf331c982a5b4408b5885ff01551f2097843b1c7"
+          }
+        },
+        "config-tester": {
+          "checks": {
+            "config_validation": true
+          },
+          "identities": {
+            "fluxheim-config-tester": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-config-tester-aarch64-linux.tar.gz": "6902ff19a6b8bf942194c81d8b2d8c1f4bfbc185879440c2a09e57bb0bd9edc0",
+            "fluxheim-1.9.0-config-tester-aarch64-linux.zip": "355d598de68da9d211c354af90dae52c87e7207c38ce5ad46de3921d011bd8a2"
+          }
+        }
+      }
+    },
+    {
+      "commit": "babbe3e71e439e6c9f8cbf626dfc50493c0794bf",
+      "version": "1.9.0",
+      "target": "aarch64-apple-darwin",
+      "host": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+      "profiles": {
+        "full": {
+          "checks": {
+            "platform": {
+              "arch": "aarch64",
+              "managed_php": false,
+              "ops_socket": true,
+              "os": "macos"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-full-aarch64-macos.tar.gz": "c63d86fb84cc0f5af6b57b71a533b19f5552ab14e45cd845e422317bd20ab3f6",
+            "fluxheim-1.9.0-full-aarch64-macos.zip": "de2c9ac2ffb36f76cc0818d3d22c4d0f3f3edbfe9eff8e9757c40947602188ac"
+          }
+        },
+        "wasm": {
+          "checks": {
+            "platform": {
+              "arch": "aarch64",
+              "managed_php": false,
+              "ops_socket": true,
+              "os": "macos"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-wasm-aarch64-macos.tar.gz": "e3935f6aa19758e63fe94eb36f80f1256cb54b362d9264c013ef3c7e186a0a4a",
+            "fluxheim-1.9.0-wasm-aarch64-macos.zip": "ff29bc75ecc2d8f921eeeb660a6684e5cf2ce705c2a5c4186d1490de723bab88"
+          }
+        },
+        "cache": {
+          "checks": {
+            "platform": {
+              "arch": "aarch64",
+              "managed_php": false,
+              "ops_socket": true,
+              "os": "macos"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-cache-aarch64-macos.tar.gz": "33e051b9480c46861080e87db896ea7cd5c0b99954f401627578d42d6b99562d",
+            "fluxheim-1.9.0-cache-aarch64-macos.zip": "88fc771e8cfdcba433996e7ad2925fea7ae3e38b55ad42917ebadcd14b6b1e08"
+          }
+        },
+        "proxy": {
+          "checks": {
+            "platform": {
+              "arch": "aarch64",
+              "managed_php": false,
+              "ops_socket": true,
+              "os": "macos"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-proxy-aarch64-macos.tar.gz": "9a242c1dcf26446faa2ff9c8abb498eaf93fe21ae4ef909d2056d0a5540fb686",
+            "fluxheim-1.9.0-proxy-aarch64-macos.zip": "028f78b244ca5004be9f76175717b9f55583a5115e0a419719da1b96179ecbd4"
+          }
+        },
+        "load-balancer": {
+          "checks": {
+            "platform": {
+              "arch": "aarch64",
+              "managed_php": false,
+              "ops_socket": true,
+              "os": "macos"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-load-balancer-aarch64-macos.tar.gz": "43d9a1db514c58618c905e4bf2954c2422f1b60afbb432eb7c934d3440804b02",
+            "fluxheim-1.9.0-load-balancer-aarch64-macos.zip": "67fba433eede1ef27f28a9191db4476bdf80b378b7b0af513dc4a5a7404b4c97"
+          }
+        },
+        "php": {
+          "checks": {
+            "platform": {
+              "arch": "aarch64",
+              "managed_php": true,
+              "ops_socket": true,
+              "os": "macos"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-php-aarch64-macos.tar.gz": "7fc57cffc463e40b6fae8d2f3c70aedf6921d80752177729d2d5fe6cebf39002",
+            "fluxheim-1.9.0-php-aarch64-macos.zip": "9381c8fb7f67c0b7c0797f26f577afca5f43f72310dd55eba5b8876e5e3244d5"
+          }
+        },
+        "config-tester": {
+          "checks": {
+            "config_validation": true
+          },
+          "identities": {
+            "fluxheim-config-tester": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-config-tester-aarch64-macos.tar.gz": "8345459b55664bb5ad3deeee311092f099d836b391cc142341100d5db206ecd5",
+            "fluxheim-1.9.0-config-tester-aarch64-macos.zip": "cad7aa3bc35ba7d05398b3932f1892e903ba1e527bc896b553a507727c27c600"
+          }
+        }
+      }
+    },
+    {
+      "commit": "babbe3e71e439e6c9f8cbf626dfc50493c0794bf",
+      "version": "1.9.0",
+      "target": "x86_64-pc-windows-msvc",
+      "host": "Windows-11-10.0.26300-SP0",
+      "profiles": {
+        "full": {
+          "checks": {
+            "platform": {
+              "arch": "x86_64",
+              "managed_php": false,
+              "ops_socket": false,
+              "os": "windows"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim.exe": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme.exe": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-full-x86_64-windows.tar.gz": "7c5573e0c08cb464bd6c5a8610aaf29500655822be4c2c588acd7219f76d88d8",
+            "fluxheim-1.9.0-full-x86_64-windows.zip": "a182f5c73e20f203329177d8267987cfab93c4b1ce9dec20279703b0ef0c0090"
+          }
+        },
+        "wasm": {
+          "checks": {
+            "platform": {
+              "arch": "x86_64",
+              "managed_php": false,
+              "ops_socket": false,
+              "os": "windows"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim.exe": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme.exe": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-wasm-x86_64-windows.tar.gz": "821aad91a4bd30cfefed27f31461abba23b3cac6062683f35c93e267c7226388",
+            "fluxheim-1.9.0-wasm-x86_64-windows.zip": "074b656f13bd8e5a74d78f9c241847b5b9fddae7fba97a749fe3b1d7e930b7c3"
+          }
+        },
+        "cache": {
+          "checks": {
+            "platform": {
+              "arch": "x86_64",
+              "managed_php": false,
+              "ops_socket": false,
+              "os": "windows"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim.exe": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme.exe": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-cache-x86_64-windows.tar.gz": "21f02ae80ca01a77a2e7573d0ae736b0dcd2441b57371ef51b7f94e5b404a37a",
+            "fluxheim-1.9.0-cache-x86_64-windows.zip": "c516c9768557fb60856b8f6416a812b752ae218b75611b2cd4fb2674cdfe2750"
+          }
+        },
+        "proxy": {
+          "checks": {
+            "platform": {
+              "arch": "x86_64",
+              "managed_php": false,
+              "ops_socket": false,
+              "os": "windows"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim.exe": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme.exe": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-proxy-x86_64-windows.tar.gz": "cd90b4d8821564542a3ce958215eef7c3b77aff2f36d51ec110398cf06498d1d",
+            "fluxheim-1.9.0-proxy-x86_64-windows.zip": "bb99e888b32b43e875144d571cd6fbf51d492ed77f3e31a93d4b24fac8c75008"
+          }
+        },
+        "load-balancer": {
+          "checks": {
+            "platform": {
+              "arch": "x86_64",
+              "managed_php": false,
+              "ops_socket": false,
+              "os": "windows"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim.exe": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme.exe": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-load-balancer-x86_64-windows.tar.gz": "c76de38783e5a95891b20c1752300cfbe29a0ecd9de6712214fe2b4917e70ded",
+            "fluxheim-1.9.0-load-balancer-x86_64-windows.zip": "1f7945b670adddc2fe68dd950677fc6b46cb461e64972489f368e8d7acb3a6bb"
+          }
+        },
+        "php": {
+          "checks": {
+            "platform": {
+              "arch": "x86_64",
+              "managed_php": false,
+              "ops_socket": false,
+              "os": "windows"
+            },
+            "http_https": true,
+            "capabilities": true,
+            "unsupported_config": true,
+            "graceful_stop_with_traffic": true,
+            "static_memory_disk_round_robin_when_compiled": true,
+            "file_rotation": true
+          },
+          "identities": {
+            "fluxheim.exe": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+            "fluxheim-acme.exe": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-php-x86_64-windows.tar.gz": "c899bb9de67578ef0ac8e538d49782659690a68ce191524b806a38d4243a38d1",
+            "fluxheim-1.9.0-php-x86_64-windows.zip": "edc399d2124f4aed180037927038274e2e57bc0b47c9ad92a1fb66da3dd0488e"
+          }
+        },
+        "config-tester": {
+          "checks": {
+            "config_validation": true
+          },
+          "identities": {
+            "fluxheim-config-tester.exe": "fluxheim 1.9.0 (qualification-gbabbe3e7)"
+          },
+          "sha256": {
+            "fluxheim-1.9.0-config-tester-x86_64-windows.tar.gz": "fc744875cea02a9e3437e036af139a2a1893cc0b60c737c383f81efa4d33730d",
+            "fluxheim-1.9.0-config-tester-x86_64-windows.zip": "e5e48b55bb579b4af57e01170d39c2d6e0ab84496ff12f26a66c195680bf8e43"
+          }
+        }
+      }
+    }
+  ]
+}

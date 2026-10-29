@@ -1,7 +1,13 @@
 # 1.9.0 Observability Commit Plan
 
-Status: Commits 01-10, 07A and 10A accepted for progression; Commit 11 implemented
-and natively qualified, awaiting pentest and GitHub acceptance, 2026-10-29.
+Status: Commits 01-11, 07A and 10A accepted for progression; Commit 12 implemented,
+2026-10-29. The owner approved a compatible dependency refresh in this checkpoint,
+requiring new native qualification rather than reuse of previous runtime archives.
+Candidate checks and approved generic-RPM qualification are recorded in
+[Commit 12 evidence](../evidence/observability-12.md); pentest, final-checkpoint CI
+and owner acceptance remain pending. CPU-native RPM compilation is blocked by
+the documented compiler crash, and cross-platform performance measurement
+limits remain explicit.
 Main stays at **1.9.0
 (unreleased)**. This document replaces the earlier ten-checkpoint outline;
 no previously accepted implementation checkpoint is being renumbered.
@@ -868,11 +874,11 @@ collector behavior is not the new required-collector acceptance contract.
 | 09 - Read-only API | Accepted for progression | Owner reported clean retest and green GitHub on `76faa3ca`. [Operational contract](../guides/operational-status.md) and [qualification evidence](../evidence/observability-09.md). No complete management API or UI is claimed. |
 | 10 - Live containers/collectors | Accepted for progression | Owner reported clean pentest, green GitHub and resolved scanning alerts through `76c938bc`, then authorized 10A. [Collector integration guide](../guides/collector-integrations.md), importable dashboards and [qualification evidence](../evidence/observability-10.md). |
 | 10A - ACME validation scope / server feature parity | Accepted for progression | Owner reported clean pentest and green GitHub through `4b4864c0`, then authorized Commit 11. [Evidence](../evidence/observability-10a.md). |
-| 11 - Native archives | Implemented; acceptance pending | All seven profiles built/extracted/executed on four native targets; real collector outage/recovery, external PHP and packaged Wasm passed. [Evidence and scope](../evidence/observability-11.md). Pentest and exact-SHA CI remain required. |
-| 12 - Observability docs / candidate qualification | Not started | Pending |
+| 11 - Native archives | Accepted for progression | Owner supplied clean pentest through `390cfc9c`, reported GitHub green and authorized 12. All nine scanning alerts were resolved. [Evidence and scope](../evidence/observability-11.md). |
+| 12 - Observability docs / candidate qualification | Implemented; acceptance pending | [Evidence](../evidence/observability-12.md): operator docs, examples/alerts, metadata, handoff, refreshed runtime `babbe3e7`, 28 native profile checks and deep gate plus separately qualified generic RPM. Owner approved generic RPM instead of the reproducibly failing CPU-native optimization. Final pentest, exact-checkpoint CI and measurement-limit review pending. |
 | 13 - Documentation / final release acceptance | Not started | Pending |
 
-Commit 10A is accepted for progression. Commit 11 is the current checkpoint.
+Commit 11 is accepted for progression. Commit 12 is the current checkpoint.
 Stop for pentest, green GitHub checks and explicit approval before proceeding
-to Commit 12.
+to Commit 13. No release tag or publication is authorized by Commit 12.
 No licensing purchase or changes to another project's VM are authorized.

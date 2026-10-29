@@ -1,0 +1,35 @@
+groups:
+  - name: fluxheim-local
+    rules:
+      - alert: FluxheimScrapeDown
+        expr: up{job="fluxheim"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Fluxheim metrics scrape is failing
+      - alert: FluxheimScrapeMissing
+        expr: absent(up{job="fluxheim"})
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: No Fluxheim scrape target is present
+      - alert: FluxheimLogSinkFailure
+        expr: sum by (instance) (increase(fluxheim_log_dispatch_events_total{job="fluxheim",outcome="sink_errors"}[5m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Fluxheim logging needs investigation
+      - alert: FluxheimMetricCardinalityOverflow
+        expr: increase(fluxheim_metric_series_overflow_total{job="fluxheim"}[5m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Fluxheim metric dimensions exceeded their budget
+      - alert: FluxheimOtlpLoss
+        expr: increase(fluxheim_otlp_dropped_total{job="fluxheim"}[5m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Fluxheim OTLP batches were lost

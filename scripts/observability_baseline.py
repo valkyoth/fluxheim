@@ -28,6 +28,15 @@ def percentile(values, fraction):
     return sorted(values)[math.ceil(len(values) * fraction) - 1]
 
 
+def is_access_record(record):
+    if not isinstance(record, dict):
+        return False
+    data = record.get("data")
+    return (record.get("target") == "fluxheim::access"
+            or (record.get("schema_version") == 1 and isinstance(data, dict)
+                and data.get("kind") == "access"))
+
+
 def get(port, path="/"):
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     try:
@@ -217,7 +226,7 @@ upstream_tls = false
         "cpu_seconds": None if before["cpu_seconds"] is None else after["cpu_seconds"] - before["cpu_seconds"],
         "rss_peak_bytes": after["rss_peak_bytes"], "shutdown_seconds": shutdown_seconds,
         "received_exports": observations, "runtime_records": len(records),
-        "access_records": sum(record.get("target") == "fluxheim::access" for record in records),
+        "access_records": sum(is_access_record(record) for record in records),
         "latency_samples_ms": timings,
     }
 
@@ -266,7 +275,7 @@ def main():
             "results": results,
         }
         (directory / "results.json").write_text(json.dumps(evidence, indent=2) + "\n")
-        print("Baseline recorded; absent access events/spans are gaps, not APM success.")
+        print("Baseline recorded; traces are unsampled for untrusted fixture traffic. This is not backend-delivery proof.")
     finally:
         fixture.shutdown()
         fixture.server_close()

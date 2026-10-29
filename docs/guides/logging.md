@@ -1,7 +1,9 @@
 # Logging And File Lifecycle
 
-Applies to unreleased 1.9.0. This guide describes implemented ordinary logging,
-not future access-log completion hooks, correlation or remote log exporters.
+Applies to unreleased 1.9.0. This guide covers the shared local sink and rotation.
+Native access completion and correlation are implemented; see the
+[operational overview](observability.md) and [tracing guide](opentelemetry-tracing.md).
+Native OTLP log export is not implemented.
 See the [configuration reference](../reference/config-reference.md),
 [structured event contract](../architecture/structured-events.md) and
 [logging architecture](../architecture/logging-architecture.md).
@@ -48,7 +50,8 @@ processes at the same file; prefer service-manager collection in that workflow.
 `append = false` truncates only during startup, after validating the opened file
 and checking that it is not the crash sink. Reopen always appends, including to
 a pre-existing replacement. Logging configuration changes require restart;
-configuration snapshot reload is not a log-reopen command.
+configuration snapshot reload is not a log-reopen command. The exception is
+`logging.access.*`, which is snapshot-safe routing policy, not sink configuration.
 
 Privacy-mode builds prohibit file logging. This change does not relax their
 configuration policy or introduce additional diagnostic fields.

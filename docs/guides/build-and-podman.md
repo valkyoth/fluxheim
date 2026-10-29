@@ -1077,6 +1077,15 @@ the unprivileged `fluxheim` user.
 
 For local binary RPM smoke builds, use the containerized helper:
 
+The default `generic` build is portable across the target architecture's baseline
+CPUs and is the release gate's RPM mode. `native` adds `target-cpu=native` and
+is only for the build CPU's supported instruction set, not general distribution.
+Use `FLUXHEIM_GATE_RPM_BUILD_TYPE=native` to explicitly qualify that optimization.
+During the 1.9.0 candidate checks, Rust 1.99.1 reproducibly crashed in LLVM while
+compiling `p256` with `native` on the tested Zen 5 host. Native RPM optimization
+is blocked there; do not treat a generic build as proof that native works.
+See the [qualification ledger](../evidence/observability-12.md).
+
 ```bash
 scripts/build_fluxheim_rpm.py 1.4.5 --target opensuse-tumbleweed
 scripts/build_fluxheim_rpm.py 1.4.5 native --target fedora-44

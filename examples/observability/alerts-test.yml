@@ -1,0 +1,64 @@
+rule_files:
+  - alerts.yml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{job="fluxheim",instance="local"}'
+        values: '1 1 1 1 1 1'
+      - series: 'fluxheim_otlp_dropped_total{job="fluxheim",instance="local",signal="traces"}'
+        values: '0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: FluxheimScrapeDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: FluxheimScrapeMissing
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: FluxheimOtlpLoss
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: 'up{job="fluxheim",instance="local"}'
+        values: '0 0 0'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: FluxheimScrapeDown
+        exp_alerts:
+          - exp_labels: {job: fluxheim, instance: local, severity: critical}
+            exp_annotations: {summary: Fluxheim metrics scrape is failing}
+  - interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: FluxheimScrapeMissing
+        exp_alerts:
+          - exp_labels: {job: fluxheim, severity: warning}
+            exp_annotations: {summary: No Fluxheim scrape target is present}
+  - interval: 1m
+    input_series:
+      - series: 'up{job="fluxheim",instance="local"}'
+        values: '1 1 1 1 1 1'
+      - series: 'fluxheim_otlp_dropped_total{job="fluxheim",instance="local",signal="traces"}'
+        values: '0 1 2 3 4 5'
+      - series: 'fluxheim_metric_series_overflow_total{job="fluxheim",instance="local"}'
+        values: '0 1 2 3 4 5'
+      - series: 'fluxheim_log_dispatch_events_total{job="fluxheim",instance="local",lane="audit",outcome="sink_errors"}'
+        values: '0 0 0 0 1 1'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: FluxheimOtlpLoss
+        exp_alerts:
+          - exp_labels: {job: fluxheim, instance: local, signal: traces, severity: warning}
+            exp_annotations: {summary: Fluxheim OTLP batches were lost}
+      - eval_time: 5m
+        alertname: FluxheimMetricCardinalityOverflow
+        exp_alerts:
+          - exp_labels: {job: fluxheim, instance: local, severity: warning}
+            exp_annotations: {summary: Fluxheim metric dimensions exceeded their budget}
+      - eval_time: 5m
+        alertname: FluxheimLogSinkFailure
+        exp_alerts:
+          - exp_labels: {instance: local, severity: warning}
+            exp_annotations: {summary: Fluxheim logging needs investigation}

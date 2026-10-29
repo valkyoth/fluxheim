@@ -11,6 +11,14 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- Publish the 1.9 operator walkthrough, tested local/collector configs, fixture-
+  checked alert rules, troubleshooting/restart policy and management API handoff.
+  Qualify refreshed compatible dependencies against native archives and release
+  gates; keep 1.9.0 unreleased pending final documentation, pentest and CI.
+- Add bounded asynchronous legacy and structured logging with separate audit
+  admission, confidential cross-platform file rotation and finite fatal reasons.
+  Linux startup verifies non-dumpable status before reading configuration.
+  This is best-effort telemetry, not a durable audit journal.
 - Scope certificate-only commands to ACME/TLS configuration, so renewal does not
   require unrelated managed PHP executables or compiled cache support. Preserve
   configuration/include, secret, storage and reload-control trust checks.
@@ -51,7 +59,7 @@ behavior when the change improves security or project direction.
   pentest/CI checkpoints and real container/native-platform acceptance.
   Preserve HTTP/3 plans and probes as deferred research for future Brynja/Vef
   evaluation; remove source probes from mandatory CI/local checks and keep
-  a manual research workflow. No new observability runtime feature ships yet.
+  a manual research workflow. No production HTTP/3 listener is included.
 - Refresh the active workspace to Rust 1.99.1, Wasmtime/WASI 50.0.0,
   sanitization 2.1.1, base64-ng 2.1.0 and current stable dependencies, including
   fuzz dependencies and immutable container base digests. Deferred HTTP/3
@@ -61,13 +69,9 @@ behavior when the change improves security or project direction.
   container matrix, with fresh vendor bases/packages, live smoke gates, unique
   rebuild tags, and versioned-alias promotion only after all builds pass.
   Fluxheim's version, signed source tag, archives, and RPMs remain unchanged.
-- Refresh Rust to 1.99.0, published stable Cargo dependencies, Rust builder
-  image digests, and pinned Docker GitHub Actions. The development workspace
-  now reports 1.9.0; published releases and runtime feature profiles remain
-  unchanged.
-- Start HTTP/3 Commit 1 with an isolated source-locked feasibility workspace,
-  machine-checked scope and provider contracts, and a future-only Brynja gap
-  inventory. This does not enable HTTP/3 or add QUIC to Fluxheim's runtime graph.
+- Refresh compatible candidate dependencies again during qualification, including
+  AWS-LC, Brotli, rustix, ICU, WebPKI roots and ACME cryptographic helpers. Retain
+  Rust 1.99.1 and the isolated, non-production HTTP/3 research workspace.
 
 ## 1.8.3 - 2026-10-22
 

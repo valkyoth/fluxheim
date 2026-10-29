@@ -3,7 +3,8 @@
 Unreleased 1.9.0 supports optional OTLP/HTTP JSON metrics and traces. This is
 best-effort telemetry, not durable audit storage, an application APM agent, or
 exactly-once delivery. Collector failure does not make the public listener or
-local metrics listener unready. Backend/dashboard qualification is Commit 10.
+local metrics listener unready. See the qualified
+[backend/dashboard integration](collector-integrations.md).
 
 ## Configure A Collector
 

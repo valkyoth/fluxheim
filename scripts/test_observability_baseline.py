@@ -10,10 +10,20 @@ import tempfile
 import threading
 import unittest
 
-from observability_baseline import CANARY, Fixture, ThreadingHTTPServer, get, percentile
+from observability_baseline import CANARY, Fixture, ThreadingHTTPServer, get, is_access_record, percentile
 
 
 class BaselineTests(unittest.TestCase):
+    def test_access_records_include_structured_schema_without_counting_other_events(self):
+        for record in ({"target": "fluxheim::access"},
+                       {"schema_version": 1, "data": {"kind": "access"}}):
+            self.assertTrue(is_access_record(record))
+        for record in ({"schema_version": 1, "data": {"kind": "audit"}},
+                       {"schema_version": 2, "data": {"kind": "access"}},
+                       {"data": {"kind": "access"}}, {"schema_version": 1, "data": "access"},
+                       {"target": "fluxheim::runtime"}, [], None):
+            self.assertFalse(is_access_record(record))
+
     def test_prometheus_fixture_retains_lf_on_windows_style_checkout(self):
         repository = Path(__file__).resolve().parents[1]
         fixture = Path("tests/fixtures/observability/metrics.prom")

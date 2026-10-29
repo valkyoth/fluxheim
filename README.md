@@ -457,9 +457,13 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 The development version is `1.9.0`, ahead of the published `v1.8.3` release.
 The [observability plan](docs/roadmap/observability-commit-plan.md) covers actionable
 diagnostics, bounded logging, metrics, tracing and live cross-platform proof.
-Commit 01 is accepted; Commit 02 adds typed, bounded event capture without yet
-wiring new runtime producers. Each checkpoint requires pentest, retest
-and green GitHub checks before the next begins. HTTP/3 plans and probes remain
+Commits 01-11 are accepted. Native events, protected file rotation, bounded
+metrics/export, request correlation, the operational observer and importable
+Grafana/SigNoz dashboards are implemented. Start with the
+[operator guide](docs/guides/observability.md), tested configurations and alerts.
+Commit 12 qualifies the release candidate; Commit 13 still reviews all product
+documentation. Each checkpoint requires pentest, retest and green GitHub checks.
+HTTP/3 plans and probes remain
 available as manually invoked research, pending renewed qualification. See the
 [draft release notes](release-notes/RELEASE_NOTES_1.9.0.md) for implemented work,
 not promises of completed protocol support.

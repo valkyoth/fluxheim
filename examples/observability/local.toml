@@ -1,0 +1,35 @@
+# Local demonstration, not a public-facing deployment. Paths are config-relative.
+[server]
+listen = ["127.0.0.1:8088"]
+trusted_proxies = []
+
+[server.process]
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+grace_period_seconds = 1
+graceful_shutdown_timeout_seconds = 5
+
+[logging]
+level = "info"
+format = "json"
+target = "stderr"
+
+[logging.access]
+enabled = true
+request_id = true
+request_id_header = "x-request-id"
+
+[metrics]
+enabled = true
+listen = "127.0.0.1:9091"
+require_loopback = true
+
+[[vhosts]]
+name = "local"
+hosts = ["localhost", "127.0.0.1"]
+
+[vhosts.web]
+root = "site"
+index_files = ["index.html"]
+deny_dotfiles = true

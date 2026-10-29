@@ -120,8 +120,10 @@ owned by the existing UDP runtime, not an HTTP reload.
 
 ## Dashboard Queries
 
-Example queries for the signal contract (live backend/dashboard qualification
-remains Commit 10):
+Example queries for the signal contract. The
+[collector integration guide](collector-integrations.md) covers the qualified
+dashboards; [alert rules and tests](../../examples/observability/alerts.yml) add
+scrape availability, sink failure, cardinality overflow and OTLP loss examples:
 
 ```promql
 sum(rate(fluxheim_http_requests_total[5m]))

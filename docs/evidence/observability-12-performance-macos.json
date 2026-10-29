@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "source_commit": "babbe3e71e439e6c9f8cbf626dfc50493c0794bf",
+  "worktree_dirty": true,
+  "binary_sha256": "90b8724ca274b596ec8bb0bf11e33d0b274f93fedda8ee990f66060ce2e56cdc",
+  "binary_version": "fluxheim 1.9.0 (qualification-gbabbe3e7)",
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "cpu_count": 10,
+  "python": "3.14.8",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "results": [
+    {
+      "enabled": false,
+      "requests": 1000,
+      "concurrency": 8,
+      "elapsed_seconds": 0.33768716698978096,
+      "requests_per_second": 2961.320706718659,
+      "latency_ms": {
+        "p50": 2.6470840093679726,
+        "p95": 3.3309590071439743,
+        "p99": 4.019333980977535
+      },
+      "cpu_seconds": null,
+      "rss_peak_bytes": null,
+      "shutdown_seconds": 1.0471320840297267,
+      "received_exports": {
+        "metrics": 0,
+        "traces": 0
+      },
+      "runtime_records": 0,
+      "access_records": 0
+    },
+    {
+      "enabled": true,
+      "requests": 1000,
+      "concurrency": 8,
+      "elapsed_seconds": 0.36340900004142895,
+      "requests_per_second": 2751.7205129372114,
+      "latency_ms": {
+        "p50": 2.7479170239530504,
+        "p95": 3.655624983366579,
+        "p99": 6.443166988901794
+      },
+      "cpu_seconds": null,
+      "rss_peak_bytes": null,
+      "shutdown_seconds": 1.052556541049853,
+      "received_exports": {
+        "metrics": 4,
+        "traces": 0
+      },
+      "runtime_records": 108,
+      "access_records": 100
+    },
+    {
+      "enabled": true,
+      "requests": 1000,
+      "concurrency": 8,
+      "elapsed_seconds": 0.3583233329700306,
+      "requests_per_second": 2790.7755593567163,
+      "latency_ms": {
+        "p50": 2.696916984859854,
+        "p95": 3.651999984867871,
+        "p99": 5.678625020664185
+      },
+      "cpu_seconds": null,
+      "rss_peak_bytes": null,
+      "shutdown_seconds": 1.0461594589869492,
+      "received_exports": {
+        "metrics": 4,
+        "traces": 0
+      },
+      "runtime_records": 108,
+      "access_records": 100
+    },
+    {
+      "enabled": false,
+      "requests": 1000,
+      "concurrency": 8,
+      "elapsed_seconds": 0.36004520795540884,
+      "requests_per_second": 2777.4289947607044,
+      "latency_ms": {
+        "p50": 2.742040960583836,
+        "p95": 3.6994590191170573,
+        "p99": 5.8369580074213445
+      },
+      "cpu_seconds": null,
+      "rss_peak_bytes": null,
+      "shutdown_seconds": 1.044307000003755,
+      "received_exports": {
+        "metrics": 0,
+        "traces": 0
+      },
+      "runtime_records": 0,
+      "access_records": 0
+    },
+    {
+      "enabled": false,
+      "requests": 1000,
+      "concurrency": 8,
+      "elapsed_seconds": 0.35858108301181346,
+      "requests_per_second": 2788.769534635643,
+      "latency_ms": {
+        "p50": 2.6985000004060566,
+        "p95": 3.7667500437237322,
+        "p99": 6.02633401285857
+      },
+      "cpu_seconds": null,
+      "rss_peak_bytes": null,
+      "shutdown_seconds": 1.045604250044562,
+      "received_exports": {
+        "metrics": 0,
+        "traces": 0
+      },
+      "runtime_records": 0,
+      "access_records": 0
+    },
+    {
+      "enabled": true,
+      "requests": 1000,
+      "concurrency": 8,
+      "elapsed_seconds": 0.3633777920040302,
+      "requests_per_second": 2751.9568394232224,
+      "latency_ms": {
+        "p50": 2.7336659841239452,
+        "p95": 3.8567089941352606,
+        "p99": 6.120916979853064
+      },
+      "cpu_seconds": null,
+      "rss_peak_bytes": null,
+      "shutdown_seconds": 1.0534644580329768,
+      "received_exports": {
+        "metrics": 4,
+        "traces": 0
+      },
+      "runtime_records": 108,
+      "access_records": 100
+    }
+  ]
+}

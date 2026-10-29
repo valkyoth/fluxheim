@@ -244,8 +244,14 @@ FLUXHEIM_GATE_LOAD=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_WASM=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_FRAMING=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_FUZZ_CHECK=1 scripts/stable_release_gate.sh release
+FLUXHEIM_GATE_RPM_BUILD=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_IMAGE_VARIANTS="debian alpine wolfi suse-micro" scripts/stable_release_gate.sh release
 ```
+
+The RPM gate defaults to `generic`, matching the helper's portable default.
+An explicitly requested `FLUXHEIM_GATE_RPM_BUILD_TYPE=native` additionally
+qualifies CPU-specific optimization; a generic pass never establishes a native
+pass. Record compiler failures and any approved scope change in release evidence.
 
 For release builders that are expected to have a working OpenSSL FIPS provider,
 make absence a hard failure:

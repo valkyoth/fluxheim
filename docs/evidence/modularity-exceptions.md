@@ -12,6 +12,14 @@ documents why the exception is temporary and how it will be removed.
 
 ## Temporary Exceptions
 
+The 1.9.0 candidate qualification retains the operation-scoped ACME validation
+accepted in Commit 10A without a late validation-order refactor. This exception
+does not permit further feature expansion in the root validator.
+
+| File | Baseline lines | Reason | Split target |
+| --- | ---: | --- | --- |
+| `crates/fluxheim-config/src/config_root_validate.rs` | 503 | Server versus certificate-only validation and reload-socket checks now exceed the target by three lines. Preserve the reviewed security boundary during qualification. | Before the next validation feature, extract ACME scope/challenge/shared-certificate validation into a focused root-validation module; retain the scope, path-trust and server-feature regression matrix. |
+
 These files crossed the hard target during the 1.7.1 Wasm access-decision
 work. They are accepted for the release so the live Wasm behavior can ship
 with complete validation and tests, but they should be split before the 1.7

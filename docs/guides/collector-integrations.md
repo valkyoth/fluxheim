@@ -40,6 +40,14 @@ Backend images are pinned by digest in
 [images.json](../../examples/observability/images.json). The candidate is
 resolved to its immutable local image ID before running. A missing image,
 browser, collector, dashboard, or expected observation fails the gate.
+Before the stack starts, the pinned Prometheus `promtool` evaluates the shipped
+[alert-rule fixtures](../../examples/observability/alerts-test.yml) without
+networking. These are initial operational alerts, not universal application SLOs.
+
+Tested backend versions (immutable digests in `images.json`): Prometheus 3.15.1,
+Grafana 13.2.4, Jaeger 2.22.0, Collector Contrib 0.163.2, SigNoz 0.148.0,
+SigNoz Collector 0.144.15 and ClickHouse 25.12.5. Do not silently replace them
+with `latest` and assume the dashboard/query proof still applies.
 
 To retest an already-built candidate:
 
