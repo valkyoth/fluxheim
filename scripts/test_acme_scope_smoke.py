@@ -113,10 +113,11 @@ class AcmeSmokeTests(unittest.TestCase):
         self.assertIn("--entrypoint=/bin/cp", args)
         self.assertNotIn("-p", args)
         self.assertNotIn("-a", args)
-        self.assertEqual(args[-5:], ["/input/renew.toml", "/input/server.toml",
-                                    "/input/cache.toml", "/input/ca.pem", "/control/"])
+        sources = ["renew.toml", "server.toml", "cache.toml", *smoke.RENEWAL_CONFIGS, "ca.pem"]
+        self.assertEqual(args[-len(sources)-1:],
+                         ["/input/" + name for name in sources] + ["/control/"])
         host_mounts = [arg for arg in args if arg.startswith("/fixture-input/")]
-        self.assertEqual(len(host_mounts), 4)
+        self.assertEqual(len(host_mounts), len(sources))
         self.assertTrue(all(arg.endswith(":ro,z") for arg in host_mounts))
         self.assertEqual(instance.volumes, [instance.volume, instance.control_volume])
 
@@ -147,6 +148,24 @@ class AcmeSmokeTests(unittest.TestCase):
         self.assertEqual(config["vhosts"][0]["php"]["fpm"]["php_fpm_binary"], "/usr/bin/php-fpm")
         self.assertEqual(config["tls"]["acme"]["automation"], "external")
         self.assertEqual(config["tls"]["acme"]["issuers"][0]["directory_url"], "https://localhost:14000/dir")
+
+    def test_each_renewal_has_a_fresh_account_but_the_same_certificate_store(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.object(smoke, "command"):
+                control = smoke.fixtures(Path(temporary))
+            configs = [tomllib.loads((control / name).read_text())
+                       for name in smoke.RENEWAL_CONFIGS]
+        self.assertEqual(len(configs), 4)
+        issuers = set()
+        baseline = tomllib.loads(smoke.configuration())
+        for config in configs:
+            acme = config["tls"]["acme"]
+            self.assertEqual(acme["default_issuer"], acme["issuers"][0]["name"])
+            issuers.add(acme["default_issuer"])
+            acme["default_issuer"] = "pebble"
+            acme["issuers"][0]["name"] = "pebble"
+            self.assertEqual(config, baseline)
+        self.assertEqual(len(issuers), 4)
 
     def test_gateway_fixture_does_not_enable_background_renewal(self):
         config = tomllib.loads(smoke.configuration(renewal=False))
@@ -227,7 +246,9 @@ class AcmeSmokeTests(unittest.TestCase):
             with patch.object(smoke, "command") as run:
                 instance.launch("ca", smoke.PEBBLE, [], ca=True, wait=False)
             arguments = run.call_args.args[0]
-            self.assertIn("PEBBLE_AUTHZREUSE=0", arguments)
+            # Always reuse eligible authorizations, so accidental shared
+            # accounts fail the four-distinct-challenges evidence check.
+            self.assertIn("PEBBLE_AUTHZREUSE=100", arguments)
             self.assertIn("127.0.0.1::14000", arguments)
             self.assertFalse(any("VA_ALWAYS_VALID" in value for value in arguments))
             self.assertIn("65532:65532", arguments)

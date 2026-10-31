@@ -6,11 +6,48 @@ from pathlib import Path
 import tempfile
 import tomllib
 import unittest
+from unittest.mock import Mock, patch
 
-from smoke_logging_examples import ACCESS_KEYS, EXAMPLE, INCLUDES, ROOT, access_records, has_complete_access, replace_once
+from smoke_logging_examples import ACCESS_KEYS, EXAMPLE, INCLUDES, ROOT, access_records, has_complete_access, replace_once, wait_for_connection
 
 
 class LoggingGuideTests(unittest.TestCase):
+    def test_readiness_retries_only_connection_refusal_and_timeout(self):
+        process, client, stderr = Mock(), Mock(), Mock()
+        process.poll.return_value = None
+        client.connect.side_effect = [ConnectionRefusedError(), TimeoutError(), None]
+        with patch("smoke_logging_examples.time.sleep"):
+            wait_for_connection(process, client, stderr)
+        self.assertEqual(client.connect.call_count, 3)
+        client.request.assert_not_called()
+        client.getresponse.assert_not_called()
+
+    def test_readiness_stops_at_deadline(self):
+        process, client = Mock(), Mock()
+        process.poll.return_value = None
+        client.connect.side_effect = TimeoutError()
+        with patch("smoke_logging_examples.time.monotonic", side_effect=[0, 0, 16]), \
+                patch("smoke_logging_examples.time.sleep"):
+            with self.assertRaisesRegex(AssertionError, "did not listen"):
+                wait_for_connection(process, client, Mock())
+        client.connect.assert_called_once()
+
+    def test_readiness_fails_on_child_exit(self):
+        process, client, stderr = Mock(), Mock(), Mock()
+        process.poll.return_value = 1
+        stderr.read_text.return_value = "fixture stopped"
+        with self.assertRaisesRegex(AssertionError, "fixture exited"):
+            wait_for_connection(process, client, stderr)
+        client.connect.assert_not_called()
+
+    def test_readiness_does_not_hide_other_errors(self):
+        process, client = Mock(), Mock()
+        process.poll.return_value = None
+        client.connect.side_effect = PermissionError()
+        with self.assertRaises(PermissionError):
+            wait_for_connection(process, client, Mock())
+        client.connect.assert_called_once()
+
     def test_recipe_uses_loopback_and_no_automatic_admin_or_export(self):
         config = tomllib.loads(EXAMPLE.read_text())
         self.assertEqual(config["server"]["listen"], ["127.0.0.1:8080"])

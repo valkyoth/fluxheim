@@ -15,6 +15,7 @@ import time
 
 PEBBLE = "ghcr.io/letsencrypt/pebble@sha256:5080492187bea12909c053d7a2b90a9e95104ef1c82381828e7823db71ce7e54"
 PYTHON = "docker.io/library/python@sha256:281d39ff02e3b389401586134ff9e6572954687822a58055ec07a60ded4e0b7f"
+RENEWAL_CONFIGS = tuple(f"renew-{index}.toml" for index in range(4))
 
 
 def command(args, *, check=True, data=None, timeout=180):
@@ -26,8 +27,8 @@ def command(args, *, check=True, data=None, timeout=180):
     return result
 
 
-def configuration(extra="", *, renewal=True):
-    return '''[server]
+def configuration(extra="", *, renewal=True, issuer="pebble"):
+    return f'''[server]
 listen = ["0.0.0.0:5002"]
 default_vhost = "scope"
 [tls]
@@ -36,12 +37,12 @@ enabled = true
 enabled = true
 storage = "/var/lib/fluxheim/acme"
 contact_email = "test@example.test"
-default_issuer = "pebble"
+default_issuer = "{issuer}"
 automation = "external"
 [tls.acme.renewal]
 reload_after_renewal = false
 [[tls.acme.issuers]]
-name = "pebble"
+name = "{issuer}"
 directory_url = "https://localhost:14000/dir"
 terms_of_service_agreed = true
 terms_of_service_url = "https://localhost:14000/terms"
@@ -91,6 +92,10 @@ def fixtures(root):
         "certificate": "/fixture/server.pem", "privateKey": "/fixture/server.key",
         "httpPort": 5002, "tlsPort": 5001, "externalAccountBindingRequired": False}}))
     (control / "renew.toml").write_text(configuration())
+    # Pebble can reuse an authorization even with AUTHZREUSE=0. Distinct
+    # issuer names isolate accounts while retaining the same certificate store.
+    for index, name in enumerate(RENEWAL_CONFIGS):
+        (control / name).write_text(configuration(issuer=f"pebble-{index}"))
     (control / "server.toml").write_text(configuration(renewal=False))
     # Isolate feature mismatch from PHP filesystem availability.
     (control / "cache.toml").write_text(configuration(renewal=False) +
@@ -126,7 +131,7 @@ class Smoke:
         # preserving ownership) into an engine volume, then mount it read-only.
         name = self.prefix + "-fixtures"
         self.names.append(name)
-        sources = ("renew.toml", "server.toml", "cache.toml", "ca.pem")
+        sources = ("renew.toml", "server.toml", "cache.toml", *RENEWAL_CONFIGS, "ca.pem")
         mounts = [argument for source in sources
                   for argument in self.mount(source, "/input/" + source)]
         command([self.runtime, "run", "--name", name, "--network=none", "--user=0",
@@ -155,7 +160,7 @@ class Smoke:
         if ca:
             cmd += ["--add-host", "scope.example.test:127.0.0.1", "-p", "127.0.0.1::14000",
                     "-p", "127.0.0.1::5002", "-e", "PEBBLE_VA_NOSLEEP=1",
-                    "-e", "PEBBLE_AUTHZREUSE=0", "-e", "PEBBLE_WFE_NONCEREJECT=0"]
+                    "-e", "PEBBLE_AUTHZREUSE=100", "-e", "PEBBLE_WFE_NONCEREJECT=0"]
             for source in ("server.pem", "server.key", "pebble.json"):
                 cmd += self.mount(source, "/fixture/" + source)
         else:
@@ -275,7 +280,8 @@ def qualify(smoke, full, php, legacy):
         (full, "/usr/local/bin/fluxheim-acme", ["renew", "--force-renew", "--no-reload"]),
         (php, "/usr/local/bin/fluxheim-acme", ["renew", "--force-renew", "--no-reload"]),
     )):
-        code, logs = smoke.launch(f"renew-{index}", image, args, entry=entry)
+        code, logs = smoke.launch(f"renew-{index}", image, args, entry=entry,
+                                  config=RENEWAL_CONFIGS[index])
         if code or "renewed: scope" not in logs or "challenges=1" not in logs:
             raise AssertionError(f"renewal {index} failed: {code}\n{logs}")
         certificate = command([smoke.runtime, "exec", gateway, "cat", certificate_dir + "/fullchain.pem"]).stdout

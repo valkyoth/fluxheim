@@ -473,6 +473,11 @@ jobs:
           bash scripts/ci_macos_temp.sh
           python3 scripts/test_ci_macos_temp.py
 
+      - name: Select reviewed Python wheel target
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+
       - name: Install Rust toolchain
         run: rustup show
 
@@ -586,6 +591,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Select reviewed Python wheel target
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+
       - name: Install Rust toolchain
         run: rustup show
 
@@ -615,6 +625,7 @@ jobs:
         run: scripts/smoke_windows_native.ps1
 
       - name: Test Windows protected log rotation
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
@@ -630,6 +641,7 @@ jobs:
           python scripts/smoke_log_file_rotation.py --binary target/debug/fluxheim.exe
 
       - name: Test Windows privacy guide
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
@@ -637,6 +649,7 @@ jobs:
           python scripts/smoke_privacy_examples.py --binary target/debug/fluxheim.exe
 
       - name: Test Windows load-balancer retry and latency policy
+        shell: pwsh
         run: |
           cargo test --locked -p fluxheim-server --lib --features wasm,php-fpm,load-balancer,tls-rustls
           if ($LASTEXITCODE -ne 0) { throw 'combined server tests failed' }

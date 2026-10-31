@@ -24,6 +24,32 @@ VALIDATOR = Draft202012Validator(SCHEMA)
 
 
 class ContractTests(unittest.TestCase):
+    def test_windows_powershell_steps_do_not_inherit_bash(self):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+        job = workflow["jobs"]["windows-x86_64-portable"]
+        checked = 0
+        for step in job["steps"]:
+            script = step.get("run", "")
+            if any(marker in script for marker in ("$ErrorActionPreference", "$LASTEXITCODE", "$env:")):
+                self.assertEqual(step.get("shell", job["defaults"]["run"]["shell"]),
+                                 "pwsh", step.get("name"))
+                checked += 1
+        self.assertGreaterEqual(checked, 5)
+
+    def test_native_ci_selects_reviewed_python_before_creating_venvs(self):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+        for name in ("macos-portable", "windows-x86_64-portable"):
+            steps = workflow["jobs"][name]["steps"]
+            setups = [(index, step) for index, step in enumerate(steps)
+                      if step.get("uses", "").startswith("actions/setup-python@")]
+            self.assertEqual(len(setups), 1, name)
+            index, setup = setups[0]
+            self.assertRegex(setup["uses"], r"^actions/setup-python@[0-9a-f]{40}$")
+            self.assertEqual(setup["with"]["python-version"], "3.14")
+            venvs = [i for i, step in enumerate(steps) if "-m venv" in step.get("run", "")]
+            self.assertTrue(venvs, name)
+            self.assertLess(index, min(venvs))
+
     def test_windows_contract_step_uses_powershell_with_fail_fast(self):
         workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
         steps = [step for job in workflow["jobs"].values() for step in job.get("steps", [])

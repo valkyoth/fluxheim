@@ -57,6 +57,21 @@ class Origin(BaseHTTPRequestHandler):
         pass
 
 
+def wait_for_connection(process, client, stderr):
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise AssertionError("logging fixture exited before readiness: " + stderr.read_text()[-2048:])
+        try:
+            client.connect()
+            return
+        except (ConnectionRefusedError, TimeoutError):
+            # Windows can time out instead of refusing while the listener is
+            # starting. Retry only the connection, never an HTTP request.
+            time.sleep(0.05)
+    raise AssertionError("logging fixture did not listen")
+
+
 def run_case(binary, *, include=True, format_="json", target="stderr",
              file_sink=False, enabled=True, request_id=True, filter_=None,
              expect=True, header="x-request-id"):
@@ -99,23 +114,14 @@ def run_case(binary, *, include=True, format_="json", target="stderr",
                 with stdout.open("wb") as out, stderr.open("wb") as err:
                     process = subprocess.Popen([str(binary), "--config", str(config)],
                                                cwd=root, env=environment, stdout=out, stderr=err)
-                    deadline = time.monotonic() + 15
-                    while True:
-                        if process.poll() is not None:
-                            raise AssertionError("logging fixture exited before readiness: " + stderr.read_text()[-2048:])
-                        try:
-                            with closing(http.client.HTTPConnection("127.0.0.1", public, timeout=2)) as client:
-                                client.request("GET", f"/{CANARY}?token={CANARY}", headers={
-                                    "Host": "logs.example.test", "Connection": "close",
-                                    header: CANARY, "Authorization": f"Bearer {CANARY}",
-                                })
-                                response = client.getresponse()
-                                assert response.status == 200 and response.read() == b"ok"
-                            break
-                        except ConnectionRefusedError:
-                            if time.monotonic() >= deadline:
-                                raise AssertionError("logging fixture did not listen")
-                            time.sleep(0.05)
+                    with closing(http.client.HTTPConnection("127.0.0.1", public, timeout=2)) as client:
+                        wait_for_connection(process, client, stderr)
+                        client.request("GET", f"/{CANARY}?token={CANARY}", headers={
+                            "Host": "logs.example.test", "Connection": "close",
+                            header: CANARY, "Authorization": f"Bearer {CANARY}",
+                        })
+                        response = client.getresponse()
+                        assert response.status == 200 and response.read() == b"ok"
                     if expect:
                         # Windows terminate() does not drain workers. Observe the
                         # complete record before stopping this owned fixture.

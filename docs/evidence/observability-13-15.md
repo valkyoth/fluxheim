@@ -221,3 +221,43 @@ Verification passed:
 
 The dedicated Windows VM was shut down normally after testing. These local
 results do not replace a successful GitHub rerun after pushing the corrections.
+
+### CI harness follow-up for `2f9196fc`
+
+The previous native failures passed in GitHub. The next run reached three later
+qualification failures, with no open code-scanning alerts:
+
+- Three Windows steps contained PowerShell but inherited the job's Bash
+  default. They now explicitly select `pwsh`; a regression checks all steps
+  containing PowerShell control syntax, not only the originally failing step.
+- The macOS runner selected Python 3.15, outside the wheel lock's reviewed
+  CPython 3.10-3.14 targets. Both native jobs now select Python 3.14 through a
+  commit-pinned setup action before creating their virtual environments.
+  Hash checking remains mandatory; no dependency version or hash was changed.
+- Pebble reused a previously validated authorization, so successful certificate
+  issuance did not perform the fresh challenge required by this smoke. Each
+  entry-point/profile combination now uses a distinct test issuer/account while
+  retaining the same CA, domain, vhost and certificate store. The fixture always
+  reuses eligible authorizations, making accidental account reuse detectable.
+  All four distinct successful HTTP-01 validations are still mandatory.
+
+Native Windows testing additionally exposed a connection timeout while a
+logging fixture started. Readiness now retries only TCP connection establishment
+within the existing bounded startup window; it never retries an HTTP request.
+Regression tests cover refusal, timeout, child exit, deadline and other errors.
+
+The rebuilt full and PHP Wolfi images passed the complete packaged renewal smoke
+twice under Podman, including four distinct HTTP-01 validations on each run.
+All 407 Python tests passed (two platform skips), as did the Windows release
+policy validator and cached RustSec audit of 449 dependencies. Python 3.14 wheel
+downloads for macOS ARM64 and Windows x64 passed the unchanged hash lock. Native
+macOS Python 3.14 installation, nine API contract tests and the live operational
+API smoke passed. No Rust source, Cargo manifest, lockfile or production
+container definition changes are included.
+
+The logging smoke passed all eight live scenarios on Linux, macOS and native
+Windows. The complete Windows protected-log-rotation step also passed, including
+metrics, tracing, collector-guide, admin, snapshot, CLI and log-rotation checks,
+followed by the privacy smoke. This local Windows VM uses Python 3.13.15; Python
+3.14 wheel availability was checked separately, and the GitHub job selects 3.14.
+The Windows live load-balancer smoke also passed every retry and latency case.
