@@ -270,28 +270,32 @@ async fn native_wasm_access_decision_fails_closed_on_timeout() {
 
 #[tokio::test]
 async fn native_wasm_access_decision_enforces_attachment_admission_budget() {
-    let fixture = WasmRouteFixture::new(&[("busy", WasmPluginBody::BusyLoop)]);
+    let fixture = WasmRouteFixture::new(&[("deny", WasmPluginBody::Decision(2))]);
     let upstream = super::upstream_expect_path("/never", "unexpected").await;
     let router = NativeHttp1HostRouter::from_config(
         &fixture.config_with_attachments(
             upstream,
-            vec![wasm_attachment_with_admission("busy", "route", 100, 1)],
+            vec![wasm_attachment_with_admission("deny", "route", 100, 1)],
         ),
         DownstreamHttp1Policy::default(),
         0,
     )
     .unwrap();
+    let admission = router.select(Some("route.test")).unwrap().routes[0]
+        .wasm_hooks
+        .access_attachment_admission_for_test();
+    let held = admission.try_acquire().unwrap();
     let proxy = router_listener(router).await;
 
-    let first = tokio::spawn(async move { downstream_get(proxy, "/route").await });
-    tokio::time::sleep(Duration::from_millis(25)).await;
-    let second = downstream_get(proxy, "/route").await;
-    let first = first.await.unwrap();
-
-    assert!([first.as_str(), second.as_str()].iter().any(|response| {
-        response.starts_with("HTTP/1.1 503 Service Unavailable\r\n")
-            && response.ends_with("wasm access decision fail_closed\n")
-    }));
+    let response = downstream_get(proxy, "/route").await;
+    assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert!(response.ends_with("wasm access decision fail_closed\n"));
+    assert_eq!(admission.active_executions(), 1);
+    drop(held);
+    let response = downstream_get(proxy, "/route").await;
+    assert!(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+    assert!(response.ends_with("wasm access denied\n"));
+    assert_eq!(admission.active_executions(), 0);
 }
 
 #[tokio::test]
@@ -342,24 +346,28 @@ async fn native_wasm_access_decision_enforces_plugin_admission_budget_across_att
 
 #[tokio::test]
 async fn native_wasm_access_decision_enforces_global_admission_budget() {
-    let fixture = WasmRouteFixture::new(&[("busy", WasmPluginBody::BusyLoop)]);
+    let fixture = WasmRouteFixture::new(&[("deny", WasmPluginBody::Decision(2))]);
     let upstream = super::upstream_expect_path("/never", "unexpected").await;
     let mut config =
-        fixture.config_with_attachments(upstream, vec![wasm_attachment("busy", "route", 100)]);
+        fixture.config_with_attachments(upstream, vec![wasm_attachment("deny", "route", 100)]);
     config.wasm.max_total_concurrent_executions = 1;
     let router =
         NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let admission = router.select(Some("route.test")).unwrap().routes[0]
+        .wasm_hooks
+        .access_global_admission_for_test();
+    let held = admission.try_acquire().unwrap();
     let proxy = router_listener(router).await;
 
-    let first = tokio::spawn(async move { downstream_get(proxy, "/route").await });
-    tokio::time::sleep(Duration::from_millis(25)).await;
-    let second = downstream_get(proxy, "/route").await;
-    let first = first.await.unwrap();
-
-    assert!([first.as_str(), second.as_str()].iter().any(|response| {
-        response.starts_with("HTTP/1.1 503 Service Unavailable\r\n")
-            && response.ends_with("wasm access decision fail_closed\n")
-    }));
+    let response = downstream_get(proxy, "/route").await;
+    assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert!(response.ends_with("wasm access decision fail_closed\n"));
+    assert_eq!(admission.active_executions(), 1);
+    drop(held);
+    let response = downstream_get(proxy, "/route").await;
+    assert!(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+    assert!(response.ends_with("wasm access denied\n"));
+    assert_eq!(admission.active_executions(), 0);
 }
 
 #[tokio::test]

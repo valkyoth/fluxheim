@@ -6,7 +6,8 @@ fn static_guide_examples_validate_and_reject_invalid_fields() {
         include_str!("../../../examples/web/static.toml"),
         include_str!("../../../examples/web/listing.toml"),
     ] {
-        let config: Config = toml::from_str(source).unwrap();
+        let mut config: Config = toml::from_str(source).unwrap();
+        let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
         config.validate().unwrap();
         let mut invalid = config;
         let web = if invalid.vhosts.is_empty() {

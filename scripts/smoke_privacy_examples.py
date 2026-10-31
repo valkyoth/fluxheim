@@ -36,6 +36,16 @@ def check_log(path):
     return records
 
 
+def assert_no_listener(port):
+    try:
+        connection = socket.create_connection(("127.0.0.1", port), timeout=1)
+    except (ConnectionRefusedError, TimeoutError):
+        # macOS may drop SYNs to a bound but non-listening socket.
+        return
+    connection.close()
+    raise AssertionError("unexpected metrics listener")
+
+
 def proxy_exchange(public, *, context=None, remove_diagnostics=False):
     connection = (http.client.HTTPSConnection("localhost", public, timeout=3, context=context)
                   if context else http.client.HTTPConnection("127.0.0.1", public, timeout=3))
@@ -141,13 +151,7 @@ key_path = "server-key.pem"
             invoke(binary, root, "--config", config, "--validate-config")
             # The port is reserved but not listening: startup can only succeed if it skips metrics.
             with server(binary, root, metrics_source, public):
-                try:
-                    connection = socket.create_connection(("127.0.0.1", metrics_port), timeout=1)
-                except ConnectionRefusedError:
-                    pass
-                else:
-                    connection.close()
-                    raise AssertionError("unexpected metrics listener")
+                assert_no_listener(metrics_port)
 
         # Admin and local snapshot operations are opt-in, not removed by this profile.
         admin = port()

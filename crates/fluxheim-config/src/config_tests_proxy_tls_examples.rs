@@ -8,6 +8,7 @@ fn upstream_tls_guide_examples_validate_and_reject_unsafe_combinations() {
     ] {
         let root = super::super::secure_test_dir("upstream-tls-guide");
         let mut config: Config = toml::from_str(source).unwrap();
+        let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
         let proxy = &mut config.vhosts[0].proxy;
         proxy.resolve_relative_paths(&root);
         assert!(proxy.upstream_tls);

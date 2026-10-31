@@ -1,9 +1,10 @@
 use super::*;
-use std::process::{Child, Command};
+use fluxheim_common::test_process::{TestBinary, self_command};
+use std::process::Child;
 use std::time::{Duration, Instant};
 
 const CHILD_TEST: &str = "file::contract_tests::wasm_fifo_loader_child";
-const ROOT_ENV: &str = "FLUXHEIM_WASM_FIFO_TEST_ROOT";
+const CHILD_ENV: &str = "FLUXHEIM_WASM_FIFO_TEST_CHILD";
 
 struct ChildGuard(Child);
 
@@ -16,11 +17,13 @@ impl Drop for ChildGuard {
 
 #[test]
 fn wasm_fifo_loader_child() {
-    let Some(root) = std::env::var_os(ROOT_ENV) else {
+    if std::env::var_os(CHILD_ENV).as_deref() != Some(std::ffi::OsStr::new("1")) {
         return;
-    };
-    let root = PathBuf::from(root);
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
     let plugin = root.join("plugin.wasm");
+    make_fifo(&root);
     let error = load_plugin_file(
         &plugin,
         std::slice::from_ref(&root),
@@ -48,16 +51,16 @@ fn wasm_fifo_loader_child() {
     // Exercise the open helper after deterministic leaf replacement. This is
     // an open-window test, not a scheduler-dependent public-loader race test.
     fs::remove_file(&plugin).unwrap();
-    make_fifo(&plugin);
+    make_fifo(&root);
     assert!(matches!(
-        open_plugin_file(&canonical, &plugin),
+        open_plugin_file(&canonical, &plugin, &root),
         Err(WasmPluginError::UnsafePath { .. })
     ));
     fs::remove_file(&plugin).unwrap();
     let target = root.join("other.wasm");
     fs::write(&target, bytes).unwrap();
     std::os::unix::fs::symlink(&target, &plugin).unwrap();
-    assert!(open_plugin_file(&canonical, &plugin).is_err());
+    assert!(open_plugin_file(&canonical, &plugin, &root).is_err());
 
     fs::remove_file(&plugin).unwrap();
     fs::write(&plugin, bytes).unwrap();
@@ -66,21 +69,22 @@ fn wasm_fifo_loader_child() {
     assert_eq!(loaded.sha256_hex(), sha256_hex(bytes));
 }
 
-fn make_fifo(path: &Path) {
+fn make_fifo(root: &Path) {
     use std::os::unix::fs::FileTypeExt as _;
+    let path = root.join("plugin.wasm");
 
     #[cfg(not(target_os = "macos"))]
     rustix::fs::mkfifoat(
         rustix::fs::CWD,
-        path,
+        &path,
         rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
     )
     .unwrap();
     #[cfg(target_os = "macos")]
     assert!(
-        Command::new("/usr/bin/mkfifo")
-            .args(["-m", "600"])
-            .arg(path)
+        std::process::Command::new("/usr/bin/mkfifo")
+            .current_dir(root)
+            .args(["-m", "600", "plugin.wasm"])
             .status()
             .unwrap()
             .success()
@@ -90,12 +94,10 @@ fn make_fifo(path: &Path) {
 
 #[test]
 fn wasm_fifo_is_rejected_without_a_writer_and_repaired_file_loads() {
-    let directory = tempfile::tempdir().unwrap();
-    let root = directory.path().canonicalize().unwrap();
-    make_fifo(&root.join("plugin.wasm"));
-    let child = Command::new(std::env::current_exe().unwrap())
+    let child = self_command(TestBinary::Wasm)
+        .unwrap()
         .args(["--exact", CHILD_TEST])
-        .env(ROOT_ENV, &root)
+        .env(CHILD_ENV, "1")
         .spawn()
         .unwrap();
     let mut child = ChildGuard(child);

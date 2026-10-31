@@ -24,12 +24,16 @@ class BaselineTests(unittest.TestCase):
                        {"target": "fluxheim::runtime"}, [], None):
             self.assertFalse(is_access_record(record))
 
-    def test_prometheus_fixture_retains_lf_on_windows_style_checkout(self):
+    def test_executable_fixtures_retain_lf_on_windows_style_checkout(self):
         repository = Path(__file__).resolve().parents[1]
-        fixture = Path("tests/fixtures/observability/metrics.prom")
-        expected = (repository / fixture).read_bytes()
-        self.assertNotIn(b"\r", expected)
-        self.assertTrue(expected.endswith(b"\n"))
+        fixtures = {
+            Path(name): (repository / name).read_bytes()
+            for name in ("tests/fixtures/observability/metrics.prom",
+                         "docs/guides/acme-accounts.md", "examples/load-balancer/local.toml")
+        }
+        for expected in fixtures.values():
+            self.assertNotIn(b"\r", expected)
+            self.assertTrue(expected.endswith(b"\n"))
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             environment = os.environ.copy()
@@ -54,16 +58,19 @@ class BaselineTests(unittest.TestCase):
             (root / ".gitattributes").write_bytes(
                 (repository / ".gitattributes").read_bytes()
             )
-            (root / fixture).parent.mkdir(parents=True)
-            (root / fixture).write_bytes(expected)
+            for fixture, expected in fixtures.items():
+                (root / fixture).parent.mkdir(parents=True)
+                (root / fixture).write_bytes(expected)
             control = root / "control.txt"
             control.write_bytes(b"unprotected text\n")
-            git("add", ".gitattributes", fixture.as_posix(), control.name)
-            (root / fixture).unlink()
+            git("add", ".gitattributes", *(fixture.as_posix() for fixture in fixtures), control.name)
+            for fixture in fixtures:
+                (root / fixture).unlink()
             control.unlink()
             git("checkout-index", "--force", "--all")
             self.assertEqual(control.read_bytes(), b"unprotected text\r\n")
-            self.assertEqual((root / fixture).read_bytes(), expected)
+            for fixture, expected in fixtures.items():
+                self.assertEqual((root / fixture).read_bytes(), expected)
 
     def test_nearest_rank_percentile(self):
         self.assertEqual(percentile([3, 1, 2], 0.5), 2)

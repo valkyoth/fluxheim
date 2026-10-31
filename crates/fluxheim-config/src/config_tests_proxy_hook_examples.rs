@@ -2,7 +2,9 @@ use crate::Config;
 
 #[test]
 fn auth_guide_validates_and_rejects_invalid_policies() {
-    let config: Config = toml::from_str(include_str!("../../../examples/proxy/auth.toml")).unwrap();
+    let mut config: Config =
+        toml::from_str(include_str!("../../../examples/proxy/auth.toml")).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     config.validate().unwrap();
     for kind in 0..5 {
         let mut invalid = config.clone();
@@ -24,8 +26,9 @@ fn auth_guide_validates_and_rejects_invalid_policies() {
 
 #[test]
 fn mirror_guide_respects_feature_and_privacy_gates() {
-    let config: Config =
+    let mut config: Config =
         toml::from_str(include_str!("../../../examples/proxy/mirror.toml")).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     if cfg!(feature = "traffic-mirror") && !cfg!(feature = "privacy-mode") {
         config.validate().unwrap();
         for kind in 0..4 {

@@ -4,6 +4,14 @@ impl NativeWasmHooks {
     pub(crate) fn access_plugin_admission_for_test(&self) -> FluxWasmAdmissionController {
         self.access_decision[0].plugin.admission.clone()
     }
+
+    pub(crate) fn access_global_admission_for_test(&self) -> FluxWasmAdmissionController {
+        self.access_decision[0].global_admission.clone()
+    }
+
+    pub(crate) fn access_attachment_admission_for_test(&self) -> FluxWasmAdmissionController {
+        self.access_decision[0].attachment_admission.clone()
+    }
 }
 
 #[tokio::test]

@@ -10,6 +10,7 @@ fn downstream_tls_guide_examples_validate_without_plaintext_exposure() {
     ] {
         let root = super::super::secure_test_dir("tls-guide");
         let mut config: Config = toml::from_str(source).unwrap();
+        let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
         for certificate in &mut config.tls.certificates {
             certificate.resolve_relative_paths(&root);
         }

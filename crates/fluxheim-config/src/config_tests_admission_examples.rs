@@ -4,6 +4,7 @@ use crate::{ConcurrencyLimitConfig, Config, RateLimitConfig, RateLimitMode};
 fn admission_recipe_and_delayed_variant_validate() {
     let mut config: Config =
         toml::from_str(include_str!("../../../examples/limits/local.toml")).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     config.validate().unwrap();
     config.vhosts[0].rate_limit.enabled = true;
     config.vhosts[0].routes[0].rate_limit.mode = RateLimitMode::Delay;

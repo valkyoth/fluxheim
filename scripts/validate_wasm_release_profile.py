@@ -83,19 +83,19 @@ def main() -> int:
     require(
         contains(
             "docs/guides/wasm-extensibility.md",
-            "### Container Plugin Trust Models",
+            "## Deploying In Containers",
         )
         and contains(
             "docs/guides/wasm-extensibility.md",
-            "A `:ro` bind mount is read-only from inside the container",
+            "**not host-side replacement**",
         )
         and contains(
             "docs/guides/wasm-extensibility.md",
-            "High-assurance deployments should build a derivative image",
+            "derivative image. Pin the base image and deployed image by digest",
         )
         and contains(
             "docs/guides/wasm-extensibility.md",
-            "Do not bake private keys, admin tokens, ACME EAB keys",
+            "Keep keys, tokens and ACME credentials outside the image.",
         ),
         "Wasm container docs must preserve the host-mount threat model",
     )

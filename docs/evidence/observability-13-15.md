@@ -88,3 +88,45 @@ passed. Native Windows/macOS and exact-commit CI remain to be rerun for this
 follow-up; the earlier platform results above do not qualify the changed source.
 The built-server smoke also passed missing/zero budget rejection before origin
 contact, positive-budget exhaustion, retry recovery and all latency scenarios.
+
+## CI Portability Follow-Up
+
+The first GitHub run for the retry-budget follow-up exposed test portability
+and documentation-contract failures. The corrections preserve production path
+validation and do not remove negative tests:
+
+- Raw TOML guide tests resolve their process paths into the existing protected
+  test directory, as the real configuration loader does for configuration files.
+- Executable Markdown/TOML examples retain LF on Windows checkout. An isolated
+  Git regression test verifies this with `core.autocrlf=true` and a CRLF control.
+- The privacy smoke accepts refusal or timeout from its reserved, non-listening
+  metrics socket; an accepted connection still fails the test.
+- The Wasm release validator checks the current guide wording for the same
+  deployment boundaries rather than requiring removed headings.
+- Wasm file tests own their temporary root and use the checked Cargo test-child
+  launcher. File opening repeats the approved-root boundary check locally.
+- Admission tests hold the actual slot and verify rejection, release and recovery,
+  replacing a scheduler-dependent overlap assumption without changing admission
+  behavior. Test-only accessors are confined to the existing test module.
+
+Linux verification passed: locked workspace, 683 combined server tests, 59
+all-feature Wasm tests, 395 Python tests (two platform-dependent skips), strict
+Clippy, formatting, documentation links, modularity and release metadata checks.
+RustSec and cargo-deny reported no advisories across 449 locked dependencies.
+
+Native macOS configuration (521 tests), all-feature Wasm (59 tests), related
+server tests (43 tests), LF checkout and privacy helper tests passed.
+Built-binary privacy and retry/latency smoke
+checks passed, including missing/zero retry budget rejection. Native tests use
+the established non-symlink temporary directory; the default macOS `/var`
+symlink is intentionally not accepted by the secure plugin-path policy.
+
+Native Windows passed the locked workspace, including all 560 configuration
+tests, the combined server suite (678 tests), and all-feature Wasm (58 tests).
+LF checkout and privacy helper tests passed, followed by built-binary privacy
+and retry/latency smoke checks, including missing/zero retry budget rejection.
+
+The owner approved dismissal of two Python stored-secret alerts after their
+data flows were verified to contain only checked-in smoke-test policy settings,
+not credentials. Rust alert follow-ups still require the next exact-commit
+GitHub scan; local passing tests do not establish that those alerts are closed.

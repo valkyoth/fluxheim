@@ -6,7 +6,8 @@ fn recipe() -> Config {
 
 #[test]
 fn cors_recipe_validates_and_route_lists_replace_parent_lists() {
-    let config = recipe();
+    let mut config = recipe();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     config.validate().unwrap();
     let vhost = &config.vhosts[0];
     let effective = config
@@ -28,6 +29,7 @@ fn cors_recipe_validates_and_route_lists_replace_parent_lists() {
 fn cors_documented_limits_and_invalid_values_are_rejected() {
     for case in 0..16 {
         let mut config = recipe();
+        let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
         let cors = &mut config.headers.cors;
         match case {
             0 => cors.allow_origins.clear(),
@@ -58,6 +60,7 @@ fn cors_documented_limits_and_invalid_values_are_rejected() {
 #[test]
 fn cors_wildcard_tokens_currently_pass_config_validation() {
     let mut config = recipe();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     config.headers.cors.allow_credentials = false;
     config.headers.cors.allow_methods = vec!["*".into()];
     config.headers.cors.allow_headers = vec!["*".into()];

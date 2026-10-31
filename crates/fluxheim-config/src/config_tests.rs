@@ -172,6 +172,21 @@ struct TestDir {
     path: PathBuf,
 }
 
+fn prepare_guide_process_paths(config: &mut Config) -> TestDir {
+    let directory = TestDir::new("guide-process-paths");
+    // Raw TOML deserialization does not perform the file loader's path resolution.
+    for path in [
+        &mut config.server.process.pid_file,
+        &mut config.server.process.upgrade_sock,
+        &mut config.server.process.certificate_reload_sock,
+    ] {
+        if path.is_relative() {
+            *path = directory.path().join(&*path);
+        }
+    }
+    directory
+}
+
 impl TestDir {
     fn new(label: &str) -> Self {
         let path = portable_test_path(unique_temp_path(label));

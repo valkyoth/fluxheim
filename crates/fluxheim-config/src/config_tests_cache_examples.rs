@@ -10,6 +10,7 @@ fn cache_guide_memory_and_disk_recipes_validate() {
         include_str!("../../../examples/cache/storage-bin.toml"),
     ] {
         let mut config: Config = toml::from_str(&format!("{LOCAL}\n{overlay}")).unwrap();
+        let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
         let root = secure_test_dir("cache-guide-disk");
         if config.cache.disk.enabled {
             config.cache.disk.path = Some(root.clone());
@@ -34,7 +35,8 @@ fn cache_guide_policy_overlay_preserves_admission_and_tier() {
             .unwrap()
             .insert(key.clone(), field.clone());
     }
-    let config: Config = toml::from_str(&toml::to_string(&value).unwrap()).unwrap();
+    let mut config: Config = toml::from_str(&toml::to_string(&value).unwrap()).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     config.validate().unwrap();
     assert!(config.cache.enabled && config.cache.memory.enabled);
     assert_eq!(config.cache.bypass_request_headers, ["cookie"]);
@@ -47,6 +49,7 @@ fn cache_guide_policy_overlay_preserves_admission_and_tier() {
 fn cache_guide_static_recipe_validates() {
     let mut config: Config =
         toml::from_str(include_str!("../../../examples/cache/static.toml")).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     let root = secure_test_dir("cache-guide-static");
     config.web.root = Some(root.clone());
     config.validate().unwrap();
@@ -58,6 +61,7 @@ fn cache_guide_static_recipe_validates() {
 #[test]
 fn cache_guide_rejects_no_tier_and_sensitive_variance() {
     let mut config: Config = toml::from_str(LOCAL).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     config.cache.memory.enabled = false;
     assert!(config.validate().is_err());
     config.cache.memory.enabled = true;
@@ -70,6 +74,7 @@ fn cache_guide_rejects_no_tier_and_sensitive_variance() {
 #[test]
 fn cache_guide_phase_error_settings_are_accepted() {
     let mut config: Config = toml::from_str(LOCAL).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     config.cache.stale_if_error_secs = Some(60);
     for kind in [
         CacheStaleErrorKind::Read,
@@ -102,6 +107,7 @@ fn cache_guide_advanced_checked_in_examples_validate() {
         ),
     ] {
         let mut config: Config = toml::from_str(recipe).unwrap();
+        let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
         assert!(
             config.vhosts[0].cache.enabled,
             "{name}: named vhost must own its cache"
@@ -139,6 +145,7 @@ fn cache_guide_operations_explicitly_configures_vhost_tiers() {
         include_str!("../../../examples/cache/operations.toml")
     ))
     .unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     let root = secure_test_dir("cache-guide-operations");
     config.vhosts[0].cache.disk.path = Some(root.clone());
     config.validate().unwrap();

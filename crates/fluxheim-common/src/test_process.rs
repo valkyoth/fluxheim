@@ -8,6 +8,7 @@ use std::process::Command;
 pub enum TestBinary {
     Common,
     Server,
+    Wasm,
 }
 
 pub fn self_command(binary: TestBinary) -> io::Result<Command> {
@@ -31,6 +32,7 @@ fn checked_command(directory: &Path, executable: &Path, binary: TestBinary) -> i
     let prefix = match binary {
         TestBinary::Common => "fluxheim_common-",
         TestBinary::Server => "fluxheim-",
+        TestBinary::Wasm => "fluxheim_wasm-",
     };
     let name = executable
         .file_name()
@@ -60,6 +62,7 @@ mod tests {
     fn running_common_test_binary_is_allowed() {
         assert!(self_command(TestBinary::Common).is_ok());
         assert!(self_command(TestBinary::Server).is_err());
+        assert!(self_command(TestBinary::Wasm).is_err());
     }
 
     #[test]
@@ -67,6 +70,12 @@ mod tests {
         let root = Path::new("trusted").join("deps");
         let name = format!("fluxheim-0123456789abcdef{}", std::env::consts::EXE_SUFFIX);
         assert!(checked_command(&root, &root.join(&name), TestBinary::Server).is_ok());
+        let wasm = format!(
+            "fluxheim_wasm-0123456789abcdef{}",
+            std::env::consts::EXE_SUFFIX
+        );
+        assert!(checked_command(&root, &root.join(&wasm), TestBinary::Wasm).is_ok());
+        assert!(checked_command(&root, &root.join(&name), TestBinary::Wasm).is_err());
         for path in [
             Path::new("outside").join(&name),
             root.join("..").join(&name),

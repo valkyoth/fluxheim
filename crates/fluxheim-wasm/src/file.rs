@@ -113,7 +113,18 @@ fn load_validated_plugin_file(
 fn open_plugin_file(
     canonical: &Path,
     requested: &Path,
+    approved_root: &Path,
 ) -> Result<(fs::File, fs::Metadata), WasmPluginError> {
+    reject_non_normal_components(canonical)?;
+    reject_non_normal_components(approved_root)?;
+    if !canonical.is_absolute()
+        || !approved_root.is_absolute()
+        || !canonical.starts_with(approved_root)
+    {
+        return Err(WasmPluginError::OutsideApprovedRoots {
+            path: requested.to_path_buf(),
+        });
+    }
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -191,8 +202,8 @@ fn validated_plugin_path(
             path: root.clone(),
             source,
         })?;
-        if plugin_canonical.starts_with(root_canonical) {
-            let (file, metadata) = open_plugin_file(&plugin_canonical, path)?;
+        if plugin_canonical.starts_with(&root_canonical) {
+            let (file, metadata) = open_plugin_file(&plugin_canonical, path, &root_canonical)?;
             return Ok(ValidatedPluginPath {
                 requested: path.to_path_buf(),
                 metadata,
@@ -293,6 +304,33 @@ mod tests {
             loaded.sha256_hex(),
             "93a44bbb96c751218e4c00d479e4c14358122a389acca16205b1e4d0dc5f9476"
         );
+    }
+
+    #[test]
+    fn open_helper_rejects_outside_and_parent_traversal_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let approved = root.join("approved");
+        let sibling = root.join("approved-sibling");
+        fs::create_dir(&approved).unwrap();
+        fs::create_dir(&sibling).unwrap();
+        let plugin = sibling.join("plugin.wasm");
+        fs::write(&plugin, b"\0asm\x01\0\0\0").unwrap();
+        assert!(matches!(
+            open_plugin_file(&plugin, &plugin, &approved),
+            Err(WasmPluginError::OutsideApprovedRoots { .. })
+        ));
+        // PathBuf::push normalizes parent components in Windows verbatim paths.
+        let mut traversal = approved.as_os_str().to_os_string();
+        for component in ["..", "approved-sibling", "plugin.wasm"] {
+            traversal.push(std::path::MAIN_SEPARATOR_STR);
+            traversal.push(component);
+        }
+        let traversal = PathBuf::from(traversal);
+        assert!(matches!(
+            open_plugin_file(&traversal, &traversal, &approved),
+            Err(WasmPluginError::NonNormalComponent { .. })
+        ));
     }
 
     #[test]

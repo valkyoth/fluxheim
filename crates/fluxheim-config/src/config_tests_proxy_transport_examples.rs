@@ -4,6 +4,7 @@ use crate::Config;
 fn proxy_transport_recipe_and_socket_limits_validate() {
     let mut config: Config =
         toml::from_str(include_str!("../../../examples/proxy/transport.toml")).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     let root = super::super::secure_test_dir("proxy-transport-guide");
     for page in &mut config.vhosts[0].proxy.error_pages {
         page.web.root = Some(root.clone());

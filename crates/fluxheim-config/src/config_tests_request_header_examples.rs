@@ -9,7 +9,8 @@ fn request_header_recipe_and_modes_validate() {
             "x_forwarded_for = \"replace\"",
             &format!("x_forwarded_for = \"{mode}\""),
         );
-        let config: Config = toml::from_str(&source).unwrap();
+        let mut config: Config = toml::from_str(&source).unwrap();
+        let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
         config.validate().unwrap();
         assert!(config.server.trusted_proxies.is_empty());
     }
@@ -19,6 +20,7 @@ fn request_header_recipe_and_modes_validate() {
 fn request_header_guide_rejects_invalid_and_unsafe_templates() {
     for value in ["{unknown}", "{http.bad name}", "{host", "bad\nvalue"] {
         let mut config: Config = toml::from_str(RECIPE).unwrap();
+        let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
         config
             .headers
             .request
@@ -33,6 +35,7 @@ fn request_header_guide_rejects_invalid_and_unsafe_templates() {
         "{tls.client_cert_organization}",
     ] {
         let mut config: Config = toml::from_str(RECIPE).unwrap();
+        let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
         config
             .headers
             .request
@@ -45,6 +48,7 @@ fn request_header_guide_rejects_invalid_and_unsafe_templates() {
 #[test]
 fn request_header_unsupported_native_templates_currently_validate() {
     let mut config: Config = toml::from_str(RECIPE).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     for (name, value) in [
         ("x-agent", "{http.user-agent}"),
         ("x-cipher", "{tls.cipher}"),

@@ -2,7 +2,9 @@ use crate::{AccessPolicyConfig, Config};
 
 #[test]
 fn ip_access_recipe_validates_with_both_scopes() {
-    let config: Config = toml::from_str(include_str!("../../../examples/access/ip.toml")).unwrap();
+    let mut config: Config =
+        toml::from_str(include_str!("../../../examples/access/ip.toml")).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     config.validate().unwrap();
     assert!(config.server.trusted_proxies.is_empty());
     assert_eq!(config.vhosts[0].access.allow.len(), 2);

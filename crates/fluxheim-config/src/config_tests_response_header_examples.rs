@@ -4,14 +4,16 @@ const RECIPE: &str = include_str!("../../../examples/headers/response.toml");
 
 #[test]
 fn response_header_recipe_and_browser_profiles_validate() {
-    let config: Config = toml::from_str(RECIPE).unwrap();
+    let mut config: Config = toml::from_str(RECIPE).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     config.validate().unwrap();
     for profile in ["off", "baseline", "cross-origin-isolated"] {
         let source = RECIPE.replace(
             "profile = \"baseline\"",
             &format!("profile = \"{profile}\""),
         );
-        let config: Config = toml::from_str(&source).unwrap();
+        let mut config: Config = toml::from_str(&source).unwrap();
+        let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
         config.validate().unwrap();
     }
 }
@@ -45,12 +47,14 @@ fn response_browser_policy_values_and_raw_hsts_withdrawal_validate() {
                 &format!("{field} = \"{original}\""),
                 &format!("{field} = \"{value}\""),
             );
-            let config: Config = toml::from_str(&source).unwrap();
+            let mut config: Config = toml::from_str(&source).unwrap();
+            let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
             config.validate().unwrap();
         }
     }
     let source = RECIPE.replace("profile = \"deny-sensitive\"", "profile = \"deny-all\"");
     let mut config: Config = toml::from_str(&source).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     config.validate().unwrap();
     config.headers.response.strict_transport_security = Some("max-age=0".into());
     assert!(config.validate().is_err());
@@ -81,7 +85,8 @@ fn response_header_recipe_rejects_invalid_policy_inputs() {
     ] {
         let source = RECIPE.replace(from, to);
         assert_ne!(source, RECIPE);
-        let config: Config = toml::from_str(&source).unwrap();
+        let mut config: Config = toml::from_str(&source).unwrap();
+        let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
         assert!(config.validate().is_err(), "{from} -> {to}");
     }
 }
@@ -89,10 +94,12 @@ fn response_header_recipe_rejects_invalid_policy_inputs() {
 #[test]
 fn response_header_parent_add_currently_conflicts_with_child_override() {
     let source = RECIPE.replace("x-route = \"child\"", "x-edge = \"child\"");
-    let config: Config = toml::from_str(&source).unwrap();
+    let mut config: Config = toml::from_str(&source).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     // documented contract: merging the child into set retains the parent's add alias.
     assert!(config.validate().is_err());
     let source = source.replace("[headers.response.add]", "[headers.response.set]");
-    let config: Config = toml::from_str(&source).unwrap();
+    let mut config: Config = toml::from_str(&source).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     config.validate().unwrap();
 }

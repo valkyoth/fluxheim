@@ -2,8 +2,9 @@ use crate::{ByteSize, Config};
 
 #[test]
 fn compression_recipe_validates_and_bounds_every_enabled_policy() {
-    let config: Config =
+    let mut config: Config =
         toml::from_str(include_str!("../../../examples/compression/local.toml")).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     config.validate().unwrap();
     assert!(config.vhosts[0].compression.is_none());
     assert!(config.vhosts[0].routes[0].compression.is_none());
@@ -40,7 +41,8 @@ fn declaring_a_child_compression_block_uses_defaults_not_parent_fields() {
             "[vhosts.routes.compression]\nenabled = false",
             "[vhosts.routes.compression]\nenabled = true",
         );
-    let config: Config = toml::from_str(&source).unwrap();
+    let mut config: Config = toml::from_str(&source).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     config.validate().unwrap();
     assert_eq!(config.compression.gzip_level, 8);
     assert_eq!(

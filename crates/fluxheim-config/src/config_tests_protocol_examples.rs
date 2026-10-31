@@ -18,8 +18,9 @@ fn cloudflare_proposal_tables_are_not_accepted_configuration() {
 
 #[test]
 fn protocol_guide_templates_validate_and_reject_unsafe_combinations() {
-    let websocket: Config =
+    let mut websocket: Config =
         toml::from_str(include_str!("../../../examples/proxy/websocket.toml")).unwrap();
+    let _websocket_root = crate::config::tests::prepare_guide_process_paths(&mut websocket);
     websocket.validate().unwrap();
     let mut invalid = websocket;
     invalid.vhosts[0].routes[0]
@@ -29,7 +30,9 @@ fn protocol_guide_templates_validate_and_reject_unsafe_combinations() {
         .upstream_http_version = UpstreamHttpVersion::Http2;
     assert!(invalid.validate().is_err());
 
-    let grpc: Config = toml::from_str(include_str!("../../../examples/proxy/grpc.toml")).unwrap();
+    let mut grpc: Config =
+        toml::from_str(include_str!("../../../examples/proxy/grpc.toml")).unwrap();
+    let _grpc_root = crate::config::tests::prepare_guide_process_paths(&mut grpc);
     grpc.validate().unwrap();
     for case in 0..4 {
         let mut invalid = grpc.clone();
@@ -42,8 +45,9 @@ fn protocol_guide_templates_validate_and_reject_unsafe_combinations() {
         }
         assert!(invalid.validate().is_err(), "case {case}");
     }
-    let proxy: Config =
+    let mut proxy: Config =
         toml::from_str(include_str!("../../../examples/proxy/proxy-protocol.toml")).unwrap();
+    let _proxy_root = crate::config::tests::prepare_guide_process_paths(&mut proxy);
     proxy.validate().unwrap();
     let mut invalid = proxy.clone();
     invalid.server.trusted_proxies.clear();

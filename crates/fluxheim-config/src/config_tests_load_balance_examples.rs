@@ -49,6 +49,7 @@ fn load_balancer_guide_selectors_validate_with_required_keys() {
         let mut value: toml::Value = toml::from_str(LOCAL).unwrap();
         value["proxy"]["load_balance"]["selection"] = selection.into();
         let mut config: Config = value.try_into().unwrap();
+        let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
         if selection.contains("header-hash") {
             config.proxy.load_balance.hash_header = Some("x-session".to_owned());
         }
@@ -86,7 +87,8 @@ fn merge(base: &mut toml::Value, fragment: toml::Value) {
 #[test]
 fn load_balancer_guide_local_and_merged_recipes_validate() {
     let base: toml::Value = toml::from_str(LOCAL).unwrap();
-    let config: Config = base.clone().try_into().unwrap();
+    let mut config: Config = base.clone().try_into().unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     config.validate().unwrap();
     for recipe in [
         include_str!("../../../examples/load-balancer/pool-policy.toml"),
@@ -96,7 +98,8 @@ fn load_balancer_guide_local_and_merged_recipes_validate() {
     ] {
         let mut value = base.clone();
         merge(&mut value, toml::from_str(recipe).unwrap());
-        let config: Config = value.try_into().unwrap();
+        let mut config: Config = value.try_into().unwrap();
+        let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
         config.validate().unwrap();
     }
 }
@@ -112,7 +115,8 @@ fn load_balancer_guide_managed_cookie_recipe_validates() {
         ))
         .unwrap(),
     );
-    let config: Config = value.try_into().unwrap();
+    let mut config: Config = value.try_into().unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     config.validate().unwrap();
 }
 
@@ -127,6 +131,7 @@ fn load_balancer_guide_discovery_recipes_replace_static_pool() {
         let fragment: toml::Value = toml::from_str(recipe).unwrap();
         base["proxy"] = fragment["proxy"].clone();
         let mut config: Config = base.try_into().unwrap();
+        let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
         let root = secure_test_dir("lb-guide-discovery");
         if config.proxy.upstreams_file.is_some() {
             let path = safe_child_path(&root, "backends.txt");
@@ -159,7 +164,8 @@ fn load_balancer_guide_invalid_overlays_are_rejected() {
     ] {
         let mut value: toml::Value = toml::from_str(LOCAL).unwrap();
         merge(&mut value, toml::from_str(recipe).unwrap());
-        let config: Config = value.try_into().unwrap();
+        let mut config: Config = value.try_into().unwrap();
+        let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
         assert!(
             config.validate().is_err(),
             "accepted invalid recipe: {recipe}"

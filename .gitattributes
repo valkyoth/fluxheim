@@ -2,3 +2,7 @@ vendor/** linguist-vendored
 
 # Prometheus wire-format fixtures must retain LF on Windows checkouts.
 tests/fixtures/observability/*.prom text eol=lf
+
+# Executable documentation tests match fenced blocks and TOML overlays verbatim.
+docs/**/*.md text eol=lf
+examples/**/*.toml text eol=lf

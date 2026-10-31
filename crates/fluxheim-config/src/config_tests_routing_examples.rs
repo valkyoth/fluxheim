@@ -5,6 +5,7 @@ fn routing_guide_template_validates_and_rejects_ambiguous_policies() {
     let root = super::super::secure_test_dir("routing-guide");
     let mut config: Config =
         toml::from_str(include_str!("../../../examples/routing/local.toml")).unwrap();
+    let _process_root = crate::config::tests::prepare_guide_process_paths(&mut config);
     for vhost in &mut config.vhosts {
         for route in &mut vhost.routes {
             route.resolve_relative_paths(&root);

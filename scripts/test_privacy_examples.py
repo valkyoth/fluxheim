@@ -5,11 +5,26 @@ import re
 import tempfile
 import tomllib
 import unittest
+from unittest.mock import Mock, patch
 
 import smoke_privacy_examples as smoke
 
 
 class PrivacyGuideTests(unittest.TestCase):
+    def test_non_listener_accepts_refusal_or_timeout_but_not_success_or_other_errors(self):
+        for error in (ConnectionRefusedError(), TimeoutError()):
+            with patch.object(smoke.socket, "create_connection", side_effect=error) as connect:
+                smoke.assert_no_listener(12345)
+                connect.assert_called_once_with(("127.0.0.1", 12345), timeout=1)
+        with patch.object(smoke.socket, "create_connection", side_effect=PermissionError()):
+            with self.assertRaises(PermissionError):
+                smoke.assert_no_listener(12345)
+        stream = Mock()
+        with patch.object(smoke.socket, "create_connection", return_value=stream):
+            with self.assertRaises(AssertionError):
+                smoke.assert_no_listener(12345)
+        stream.close.assert_called_once_with()
+
     def test_local_example_has_no_proposed_privacy_schema_or_enabled_collectors(self):
         config = tomllib.loads(smoke.EXAMPLE.read_text())
         self.assertNotIn("privacy", config)
