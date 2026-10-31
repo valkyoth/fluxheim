@@ -33,12 +33,7 @@ fn serve_outcome(listener: TcpListener, tls: Arc<rustls::ServerConfig>, outcome:
             }
             Err(error) => panic!("fixture accept: {error}"),
         };
-        socket
-            .set_read_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
-        socket
-            .set_write_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
+        prepare_socket(&socket);
         let mut stream =
             rustls::StreamOwned::new(rustls::ServerConnection::new(tls.clone()).unwrap(), socket);
         let (request, body) = read_request(&mut stream);
@@ -87,6 +82,39 @@ fn serve_outcome(listener: TcpListener, tls: Arc<rustls::ServerConfig>, outcome:
         stream.conn.send_close_notify();
         let _ = stream.flush();
     }
+}
+
+fn prepare_socket(socket: &TcpStream) {
+    // Windows inherits the listener's nonblocking mode; the TLS fixture uses
+    // blocking I/O with bounded deadlines on every platform.
+    socket.set_nonblocking(false).unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    socket
+        .set_write_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+}
+
+#[test]
+fn outcome_fixture_resets_nonblocking_mode_before_reading() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut socket, _) = listener.accept().unwrap();
+    socket.set_nonblocking(true).unwrap();
+    prepare_socket(&socket);
+    let peer = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        client
+            .set_write_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        client.write_all(b"x").unwrap();
+    });
+    let mut byte = [0];
+    let result = socket.read_exact(&mut byte);
+    peer.join().unwrap();
+    result.unwrap();
+    assert_eq!(byte, *b"x");
 }
 
 fn read_request(

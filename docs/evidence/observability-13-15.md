@@ -172,3 +172,52 @@ checks. All nine retry/latency Python fixture tests passed natively. The Linux
 container-argument test uses `PurePosixPath` so its mount contract is tested
 unchanged on Windows rather than interpreted as a Windows filesystem path.
 No production Rust, manifest or lockfile changes are included in this follow-up.
+
+### Native CI follow-up for `75e2aaff`
+
+Code scanning reported no open alerts. The next native CI run exposed two
+platform-specific fixture problems:
+
+- macOS used its default symlinked temporary directory for server fixtures.
+  CI now creates a private, canonical temporary root before running tests.
+  A regression covers symlinked parents, spaces, mode `0700` and unique roots.
+  Production path and symlink checks are unchanged.
+- The ACME mock accepted sockets from a nonblocking listener but then used
+  blocking TLS I/O. Windows preserves the nonblocking mode. The fixture now
+  explicitly restores blocking mode while retaining read/write deadlines;
+  a delayed-peer regression exercises that setup on every platform.
+
+The reserved, non-listening origin test now asserts macOS's timeout response
+and the refusal response on Linux/Windows separately. It keeps the port
+reserved, checks the exact event reason and still rejects protocol-error
+misclassification. Windows retains the normal connection deadline to allow its
+refusal to arrive. No test is skipped for this difference.
+
+Broader native ACME testing also reproduced a production macOS failure when
+concurrent operations created the same lock file. Unix lock opening now first
+attempts exclusive creation, then opens the existing lock only on `EEXIST`.
+All three lock modes retain handle-relative access, `NOFOLLOW`, close-on-exec,
+and the original flock behavior. Other errors still fail closed. Regression
+tests cover concurrent creation of one inode, private creation permissions,
+non-truncation and rejection of a symlink for every lock mode. Windows lock
+implementation is unchanged. The macOS ACME suite is now an explicit CI step.
+
+Verification passed:
+
+- Linux locked workspace and 683 combined server tests.
+- Linux ACME all-feature suite: 101 passed, one existing privileged test ignored.
+- macOS combined server suite: 682 passed with no exclusions.
+- macOS ACME suite: 101 passed; the previously failing concurrent certificate
+  installation also passed twenty consecutive isolated runs.
+- Full macOS static/proxy/TLS/admin/load-balancer/memory-and-disk-cache/local
+  observability parity smoke. Optional external Prometheus and Jaeger checks
+  were skipped because no external collectors were running.
+- Windows full native runtime parity smoke, including 84 ACME tests, followed
+  by all 678 combined server tests.
+- 400 Python tests (two platform skips), strict ACME/server Clippy, formatting,
+  Windows policy validators and diff checks.
+- Cached RustSec audit: no findings across 449 locked dependencies; no
+  dependency changes are included.
+
+The dedicated Windows VM was shut down normally after testing. These local
+results do not replace a successful GitHub rerun after pushing the corrections.

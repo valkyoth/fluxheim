@@ -109,6 +109,7 @@ jobs:
       - run: python3 scripts/test_php_examples.py
       - run: python3 scripts/test_php_transport.py
       - run: python3 scripts/test_observability_baseline.py
+      - run: python3 scripts/test_ci_macos_temp.py
       - run: python3 scripts/test_log_rotation_fixture.py
       - run: python3 scripts/test_native_archives.py
       - run: bash -n scripts/promote_container_refresh.sh
@@ -467,6 +468,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Use a private canonical macOS temporary directory
+        run: |
+          bash scripts/ci_macos_temp.sh
+          python3 scripts/test_ci_macos_temp.py
+
       - name: Install Rust toolchain
         run: rustup show
 
@@ -492,6 +498,9 @@ jobs:
         run: |
           cargo test --locked -p fluxheim-config fs_trust::tests
           cargo test --locked -p fluxheim-cache storage_bin_manifest_rejects_special_file_without_blocking
+
+      - name: Test macOS ACME storage and lifecycle
+        run: cargo test --locked -p fluxheim-acme --lib --features acme-client
 
       - name: Test macOS bounded logging and real pipe backpressure
         run: |

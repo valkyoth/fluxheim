@@ -22,16 +22,28 @@ async fn operational_dns_failure_is_private_and_returns_bad_gateway() {
 }
 
 #[tokio::test]
-async fn operational_refused_connection_is_not_a_protocol_error() {
+async fn operational_nonlistening_origin_is_not_a_protocol_error() {
     let capture = Capture::start();
     // Keep the port reserved without listening, so another test cannot take it.
     let socket = tokio::net::TcpSocket::new_v4().unwrap();
     socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
-    let proxy = proxy_listener(socket.local_addr().unwrap()).await;
+    let upstream = NativeHttp1Upstream::new(socket.local_addr().unwrap().to_string());
+    #[cfg(target_os = "macos")]
+    let upstream = upstream.with_connect_timeout(Duration::from_millis(250));
+    let proxy = proxy_listener_for(NativeHttp1Proxy::new(upstream)).await;
     let response = downstream_get(proxy, "/").await;
-    assert!(response.starts_with("HTTP/1.1 502"));
-    assert!(response.ends_with("bad gateway\n"));
-    capture.assert_reason("connection_refused", 1);
+    // macOS drops SYNs to a bound, non-listening socket instead of refusing
+    // them. Keep the port reserved and check the exact platform outcome.
+    #[cfg(target_os = "macos")]
+    let (status, body, reason) = ("HTTP/1.1 504", "gateway timeout\n", "connection_timeout");
+    #[cfg(not(target_os = "macos"))]
+    let (status, body, reason) = ("HTTP/1.1 502", "bad gateway\n", "connection_refused");
+    assert!(
+        response.starts_with(status),
+        "unexpected response: {response}"
+    );
+    assert!(response.ends_with(body));
+    capture.assert_reason(reason, 1);
     capture.assert_reason("upstream_protocol", 0);
 }
 
