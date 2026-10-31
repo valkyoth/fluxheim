@@ -44,17 +44,12 @@ impl RetryBudget {
 
     fn reserve_at(self: &Arc<Self>, now: Instant) -> Option<RetryBudgetReservation> {
         // Also fail closed for programmatic callers that bypass config validation.
-        if self.limit > 1_000_000
+        if self.limit == 0
+            || self.limit > 1_000_000
             || self.window.is_zero()
             || self.window > Duration::from_secs(3600)
         {
             return None;
-        }
-        if self.limit == 0 {
-            return Some(RetryBudgetReservation {
-                budget: self.clone(),
-                window: None,
-            });
         }
         let mut state = self.state.lock().ok()?;
         if now.saturating_duration_since(state.started) >= self.window {
@@ -146,17 +141,19 @@ mod tests {
     }
 
     #[test]
-    fn zero_budget_is_unlimited_but_invalid_programmatic_limits_are_denied() {
-        let budget = Arc::new(RetryBudget::new(0, 1));
-        for _ in 0..100 {
-            budget.reserve().unwrap().commit();
-        }
-        for (limit, window) in [(1_000_001, 1), (1, 0), (0, 0), (1, 3601)] {
-            assert!(
-                Arc::new(RetryBudget::new(limit, window))
-                    .reserve()
-                    .is_none()
-            );
+    fn zero_and_invalid_programmatic_budgets_deny_all_admission() {
+        for (limit, window) in [(0, 1), (0, 3600), (1_000_001, 1), (1, 0), (0, 0), (1, 3601)] {
+            let budget = Arc::new(RetryBudget::new(limit, window));
+            let start = budget.state.lock().unwrap().started;
+            for elapsed in [0, 1, 3600, 7200] {
+                assert!(
+                    budget
+                        .reserve_at(start + Duration::from_secs(elapsed))
+                        .is_none()
+                );
+            }
+            assert_eq!(budget.admitted(), 0);
+            assert_eq!(budget.state.lock().unwrap().used, 0);
         }
     }
 

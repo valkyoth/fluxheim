@@ -13,6 +13,52 @@ mod latency_tests;
 mod lifecycle_tests;
 
 #[tokio::test]
+async fn native_load_balanced_retry_zero_budget_never_amplifies_programmatic_requests() {
+    for http2 in [false, true] {
+        for transport_failure in [false, true] {
+            let origins = if http2 {
+                h2_origins(&[if transport_failure { 0 } else { 503 }, 200]).await
+            } else {
+                origins(&[
+                    if transport_failure {
+                        String::new()
+                    } else {
+                        reply(503, "")
+                    },
+                    reply(200, ""),
+                ])
+                .await
+            };
+            let mut config = config(&origins);
+            config.upstream_priority_groups = vec![20, 10];
+            config.load_balance.retry.max_retries = 10;
+            config.load_balance.retry.budget_per_window = 0;
+            if http2 {
+                config.upstream_http_version = fluxheim_config::UpstreamHttpVersion::Http2;
+            }
+            // Deliberately bypass Config::validate to exercise runtime admission.
+            let proxy = proxy(&config);
+            for expected_calls in 1..=4 {
+                let response = dispatch(&proxy, native_proxy_test_request()).await;
+                assert_eq!(response.status(), if transport_failure { 502 } else { 503 });
+                assert_eq!(calls(&origins), expected_calls);
+                assert_eq!(origins[1].count.load(Ordering::SeqCst), 0);
+                assert_eq!(
+                    proxy
+                        .load_balancer
+                        .as_ref()
+                        .unwrap()
+                        .runtime_stats()
+                        .retry
+                        .admitted,
+                    0
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn native_load_balanced_retry_switch_and_count_control_status_and_transport_failures() {
     for transport_failure in [false, true] {
         for (enabled, max_retries, expected_calls, expected_status) in [

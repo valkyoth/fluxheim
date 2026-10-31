@@ -2234,7 +2234,11 @@ require a configured safe method and replayable empty-body non-upgrade request.
 `statuses` and `status_ranges` opt into server-error response retries; transport
 failures are otherwise eligible. Already attempted members are excluded.
 `budget_per_window` and `budget_window_secs` share retry admission across pool
-requests and cache workers; zero budget disables that cap, not the request count.
+requests and cache workers. Enabled retries with positive `max_retries` require
+an explicit budget from 1 to 1000000. Zero denies retry admission at runtime;
+it is permitted in configuration only for disabled retries or `max_retries = 0`.
+Separate pools have independent budgets, and configuration rebuilds reset them:
+this is not a process-wide or persistent ceiling.
 `retry.admitted` reports cumulative admissions, not successful origin responses.
 Single static upstreams and non-HTTP transports are separate. See the
 [runtime boundaries](../guides/load-balancer.md#retry-and-latency-boundaries).

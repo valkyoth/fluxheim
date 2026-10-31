@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::LoadBalanceRetryConfig;
 
 #[test]
 fn validates_load_balance_retry_policy() {
@@ -26,6 +27,7 @@ fn validates_load_balance_retry_policy() {
             [proxy.load_balance.retry]
             enabled = true
             methods = ["POST"]
+            budget_per_window = 1
             "#,
     )
     .unwrap();
@@ -91,4 +93,52 @@ fn validates_load_balance_retry_policy() {
             field: "proxy.load_balance.retry.status_ranges"
         })
     );
+}
+
+#[test]
+fn enabled_retry_requires_explicit_positive_budget_in_every_proxy_scope() {
+    for prefix in [
+        "[proxy.load_balance.retry]",
+        "[[vhosts]]\nname = 'retry.test'\nhosts = ['retry.test']\n[vhosts.proxy.load_balance.retry]",
+        "[[vhosts]]\nname = 'retry.test'\nhosts = ['retry.test']\n[[vhosts.routes]]\nname = 'retry'\npath_prefix = '/'\n[vhosts.routes.proxy.load_balance.retry]",
+    ] {
+        for budget in ["", "budget_per_window = 0", "budget_per_window = 1000001"] {
+            let config: Config =
+                toml::from_str(&format!("{prefix}\nenabled = true\n{budget}\n")).unwrap();
+            let error = match config.validate().unwrap_err() {
+                ConfigError::VhostSection { source, .. }
+                | ConfigError::RouteSection { source, .. } => *source,
+                error => error,
+            };
+            assert_eq!(
+                error,
+                ConfigError::InvalidLoadBalanceRetry {
+                    field: "proxy.load_balance.retry.budget_per_window",
+                },
+                "{prefix}: {budget}",
+            );
+        }
+    }
+}
+
+#[test]
+fn retry_budget_boundaries_preserve_disabled_defaults_and_explicit_opt_in() {
+    for (enabled, max_retries, budget, valid) in [
+        (false, 1, 0, true),
+        (true, 0, 0, true),
+        (true, 1, 0, false),
+        (true, 10, 0, false),
+        (true, 1, 1, true),
+        (true, 10, 1_000_000, true),
+        (true, 1, 1_000_001, false),
+    ] {
+        let config = LoadBalanceRetryConfig {
+            enabled,
+            max_retries,
+            budget_per_window: budget,
+            ..Default::default()
+        };
+        assert_eq!(config.validate().is_ok(), valid, "{config:?}");
+    }
+    Config::default().validate().unwrap();
 }

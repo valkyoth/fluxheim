@@ -354,7 +354,7 @@ class DocumentationLayoutTests(unittest.TestCase):
     def test_load_balancer_documents_runtime_not_just_parsing(self):
         guide = read_review_document(DOCS / "guides/load-balancer.md")
         for statement in ("no pool", "retry.admitted", "response-header wait",
-                          "not a cluster-wide", "not a standalone server configuration",
+                          "not a process-wide, cluster-wide", "not a standalone server configuration",
                           "30 seconds", "Cache hits supply no samples"):
             combined = " ".join((guide + read_review_document(DOCS / "reference/load-balancer-options.md")).split())
             self.assertIn(statement, combined)

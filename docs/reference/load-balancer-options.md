@@ -211,12 +211,15 @@ Fields under `[proxy.load_balance.retry]`:
 | `methods` | `["GET", "HEAD", "OPTIONS"]` | Unique subset of `GET`, `HEAD`, `OPTIONS`, `TRACE` |
 | `statuses` | `[]` | Up to 32 unique HTTP 500-599 statuses |
 | `status_ranges` | `[]` | Up to 32 inclusive `{ start, end }` ranges in 500-599 |
-| `budget_per_window` | `0` | 0-1000000 retry admissions per pool window; 0 disables the pool-wide cap |
+| `budget_per_window` | `0` | 1-1000000 required when enabled with positive `max_retries`; 0 denies retries at runtime and is valid configuration only when retries are disabled or `max_retries = 0` |
 | `budget_window_secs` | `1` | 1-3600 seconds on a monotonic clock; reset on the next reservation after expiry |
 
 `retry.admitted` in runtime status counts committed retry admissions since pool
 construction. It excludes initial sends and unused reservations; cancellation
 after admission does not decrement it. The counter saturates rather than wraps.
+Budgets are per pool, not process-wide or cluster-wide. Initial sends do not
+consume retry budget. Configuration rebuilds create fresh budgets; size the
+aggregate of configured pools for the origins' available capacity.
 
 ## Persistence
 

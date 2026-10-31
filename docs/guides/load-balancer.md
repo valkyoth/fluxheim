@@ -298,10 +298,19 @@ normally, including stale-if-error and configured error pages. Only the initial
 selection may enter the admission queue; retries do not wait for another slot.
 
 `budget_per_window` limits retry admissions shared by the same pool's requests
-and cache workers. `0` disables this pool-wide cap, not `max_retries`. Budget
+and cache workers. When `enabled = true` and `max_retries > 0`, you must explicitly
+set a value from 1 to 1000000; an omitted or zero budget is rejected. Runtime
+admission also denies all retries for a zero budget if a programmatic caller
+bypasses configuration validation. Disabled retries and `max_retries = 0` may
+retain the default zero budget. Budget
 windows use a monotonic clock and reset when the next reservation observes an expired
 window. A new pool/configuration rebuild starts a new budget; this is not a
-cluster-wide or restart-persistent limit. Unused reservations are returned.
+process-wide, cluster-wide or restart-persistent limit. Separately constructed
+pools have separate budgets, so account for all pools when sizing aggregate
+origin capacity. There is no global retry semaphore or token bucket. Prefer a
+small budget during origin failures and combine it with admission/in-flight
+limits; a large explicitly configured budget can still amplify traffic.
+Unused reservations are returned.
 An admitted send remains charged if it subsequently fails or is cancelled.
 Status exposes the cumulative `retry.admitted` count for that pool instance;
 ordinary request telemetry records each application attempt separately.

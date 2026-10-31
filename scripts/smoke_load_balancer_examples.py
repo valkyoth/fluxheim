@@ -235,8 +235,21 @@ def run_retry_case(parent, enabled):
             public = reservation.getsockname()[1]
         with private_fixture(None if os.name == "nt" else parent) as directory, tempfile.TemporaryFile() as log:
             config = Path(directory) / "fluxheim.toml"
-            config.write_text(retry_config((EXAMPLES / "local.toml").read_text(), public, first, second, enabled), encoding="utf-8")
+            source = retry_config((EXAMPLES / "local.toml").read_text(), public, first, second, enabled)
             command = [str(BINARY), "--config", str(config)]
+            if enabled:
+                for budget in ("", "budget_per_window = 0\n"):
+                    config.write_text(replace_once(source, "budget_per_window = 1\n", budget), encoding="utf-8")
+                    rejected = subprocess.run(command + ["--validate-config"], timeout=20,
+                                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log)
+                    log.seek(0)
+                    error = log.read(8192)
+                    assert rejected.returncode != 0 and b"retry.budget_per_window" in error, "unsafe retry budget accepted"
+                    assert first_calls.count() + second_calls.count() == 0, "invalid config contacted an origin"
+                    log.seek(0)
+                    log.truncate()
+                print("load-balancer missing/zero retry budgets rejected: ok")
+            config.write_text(source, encoding="utf-8")
             validate_command(command, log)
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log)
             try:

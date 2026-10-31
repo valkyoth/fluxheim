@@ -103,7 +103,9 @@ impl LoadBalanceRetryConfig {
                 field: "proxy.load_balance.retry.status_ranges",
             });
         }
-        if self.budget_per_window > MAX_LB_RETRY_BUDGET_PER_WINDOW {
+        if (self.enabled && self.max_retries > 0 && self.budget_per_window == 0)
+            || self.budget_per_window > MAX_LB_RETRY_BUDGET_PER_WINDOW
+        {
             return Err(ConfigError::InvalidLoadBalanceRetry {
                 field: "proxy.load_balance.retry.budget_per_window",
             });

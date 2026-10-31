@@ -153,7 +153,7 @@ fn load_balancer_guide_invalid_overlays_are_rejected() {
     for recipe in [
         "[proxy]\nupstream_weights = [1]",
         "[proxy.load_balance.queue]\nmax_waiting = 1\ntimeout_ms = 0",
-        "[proxy.load_balance.retry]\nenabled = true\nmethods = ['POST']",
+        "[proxy.load_balance.retry]\nenabled = true\nbudget_per_window = 1\nmethods = ['POST']",
         "[proxy.load_balance]\nselection = 'header-hash'",
         "[proxy.load_balance.persistence]\nmode = 'managed-cookie'\ncookie = 'affinity'\nmanaged_cookie_same_site = 'none'\nmanaged_cookie_secure = false",
     ] {

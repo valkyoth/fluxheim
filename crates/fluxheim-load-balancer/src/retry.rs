@@ -40,7 +40,8 @@ impl UpstreamLoadBalancer {
     ///
     /// Clones of this pool share one monotonic fixed-window budget. A separately
     /// constructed pool has a separate budget; rebuilding configuration resets it.
-    /// A zero pool budget disables that cap, not the per-request retry limit.
+    /// A zero or invalid pool budget denies all retries, including for callers
+    /// that bypass configuration validation. Initial attempts are not charged.
     pub fn retry_sequence(&self, method: &str, replayable: bool) -> LoadBalancerRetrySequence<'_> {
         let allowed = replayable
             && self.retry.enabled

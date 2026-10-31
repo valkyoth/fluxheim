@@ -137,6 +137,8 @@ pub(super) fn config(origins: &[Origin]) -> fluxheim_config::ProxyConfig {
     };
     config.load_balance.health_check.enabled = false;
     config.load_balance.retry.enabled = true;
+    config.load_balance.retry.budget_per_window = 100;
+    config.load_balance.retry.budget_window_secs = 3600;
     config.load_balance.retry.max_retries = 2;
     config.load_balance.retry.statuses = vec![503];
     config

@@ -59,6 +59,7 @@ async fn native_load_balancer_retries_configured_status_once_per_distinct_member
     let second = origin(503, Duration::ZERO, Arc::clone(&count)).await;
     let mut config = config(first, second);
     config.load_balance.retry.enabled = true;
+    config.load_balance.retry.budget_per_window = 2;
     config.load_balance.retry.max_retries = 2;
     config.load_balance.retry.statuses = vec![503];
     let listener = proxy_listener_for(proxy(&config)).await;

@@ -66,3 +66,25 @@ The unresolved numbered correction queue, private reproduction material, VM
 state and raw local qualification logs are excluded from Git and container
 contexts. Public guides retain truthful behavior and deployment limitations;
 their presence does not imply every outstanding correction is complete.
+
+## Retry Budget Review Follow-Up
+
+The review of this checkpoint identified implicit unlimited pool retry admission
+when `budget_per_window` was omitted or zero. Enabled retries with positive
+`max_retries` now require an explicit budget from 1 to 1000000. Runtime admission
+also rejects zero and invalid budgets for programmatic callers that bypass
+configuration validation. Disabled retries and zero additional attempts retain
+their existing defaults.
+
+Regression coverage checks root/vhost/route validation, budget boundaries,
+expiry, concurrency, cancellation/refunds and repeated HTTP/1.1/HTTP/2 status
+and transport failures with zero budget. Documentation distinguishes per-pool
+budgets from a process-wide limit; no global retry limiter is claimed.
+
+Follow-up local verification on Linux: locked workspace passed, combined server
+683 passed, load-balancer library 157 passed, Python suite 394 tests with two
+platform-dependent skips, and strict Clippy/formatting/documentation checks
+passed. Native Windows/macOS and exact-commit CI remain to be rerun for this
+follow-up; the earlier platform results above do not qualify the changed source.
+The built-server smoke also passed missing/zero budget rejection before origin
+contact, positive-budget exhaustion, retry recovery and all latency scenarios.

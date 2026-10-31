@@ -19,6 +19,8 @@ fn enabled() -> LoadBalanceRetryConfig {
     LoadBalanceRetryConfig {
         enabled: true,
         max_retries: 2,
+        budget_per_window: 100,
+        budget_window_secs: 3600,
         ..LoadBalanceRetryConfig::default()
     }
 }
@@ -33,6 +35,10 @@ fn disabled_zero_and_invalid_retry_limits_deny_admission() {
         },
         LoadBalanceRetryConfig {
             max_retries: 11,
+            ..enabled()
+        },
+        LoadBalanceRetryConfig {
+            budget_per_window: 0,
             ..enabled()
         },
     ] {
