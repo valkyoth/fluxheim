@@ -275,6 +275,18 @@ class DocumentationLayoutTests(unittest.TestCase):
             self.assertTrue(config["server"]["tls_listen"])
             self.assertFalse(config["tls"]["acme"]["issuers"][0]["terms_of_service_agreed"])
 
+    def test_managed_acme_examples_use_acme_enabled_ci_validation(self):
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        for name in ("acme-http-01.toml", "acme-actalis.toml"):
+            command = (
+                "cargo run --quiet --features acme-client -- --check-config --config "
+                f"examples/{name}"
+            )
+            self.assertIn(command, workflow)
+            self.assertNotIn(
+                f"cargo run --quiet -- --check-config --config examples/{name}", workflow
+            )
+
 
     def test_cache_reference_covers_root_policy_fields(self):
         reference = read_review_document(DOCS / "reference/cache-options.md")

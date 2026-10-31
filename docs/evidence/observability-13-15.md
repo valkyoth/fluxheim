@@ -130,3 +130,45 @@ The owner approved dismissal of two Python stored-secret alerts after their
 data flows were verified to contain only checked-in smoke-test policy settings,
 not credentials. Rust alert follow-ups still require the next exact-commit
 GitHub scan; local passing tests do not establish that those alerts are closed.
+
+## Runner Follow-Up
+
+The subsequent scan of `50c634a1` completed with no open code-scanning alerts.
+Its CI run exposed three further fixture/profile mismatches:
+
+- The gRPC characterization loaded a snapshot with relative process paths,
+  depending on the checkout's Windows permissions. It now loads the example
+  through the real file loader from the protected test root and checks all three
+  resolved process paths using canonical parents, including Windows verbatim
+  path equivalence.
+- The live latency smoke assumed one new sample must reverse an EWMA ranking.
+  It now requires three consecutive selections of the expected origin within
+  twelve attempts and ten seconds, before stale-sample reset could mask a
+  failure. Regression tests reject stuck/alternating selection, late convergence
+  and unexpected responses. The separate stale-resampling check remains.
+- CI now enables `acme-client` when checking the two managed-ACME templates;
+  default features do not include ACME. Template consent settings are unchanged.
+
+Linux verification passed: locked workspace, 683 combined server tests, strict
+Clippy, 399 Python tests (two platform skips), and the full load-balancer smoke.
+The five ACME guide configuration tests and both ACME-enabled CLI template checks
+passed. For the latter, local fixture copies used private process paths because
+this workstation's `/run/fluxheim` belongs to another service account. The exact
+unmodified CI example matrix could not run under those host permissions.
+
+The full macOS native parity smoke passed, covering static/proxy/TLS, admin,
+load balancing, memory/disk cache and local observability. Its optional external
+Prometheus/Jaeger checks were skipped because those collectors were not running.
+The final gRPC fixture assertion also passed natively on macOS.
+
+One Windows workspace attempt encountered an access-denied error in the unchanged
+snapshot migration test. Twenty isolated repeats and the complete 53-test
+snapshot suite passed without reproducing it. No snapshot code or security
+policy was changed; this remains an observation, not a claimed remediation.
+
+The subsequent Windows workspace run passed, including 553 default server
+tests, followed by 678 combined server tests and the live privacy/retry/latency
+checks. All nine retry/latency Python fixture tests passed natively. The Linux
+container-argument test uses `PurePosixPath` so its mount contract is tested
+unchanged on Windows rather than interpreted as a Windows filesystem path.
+No production Rust, manifest or lockfile changes are included in this follow-up.

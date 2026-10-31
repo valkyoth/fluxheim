@@ -2,15 +2,47 @@
 """Keep the executable retry guide fixture bounded and independent of health probes."""
 
 import concurrent.futures
-from pathlib import Path
+from pathlib import PurePosixPath
 import tomllib
 import unittest
+from unittest import mock
 
 import smoke_load_balancer_examples as smoke
 import smoke_load_balancer_retry_container as container
 
 
 class RetryExamplesTests(unittest.TestCase):
+    def test_latency_preference_allows_bounded_ewma_convergence(self):
+        replies = [(200, b"origin-b")] * 3 + [(200, b"origin-a")] * 3
+        with mock.patch.object(smoke, "request", side_effect=replies) as request:
+            smoke.expect_latency_preference(12345, b"origin-a")
+        self.assertEqual(request.call_count, 6)
+
+    def test_latency_preference_rejects_stuck_and_alternating_selection(self):
+        for replies in ([(200, b"origin-b")] * 12,
+                        [(200, b"origin-a"), (200, b"origin-b")] * 6):
+            with self.subTest(replies=replies), \
+                    mock.patch.object(smoke, "request", side_effect=replies) as request, \
+                    mock.patch.object(smoke.time, "monotonic", return_value=0):
+                with self.assertRaisesRegex(AssertionError, "did not converge"):
+                    smoke.expect_latency_preference(12345, b"origin-a")
+                self.assertEqual(request.call_count, 12)
+
+    def test_latency_preference_has_time_limit_and_rejects_bad_responses(self):
+        with mock.patch.object(smoke, "request", return_value=(200, b"origin-b")) as request, \
+                mock.patch.object(smoke.time, "monotonic", side_effect=[0, 10]):
+            with self.assertRaisesRegex(AssertionError, "did not converge"):
+                smoke.expect_latency_preference(12345, b"origin-a")
+            self.assertEqual(request.call_count, 1)
+        with mock.patch.object(smoke, "request", return_value=(200, b"origin-a")), \
+                mock.patch.object(smoke.time, "monotonic", side_effect=[0, 1, 2, 10]):
+            with self.assertRaisesRegex(AssertionError, "did not converge"):
+                smoke.expect_latency_preference(12345, b"origin-a")
+        for response in ((503, b"origin-a"), (200, b"unexpected")):
+            with mock.patch.object(smoke, "request", return_value=response):
+                with self.assertRaisesRegex(AssertionError, "unexpected latency response"):
+                    smoke.expect_latency_preference(12345, b"origin-a")
+
     def test_latency_modes_are_bounded_and_disable_active_probes(self):
         source = (smoke.EXAMPLES / "local.toml").read_text()
         for mode, threshold in (("selection", 0), ("passive", 10), ("disabled", 0), ("body", 200)):
@@ -70,7 +102,7 @@ class RetryExamplesTests(unittest.TestCase):
     def test_container_uses_immutable_image_and_read_only_single_file_mount(self):
         digest = "sha256:" + "a" * 64
         name = "fluxheim-retry-" + "b" * 32
-        args = container.run_arguments(name, digest, Path("/tmp/fixture/config.toml"))
+        args = container.run_arguments(name, digest, PurePosixPath("/tmp/fixture/config.toml"))
         self.assertIn("--pull=never", args)
         self.assertIn("--cap-drop=ALL", args)
         self.assertIn("no-new-privileges", args)
@@ -79,13 +111,13 @@ class RetryExamplesTests(unittest.TestCase):
         self.assertEqual(args[args.index("-v") + 1], "/tmp/fixture/config.toml:/etc/fluxheim/fluxheim.toml:ro,Z")
         for invalid in ("latest", "--privileged", digest + "x"):
             with self.assertRaises(ValueError):
-                container.run_arguments(name, invalid, Path("/tmp/config.toml"))
+                container.run_arguments(name, invalid, PurePosixPath("/tmp/config.toml"))
         for invalid in ("other-project", "--all"):
             with self.assertRaises(ValueError):
-                container.run_arguments(invalid, digest, Path("/tmp/config.toml"))
+                container.run_arguments(invalid, digest, PurePosixPath("/tmp/config.toml"))
         for invalid in ("relative", "/tmp/a:b", "/tmp/a,b", "/tmp/a\nb"):
             with self.assertRaises(ValueError):
-                container.run_arguments(name, digest, Path(invalid))
+                container.run_arguments(name, digest, PurePosixPath(invalid))
 
 
 if __name__ == "__main__":

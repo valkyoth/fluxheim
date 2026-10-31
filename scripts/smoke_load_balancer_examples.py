@@ -284,16 +284,35 @@ def latency_config(source, public, first, second, mode):
     )
 
 
+def expect_latency_preference(public, expected):
+    deadline = time.monotonic() + 10
+    consecutive = 0
+    observations = []
+    # EWMA convergence depends on previous samples, including runner scheduling.
+    # Bound convergence below the 30-second stale-sample reset, rather than
+    # requiring a single new sample to outweigh every earlier measurement.
+    for _ in range(12):
+        status, body = request(public)
+        assert status == 200 and body in (b"origin-a", b"origin-b"), "unexpected latency response"
+        observations.append(body)
+        if time.monotonic() >= deadline:
+            break
+        consecutive = consecutive + 1 if body == expected else 0
+        if consecutive == 3:
+            return
+    raise AssertionError(f"latency preference did not converge to {expected!r}: {observations!r}")
+
+
 def assert_latency_sequence(public, mode, first_calls, second_calls):
     if mode == "selection":
         first_calls.set_timing(0.12)
         second_calls.set_timing(0.001)
         assert {request(public) for _ in range(2)} == {(200, b"origin-a"), (200, b"origin-b")}
-        assert all(request(public) == (200, b"origin-b") for _ in range(3)), "fast origin not preferred"
+        expect_latency_preference(public, b"origin-b")
         first_calls.set_timing(0.001)
         second_calls.set_timing(0.8)
         assert request(public) == (200, b"origin-b")
-        assert all(request(public) == (200, b"origin-a") for _ in range(3)), "latency change not learned"
+        expect_latency_preference(public, b"origin-a")
         second_calls.set_timing(0.001)
         before = first_calls.count(), second_calls.count()
         time.sleep(30.1)  # Stale members must be sampled again without a configuration reload.

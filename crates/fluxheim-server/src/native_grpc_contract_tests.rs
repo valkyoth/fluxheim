@@ -17,10 +17,26 @@ use crate::{
 async fn routed_h2_grpc_response_loses_origin_status_trailers() {
     timeout(Duration::from_secs(10), async {
         let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let mut config = fluxheim_config::Config::load_snapshot_bytes(include_bytes!(
-            "../../../examples/proxy/grpc.toml"
-        ))
+        let directory = tempfile::tempdir_in(fluxheim_common::test_support::test_root()).unwrap();
+        let config_path = directory.path().join("fluxheim.toml");
+        std::fs::write(
+            &config_path,
+            include_bytes!("../../../examples/proxy/grpc.toml"),
+        )
         .unwrap();
+        // The file loader resolves process paths without trusting the checkout directory.
+        let mut config = fluxheim_config::Config::load(Some(&config_path)).unwrap();
+        for path in [
+            &config.server.process.pid_file,
+            &config.server.process.upgrade_sock,
+            &config.server.process.certificate_reload_sock,
+        ] {
+            assert!(path.is_absolute());
+            assert_eq!(
+                path.parent().unwrap().canonicalize().unwrap(),
+                directory.path().canonicalize().unwrap()
+            );
+        }
         let route = &mut config.vhosts[0].routes[0];
         route.proxy.as_mut().unwrap().upstreams = vec![origin.local_addr().unwrap().to_string()];
         config.validate().unwrap();
