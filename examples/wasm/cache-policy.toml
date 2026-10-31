@@ -1,5 +1,5 @@
 # Example fragment for the checked-in cache lookup/store Wasm Text modules
-# after compiling them to .wasm files and replacing the sha256 placeholders
+# after compiling them to.wasm files and replacing the sha256 placeholders
 # with the compiled module SHA-256 digests.
 
 [wasm]

@@ -52,9 +52,16 @@ upstream `x-powered-by` response header, and adds
 `x-fluxheim-policy-branch: gold` to the client response.
 
 The guest cannot read raw `Authorization`, `Cookie`, or `Set-Cookie` values and
-cannot create arbitrary names or values. Unknown IDs, duplicate/oversized
-mutations, traps, timeouts, and admission failures follow the configured fail
+cannot create arbitrary names or values. Unknown IDs, excessive mutation counts,
+traps, timeouts, and admission failures follow the configured fail
 mode; security-sensitive examples use `fail-closed`.
+
+Repeated legal header sets are allowed and count toward the per-invocation
+limit; this differs from duplicate cache-key components and stored headers.
+See the [exact host-call IDs and chain rules](../../docs/reference/wasm-policy-abi.md).
+These examples do not establish WebSocket policy parity: configuration rejects
+route/header hooks on WebSocket-enabled proxy scopes. Keep those
+examples on HTTP-only routes; access-decision remains supported for upgrades.
 
 `haproxy-spoe-routing-policy.wat` and
 `haproxy-spoe-routing-policy.toml` demonstrate the HAProxy Lua/SPOE-style
@@ -69,7 +76,7 @@ symbolic branch is not configured and still valid for the request, selection
 fails closed instead of falling back to an attacker-chosen destination.
 
 `cache-lookup-policy.wat` and `cache-store-policy.wat` demonstrate the bounded
-1.7.5 cache-policy ABI:
+native cache-policy ABI:
 
 - split cache keys by Fluxheim's symbolic mobile/desktop device class;
 - apply a bounded short TTL;
@@ -92,7 +99,7 @@ fail-closed rejection of unknown or duplicate mutation IDs. Fluxheim does not
 embed VCL and the guest never receives raw cache objects.
 
 `wasi-random-policy.wat` and `wasi-random-policy.toml` demonstrate the opt-in
-`1.7.8` WASI Preview 1 boundary. The module imports only `random_get`, and the
+WASI Preview 1 boundary. The module imports only `random_get`, and the
 config grants only randomness. Clocks require their own explicit grant.
 Environment, arguments, inherited stdio, filesystem, sockets/network, and
 process-exit imports remain unavailable and are rejected before instantiation.

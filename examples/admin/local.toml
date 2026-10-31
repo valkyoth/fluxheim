@@ -1,0 +1,47 @@
+# Run from a private directory containing the files described in the admin guide.
+[server]
+listen = ["127.0.0.1:8080"]
+trusted_proxies = []
+
+[server.process]
+threads = 2
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+grace_period_seconds = 1
+graceful_shutdown_timeout_seconds = 2
+
+[admin]
+enabled = true
+listen = "127.0.0.1:9090"
+require_loopback = true
+token_file = "control-token"
+operational_token_file = "observer-token"
+snapshot_store = "snapshots"
+snapshot_integrity_key_file = "snapshot-integrity.key"
+
+[admin.health]
+unauthenticated = false
+response = "status"
+
+[admin.auth_throttle]
+enabled = true
+window_secs = 60
+per_source_failures = 10
+global_failures = 100
+base_lockout_secs = 30
+max_lockout_secs = 900
+max_sources = 4096
+
+[admin.self_healing]
+enabled = false
+validation_window_secs = 30
+health_path = "/_fluxheim/health"
+min_successful_checks = 1
+max_error_rate_per_mille = 100
+
+[[vhosts]]
+name = "admin.example.test"
+hosts = ["admin.example.test", "127.0.0.1"]
+[vhosts.web]
+root = "public"

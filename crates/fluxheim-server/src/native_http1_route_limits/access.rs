@@ -173,3 +173,7 @@ fn parse_native_access_sources(
         )
         .collect()
 }
+
+#[cfg(test)]
+#[path = "access_contract_tests.rs"]
+mod contract_tests;

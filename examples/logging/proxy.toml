@@ -1,0 +1,46 @@
+# Start an HTTP origin at 127.0.0.1:9001 before requesting logs.example.test.
+[server]
+listen = ["127.0.0.1:8080"]
+trusted_proxies = []
+[server.process]
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+grace_period_seconds = 1
+graceful_shutdown_timeout_seconds = 2
+
+[logging]
+level = "info"
+format = "json"
+target = "stderr"
+# Optional independent fatal diagnostics; create a private logs directory first.
+# crash_file = "logs/fatal.log"
+
+[logging.file]
+enabled = false
+# path = "logs/events.log"
+append = true
+
+[logging.access]
+enabled = true
+request_id = true
+request_id_header = "x-request-id"
+# Currently accepted but unused by native access events.
+include_host = true
+include_client_ip = true
+include_cache_phase = true
+include_path = true
+include_route = true
+include_upstream = true
+
+[[vhosts]]
+name = "logging-guide"
+hosts = ["logs.example.test"]
+[[vhosts.routes]]
+name = "application"
+path_prefix = "/"
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+upstream_tls = false
+upstream_http_version = "http1"

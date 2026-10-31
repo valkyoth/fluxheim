@@ -170,6 +170,9 @@ impl LoadBalancerDiscoveryRuntimeStats {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct LoadBalancerRetryRuntimeStats {
+    /// Committed retry admissions since this pool was constructed, including
+    /// attempts later cancelled or failed. Excludes initial sends and negotiation.
+    pub admitted: u64,
     pub enabled: bool,
     pub max_retries: u8,
     pub methods: Vec<String>,
@@ -182,6 +185,7 @@ pub struct LoadBalancerRetryRuntimeStats {
 impl LoadBalancerRetryRuntimeStats {
     pub(super) fn from_config(config: &LoadBalanceRetryConfig) -> Self {
         Self {
+            admitted: 0,
             enabled: config.enabled,
             max_retries: config.max_retries,
             methods: config.methods.clone(),

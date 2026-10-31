@@ -1,0 +1,7 @@
+# Replace [vhosts.access] in local.toml with this table; do not append it.
+[vhosts.access]
+enabled = true
+allow_countries = []
+allow_asns = []
+deny_countries = ["US"]
+deny_asns = [13335]

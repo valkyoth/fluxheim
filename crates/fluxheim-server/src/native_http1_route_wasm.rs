@@ -20,6 +20,10 @@ use crate::native_http1_route_proxy::{NativeHttp1RouteProxy, NativeHttp1RoutePro
 use crate::native_http1_route_rewrite::request_path_and_query;
 use crate::{NativeHttp1Request, NativeHttp1Response};
 
+#[cfg(test)]
+#[path = "native_wasm_inheritance_tests.rs"]
+mod inheritance_tests;
+
 const ACCESS_DECISION_PHASE: &str = "access-decision";
 const ACCESS_DECISION_FUNCTION: &str = "fluxheim_access_decision";
 const REQUEST_HEADERS_PHASE: &str = "request-headers";
@@ -106,6 +110,7 @@ pub(crate) struct NativeWasmHooks {
 
 #[derive(Clone, Debug)]
 struct NativeWasmAttachment {
+    order: usize,
     plugin: Arc<NativeWasmPlugin>,
     vhost: String,
     route: Option<String>,
@@ -125,6 +130,7 @@ struct NativeWasmPlugin {
 
 #[derive(Clone, Debug)]
 struct NativeWasmHook {
+    attachment_order: usize,
     plugin: Arc<NativeWasmPlugin>,
     phase: WasmPluginPhase,
     global_admission: FluxWasmAdmissionController,
@@ -269,8 +275,8 @@ impl NativeWasmHookRegistry {
                     host_call_namespace: loaded.manifest().host_call_namespace(),
                     admission: admission_controller(
                         plugin_config
-                            .admission
-                            .unwrap_or(config.wasm.default_admission),
+                            .effective_admission(config.wasm.default_admission)
+                            .map_err(|_| NativeWasmRegistryError::Config)?,
                     )?,
                     runtime,
                     module,
@@ -279,7 +285,7 @@ impl NativeWasmHookRegistry {
         }
 
         let mut attachments = Vec::with_capacity(config.wasm.attachments.len());
-        for attachment in config.wasm.ordered_attachments() {
+        for (order, attachment) in config.wasm.ordered_attachments().into_iter().enumerate() {
             let plugin = plugins
                 .get(&attachment.plugin)
                 .cloned()
@@ -291,14 +297,15 @@ impl NativeWasmHookRegistry {
                 .find(|plugin| plugin.name == attachment.plugin)
                 .ok_or(NativeWasmRegistryError::Config)?;
             attachments.push(NativeWasmAttachment {
+                order,
                 phases: attachment_phases(attachment, &plugin_config.phases),
                 plugin,
                 vhost: attachment.vhost.clone(),
                 route: attachment.route.clone(),
                 admission: admission_controller(
                     attachment
-                        .admission
-                        .unwrap_or(config.wasm.default_admission),
+                        .effective_admission(config.wasm.default_admission)
+                        .map_err(|_| NativeWasmRegistryError::Config)?,
                 )?,
             });
         }
@@ -380,6 +387,7 @@ impl NativeWasmHookRegistry {
             .filter(|attachment| attachment.matches(vhost, route))
             .filter(|attachment| attachment.phases.contains(&WasmPluginPhase::CacheLookup))
             .map(|attachment| NativeWasmHook {
+                attachment_order: attachment.order,
                 plugin: attachment.plugin.clone(),
                 phase: WasmPluginPhase::CacheLookup,
                 global_admission: self.cache_admission.clone(),
@@ -398,6 +406,7 @@ impl NativeWasmHookRegistry {
             .filter(|attachment| attachment.matches(vhost, route))
             .filter(|attachment| attachment.phases.contains(&WasmPluginPhase::CacheStore))
             .map(|attachment| NativeWasmHook {
+                attachment_order: attachment.order,
                 plugin: attachment.plugin.clone(),
                 phase: WasmPluginPhase::CacheStore,
                 global_admission: self.cache_admission.clone(),
@@ -428,6 +437,7 @@ impl NativeWasmHookRegistry {
         let (global_admission, global_admission_scope, vhost_admission) =
             self.access_admission(attachment.plugin.host_call_namespace, &attachment.vhost);
         NativeWasmHook {
+            attachment_order: attachment.order,
             plugin: attachment.plugin.clone(),
             phase,
             global_admission,
@@ -550,20 +560,26 @@ fn wasm_proxy_preview_host_functions() -> Vec<WasmI32HostFunction> {
 }
 
 impl NativeWasmHooks {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.access_decision.is_empty()
+    fn supports_upgrade(&self) -> bool {
+        self.route_decision.is_empty()
             && self.request_headers.is_empty()
             && self.response_headers.is_empty()
-            && self.route_decision.is_empty()
-            && self.cache_lookup.is_empty()
-            && self.cache_store.is_empty()
     }
 
-    pub(crate) async fn access_decision(&self) -> NativeWasmAccessOutcome {
-        if self.access_decision.is_empty() {
-            return NativeWasmAccessOutcome::Allow;
-        }
-        for hook in &self.access_decision {
+    fn access_hooks<'a>(&'a self, scopes: &[&'a Self]) -> Vec<&'a NativeWasmHook> {
+        let mut hooks: Vec<_> = std::iter::once(self)
+            .chain(scopes.iter().copied())
+            .flat_map(|scope| &scope.access_decision)
+            .collect();
+        // Route sets share vhost attachments. Preserve registry priority order
+        // and execute each configured attachment once, not once per route.
+        hooks.sort_unstable_by_key(|hook| hook.attachment_order);
+        hooks.dedup_by_key(|hook| hook.attachment_order);
+        hooks
+    }
+
+    async fn access_decision(&self, scopes: &[&Self]) -> NativeWasmAccessOutcome {
+        for hook in self.access_hooks(scopes) {
             match hook.run_access_decision().await {
                 WasmAccessDecision::Continue | WasmAccessDecision::Allow => {}
                 WasmAccessDecision::Deny(deny) => {
@@ -738,11 +754,22 @@ impl NativeWasmHooks {
     }
 }
 
+pub(crate) fn wasm_upgrade_supported(
+    proxy: &NativeHttp1RouteProxy,
+    routes: &[Option<&NativeHttp1RouteProxyRoute>],
+) -> bool {
+    proxy.wasm_hooks.supports_upgrade()
+        && routes
+            .iter()
+            .flatten()
+            .all(|route| route.wasm_hooks.supports_upgrade())
+}
+
 pub(crate) async fn wasm_access_rejection(
     proxy: &NativeHttp1RouteProxy,
-    route: Option<&NativeHttp1RouteProxyRoute>,
+    routes: &[Option<&NativeHttp1RouteProxyRoute>],
 ) -> Option<NativeHttp1Response> {
-    wasm_access_rejection_status(proxy, route)
+    wasm_access_rejection_status(proxy, routes)
         .await
         .map(|(status, reason)| {
             NativeHttp1Response::new(status, status_reason(status), reason.into_bytes())
@@ -752,13 +779,14 @@ pub(crate) async fn wasm_access_rejection(
 
 pub(crate) async fn wasm_access_rejection_status(
     proxy: &NativeHttp1RouteProxy,
-    route: Option<&NativeHttp1RouteProxyRoute>,
+    routes: &[Option<&NativeHttp1RouteProxyRoute>],
 ) -> Option<(u16, String)> {
-    let hooks = route
+    let scopes: Vec<_> = routes
+        .iter()
+        .flatten()
         .map(|route| &route.wasm_hooks)
-        .filter(|hooks| !hooks.is_empty())
-        .unwrap_or(&proxy.wasm_hooks);
-    match hooks.access_decision().await {
+        .collect();
+    match proxy.wasm_hooks.access_decision(&scopes).await {
         NativeWasmAccessOutcome::Allow => None,
         NativeWasmAccessOutcome::Deny { status, reason } => Some((status, format!("{reason}\n"))),
     }
@@ -1944,6 +1972,10 @@ impl NativeWasmAdmissionScope {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "native_wasm_abi_contract_tests.rs"]
+mod abi_contract_tests;
 
 #[cfg(test)]
 mod tests {

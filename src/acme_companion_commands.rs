@@ -7,6 +7,10 @@ use super::reload::request_certificate_reload;
 #[cfg(feature = "acme")]
 use crate::config::Config;
 
+#[cfg(all(test, feature = "acme"))]
+#[path = "acme_companion_target_contract_tests.rs"]
+mod target_contract_tests;
+
 #[cfg(feature = "acme-client")]
 pub(super) fn run_account_operation(
     config_path: Option<&std::path::Path>,

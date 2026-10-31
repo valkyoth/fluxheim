@@ -8,4 +8,5 @@ examples/public
 *.tmp
 tmp
 release-reports
+local-review
 **/node_modules

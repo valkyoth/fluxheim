@@ -14,6 +14,7 @@ const WRITE_CHUNK_BYTES: usize = 8192;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1Response {
     pub(crate) completion: Option<crate::native_request_telemetry::Completion>,
+    upstream_header_latency_nanos: Option<std::num::NonZeroU64>,
     status: u16,
     reason: String,
     headers: Vec<(String, String)>,
@@ -51,6 +52,7 @@ impl NativeHttp1Response {
         Self {
             status,
             completion: None,
+            upstream_header_latency_nanos: None,
             reason: reason.into(),
             headers: Vec::new(),
             content_length: None,
@@ -69,6 +71,17 @@ impl NativeHttp1Response {
     pub const fn with_content_length(mut self, content_length: u64) -> Self {
         self.content_length = Some(content_length);
         self
+    }
+
+    pub(crate) fn set_upstream_header_latency(&mut self, latency: Duration) {
+        self.upstream_header_latency_nanos =
+            std::num::NonZeroU64::new(latency.as_nanos().clamp(1, u128::from(u64::MAX)) as u64);
+    }
+
+    #[cfg(feature = "load-balancer")]
+    pub(crate) fn upstream_header_latency(&self) -> Option<Duration> {
+        self.upstream_header_latency_nanos
+            .map(|nanos| Duration::from_nanos(nanos.get()))
     }
 
     pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {

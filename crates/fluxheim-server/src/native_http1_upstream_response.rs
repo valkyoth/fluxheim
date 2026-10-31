@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use fluxheim_protocol::{
     Http1ChunkLimits, Http1ChunkedDecoder, Http1ConnectionDirective, Http1ConnectionOptions,
@@ -84,6 +84,7 @@ async fn read_upstream_response_inner<S>(
 where
     S: AsyncRead + Unpin,
 {
+    let started = Instant::now();
     let limits = Http1HeadLimits {
         max_head_bytes,
         ..Http1HeadLimits::default()
@@ -111,6 +112,7 @@ where
     }
     let head =
         parse_http1_response_head(&buffer, limits)?.ok_or(Http1ParseError::InvalidResponseLine)?;
+    let header_latency = started.elapsed();
     let head_len = head.head_len;
     let status = head.status;
     let reason = head.reason.to_owned();
@@ -131,6 +133,7 @@ where
         && response_body_reusable(&buffer, head_len, body_framing, body.len(), status);
     let content_length = response_content_length(&headers);
     let mut response = NativeHttp1Response::new(status, reason, body);
+    response.set_upstream_header_latency(header_latency);
     if let Some(content_length) = content_length {
         response = response.with_content_length(content_length);
     }

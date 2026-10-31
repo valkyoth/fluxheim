@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 const INSTALL_JOURNAL_FILE: &str = ".install.transaction";
 const MAX_INSTALL_JOURNAL_BYTES: u64 = 4096;
 
+#[cfg(test)]
+#[path = "acme_install_recovery_contract_tests.rs"]
+mod contract_tests;
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(super) enum CertificateInstallPhase {

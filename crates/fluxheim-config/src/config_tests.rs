@@ -28,6 +28,9 @@ use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path}
 #[cfg(unix)]
 use crate::test_support::{unique_group_writable_child, unique_world_writable_child};
 
+#[cfg(feature = "acme")]
+#[path = "config_tests_acme_examples.rs"]
+mod acme_examples;
 #[path = "config_tests_acme_scope.rs"]
 mod acme_scope;
 #[path = "config_tests_admin.rs"]
@@ -40,6 +43,8 @@ mod basic;
 mod cache;
 #[path = "config_tests_compression.rs"]
 mod compression;
+#[path = "config_tests_fips_guide.rs"]
+mod fips_guide;
 #[path = "config_tests_generic.rs"]
 mod generic;
 #[path = "config_tests_geoip.rs"]
@@ -52,6 +57,8 @@ mod limits;
 mod load_balance;
 #[path = "config_tests_loader_conf_d.rs"]
 mod loader_conf_d;
+#[path = "config_tests_loader_contract.rs"]
+mod loader_contract;
 #[path = "config_tests_loader_core.rs"]
 mod loader_core;
 #[path = "config_tests_loader_paths.rs"]
@@ -60,6 +67,10 @@ mod loader_paths;
 mod loader_source_safety;
 #[path = "config_tests_logging.rs"]
 mod logging;
+#[path = "config_tests_logging_guide.rs"]
+mod logging_guide;
+#[path = "config_tests_metrics_guide.rs"]
+mod metrics_guide;
 #[path = "config_tests_observability.rs"]
 mod observability;
 #[path = "config_tests_observability_examples.rs"]
@@ -68,6 +79,8 @@ mod observability_examples;
 mod parse_hints;
 #[path = "config_tests_php.rs"]
 mod php;
+#[path = "config_tests_process_contract.rs"]
+mod process_contract;
 #[path = "config_tests_proxy.rs"]
 mod proxy;
 #[path = "config_tests_proxy_timeouts.rs"]
@@ -76,6 +89,8 @@ mod proxy_timeouts;
 mod server;
 #[path = "config_tests_tls.rs"]
 mod tls;
+#[path = "config_tests_tracing_guide.rs"]
+mod tracing_guide;
 #[path = "config_tests_vhost_acme_redirect.rs"]
 mod vhost_acme_redirect;
 #[path = "config_tests_vhost_core.rs"]

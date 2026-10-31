@@ -14,8 +14,12 @@ mod acme_tests;
 mod cache_config_tests;
 #[path = "native_http1_route_proxy_tests/cache_control.rs"]
 mod cache_control_tests;
+#[path = "native_http1_route_proxy_tests/cache_documented_contract.rs"]
+mod cache_documented_contract;
 #[path = "native_http1_route_proxy_tests/cache_freshness.rs"]
 mod cache_freshness_tests;
+#[path = "native_http1_route_proxy_tests/cache_lifecycle_contract.rs"]
+mod cache_lifecycle_contract;
 #[path = "native_http1_route_proxy_tests/cache_peer.rs"]
 mod cache_peer_tests;
 #[path = "native_http1_route_proxy_tests/cache_range.rs"]
@@ -37,6 +41,8 @@ mod header_policy_tests;
 mod php_fpm_tests;
 #[path = "native_http1_route_proxy_tests/rate_concurrency.rs"]
 mod rate_concurrency_tests;
+#[path = "native_http1_route_proxy_tests/regex_contract.rs"]
+mod regex_contract;
 #[path = "native_http1_route_proxy_tests/rewrite.rs"]
 mod rewrite_tests;
 #[path = "native_http1_route_proxy_tests/routing_policy.rs"]

@@ -111,3 +111,31 @@ pub(crate) fn native_cache_expiry_times(
         stale_if_error_until,
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn native_stale_error_policy_currently_loses_transport_phase() {
+        // documented contract: characterize the current gap; the follow-up must replace
+        // this with phase-aware tests at the actual upstream failure sites.
+        for (kind, expected) in [
+            (ErrorKind::TimedOut, CacheStaleErrorKind::Timeout),
+            (ErrorKind::ConnectionRefused, CacheStaleErrorKind::Connect),
+            (ErrorKind::BrokenPipe, CacheStaleErrorKind::ConnectionClosed),
+            (
+                ErrorKind::UnexpectedEof,
+                CacheStaleErrorKind::ConnectionClosed,
+            ),
+            (ErrorKind::InvalidData, CacheStaleErrorKind::Protocol),
+            (ErrorKind::Other, CacheStaleErrorKind::Other),
+        ] {
+            for phase in ["read", "write", "tls"] {
+                let error = crate::NativeHttp1Error::Io(Error::new(kind, phase));
+                assert_eq!(native_cache_stale_error_kind(&error), expected);
+            }
+        }
+    }
+}

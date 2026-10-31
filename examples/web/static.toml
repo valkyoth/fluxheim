@@ -1,0 +1,29 @@
+# Run beside a site/ directory. The guide includes file creation commands.
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "static"
+
+[server.process]
+daemon = false
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+
+[cache]
+enabled = false
+
+[[vhosts]]
+name = "static"
+hosts = ["app.example.test"]
+
+[vhosts.web]
+root = "site"
+index_files = ["index.html", "default.html"]
+deny_dotfiles = true
+cache_control = "public, max-age=60"
+
+[vhosts.web.directory_listing]
+enabled = false
+exact_size = false
+local_time = false

@@ -51,6 +51,46 @@ fn php_config() -> fluxheim_config::PhpConfig {
 }
 
 #[test]
+fn php_directory_cgi_identity_currently_uses_root_index_contract_gap() {
+    // documented contract: characterize, then invert when planning uses the resolved script.
+    let plan = native_php_request_plan(
+        &request("/blog/?keep=1"),
+        &php_config(),
+        Path::new("/srv/www"),
+        Path::new("/var/www/html"),
+        Path::new("/srv/www/blog/index.php"),
+        "fallback.example",
+        "443",
+    )
+    .unwrap();
+    assert_eq!(plan.script_filename, "/var/www/html/blog/index.php");
+    assert_eq!(plan.param("SCRIPT_NAME"), Some("/index.php"));
+    assert_eq!(plan.param("DOCUMENT_URI"), Some("/index.php"));
+    assert_eq!(plan.param("QUERY_STRING"), Some("keep=1"));
+}
+
+#[test]
+fn php_zero_accel_expiry_currently_leaves_public_cache_control_contract_gap() {
+    // documented contract: stripping the control is not expiry-policy application.
+    let plan = native_php_response_plan(
+        b"Content-Type: text/plain\r\nCache-Control: public, max-age=60\r\nX-Accel-Expires: 0\r\n\r\nbody",
+        &php_config(),
+        "GET",
+    )
+    .unwrap();
+    assert!(plan.response.headers().iter().any(|(name, value)| {
+        name.eq_ignore_ascii_case("cache-control") && value == "public, max-age=60"
+    }));
+    assert!(
+        plan.response
+            .headers()
+            .iter()
+            .all(|(name, _)| { !name.eq_ignore_ascii_case("x-accel-expires") })
+    );
+    assert_eq!(plan.response.body(), b"body");
+}
+
+#[test]
 fn native_php_request_plan_maps_core_fastcgi_params() {
     let plan = native_php_request_plan(
         &request("/index.php/user?id=1"),
@@ -92,6 +132,47 @@ fn native_php_request_plan_maps_core_fastcgi_params() {
         Some("/var/www/html/index.php")
     );
     assert_eq!(plan.dropped_custom_params, vec!["SCRIPT_FILENAME"]);
+}
+
+#[test]
+fn php_disabled_body_keeps_original_content_length_contract_gap() {
+    // documented contract: the route sends empty STDIN but this metadata stays nonzero.
+    let mut php = php_config();
+    php.pass_request_body = false;
+    let plan = native_php_request_plan(
+        &request("/index.php"),
+        &php,
+        Path::new("/srv/www"),
+        Path::new("/srv/www"),
+        Path::new("/srv/www/index.php"),
+        "app.example",
+        "443",
+    )
+    .unwrap();
+    assert_eq!(plan.param("CONTENT_LENGTH"), Some("13"));
+}
+
+#[tokio::test]
+async fn php_spooling_retains_collected_request_body_contract_gap() {
+    // documented contract: replay storage is not ingress streaming or original-body release.
+    let directory = fluxheim_common::test_support::unique_temp_path("native-php-spool-contract");
+    let mut php = php_config();
+    php.request_body_spool_threshold_bytes = Some(fluxheim_config::ByteSize::from_bytes(1));
+    php.request_body_spool_dir = Some(directory.clone());
+    let request = request("/index.php");
+    let body = native_php_request_body(&request, &php).await.unwrap();
+    assert_eq!(body.len(), request.body.len());
+    assert_eq!(&*request.body, b"name=fluxheim");
+    let mut reader = body.reader().await.unwrap();
+    let mut replay = Vec::new();
+    fastcgi_client::io::AsyncReadExt::read_to_end(&mut reader, &mut replay)
+        .await
+        .unwrap();
+    assert_eq!(replay, b"name=fluxheim");
+    drop(reader);
+    drop(body);
+    assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
+    std::fs::remove_dir(directory).unwrap();
 }
 
 #[test]

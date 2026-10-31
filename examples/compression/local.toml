@@ -1,0 +1,48 @@
+# Public text only. Provide site/asset.txt and an HTTP origin on loopback 9001.
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "public"
+
+[server.process]
+daemon = false
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+
+[cache]
+enabled = false
+
+[compression]
+enabled = true
+gzip = true
+zstd = false
+brotli = false
+min_bytes = "1KiB"
+max_input_bytes = "1MiB"
+max_output_bytes = "2MiB"
+gzip_level = 4
+zstd_level = 3
+brotli_quality = 4
+
+[[vhosts]]
+name = "public"
+hosts = ["compress.example.test"]
+
+[vhosts.web]
+root = "site"
+
+[[vhosts.routes]]
+name = "origin"
+path_prefix = "/origin"
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+
+[[vhosts.routes]]
+name = "uncompressed"
+path_prefix = "/plain"
+strip_prefix = "/plain"
+[vhosts.routes.web]
+root = "site"
+[vhosts.routes.compression]
+enabled = false

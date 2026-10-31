@@ -1,14 +1,16 @@
 <p align="center">
   <b>Rust edge gateway for websites, applications, caching, and load balancing.</b><br>
-  Modular by design. Secure by default. Ready for rootless containers and regulated estates.
+  Modular builds. Rootless containers. Explicit security and operational controls.
 </p>
 
 <div align="center">
   <a href="https://fluxheim.eu">Home Page</a>
   ·
+  <a href="docs/README.md">Documentation</a>
+  ·
   <a href="docs/reference/config-reference.md">Config Reference</a>
   ·
-  <a href="docs/roadmap/versioning-plan.md">Versioning Plan</a>
+  <a href="docs/reference/supported-headers.md">Header Reference</a>
   ·
   <a href="SECURITY.md">Security</a>
 </div>
@@ -21,202 +23,196 @@
 
 # Fluxheim
 
-Documentation: [guides, reference, architecture, roadmap, ideas and evidence](docs/README.md).
+Fluxheim is a modular Rust webserver and edge gateway. Serve static websites
+and PHP applications, reverse-proxy services, cache responses, balance traffic,
+automate certificates, and inspect your deployment through logs, metrics and
+traces.
 
-`main` targets **1.9.0 (unreleased)**. The latest published release is
-**v1.8.3**. The [1.9.0 commit plan](docs/roadmap/observability-commit-plan.md) focuses
-on logging, metrics and operational visibility. HTTP/3 is
-[deferred](docs/roadmap/http3-quic-commit-plan.md), not enabled in Fluxheim. No
-`v1.9.0` release tag or release artifacts have been published.
+[Download a release](https://github.com/valkyoth/fluxheim/releases/latest) ·
+[Read the guides](docs/README.md) · [Browse configurations](examples)
 
-The separate [`1.8.x` maintenance line](docs/guides/maintenance-releases.md) delivered
-[1.8.3](release-notes/RELEASE_NOTES_1.8.3.md) dependency, runtime-image and
-build-tool updates. Shared fixes are carried forward to main.
+## Features
 
-Fluxheim is a modular Rust edge gateway for static sites, reverse proxying,
-edge caching, PHP-FPM application serving, ACME automation, observability,
-FIPS/ISO-capable TLS build paths, GeoIP policy, TCP stream proxying, and
-enterprise HTTP/TCP load balancing. Normal Fluxheim builds now use
-Fluxheim-owned Rust runtime boundaries for server/listener/TLS, HTTP/1,
-HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and
-background-service paths. The `1.7.x` line added a shared WebAssembly policy
-runtime for typed, sandboxed operator extensions, and `1.8.x` packages it as an
-explicit Wasm profile while starting portable macOS archives and defining the
-Windows archive workflow. The
-operator-facing product is Fluxheim: focused release profiles are available
-for full, Wasm, cache, proxy, load-balancer, and PHP deployments.
+These tables describe this source checkout. For a deployed release, use its
+tagged documentation and [release notes](release-notes).
+A check means implemented, not enabled in every binary or container.
+Choose the appropriate [build features](docs/reference/features.md) or
+[packaged profile](docs/guides/portable-releases.md); runtime configuration
+still controls what is enabled.
+Read each guide's limitations before relying on a feature. The
+[coverage ledger](docs/reference/documentation-coverage.md) tracks outstanding
+corrections and qualification; a table entry is not release approval.
 
-The load-balancer line targets F5 LTM, HAProxy, nginx, and Envoy-style HTTP/TCP
-pool operations: weighted and adaptive selection, health and circuit state,
-slow start, retry budgets, bounded queueing, local persistence, runtime
-member-state controls, runtime backend-set mutation, status/metrics/audit
-visibility, and a validated enterprise migration fixture. It is not a complete
-BIG-IP platform clone: managed affinity cookies remain local to one process,
-while cross-instance state sync, production UDP/GSLB, WAF, VPN/firewall
-appliance behavior, and syntax-compatible iRules/Lua scripting are documented
-future tracks rather than hidden or implied behavior. The `1.7.x` Wasm line is
-capability parity through typed host calls, not syntax compatibility with F5
-iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, or VCL. Runtime weight overrides
-are local, in-memory controls for round-robin and least-* selectors in the
-current load-balancer implementation.
+### Server And Routing
 
-Fluxheim is licensed under the European Union Public Licence 1.2.
-
-## What Works Today
-
-### Serving And Routing
-
-| Capability | Status | Notes |
+| Feature | Supported | Documentation |
 | --- | --- | --- |
-| Static websites | ✅ | MIME detection, index files, `GET`/`HEAD`, `ETag`, conditional `304`, and single byte ranges. |
-| Vhosts | ✅ | Host-header routing, default-vhost fallback, wildcard hosts, and opt-in strict host routing. |
-| Route actions | ✅ | Static, proxy, redirect, and route-level policy blocks. |
-| Regex path routing | ✅ | `1.4.1`; requires explicit global `server.regex_enabled = true`. |
-| Regex capture variables | ✅ | `1.4.1`; bounded `{route.regex.1}` and `{route.regex.name}` variables for request headers and path-only rewrites. |
-| Regex path rewrite templates | ✅ | `1.4.1`; `rewrite_template` maps regex routes to safe upstream paths without nginx-style rewrite loops or `if`. |
-| Method-based routing | ✅ | `1.4.1`; optional route `methods = ["GET", "HEAD"]` filters. |
-| HTTPS redirects | ✅ | Optional global HTTP-to-HTTPS redirects with safe Host validation. |
-| Secure headers | ✅ | Request/response policy, opt-in hardening and cross-origin-isolation profiles, typed CSP reporting and modern browser controls, validated request-aware CORS, automatic `Vary`, bounded `Retry-After`, and opt-in RFC 9211/9209/9530 response metadata; origin `Server` headers are preserved by default and removed by the hardening profiles. |
-| PHP-FPM applications | ✅ | External php-fpm for existing pools. |
-| Managed PHP-FPM | ✅ | Fluxheim-supervised php-fpm pools for zero-admin WordPress-style deployments on Unix; Windows supports external TCP FastCGI only. |
+| Static files, MIME types, index pages and GET/HEAD | ✅ | [Static serving and publication limits](docs/guides/static-files.md) |
+| Static conditional requests, single byte ranges and directory listings | Limited | [Current semantics and directory URL gaps](docs/guides/static-files.md#validators-and-byte-ranges) |
+| Virtual hosts, wildcard hosts, default site and strict host matching | ✅ | [Vhosts](docs/guides/vhost-config.md) |
+| Static, proxy and redirect routes; method filters | ✅ | [HTTP routing](docs/guides/routing.md) |
+| Opt-in regex routes, capture variables and path rewrites | ✅ | [Rewrites and current capture limits](docs/guides/routing.md#use-a-bounded-regex-rewrite) |
+| HTTP-to-HTTPS redirects | ✅ | [Listeners and redirects](docs/reference/config-reference.md#server) |
+| Reverse proxy with HTTP/1.1 and HTTP/2 origins | ✅ | [Connections, deadlines and gateway pages](docs/guides/reverse-proxy.md) |
+| HTTP/1.1 WebSocket upgrades | Limited | [Configuration and open authorization/handshake limits](docs/guides/websocket.md) |
+| gRPC route filtering and H2 transport primitives | Limited | [Trailer and streaming gaps; not general gRPC pass-through](docs/guides/grpc.md) |
+| gzip, Zstandard and Brotli response compression | Limited | [Configuration, negotiation gaps and CPU limits](docs/guides/compression.md) |
+| Request header forwarding and mutation | Limited | [Request headers and identity limitations](docs/guides/request-headers.md) |
+| Response headers, browser policy and redirect/cookie rewriting | Limited | [Response headers and current limits](docs/guides/response-headers.md) |
+| CORS origin allowlists and local preflights | Limited | [CORS and current inheritance/wildcard limits](docs/guides/cors.md) |
+| External authorization subrequests | Limited | [Authorization and current security limits](docs/guides/external-authorization.md) |
+| Opt-in traffic mirroring | Limited | [Sampling and current projection limits](docs/guides/traffic-mirroring.md) |
+| PROXY protocol receive/send | Limited | [HTTP support and HTTPS trust-policy blocker](docs/guides/proxy-protocol.md) |
+| TCP stream proxying, upstream TLS and connection limits | Limited | [TCP streams and current boundaries](docs/guides/tcp-streams.md) |
+| DNS-style UDP forwarding and one-way syslog forwarding | Beta | [UDP setup, limits and restrictions](docs/guides/udp.md) |
+
+### Access And TLS
+
+| Feature | Supported | Documentation |
+| --- | --- | --- |
+| Trusted-proxy-aware IP allow/deny rules | Limited | [Access policy and mapped-CIDR limitation](docs/guides/access-control.md) |
+| GeoIP country and ASN allow/deny rules | ✅ | [GeoIP](docs/guides/geoip.md) |
+| Rate limits, delay mode and concurrency limits | Limited | [Admission, queues and current lifetime/table limits](docs/guides/rate-and-concurrency-limits.md) |
+| rustls or OpenSSL TLS backends | ✅ | [HTTPS and TLS](docs/guides/tls.md) |
+| Client certificates, fingerprint rules and upstream mTLS | ✅ | [Fingerprint authorization](docs/guides/access-control.md#require-and-pin-a-client-certificate), [client authentication](docs/guides/tls.md#require-client-certificates-mtls) and [proxy TLS](docs/guides/upstream-tls.md) |
+| FIPS-capable backend build paths | Conditional | [Required provider and deployment evidence](docs/guides/fips.md) |
+| ACME issuance and renewal: HTTP-01, EAB and ARI | Limited: scheduling and recovery corrections pending | [Certificates, ACME and current limits](docs/guides/acme.md) |
+| External HTTP-01 challenge forwarding | ✅ | [Challenge forwarding](docs/reference/acme-options.md#external-http-01-forwarding) |
+| Privacy build profile | ✅ | [Privacy boundaries](docs/guides/zero-retention-privacy-mode.md) |
+
+FIPS-capable builds are not a claim that Fluxheim or every deployment is
+certified. GeoIP describes database-derived network information, not proof of
+a person's location or identity.
 
 ### Cache
 
-| Capability | Status | Notes |
+| Feature | Supported | Documentation |
 | --- | --- | --- |
-| Proxy cache | ✅ | Vhost and route-scoped cache policies. |
-| Memory cache | ✅ | Bounded in-memory cache tier. |
-| Disk cache | ✅ | Filesystem and storage-bin disk backends with ordered eviction, one process-wide persistence worker, pre-initialization advisory lease enforcement, live inspection, fail-closed lookup admission, and coalesced durable index writes. |
-| Tiered cache | ✅ | Memory plus disk storage plans. |
-| Encrypted disk cache | ✅ | Optional local-key and OpenBao Transit paths; root-derived data/index keys, HMAC-opaque lookup metadata, confidential v2 envelopes, and durable fail-closed local AES-GCM invocation accounting. |
-| Static-file cache | ✅ | Optional local static-file caching. |
-| Range and slice cache | ✅ | Bounded range caching and fixed-slice composition for large objects. |
-| Peer fill | ✅ | Optional peer-assisted cache fill for cache-edge deployments. |
-| Origin protection | ✅ | `1.5.23`; opt-in vhost/route origin-fill budgets for protected cache fill paths, with cache-key/cache-lookup release-gate assertions. |
-| Cache operations | ✅ | Hit/miss headers, cache locks, stale serving, cache warming, protected purge/status endpoints, and key/lookup diagnostics. |
+| Vhost and route-scoped proxy caching | ✅ | [Caching](docs/guides/cache.md) |
+| Bounded memory cache | ✅ | [Memory caching](docs/guides/cache.md#choose-a-cache) |
+| Disk cache, storage-bin backend and memory/disk tiers | ✅ | [Persistent caching](docs/guides/cache.md#add-persistent-storage) |
+| Encrypted disk cache with local keys or OpenBao Transit | ✅ | [Cache encryption](docs/guides/cache-encryption.md) |
+| Local static-file memory caching | ✅ | [Static cache](docs/guides/cache.md#local-static-files) |
+| Range caching and fixed-slice composition | ✅ | [Range and slice limits](docs/guides/cache-ranges.md) |
+| Peer-assisted fill (variant restrictions apply) | ✅ | [Peer fill and safety limits](docs/guides/cache-peer-fill.md) |
+| Origin-fill concurrency protection | ✅ | [Origin protection](docs/guides/cache.md#protect-the-origin) |
+| Cache locks, revalidation, stale serving and hit/miss diagnostics | ✅ | [Cache configuration](docs/reference/config-reference.md#cache) |
+| Warming, protected purge, status and object/key inspection | ✅ | [Cache operations](docs/guides/cache-operations.md) |
 
-### Proxy, TLS, And Edge Policy
+### Load Balancing
 
-| Capability | Status | Notes |
+| Feature | Supported | Documentation |
 | --- | --- | --- |
-| Reverse proxy | ✅ | Whole-vhost and route-level proxying. |
-| Compression | ✅ | Optional gzip, Zstandard, and Brotli with vhost/route controls. |
-| Load balancing | ✅ | Weighted round-robin, least/weighted/ratio least connections, least-sessions, least-time EWMA, priority groups, locality preference with fallback, per-upstream tags and in-flight caps, bounded queue/overflow policy, local source-IP/header/request-cookie persistence, signed/opaque managed affinity cookies, runtime persistence clear, weighted power-of-two, hash, consistent-hash, bounded-load consistent-hash, static-pool Maglev hash, nginx-compatible Ketama static-ring hash, backup, drain, disabled/forced-down members, runtime drain/disable/force-down/enable/manual-resume, runtime weight overrides for round-robin and least-* selectors, slow start, retry budgets/statuses, configurable all-down status, and a validated enterprise fixture in `examples/load-balancer-enterprise.toml`. |
-| DNS-refreshed upstream pools | ✅ | `1.4.1`; `upstream_dns_refresh_secs` for load-balancer service-name pools. |
-| File-refreshed upstream pools | ✅ | `1.4.1`; `upstreams_file` for load-balancer builds with bounded refresh and safe file handling. |
-| HTTP control-plane upstream discovery | ✅ | `1.5.11`; `upstreams_http_url` for bounded pull-based JSON discovery with optional bearer-token authentication. See `examples/load-balancer-http-discovery.toml`. |
-| Passive health | ✅ | Failure, selected 5xx, and latency-based ejection with circuit-open status visibility. |
-| Active health checks | ✅ | TCP/TLS, HTTP, standard gRPC, Redis `PING`, MySQL/MariaDB handshake, PostgreSQL SSLRequest, exact JSON scalar body validation, `X-Health-Weight` degraded weight signals, and opt-in bounded local exec checks. Agent checks and additional database protocol probes remain future load-balancer health-check work. |
-| Load-balancer status | ✅ | Admin status includes configured pools, discovery mode/refresh health, selection/health/retry policy metadata, ready/available summary counts, runtime override counts/timestamps, backend readiness, disabled/drained state, in-flight counts, persistence-entry skew, passive failure/ejection and circuit state, slow-start, and least-time latency state; discovery refreshes also emit bounded success/failure events. |
-| Load-balancer boundaries | Limited | Local persistence and runtime overrides can be restart-persisted with `proxy.load_balance.runtime_state_file`; managed affinity cookie signing keys remain process-local; Fluxheim does not yet apply runtime weights to hash/ring selectors, share managed-cookie keys, or sync state across active-active nodes. |
-| Rate limits | ✅ | Local vhost/route token buckets, delay mode, bounded tables, and optional indeterminate-IP rejection. |
-| Concurrency limits | ✅ | Vhost/route in-flight limits with bounded wait queues. |
-| IP ACLs | ✅ | Trusted-proxy-aware allow/deny rules. |
-| mTLS/client certificates | ✅ | Listener client-auth, fingerprint ACLs, and safe upstream identity forwarding templates. |
-| TLS backends | ✅ | rustls default/recommended, plus OpenSSL for operators who need OpenSSL integration or OpenSSL FIPS provider deployments. |
-| FIPS/ISO-capable builds | ✅ | OpenSSL FIPS provider path and rustls/AWS-LC FIPS-capable candidate path. |
-| ACME | ✅ | Managed HTTP-01 and rustls TLS-ALPN-01 issuance/renewal, bounded and recoverable certificate publication, ARI scheduling, lifecycle/preflight commands, plus external HTTP-01 forwarding. |
-| PROXY protocol | ✅ | v1/v2 receive and upstream send. |
-| HTTP/2 origins | ✅ | Upstream HTTP version controls and bounded HTTP/2 settings. |
-| gRPC pass-through | ✅ | Route-scoped HTTP/2 gRPC policy; no transcoding. |
-| WebSocket / HTTP upgrade | ✅ | `1.4.1`; explicit `proxy.websocket = true` on HTTP/1.1 upstream routes. |
-| External auth subrequests | ✅ | `1.4.1`; `[proxy.auth_request]` with bounded header/body forwarding plus per-service, process-wide, and shared blocking-work admission. |
-| Traffic mirroring | ✅ | `1.4.1`; `traffic-mirror` feature with safe bodyless shadow requests. |
-| TCP stream proxying | ✅ | Optional `stream-proxy` feature with Fluxheim-owned L4 TCP listener/data-path and upstream TLS connector boundaries, source IP/CIDR allow/deny policy, hostname-upstream DNS-rebinding guards, weighted upstream selection, drain/backup policy, bounded idle/lifetime/byte/connect controls, route-local PROXY protocol receive/send, and stream upstream TLS/mTLS controls. |
-| UDP/GSLB beta boundary | Limited | `1.5.16`; separate `[udp]` config namespace and `udp-proxy` feature gate with beta DNS-style request/response forwarding, bounded response waits, oversized-response drops, drop-log rate limiting, and syslog one-way forwarding. Public DNS reflector hardening, QUIC pass-through, game proxying, production UDP support, and generic UDP/GSLB platform behavior are not included yet. |
+| Weighted round-robin, least-connections, least-sessions and power-of-two | ✅ | [Load balancing](docs/guides/load-balancer.md#select-backends) |
+| Hash, consistent hash, bounded-load hash, Maglev and Ketama | ✅ | [Algorithms and boundaries](docs/reference/load-balancer-options.md#selection) |
+| Priority groups, locality, backup, drain and disabled members | ✅ | [Pool configuration](docs/reference/config-reference.md#proxy) |
+| In-flight caps, bounded queues and slow start | ✅ | [Pool configuration](docs/guides/load-balancer.md#passive-health-slow-start-and-queueing) |
+| Active TCP/TLS, HTTP, gRPC, exec and database health checks | ✅ | [Health checks](docs/guides/load-balancer.md#health-checks) |
+| Passive transport/status failure ejection and circuit state | ✅ | [Health policy](docs/guides/load-balancer.md#passive-health-slow-start-and-queueing) |
+| Bounded retries and shared pool retry budgets | ✅ | [Retry policy](docs/guides/load-balancer.md#retry-and-latency-boundaries) |
+| Weighted least-time selection and passive header-latency thresholds | ✅ | [Latency measurement](docs/guides/load-balancer.md#what-latency-measures) |
+| DNS, file and HTTP backend discovery | ✅ | [Discovery](docs/guides/load-balancer.md#discover-backends) |
+| Source-IP, header, request-cookie and managed-cookie affinity | ✅ | [Persistence](docs/guides/load-balancer.md#keep-related-requests-together) |
+| Runtime member controls, backend-set updates and pool status | ✅ | [Operations](docs/guides/load-balancer.md#operate-a-pool) |
+| Optional local restart-persistent runtime state | ✅ | [State and restrictions](docs/guides/load-balancer.md#operate-a-pool) |
 
-### Operations And Packaging
+Persistence and runtime overrides are not an active-active cluster state
+service. Managed-cookie signing keys remain process-local, and runtime weight
+overrides do not apply to every selector.
+Native HTTP retry and latency policies have explicit replay and measurement
+[boundaries](docs/guides/load-balancer.md#retry-and-latency-boundaries).
 
-| Capability | Status | Notes |
+### PHP And Extensions
+
+| Feature | Supported | Documentation |
 | --- | --- | --- |
-| Admin API | ✅ | Bearer-token auth, loopback defaults, brute-force throttling, authenticated health by default, authenticated transactional snapshots, rollback, doctor/prune operations, and cache operations. |
-| Operational status | ✅ | `1.9.0` (unreleased); [bounded read-only API](docs/guides/operational-status.md) with OpenAPI/JSON Schema, capabilities, recovery readiness and telemetry health. Not a full management API. |
-| Read-only ops socket | ✅ | `1.4.1`; Unix-domain local status/cache/health endpoint with owner/group-only permissions; snapshot listing requires bearer auth. |
-| Prometheus metrics | ✅ | Native metrics profile and bounded labels for edge/cache/LB/PHP events. |
-| OpenTelemetry | ✅ | OTLP metrics and tracing export profiles. |
-| Structured access logs | ✅ | Trusted client IP, cache phase, route, selected upstream/alias/retries, TLS identity, compression, and optional Geo-Context fields. |
-| Config tester | ✅ | Release-page config diagnostics through `fluxheim-config-tester`. |
-| Rootless containers | ✅ | Wolfi, Alpine, SUSE Micro, Debian, focused full/Wasm/cache/proxy/load-balancer/PHP images, plus a SUSE BCI PHP image. |
-| Native services | ✅ | systemd units and RPM packaging files. |
-| Default page | ✅ | Packaged `/srv/fluxheim/index.html` with no external assets. |
+| PHP/FastCGI with externally managed pools | ✅ | [PHP deployment](docs/guides/php.md) |
+| Managed PHP-FPM: static, dynamic and ondemand pools | Unix only | [Managed PHP-FPM](docs/guides/php.md#let-fluxheim-start-php-fpm) |
+| Front-controller routing and mixed static/PHP sites | Documented routing limits | [PHP routing](docs/guides/php.md#understand-request-routing) |
+| PHP request-body replay and application recipes | Collected ingress; documented memory limits | [PHP runtime](docs/guides/php-runtime-support.md) |
+| PHP container images with application extensions | ✅ | [PHP images and prerequisites](docs/guides/php-runtime-support.md) |
+| Sandboxed Wasm access, headers, routing and cache policy hooks | ✅ | [Wasm](docs/guides/wasm-extensibility.md) |
+| Opt-in proxy ABI and WASI compatibility surfaces | Preview | [Compatibility boundaries](docs/guides/wasm-extensibility.md) |
 
-### Planned Or Not Yet
+PHP is a separate runtime, not embedded in Fluxheim. Windows supports external
+FastCGI over TCP and rejects managed PHP-FPM. Wasm is an explicit build/profile
+choice; it is not syntax-compatible iRules, Lua or VCL execution.
 
-| Capability | Status | Target |
+### Operations And Visibility
+
+| Feature | Supported | Documentation |
 | --- | --- | --- |
-| Proxy module split | ✅ | `1.4.2`; access logs, compression, auth subrequests, traffic mirroring, edge policy, route policy, cache API DTOs, request-side cache policy, path safety, upstream TLS loading, PROXY protocol framing, and PHP-FPM process/spool/FastCGI handling are split into focused modules, with a new rule that future feature domains start outside the proxy orchestration file. |
-| Config module split | ✅ | `1.4.3`; config loading, shared helpers, domain validation, and large config tests are split into focused `config_*` modules while keeping `crate::config::*` stable. |
-| Load-balancer module split | ✅ | `1.5.0`; health checks, backend state, persistence, selection algorithms, backend policy/status, and file/DNS discovery are split into focused `load_balancer/*` modules while keeping `crate::load_balancer::*` stable. |
-| macOS portable builds | 🧪 | `1.4.4` established Apple Silicon development support; `1.8.0` added the shared unsigned archive contract, and `1.8.1` builds all seven public profiles and runs the native subsystem parity suite on Apple Silicon. Archives remain unsigned previews. Intel macOS is not a supported release target. |
-| Windows portable builds | 🧪 | `1.8.2` completes unsigned native MSVC parity for x86_64. Native x86_64 CI passes the workspace, seven profiles, live runtime, archives, and packaged Wasm; release ZIPs come from an exact-tag disposable native builder using the same default-binary reproducibility and checksum model as Linux ARM. Windows ARM64 is deferred until sustainable native build and test infrastructure is available. |
-| GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional bounded local MMDB support with trusted-file enforcement for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. The [GeoIP guide](docs/guides/geoip.md) includes a pinned real CIRCL database proof for static, proxy, and load-balancer paths. |
-| Pingora-free runtime | ✅ | `1.6.34`; normal Fluxheim builds no longer compile Pingora crates. Server/listener/TLS, HTTP/1, HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and background-service paths run through Fluxheim-owned Rust crates. |
-| HTTP/3/QUIC | ❌ | Deferred research; revisit transport and crypto qualification when Brynja/Vef are more mature. No release version assigned. |
-| WASM extensibility | 🧪 | The `1.7.0` through `1.7.10` line added the optional bounded Wasmtime runtime, typed access/header/route/cache policy hooks, isolated module identities, proxy-ABI and WASI previews, and runnable migration examples for F5 iRules-style, nginx Lua/OpenResty-style, HAProxy Lua/SPOE-style, and VCL-like policy. `1.7.10` stabilized the line with independently selectable family smokes, release-gate enforcement, and arbitrary guest-ID decoder property coverage. Direct backend choice, plugin-provided persistence keys, and dynamic mirror/shadow target choice remain constrained follow-up work. |
-| Zero-downtime upgrades | ✅ | `1.7.11`; bounded native drain, strict systemd listener inheritance, readiness notification after all configured background services report ready, live old/new process handoff coverage, and a tested Podman blue/green pattern behind a stable fronting listener. Directly replacing a container that owns published host ports is explicitly not gap-free. |
+| Structured text/JSON logging, bounded queues and typed event fields | ✅ | [Logging and disclosure boundaries](docs/guides/logging.md) |
+| Native access completion and configurable access fields | Limited | [Current fields and unused options](docs/guides/logging.md#every-logging-option) |
+| Protected log files and rotation | ✅ | [File lifecycle](docs/guides/logging.md) |
+| Request IDs and distributed trace correlation | ✅ | [Correlation and tracing](docs/guides/opentelemetry-tracing.md) |
+| Per-vhost and module trace annotations | Limited: native enrichment pending | [Current span fields](docs/guides/opentelemetry-tracing.md#current-span-fields) |
+| Prometheus metrics with bounded labels | ✅ | [Metrics](docs/guides/metrics.md) |
+| Metrics bearer-token authentication | Limited: Unix private-file enforcement pending | [Credential permissions and rotation](docs/guides/metrics.md#scrape-authentication-and-lifecycle) |
+| OTLP metric and trace export, retry and recovery | ✅ | [OTLP export](docs/guides/otlp-export.md) |
+| Grafana/Prometheus/Jaeger and SigNoz integration examples and dashboards | ✅ | [Collector integrations](docs/guides/collector-integrations.md) |
+| Exporter-health dashboard panels | Limited: direct scrape required | [Signal-path limitations](docs/guides/collector-integrations.md#read-each-dashboard-panel) |
+| Prometheus operational alert examples | Limited: persistent log-worker alert pending | [Rules and boundaries](docs/guides/collector-integrations.md#alert-rules-and-their-limits) |
+| Authenticated admin operations and owner-only Unix operations socket | ✅ | [Admin API and roles](docs/guides/admin.md) |
+| Configurable operations-socket group mode and Unix control-token leaf enforcement | Limited | [Current limitations and safe settings](docs/guides/admin.md) |
+| Read-only operational status and restricted observer credentials | ✅ | [Operational status API](docs/guides/operational-status.md) |
+| Verified configuration snapshots, reload and explicit rollback | ✅ | [Snapshots](docs/guides/config-snapshots.md) |
+| Automatic recovery identity and overlapping validation | Limited | [Current recovery boundaries](docs/guides/config-snapshots.md#current-recovery-limitations) |
+| Configuration loading, split files and validation | Limited | [Composition rules and diagnostics](docs/guides/configuration.md) |
+| CLI validation and standalone configuration tester | Limited: mode and profile checks | [Commands and validation](docs/guides/command-line.md) |
+| Foreground service, process settings and graceful drain | Limited | [Active settings, shutdown and current limits](docs/guides/service-lifecycle.md) |
+| Inherited listeners and externally supervised blue/green deployment | ✅ | [Upgrade requirements and systemd restart distinctions](docs/guides/zero-downtime-upgrades.md) |
 
-See [Production Readiness](docs/guides/production-readiness.md) for the precise
-stable-core promise and deployment checks. See
-[macOS Development Support](docs/guides/macos-development.md) for the Level 1
-Apple Silicon developer workflow.
+Audit queue admission does not guarantee durable audit storage. The admin API
+has specific supported operations, not complete server management; see the
+[management API boundary](docs/reference/management-api-handoff.md).
+JSON escaping and typed event restrictions do not provide general secret
+redaction for arbitrary legacy or dependency log messages.
 
-## Why Fluxheim
+### Packaging And Deployment
 
-- **Rust first**: memory-safe implementation with a pinned stable toolchain.
-- **Production edge core**: Fluxheim owns the config, security, operations,
-  load-balancer, cache, PHP-FPM, stream, observability, and HTTP runtime model
-  through project-owned Rust crates.
-- **Modular builds**: compile only the modules needed for a deployment.
-- **Secure defaults**: strict config validation, request limits, safe filesystem
-  handling, dependency policy, and no hidden legacy protocol fallback.
-- **Container native**: rootless-first examples and explicit runtime images for
-  different operational policies.
+| Feature | Supported | Documentation |
+| --- | --- | --- |
+| Linux x86_64 and ARM64 portable packages | ✅ | [Portable releases](docs/guides/portable-releases.md) |
+| macOS Apple Silicon portable packages | Unsigned | [macOS](docs/guides/macos-development.md) |
+| Windows x86_64 native packages | Unsigned | [Windows packages](docs/guides/portable-releases.md) |
+| Focused full, Wasm, cache, proxy, load-balancer, PHP and config-tester profiles | ✅ | [Package selection and compiled capabilities](docs/guides/installation.md) |
+| Rootless Wolfi, Alpine, Debian and SUSE containers | ✅ | [Build and Podman](docs/guides/build-and-podman.md) |
+| Container OS/PHP refreshes independent of Fluxheim releases | ✅ | [Runtime refresh](docs/guides/container-runtime-refresh.md) |
+| RPM packages and hardened systemd services | ✅ | [systemd deployment](docs/guides/systemd.md) |
+
+SUSE PHP uses BCI; other SUSE profiles use Micro. Windows ARM64 and Intel macOS
+are not supported release targets. HTTP/3 is deferred; production UDP/GSLB,
+a WAF and a full management UI are not implemented. Plans are tracked in the
+[roadmap](docs/roadmap/observability-commit-plan.md), not implied by these tables.
 
 ## Quick Start
 
-Build the default development binary:
+Build with the repository's pinned Rust toolchain, validate the example, then
+start the server from the repository root. This example serves an included
+static page; it needs no database, PHP pool or upstream application:
 
 ```bash
-cargo build
+cargo build --locked
+cargo run --locked -- --validate-config --config examples/configuration/single.toml
+cargo run --locked -- --config examples/configuration/single.toml
 ```
 
-Validate the local development config:
+From another terminal:
 
 ```bash
-cargo run -- --check-config --config examples/fluxheim.toml
+curl -H 'Host: configuration.example.test' http://127.0.0.1:8080/
 ```
 
-Run Fluxheim locally:
+Expected body: `configuration-single-ok`. Stop with Ctrl+C. Port 8080 must
+be free; this is a loopback HTTP demonstration, not a public TLS deployment.
 
-```bash
-cargo run -- --config examples/fluxheim.toml
-```
-
-Then open `http://127.0.0.1:8080` with a Host header that matches the default
-vhost, or use curl:
-
-```bash
-curl -H 'Host: localhost' http://127.0.0.1:8080/
-```
-
-Run the normal local checks:
-
-```bash
-scripts/checks.sh
-```
-
-## Minimal Static Site Config
+For your own static site, replace the host names and root in this configuration:
 
 ```toml
 [server]
-listen = ["0.0.0.0:8080"]
+listen = ["127.0.0.1:8080"]
 default_vhost = "site"
-
-[headers.response]
-enabled = true
-x_content_type_options = "nosniff"
-x_frame_options = "DENY"
-referrer_policy = "no-referrer"
 
 [[vhosts]]
 name = "site"
@@ -229,455 +225,40 @@ deny_dotfiles = true
 cache_control = "public, max-age=60"
 ```
 
-More examples live in [examples](examples). Native packages use
-[packaging/default/fluxheim.toml](packaging/default/fluxheim.toml), which
-listens on port `80` under the hardened systemd unit with
-`CAP_NET_BIND_SERVICE`; containers use
-[packaging/container/fluxheim.toml](packaging/container/fluxheim.toml), which
-keeps rootless-friendly internal ports `8080` and `8443`. For the `[[vhosts]]`
-syntax and the recommended one-vhost-per-file layout, see
-[Vhost Config Guide](docs/guides/vhost-config.md). For common multi-site proxy
-patterns, see [Gateway Recipes](docs/guides/gateway-recipes.md).
-
-Native/manual binary deployments can use the provided hardened systemd unit;
-see [systemd Deployment](docs/guides/systemd.md).
-
-<details>
-<summary><b>Feature Builds</b></summary>
-
-The default build is the recommended local/server baseline:
-
-```bash
-cargo build
-```
-
-It enables:
-
-- `proxy`
-- `web`
-- `cache`
-- `tls-rustls`
-- `security`
-
-Individual module features:
-
-| Feature | Default | Notes |
-| --- | --- | --- |
-| `proxy` | Yes | Fluxheim-owned native reverse-proxy runtime for HTTP/1, HTTP/2 origins, WebSocket upgrades, cache integration, load-balancer routing, and edge policy. |
-| `web` | Yes | Static file resolver and static response handling used by the native server path. |
-| `cache` | Yes | Cache module compiled in; runtime cache remains disabled until configured. |
-| `load-balancer` | No | Fluxheim load-balancing module, health checks, and runtime pool policy. |
-| `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream semantics, Fluxheim-owned listener loop and async IO boundary, upstream TLS/mTLS controls, true idle timeouts, weighted/drain/backup policy, and expanded smoke coverage. |
-| `metrics` | No | Prometheus metrics listener. |
-| `acme` | No | ACME planning/renewal support. Requires TLS config and should be paired with one TLS backend for serving. |
-| `acme-client` | No | Live ACME account/order HTTP client and background renewal service for HTTP-01 and rustls TLS-ALPN-01 certificate issuance and renewal. |
-| `php-fpm` | No | PHP-FPM FastCGI bridge for WordPress-style PHP applications. Implies `proxy` and `web`; not included in default/focused images. |
-| `privacy-mode` | No | Zero-retention static/proxy build profile. |
-| `security` | Yes | Compile-time security profile marker plus release hardening checks. Runtime enforcement lives in the concrete config, TLS, filesystem, admin, and request-handling modules. |
-| `wasm` | No | Optional `1.7.x` WebAssembly policy runtime. `1.7.10` stabilizes the documented, runnable migration examples and their release-gate coverage while retaining isolated compiled-module identities, the opt-in proxy-ABI preview, and the opt-in WASI Preview 1 boundary. Later work retains constrained follow-ups such as direct backend choice, plugin-provided persistence keys, and dynamic mirror/shadow target choice. |
-| `wasm-proxy-abi` | No | Opt-in compatibility preview for a reviewed safe subset of proxy-oriented Wasm ABI calls. Depends on `wasm`, remains off by default, requires `allow_preview_abi = true`, and rejects unsupported preview calls deterministically. |
-| `wasm-wasi` | No | Opt-in WASI Preview 1 access-decision capability boundary. Depends on `wasm`; clocks and randomness require separate explicit grants. Environment, arguments, inherited stdio, filesystem, sockets/network, and process state remain unavailable. |
-| `tls` | No | Internal TLS marker used by TLS/ACME code; select a concrete backend for serving. |
-| `tls-rustls-fips` | No | rustls/AWS-LC FIPS-capable TLS backend candidate for source builds. |
-
-For checked TLS policy examples, see
-[`examples/tls-modern.toml`](examples/tls-modern.toml) and
-[`examples/tls-intermediate.toml`](examples/tls-intermediate.toml).
-For managed certificate issuance, see
-[`examples/acme-http-01.toml`](examples/acme-http-01.toml). For an issuer that
-requires External Account Binding, see
-[`examples/acme-actalis.toml`](examples/acme-actalis.toml).
-Packaged builds include `acme-init` for guided issuer bootstrap:
-
-```bash
-sudo fluxheim acme-init actalis
-sudo fluxheim acme-init letsencrypt
-```
-
-Cargo does not provide a separate `--group` flag. Fluxheim uses normal Cargo
-feature aliases named `profile-*` for grouped builds.
-
-Recommended profile features:
-
-| Profile feature | Enables | Use case |
-| --- | --- | --- |
-| `profile-core` | `proxy`, `web`, `cache`, `tls-rustls`, `security` | Same intent as the default build. |
-| `profile-static-site` | `proxy`, `web`, `tls-rustls`, `security` | Static sites without Fluxheim cache. |
-| `profile-reverse-proxy` | `proxy`, `tls-rustls`, `security` | Reverse proxy without static hosting/cache. |
-| `profile-cache-server` | `proxy`, `web`, `cache`, `tls-rustls`, `security` | Static/proxy server with cache enabled. |
-| `profile-load-balancer` | `proxy`, `web`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `load-balancer`, `tls-rustls`, `security` | Edge server with Fluxheim load balancing and all compression codecs compiled in. |
-| `profile-observability` | `profile-core`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Core server with Prometheus metrics, optional local OTLP metrics export, trace context propagation, and optional local OTLP trace export. |
-| `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Zero-retention static/proxy profile. |
-| `profile-full` | `profile-load-balancer`, `geoip`, `stream-proxy`, `traffic-mirror` | All stable production modules, including GeoIP, traffic mirroring, stream, and load-balancer runtime lines. |
-| `profile-wasm` | `profile-full`, `wasm-proxy-abi`, `wasm-wasi` | Explicit Wasm distribution profile. It includes the full native server plus reviewed Wasm compatibility surfaces; `profile-full` intentionally remains Wasm-free. |
-| `profile-development` | `profile-full`, `php-fpm`, `acme-client`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Broad development build with all compatible production modules. |
-| `profile-web-server` | `proxy`, `web`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Static webserver profile using Fluxheim's native server path. |
-| `profile-cache-edge` | `proxy`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Cache edge without local static web serving. |
-| `profile-proxy-edge` | `proxy`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Focused reverse proxy edge. |
-| `profile-load-balancer-edge` | `proxy`, `load-balancer`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Load-balancer edge without cache or static web serving. |
-| `profile-fips-rustls` | `proxy`, `security`, `tls-rustls-fips` | rustls/AWS-LC FIPS-capable candidate build. |
-| `profile-iso19790-rustls` | `profile-fips-rustls` | ISO/IEC 19790 terminology alias for the same rustls/AWS-LC candidate path. |
-
-Starting in `1.6.34`, normal Fluxheim profiles no longer compile Pingora
-crates. The internal `pingora-compat` feature name remains only as a
-source-quarantine cfg for legacy adapter code while the dead source is removed;
-it is not part of any supported release profile.
-
-Fluxheim 1.3 started the focused image split. The `profile-cache-edge` and
-`profile-proxy-edge` aliases are TLS-capable without compiling local static web
-serving. Official RPMs, container images, and release tarballs add
-`acme-client` to the full, Wasm, cache, proxy, and load-balancer profiles by
-default because managed certificates are the normal production path. Custom
-source builds can still omit `acme-client` for fully offline or
-static-certificate deployments.
-`profile-cache-server` and `profile-load-balancer` remain compatibility aliases
-for operators who want the older convenience bundles.
-
-FIPS/ISO-capable OpenSSL testing is available with `tls-openssl-fips`, plus the
-`tls-openssl-iso19790` terminology alias for ISO/IEC 19790-oriented evidence.
-Both require `backend = "openssl"` and an operator-installed OpenSSL 3
-validated provider path. Use the `profile-fips-openssl` or
-`profile-iso19790-openssl` alias for local validation, run `fluxheim crypto` to
-inspect provider availability and OpenSSL default FIPS property status, and read
-[FIPS / ISO-Capable Deployments](docs/guides/fips.md) before treating a deployment as
-regulated evidence.
-
-The `1.3.5` release line added a rustls/AWS-LC candidate path with
-`tls-rustls-fips`, the ISO/IEC terminology alias `tls-rustls-iso19790`,
-`profile-fips-rustls`, and `profile-iso19790-rustls`. It builds
-`aws-lc-fips-sys`, so local validation requires CMake, Go, and a C compiler,
-plus the AWS-LC module certificate/Security Policy evidence for any regulated
-deployment.
-
-Example grouped builds that match the official release artifacts:
-
-```bash
-cargo build --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
-cargo build --no-default-features --features profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
-cargo build --no-default-features --features profile-development
-cargo build --no-default-features --features profile-cache-edge,acme-client
-cargo build --no-default-features --features profile-proxy-edge,acme-client
-cargo build --no-default-features --features profile-load-balancer-edge,acme-client
-cargo build --no-default-features --features profile-web-server,php-fpm,acme-client
-```
-
-Official container images are published to GitHub Container Registry and Quay:
-
-- `ghcr.io/valkyoth/fluxheim`
-- `quay.io/valkyoth/fluxheim`
-
-Release tags use the same profile/OS suffixes on both registries. The `1.8.x`
-image line adds a dedicated Wasm profile. Tags include `v1.8.3-wolfi`,
-`v1.8.3-wasm-wolfi`, `v1.8.3-cache-wolfi`, `v1.8.3-proxy-wolfi`,
-`v1.8.3-load-balancer-wolfi`, and `v1.8.3-php-wolfi`. Wasm is not included in
-the unsuffixed full image.
-
-Released containers can receive OS/PHP security refreshes without changing the
-Fluxheim version. The weekly/manual refresh workflow tests every image before
-moving versioned aliases; digest-pinned deployments remain opt-in. See
-[container runtime refreshes](docs/guides/container-runtime-refresh.md) for triggering
-a refresh, image identity, rollback, and deployment instructions.
-
-Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
-tag. The GitHub Release page is published under `v1.5.15-release` because the
-original immutable GitHub Release object for `v1.5.15` was accidentally
-deleted; GitHub reserves immutable release tag names and does not allow the
-original release page to be restored through the normal release UI/API.
-
-Manual feature selection also works:
-
-```bash
-cargo build --no-default-features --features proxy,web,tls-rustls,load-balancer
-```
-
-PHP support starts in `1.3.1` with an explicit `php-fpm` module. A PHP build
-can serve normal static assets from the same root while routing missing paths
-and explicit `.php` scripts to php-fpm. See
-[`docs/guides/php-runtime-support.md`](docs/guides/php-runtime-support.md),
-[`docs/guides/php-fpm-app-recipes.md`](docs/guides/php-fpm-app-recipes.md), and
-[`examples/php-fpm.toml`](examples/php-fpm.toml).
-Fluxheim `1.3.7` completed the production PHP-FPM line with managed php-fpm
-supervision as an opt-in runtime mode. The focused Wolfi, Alpine, Debian, and
-SUSE BCI PHP images are self-contained managed PHP-FPM runtimes with a common
-smoke-tested application extension baseline. The SUSE PHP image uses the
-dedicated BCI PHP base and is published as `php-suse-bci`; SUSE Micro remains
-the base for non-PHP SUSE profiles.
-Managed supervision requires Unix process and socket primitives. Windows PHP
-archives support operator-managed external FastCGI pools over TCP and reject
-`mode = "managed"` during configuration validation.
-Pure-Rust PHP/phprs support is not planned; managed php-fpm is the supported
-zero-admin PHP path.
-
-TLS backends are mutually exclusive. Select exactly one backend when TLS is
-needed:
-
-| TLS feature | Status |
-| --- | --- |
-| `tls-rustls` | Default and recommended. |
-| `tls-openssl` | Optional OpenSSL backend. |
-| `tls-rustls-fips` / `tls-rustls-iso19790` | rustls/AWS-LC FIPS-capable candidate backend. |
-| `tls-openssl-fips` / `tls-openssl-iso19790` | OpenSSL FIPS provider backend. |
-
-Selecting more than one TLS backend is a compile error.
-Use `scripts/validate-features.sh` in packaging or custom CI jobs when accepting
-user-provided feature strings; Cargo features are additive, and Fluxheim
-supports one TLS backend per build.
-
-Future optional modules such as `waf`, `cloudflare`, PHP, CGI, and legacy
-static HTTP are documented in the architecture docs but are not enabled in the
-default build.
-
-Because `cache` is part of the default build, privacy builds must use
-`--no-default-features` through `profile-privacy` or an explicit manual feature
-set. Combining `privacy-mode` with `cache` or `metrics` fails at compile time.
-A future `privacy-cache` line is planned for explicitly public assets only,
-with no client-IP cache keys, no per-user variants, no `Cookie`/`Authorization`
-admission, and strict shared-cache safety rules; normal cache remains outside
-the current privacy build promise.
-
-Small manual builds:
-
-```bash
-cargo build --no-default-features --features proxy
-cargo build --no-default-features --features proxy,web,tls-rustls
-cargo build --no-default-features --features proxy,web,tls-rustls,privacy-mode
-cargo build --no-default-features --features proxy,web,tls-rustls,wasm
-```
-
-Validate a custom feature set before building:
-
-```bash
-scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
-```
-
-</details>
-
-## Development: 1.9.0 Operational Visibility
-
-The development version is `1.9.0`, ahead of the published `v1.8.3` release.
-The [observability plan](docs/roadmap/observability-commit-plan.md) covers actionable
-diagnostics, bounded logging, metrics, tracing and live cross-platform proof.
-Commits 01-11 are accepted. Native events, protected file rotation, bounded
-metrics/export, request correlation, the operational observer and importable
-Grafana/SigNoz dashboards are implemented. Start with the
-[operator guide](docs/guides/observability.md), tested configurations and alerts.
-Commit 12 qualifies the release candidate; Commit 13 still reviews all product
-documentation. Each checkpoint requires pentest, retest and green GitHub checks.
-HTTP/3 plans and probes remain
-available as manually invoked research, pending renewed qualification. See the
-[draft release notes](release-notes/RELEASE_NOTES_1.9.0.md) for implemented work,
-not promises of completed protocol support.
-
-The thirteen checkpoints include a final whole-product documentation and
-fluxheim.eu review, plus UI-ready read-only operational contracts, not
-complete remote configuration management. A separate management release and
-`fluxheim-ui` repository are [proposed](docs/ideas/management-api-direction.md);
-they are not implemented features or release commitments.
-
-### Latest Release: 1.8.3 Maintenance
-
-Release `v1.8.3` updates Rust/dependencies, the opt-in Wasm runtime, container
-bases and release tooling while retaining the portable profile matrix. See
-the [release notes](release-notes/RELEASE_NOTES_1.8.3.md) and
-[qualification record](docs/evidence/maintenance-1.8.3-qualification.md).
-
-### Platform Baseline: 1.8.2 Windows Portable Parity
-
-Fluxheim does not treat every planned idea as stable. The released `1.8` line
-established platform parity. Release `1.8.0` packages the completed Wasm
-line as an explicit image/archive profile and establishes the shared portable
-archive contract. Release `1.8.1` completed the defined unsigned Apple Silicon
-macOS parity gate. Release `v1.8.2` completes native Windows x86_64 MSVC
-archives without weakening filesystem trust or cache-storage
-boundaries. The normal `full` profile remains Wasm-free. Signing and installer
-work follows platform parity. The unsigned macOS CLI preview publishes
-`.tar.gz` only; Windows publishes `.zip` only after its exact-tag native x86_64
-gate passes. Windows ARM64 is deferred until equivalent native build and test
-infrastructure is sustainable.
-See
-[Portable Releases](docs/guides/portable-releases.md) for the shared archive contract,
-current platform support level, and unsigned-preview policy.
-
-- `1.0` is the gateway foundation: vhosts, routes, redirects, static serving,
-  proxying, SNI/TLS, safe ACME challenge exceptions, systemd/RPM packaging, and
-  rootless container operation.
-- `1.1` is the certificate operations line: TLS policy profiles, multi-cert
-  rustls SNI, managed ACME issuance/renewal, EAB-capable issuers, file-backed
-  secrets, `acme-init`, and packaged renewal units.
-- `1.2.x` completed the production cache and observability line: vhost/route
-  cache policy, memory/disk/tiered cache, local static-file caching,
-  storage-bin disk cache, optional disk-cache encryption, peer fill, bounded
-  range caching, fixed-slice range composition, cache operations tooling,
-  Prometheus metrics, and OpenTelemetry export profiles.
-- `1.3.x` completed the split-profile and application-serving line: shared
-  ingress/TLS feature profiles, focused full/cache/proxy/PHP images, the
-  `fluxheim-acme` companion, release-page `fluxheim-config-tester`, production
-  PHP-FPM support with WordPress-compatible front-controller behavior and
-  Fluxheim-managed php-fpm supervision, OpenSSL and rustls/AWS-LC FIPS/ISO
-  build paths, internal-crypto compliance guards, and the repeatable compliance
-  evidence package template.
-- `1.4.x` completed the production proxy parity and platform-hardening line:
-  edge ACLs, rate/concurrency limits, gzip/zstd/brotli compression,
-  regex/template rewrites, method routing, WebSocket upgrades, auth
-  subrequests, traffic mirroring, read-only ops socket, passive and active
-  health checks, retry budgets, PROXY protocol v1/v2, upstream TLS controls,
-  mTLS/client certificate policy, HTTP/2 origin controls, gRPC pass-through,
-  Apple Silicon Level 1 development support, bounded GeoIP/Geo-Context policy,
-  TCP stream proxying with idle timeouts and stream upstream TLS/mTLS controls,
-  and the proxy/config/module splits that keep future feature domains in
-  focused files.
-- `1.5.x` is the enterprise load-balancer/control-plane line. It promotes the
-  load-balancer image profile and focuses on F5/HAProxy/Envoy-class pool
-  operations: runtime pool/member mutation, priority groups, persistence,
-  slow-start, richer active/adaptive health checks, circuit breaking, queue and
-  overflow behavior, locality/failure-domain policy, richer selection
-  algorithms, admin/audit visibility, migration fixtures, bounded UDP/GSLB
-  beta exploration, and the workspace/shared-crate foundation that prepares the
-  config, load-balancer, cache, web, PHP-FPM, and future extension crates. It
-  is not a production WAF, full GSLB/DNS appliance, generic UDP proxy, or
-  iRules-compatible scripting release. See
-  [Load Balancer Migration Notes](docs/guides/load-balancer-migration.md) for HAProxy,
-  nginx, and F5 pool mappings.
-- `1.6.x` is the Pingora-exit line. It starts with baseline evidence,
-  modularity gates, runtime-fact/policy-proof planning, and crate-boundary
-  guardrails, then removes Pingora from normal Fluxheim builds in staged
-  releases while preserving current operator-facing behavior.
-- `1.7.x` is the shared Wasm extensibility line. It starts with strict plugin
-  file loading, bounded Wasmtime execution, config-level plugin registry
-  validation, deterministic attachment ordering, process/plugin/attachment
-  admission ceilings, Wasm-aware reload classification, metrics, live native
-  HTTP/1 access-decision hooks, and bounded request/response header hooks.
-  Later `1.7.x` releases add routing/load-balancer decisions,
-  mirror/persistence decisions, VCL-like cache policy hooks, optional
-  proxy-ABI/WASI previews, and runnable examples for F5 iRules-style policy,
-  nginx Lua/OpenResty-style header policy, HAProxy Lua/SPOE-style
-  routing/load-balancer policy, and VCL-like cache policy.
-- `1.7.11` completes the zero-downtime upgrade slice. Native listeners retain
-  established work during bounded drain, systemd can retain and pass public
-  listeners across generations, and `READY=1` follows explicit readiness from
-  every configured background service. A live Podman smoke proves the supported
-  blue/green pattern and the direct-published-port limitation. The release also
-  closes the native HTTP/1 parser audit with validated-only request heads,
-  bounded fragmentation-independent chunk decoding, strict request-target and
-  authority handling, and ownership-safe critical background supervision.
-- `1.7.12` adds response metadata generated from real runtime outcomes and
-  final response bytes. Cache and proxy status fields remain opt-in and avoid
-  backend topology or arbitrary error strings; digest behavior is live-tested
-  across cache, compression, conditional, `HEAD`, and range responses. Pinned
-  CI-only proof environments build and run both FIPS-capable TLS profiles and
-  capture provider, toolchain, dependency, binary, and image evidence. They are
-  not published FIPS images or a claim that Fluxheim itself is FIPS validated.
-  The release also makes native request/static buffering admission effective
-  before allocation, keeps fragmented HTTP/2 body growth logarithmic, and
-  completes encrypted-cache root separation, opaque HMAC identities,
-  fail-closed counter state, and the one-time legacy cold migration.
-
-Detailed cache behavior, config examples, operational limits, and smoke-test
-coverage are documented in [Cache Backends](docs/guides/cache-backends.md),
-[Cache Encryption](docs/guides/cache-encryption.md),
-[Config Reference](docs/reference/config-reference.md), and
-[Production Readiness](docs/guides/production-readiness.md).
-
-The `1.8` line establishes macOS/Windows portable parity. The `1.9` line focuses
-on logging, metrics and operational visibility; HTTP/3/QUIC is deferred.
-See [Versioning Plan](docs/roadmap/versioning-plan.md) and
-[Roadmap](ROADMAP.md) for the full release ladder.
+The directory must exist and be readable by the service user.
+This example binds locally; public deployment also needs appropriate listeners,
+network/firewall rules and TLS. See [vhost setup](docs/guides/vhost-config.md)
+and [production readiness](docs/guides/production-readiness.md).
 
 ## Documentation
 
-- [Roadmap](ROADMAP.md)
-- [Changelog](CHANGELOG.md)
-- [Versioning Plan](docs/roadmap/versioning-plan.md)
-- [Modularity Policy](docs/architecture/modularity-policy.md)
-- [Runtime Baseline](docs/evidence/runtime-baseline.md)
-- [Runtime Parity Fixtures](docs/evidence/runtime-parity-fixtures.md)
-- [Extraction Dependency Graph](docs/evidence/extraction-dependency-graph.md)
-- [Runtime Facts And Policy Proofs](docs/architecture/runtime-facts-and-policy-proofs.md)
-- [Release Runbook](docs/guides/release-runbook.md)
-- [Release Checklist](docs/guides/release-checklist.md)
-- [Build, Containers, And Rootless Podman](docs/guides/build-and-podman.md)
-- [Production Readiness](docs/guides/production-readiness.md)
-- [Feature Matrix](docs/reference/features.md)
-- [OWASP Top 10 2025 Baseline](docs/evidence/owasp-top10-2025-baseline.md)
-- [FIPS-Capable Deployments](docs/guides/fips.md)
-- [Config Reference](docs/reference/config-reference.md)
-- [Load Balancer Migration Notes](docs/guides/load-balancer-migration.md)
-- [Gateway Recipes](docs/guides/gateway-recipes.md)
-- [GitHub Repository Setup](docs/guides/github-setup.md)
-- [Cache Backends](docs/guides/cache-backends.md)
-- [Cache Encryption](docs/guides/cache-encryption.md)
-- [Image Filter](docs/ideas/image-filter.md)
-- [Programmable Media Edge](docs/ideas/programmable-media-edge.md)
-- [Certificate Renewal And Reload](docs/guides/certificate-renewal.md)
-- [Config Snapshots And Rollback](docs/guides/config-snapshots.md)
-- [Logging Architecture](docs/architecture/logging-architecture.md)
-- [Metrics Architecture](docs/architecture/metrics-architecture.md)
-- [OpenTelemetry Tracing](docs/guides/opentelemetry-tracing.md)
-- [WASM Extensibility](docs/guides/wasm-extensibility.md)
-- [Wasm Policy Example Parity](docs/evidence/wasm-policy-example-parity.md)
-- [Portable Releases](docs/guides/portable-releases.md)
-- [1.9.0 Observability Commit Plan](docs/roadmap/observability-commit-plan.md)
-- [Management API And UI Direction](docs/ideas/management-api-direction.md)
-- [Deferred HTTP/3 And QUIC Commit Plan](docs/roadmap/http3-quic-commit-plan.md)
-- [Windows Release Builders](docs/guides/windows-release-builders.md)
-- [Zero-Downtime Upgrades](docs/guides/zero-downtime-upgrades.md)
-- [Crypto RPC Edge](docs/ideas/crypto-rpc-edge.md)
-- [External Authorization Request](docs/ideas/auth-request.md)
-- [Zero-Retention Privacy Mode](docs/guides/zero-retention-privacy-mode.md)
-- [WAF Architecture](docs/ideas/waf-architecture.md)
-- [Rust Supply-Chain Security](docs/guides/supply-chain-security.md)
-- [Cloudflare Origin Support](docs/guides/cloudflare-origin-support.md)
-- [PHP Runtime Support](docs/guides/php-runtime-support.md)
-- [Perl CGI Support](docs/ideas/perl-cgi-support.md)
-- [Legacy Static HTTP Support](docs/ideas/legacy-static-http.md)
-- [Sentinel Mesh](docs/ideas/sentinel-mesh.md)
+- [Documentation index](docs/README.md): guides, reference, architecture and evidence.
+- [Configuration reference](docs/reference/config-reference.md): accepted settings.
+- [Build features](docs/reference/features.md): choose modules and TLS backends.
+- [Deployment guide](docs/guides/build-and-podman.md): builds and rootless containers.
+- [Gateway recipes](docs/guides/gateway-recipes.md): multi-site and proxy examples.
+- [Observability guide](docs/guides/observability.md): logs, metrics, traces and alerts.
+- [Executable examples](examples): starting configurations and integrations.
 
-## Security And Dependency Policy
+## Development And Security
 
-Fluxheim uses:
-
-- pinned Rust stable toolchain;
-- checked-in `Cargo.lock`;
-- GitHub CI and CodeQL scanning;
-- `cargo deny` for license and dependency policy;
-- `cargo audit` for advisory checks;
-- SBOM and reproducible-build evidence for stable releases;
-- `scripts/validate-owasp-top10-2025.sh` for a mapped OWASP Top 10 2025
-  baseline over Fluxheim-owned controls;
-- rootless Podman smoke tests before container releases.
-
-Before publishing or merging security-sensitive changes:
+Run local checks and select live tests:
 
 ```bash
-scripts/release_checks.sh
-```
-
-For focused live testing, `scripts/test_starter.py` provides a human-facing
-menu over the maintained smoke scripts. It can run categories such as
-load-balancer, cache, WordPress, database health checks, privacy mode, Wasm,
-observability, containers, and RPM builds without memorizing every script name.
-The observability smoke starts disposable Prometheus and Jaeger containers by
-default unless `FLUXHEIM_PROMETHEUS_URL` or `FLUXHEIM_JAEGER_URL` point at
-already-running services.
-
-For mandatory stored-signal and dashboard verification, use the
-[required collector gate](docs/guides/collector-integrations.md). It builds a
-packaged server and tests Grafana/Prometheus/Jaeger and SigNoz, including real
-PHP, failure/recovery and log-to-trace correlation. Missing collectors fail this
-gate; a quick smoke that skips them is not release qualification.
-
-Other focused workflows:
-
-```bash
+scripts/checks.sh
 scripts/test_starter.py --list
-scripts/test_starter.py --category load-balancer
-scripts/test_starter.py --run privacy
-scripts/test_starter.py --run wasm
 ```
 
-See [SECURITY.md](SECURITY.md) for vulnerability reporting and
-[Rust Supply-Chain Security](docs/guides/supply-chain-security.md) for dependency
-review policy.
+Use `scripts/release_checks.sh` for release qualification.
+The [collector gate](docs/guides/collector-integrations.md) checks stored signals
+and dashboards against running collector products; skipped external services
+are not release evidence.
+
+Fluxheim uses a locked dependency graph, CI, CodeQL, RustSec advisory checks,
+dependency/license policy and native/container smoke tests. Checksums and
+repeat builds do not by themselves prove independent build provenance.
+Read [supply-chain policy](docs/guides/supply-chain-security.md) for the trust
+model and [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## License
 

@@ -1,0 +1,50 @@
+# Local admission example; intentionally small budgets for an observable demo.
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "api"
+trusted_proxies = []
+[server.process]
+daemon = false
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+[cache]
+enabled = false
+[[vhosts]]
+name = "api"
+hosts = ["api.example.test"]
+[vhosts.proxy]
+upstreams = ["127.0.0.1:9001"]
+[vhosts.rate_limit]
+enabled = false
+requests_per_second = 1
+burst = 1
+status = 429
+table_max_entries = 65536
+entry_ttl_secs = 300
+mode = "nodelay"
+max_delay_ms = 1000
+reject_indeterminate = false
+[vhosts.concurrency]
+enabled = true
+max_in_flight = 1
+max_queue = 0
+queue_timeout_ms = 0
+status = 503
+[[vhosts.routes]]
+name = "limited"
+path_prefix = "/limited"
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+[vhosts.routes.rate_limit]
+enabled = true
+requests_per_second = 1
+burst = 1
+mode = "nodelay"
+max_delay_ms = 1200
+[vhosts.routes.concurrency]
+enabled = true
+max_in_flight = 1
+max_queue = 1
+queue_timeout_ms = 0

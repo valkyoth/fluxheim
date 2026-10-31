@@ -304,3 +304,5 @@ if [ "$lb_denied" != "403" ]; then
 fi
 
 echo "CIRCL GeoIP static/proxy/load-balancer smoke passed"
+
+python3 "$ROOT_DIR/scripts/smoke_geoip_examples.py" "$DATABASE" "$TMP_DIR"

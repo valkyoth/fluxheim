@@ -54,7 +54,9 @@ async fn php_handler_metrics_cover_direct_fallback_rejection_and_cancellation_on
     let recorder = Arc::new(Recorder::default());
     assert!(crate::install_native_php_metrics_recorder(recorder.clone()));
     let root = tempfile::TempDir::new().unwrap();
-    let mut php = super::tests::test_php_route(root.path());
+    // Match production's canonical root, including Windows verbatim prefixes.
+    let canonical_root = std::fs::canonicalize(root.path()).unwrap();
+    let mut php = super::tests::test_php_route(&canonical_root);
     php.vhost_name = "php-handler-metrics-test".to_owned();
     assert_eq!(php.handle(request("GET")).await.status(), 404);
     assert_eq!(php.handle(request("ATTACKER-METHOD")).await.status(), 405);

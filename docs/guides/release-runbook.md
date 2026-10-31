@@ -124,7 +124,7 @@ advisory ID, impact, and removal condition.
 Commit any release-note, README, packaging, or metadata changes:
 
 ```bash
-git add .
+git add.
 git commit -S -m "Prepare Fluxheim ${RELEASE_VERSION} release"
 git push origin "${RELEASE_BRANCH}"
 ```
@@ -153,7 +153,7 @@ git tag -v "${TAG}"
 git push origin "${TAG}"
 ```
 
-Record the `Good "git" signature ...` line from `git tag -v`.
+Record the `Good "git" signature...` line from `git tag -v`.
 
 Pushing the tag starts the container image workflow.
 
@@ -205,7 +205,7 @@ fluxheim-${RELEASE_VERSION}-php-aarch64-linux.tar.gz
 fluxheim-${RELEASE_VERSION}-config-tester-aarch64-linux.tar.gz
 fluxheim-${RELEASE_VERSION}-full-x86_64-linux.zip
 fluxheim-${RELEASE_VERSION}-wasm-x86_64-linux.zip
-# ...matching .zip files for every profile and architecture above
+#...matching.zip files for every profile and architecture above
 ```
 
 Build and live-test only the packaged Wasm profile during development:
@@ -492,7 +492,7 @@ for image in \
   "${TAG}-php-suse-bci"
 do
   podman pull "ghcr.io/valkyoth/fluxheim:${image}"
-  podman inspect "ghcr.io/valkyoth/fluxheim:${image}" --format '{{index .RepoDigests 0}}'
+  podman inspect "ghcr.io/valkyoth/fluxheim:${image}" --format '{{index.RepoDigests 0}}'
 done
 ```
 
@@ -520,7 +520,7 @@ for image in \
   "${TAG}-php-suse-bci"
 do
   podman pull "quay.io/valkyoth/fluxheim:${image}"
-  podman inspect "quay.io/valkyoth/fluxheim:${image}" --format '{{index .RepoDigests 0}}'
+  podman inspect "quay.io/valkyoth/fluxheim:${image}" --format '{{index.RepoDigests 0}}'
 done
 ```
 
@@ -558,7 +558,7 @@ The release notes should end with concrete evidence, not placeholders:
   - Quay full/default Debian: `quay.io/valkyoth/fluxheim@sha256:...`
   - Quay cache/proxy/php variants: `quay.io/valkyoth/fluxheim@sha256:...`
 - Tag signature:
-  - `Good "git" signature for ...`
+  - `Good "git" signature for...`
 ```
 
 ## 9. Post-Release Smoke

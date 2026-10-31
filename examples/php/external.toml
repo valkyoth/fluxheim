@@ -1,0 +1,42 @@
+# Create public/index.php and public/style.css beside this configuration first.
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "php.example.test"
+
+[server.process]
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+threads = 2
+
+[server.limits]
+max_request_body_bytes = "1MiB"
+
+[[vhosts]]
+name = "php.example.test"
+hosts = ["php.example.test"]
+
+[vhosts.php]
+enabled = true
+preset = "wordpress"
+root = "public"
+index = "index.php"
+allowed_extensions = ["php"]
+path_info = "disabled"
+max_in_flight = 4
+max_request_body_bytes = "1MiB"
+request_timeout_secs = 10
+hide_response_headers = ["x-powered-by"]
+
+[vhosts.php.fpm]
+mode = "external"
+tcp = "127.0.0.1:9000"
+allow_private_tcp_upstreams = true
+
+[vhosts.web]
+root = "public"
+index_files = ["index.html"]
+deny_dotfiles = true
+
+[vhosts.web.directory_listing]
+enabled = false

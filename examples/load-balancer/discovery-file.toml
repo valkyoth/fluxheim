@@ -1,0 +1,8 @@
+# Replace the WHOLE [proxy] block and its child tables in local.toml.
+[proxy]
+upstreams_file = "backends.txt"
+upstreams_file_refresh_secs = 5
+
+[proxy.load_balance]
+selection = "round-robin"
+all_down_status = 503

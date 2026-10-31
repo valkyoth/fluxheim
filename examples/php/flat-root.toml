@@ -1,0 +1,42 @@
+# PHP sources stay in app/. Only the named asset is published from public-static/.
+# This is a layout fixture, not a complete forum/wiki installation.
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "php.example.test"
+
+[server.process]
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+threads = 2
+
+[[vhosts]]
+name = "php.example.test"
+hosts = ["php.example.test"]
+
+[vhosts.php]
+enabled = true
+root = "app"
+index = "index.php"
+try_files = "front-controller"
+allowed_extensions = ["php"]
+deny_path_prefixes = ["/private/", "/uploads/"]
+max_request_body_bytes = "1MiB"
+hide_response_headers = ["x-powered-by"]
+
+[vhosts.php.fpm]
+mode = "external"
+tcp = "127.0.0.1:9000"
+allow_private_tcp_upstreams = true
+
+[[vhosts.routes]]
+name = "public-stylesheet"
+path_exact = "/assets/style.css"
+
+[vhosts.routes.web]
+root = "public-static"
+index_files = ["index.html"]
+deny_dotfiles = true
+
+[vhosts.routes.web.directory_listing]
+enabled = false

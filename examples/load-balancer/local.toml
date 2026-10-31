@@ -1,0 +1,49 @@
+# Two local HTTP origins. Start the example origins before Fluxheim.
+[server]
+listen = ["127.0.0.1:8088"]
+trusted_proxies = []
+
+[server.process]
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+grace_period_seconds = 1
+graceful_shutdown_timeout_seconds = 2
+
+[logging]
+level = "warn"
+format = "text"
+
+[logging.access]
+enabled = false
+request_id = false
+
+[tls]
+enabled = false
+
+[cache]
+enabled = false
+
+[proxy]
+upstreams = ["127.0.0.1:9001", "127.0.0.1:9002"]
+upstream_aliases = ["app-a", "app-b"]
+upstream_weights = [1, 1]
+upstream_tls = false
+connect_timeout_secs = 1
+read_timeout_secs = 3
+
+[proxy.load_balance]
+selection = "round-robin"
+all_down_status = 503
+
+[proxy.load_balance.health_check]
+enabled = true
+protocol = "http"
+path = "/healthz"
+interval_secs = 1
+consecutive_success = 1
+consecutive_failure = 1
+expected_statuses = [200]
+expected_body_contains = ["ready"]
+connect_timeout_secs = 1
+read_timeout_secs = 1

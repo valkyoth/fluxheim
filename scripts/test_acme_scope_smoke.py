@@ -2,14 +2,91 @@
 """Regression checks for the local-only ACME qualification harness."""
 import json
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import tomllib
 import unittest
 from unittest.mock import patch
 
+import yaml
+
 import acme_pebble_frontend as frontend
 import smoke_acme_scope as smoke
+
+ROOT = Path(__file__).resolve().parents[1]
+GUIDE = ROOT / "docs/guides/certificate-renewal.md"
+
+
+class AcmeDeploymentDocumentationTests(unittest.TestCase):
+    def compose_documents(self):
+        yield yaml.safe_load((ROOT / "examples/podman-compose-acme.yml").read_text())
+        blocks = re.findall(r"```yaml\n(.*?)```", GUIDE.read_text(), re.S)
+        self.assertEqual(len(blocks), 1)
+        yield yaml.safe_load(blocks[0])
+
+    def test_companion_is_opt_in_and_requires_explicit_image_selection(self):
+        for document in self.compose_documents():
+            services = document["services"]
+            companion = services["fluxheim-acme"]
+            self.assertEqual(companion["profiles"], ["renewal"])
+            self.assertEqual(companion["restart"], "no")
+            self.assertEqual(companion["entrypoint"], ["/usr/local/bin/fluxheim-acme"])
+            self.assertEqual(companion["command"],
+                             ["--config", "/etc/fluxheim/fluxheim.toml", "renew"])
+            self.assertIn("${FLUXHEIM_GATEWAY_IMAGE:?", services["fluxheim"]["image"])
+            self.assertIn("${FLUXHEIM_RENEWAL_IMAGE:?", companion["image"])
+            for service in services.values():
+                self.assertEqual(service["ulimits"]["core"], {"soft": 0, "hard": 0})
+
+    def test_shared_mounts_keep_shared_labels_without_live_chown(self):
+        expected = {"/etc/fluxheim/fluxheim.toml", "/etc/fluxheim/conf.d",
+                    "/run/fluxheim", "/var/lib/fluxheim",
+                    "/run/secrets/actalis-eab-kid", "/run/secrets/actalis-eab-hmac-key"}
+        for document in self.compose_documents():
+            services = document["services"]
+            gateway = {entry.split(":")[1]: entry for entry in services["fluxheim"]["volumes"]}
+            companion = {entry.split(":")[1]: entry for entry in services["fluxheim-acme"]["volumes"]}
+            self.assertEqual(set(companion), expected)
+            for target, entry in companion.items():
+                self.assertEqual(gateway[target], entry)
+                modes = entry.rsplit(":", 1)[1].split(",")
+                self.assertIn("z", modes)
+                self.assertNotIn("Z", modes)
+                self.assertNotIn("U", modes)
+                self.assertEqual("ro" in modes, target not in {"/run/fluxheim", "/var/lib/fluxheim"})
+
+    def test_each_systemd_service_gets_its_own_credentials(self):
+        guide = GUIDE.read_text().split("## Packaged Actalis Credentials\n", 1)[1].split("\n## ", 1)[0]
+        for unit, dropin in (("fluxheim", "actalis-eab.conf"),
+                             ("fluxheim-acme", "actalis-eab-acme.conf")):
+            self.assertIn(f"/etc/systemd/system/{unit}.service.d/actalis-eab.conf", guide)
+            self.assertIn(f"/usr/share/doc/fluxheim/systemd/{dropin}", guide)
+            source = (ROOT / "packaging/systemd" / dropin).read_text()
+            for name in ("actalis-eab-kid", "actalis-eab-hmac-key"):
+                self.assertIn(f"LoadCredential={name}:/etc/fluxheim/secrets/{name}", source)
+        self.assertIn("does not inherit", guide)
+        self.assertIn("not a complete ready-to-register policy", guide)
+
+    def test_initializer_commands_require_deliberate_terms_acceptance(self):
+        section = GUIDE.read_text().split("## Initialize ACME\n", 1)[1].split("\n## ", 1)[0]
+        commands = section.replace("\\\n", " ").splitlines()
+        initializers = [line for line in commands if line.startswith("sudo fluxheim acme-init ")]
+        self.assertEqual(len(initializers), 4)
+        for command in initializers:
+            self.assertIn("--accept-terms-of-service", command)
+            self.assertIn('--terms-of-service-url "${ACME_TERMS_URL:?', command)
+        self.assertIn("sudo systemctl start fluxheim-acme.service", section)
+        self.assertNotIn("sudo fluxheim-acme --config", section)
+
+    def test_renewal_does_not_claim_installation_is_activation(self):
+        guide = GUIDE.read_text()
+        for boundary in ("separate steps", "may already be", "renew --no-reload",
+                         "not available on Windows", "actually served after activation",
+                         "not challenge readiness", "A one-shot container is not a timer"):
+            self.assertIn(boundary, guide)
+        self.assertIn("run --rm --no-deps fluxheim-acme", guide)
+        self.assertNotIn("source-identical local copy with one narrow", guide)
 
 
 class AcmeSmokeTests(unittest.TestCase):

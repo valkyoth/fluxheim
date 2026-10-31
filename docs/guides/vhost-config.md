@@ -1,5 +1,9 @@
 # Vhost Config Guide
 
+For file selection, `conf.d`, ordering, permissions and cross-file merge rules,
+start with [loading configuration](configuration.md). Keep each vhost together:
+another `[[vhosts]]` with the same name does not patch its earlier declaration.
+
 Fluxheim uses TOML array-of-tables syntax for virtual hosts:
 
 ```toml
@@ -102,9 +106,10 @@ cert_path = "/etc/fluxheim/tls/example/fullchain.pem"
 key_path = "/etc/fluxheim/tls/example/privkey.pem"
 ```
 
-Use global `[[tls.certificates]]` entries when you need to configure additional
-listener certificates outside a specific vhost block. Use `[vhosts.tls.acme]`
-when Fluxheim should manage the vhost certificate.
+Do not treat global `[[tls.certificates]]` as an independent extra certificate
+store when vhosts are configured. Follow the [SNI and certificate selection
+guide](tls.md) for effective certificate sources and fallback behavior. Use
+`[vhosts.tls.acme]` when Fluxheim should manage the vhost certificate.
 
 Proxy error pages are arrays because one proxy can define multiple fallback
 statuses. Define the array entry first, then its nested web root:
@@ -136,15 +141,21 @@ can continue through `[vhosts.proxy]`.
 ## Routes Inside A Vhost
 
 For gateway-style configs, add `[[vhosts.routes]]` under the current vhost.
-Routes are matched in this order:
+Routes first filter by method, then match in this order:
 
 - exact path;
 - longest path prefix;
+- first configured matching regex (requires `server.regex_enabled = true`);
 - one optional fallback route.
 
 Each route must define exactly one action by adding one nested table:
-`[vhosts.routes.redirect]`, `[vhosts.routes.proxy]`, or `[vhosts.routes.web]`.
+`[vhosts.routes.redirect]`, `[vhosts.routes.proxy]`, `[vhosts.routes.web]`, or
+`[vhosts.routes.php]`.
 Do not add an `action = "proxy"` field.
+
+The [routing guide](routing.md) explains segment boundaries, method mismatches,
+regex capture limitations and redirects with a runnable loopback example. A
+matched action's failure does not cause the router to try the fallback route.
 
 Do not write route tables such as `[vhosts.routes.proxy]`,
 `[vhosts.routes.web]`, or `[vhosts.routes.cache]` before a
@@ -214,11 +225,13 @@ selected route. Route proxy actions can also set `connect_timeout_secs`,
 `read_timeout_secs`, and `send_timeout_secs` for long-lived uploads or websocket
 paths without changing every backend on the vhost.
 
-Fluxheim preserves downstream `Connection: Upgrade` and `Upgrade` request
-headers by default, so websocket-style upgrade routes usually only need prefix
-matching, optional `strip_prefix`, and longer read/send timeouts. Header policy
-can still remove or replace those headers when an operator intentionally wants
-to disable upgrade tunneling for a route.
+WebSocket upgrade forwarding requires `websocket = true` on the proxy action
+and an HTTP/1 origin policy. Ordinary proxy actions strip upgrade headers when
+that flag is false. Prefix matching and optional rewriting still apply. The
+current tunnel uses the upstream read timeout as an absolute lifetime, not an
+idle timeout. Do not enable upgrades on the assumption that external auth will
+protect them: [the documented limitation](external-authorization.md#important-current-limits)
+is an open authorization bypass in the takeover path.
 
 When global HTTP-to-HTTPS redirect is enabled, proxy and static routes are also
 redirected by default on cleartext requests. Use the vhost ACME challenge helper
@@ -245,17 +258,25 @@ Route-specific header policy is nested under the route:
 ```toml
 [vhosts.routes.headers.request.add]
 x-route = "chat"
-host = "{host}"
-upgrade = "{http.upgrade}"
+x-public-host = "{host}"
 
 [vhosts.routes.headers.response]
 remove = ["server"]
 ```
 
-Route request headers support the same safe dynamic values as global request
-headers, including `{host}`, `{remote_addr}`, `{scheme}`, `{uri}`, `{path}`,
-`{query}`, `{request_id}`, and `{http.<header-name>}`. Unknown variables are
-config errors.
+Route request headers use the same renderer as global request headers. See the
+[request-header guide](request-headers.md) for supported values, privacy and
+trusted-client limits. Generic `{http.<header-name>}` values currently render
+empty except `{http.upgrade}`; TLS cipher/organization are also unresolved.
+Unknown variables fail validation, but successful validation does not prove
+runtime support.
+
+Leave Host untouched when preserving it: `host = "{host}"` currently removes its
+input before rendering. URL templates see the rewritten target,
+and request IDs are diagnostic only. Do not use forwarded client IPs for origin
+authorization behind trusted proxies until the documented limitation is corrected.
+Use [WebSocket route configuration](websocket.md), not a manual Upgrade field,
+to select tunnel behavior.
 
 Use the normal user-friendly header operations when possible:
 

@@ -1,6 +1,9 @@
 use super::*;
 use crate::{GeoIpConfig, MAX_WEB_INDEX_FILES, StreamConfig, TlsConfig, UdpConfig};
 
+#[path = "config_tests_static_examples.rs"]
+mod examples;
+
 #[test]
 fn rejects_empty_index_files() {
     let config = Config {

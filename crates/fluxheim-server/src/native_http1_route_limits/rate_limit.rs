@@ -12,6 +12,10 @@ const NATIVE_RATE_LIMIT_SHARD_HASH_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const NATIVE_RATE_LIMIT_SHARD_HASH_PRIME: u64 = 0x0000_0100_0000_01b3;
 static NATIVE_RATE_LIMIT_SHARD_SEED: OnceLock<u64> = OnceLock::new();
 
+#[cfg(test)]
+#[path = "rate_contract_tests.rs"]
+mod contract_tests;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum NativeRateLimitKey {
     Ip(IpAddr),

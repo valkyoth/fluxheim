@@ -146,3 +146,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "file_contract_tests.rs"]
+mod contract_tests;

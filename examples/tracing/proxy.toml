@@ -1,0 +1,46 @@
+# Local demonstration: any local process can connect as a trusted peer.
+# In production, trust only direct proxy addresses that you control.
+[server]
+listen = ["127.0.0.1:8080"]
+trusted_proxies = ["127.0.0.1"]
+[server.process]
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+grace_period_seconds = 1
+graceful_shutdown_timeout_seconds = 2
+[logging]
+format = "json"
+target = "stdout"
+[logging.access]
+enabled = true
+request_id = true
+request_id_header = "x-request-id"
+# Local diagnostic surface, not a public listener.
+[metrics]
+enabled = true
+listen = "127.0.0.1:9091"
+require_loopback = true
+[tracing]
+enabled = true
+mode = "propagate_only"
+traceparent = true
+log_trace_id = true
+[tracing.otlp]
+enabled = true
+endpoint = "http://127.0.0.1:4318/v1/traces"
+service_name = "fluxheim-tracing-guide"
+queue_size = 8192
+timeout_secs = 2
+[[vhosts]]
+name = "tracing-guide"
+hosts = ["traces.example.test"]
+[[vhosts.routes]]
+name = "application"
+path_prefix = "/"
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+upstream_aliases = ["origin-a"]
+upstream_tls = false
+upstream_http_version = "http1"

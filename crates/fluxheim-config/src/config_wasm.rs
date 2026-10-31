@@ -7,6 +7,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{ByteSize, ConfigError, validate_config_list_len};
 
+#[path = "config_wasm_overrides.rs"]
+mod overrides;
+pub use overrides::{WasmAdmissionBudgetOverride, WasmSandboxLimitsOverride};
+#[path = "config_wasm_upgrade.rs"]
+mod upgrade;
+
 pub const MAX_WASM_PLUGIN_ROOTS: usize = 32;
 pub const MAX_WASM_PLUGINS: usize = 128;
 pub const MAX_WASM_ATTACHMENTS: usize = 64;
@@ -109,9 +115,9 @@ pub(crate) struct WasmConfigFragment {
     #[serde(default)]
     plugin_roots: Option<Vec<PathBuf>>,
     #[serde(default)]
-    default_limits: Option<WasmSandboxLimitsConfig>,
+    default_limits: Option<WasmSandboxLimitsOverride>,
     #[serde(default)]
-    default_admission: Option<WasmAdmissionBudgetConfig>,
+    default_admission: Option<WasmAdmissionBudgetOverride>,
     #[serde(default)]
     max_total_concurrent_executions: Option<u32>,
     #[serde(default)]
@@ -155,10 +161,10 @@ impl WasmConfig {
             self.plugin_roots.extend(plugin_roots);
         }
         if let Some(default_limits) = fragment.default_limits {
-            self.default_limits = default_limits;
+            self.default_limits = default_limits.resolve(self.default_limits);
         }
         if let Some(default_admission) = fragment.default_admission {
-            self.default_admission = default_admission;
+            self.default_admission = default_admission.resolve(self.default_admission);
         }
         if let Some(max_total_concurrent_executions) = fragment.max_total_concurrent_executions {
             self.max_total_concurrent_executions = max_total_concurrent_executions;
@@ -254,6 +260,8 @@ impl WasmConfig {
         let mut names = HashSet::new();
         for plugin in &self.plugins {
             plugin.validate(self.allow_preview_abi)?;
+            plugin.effective_limits(self.default_limits)?;
+            plugin.effective_admission(self.default_admission)?;
             validate_wasm_plugin_path_under_roots(plugin, &self.plugin_roots)?;
             if !names.insert(plugin.name.clone()) {
                 return Err(ConfigError::DuplicateWasmPluginName {
@@ -312,9 +320,9 @@ pub struct WasmPluginConfig {
     #[serde(default)]
     pub fail_mode: WasmPluginFailMode,
     #[serde(default)]
-    pub limits: Option<WasmSandboxLimitsConfig>,
+    pub limits: Option<WasmSandboxLimitsOverride>,
     #[serde(default)]
-    pub admission: Option<WasmAdmissionBudgetConfig>,
+    pub admission: Option<WasmAdmissionBudgetOverride>,
 }
 
 impl WasmPluginConfig {
@@ -418,13 +426,25 @@ impl WasmPluginConfig {
             &self.phases,
             &format!("wasm plugin {:?}", self.name),
         )?;
-        if let Some(limits) = &self.limits {
-            limits.validate("wasm.plugins.limits")?;
-        }
-        if let Some(admission) = &self.admission {
-            admission.validate("wasm.plugins.admission")?;
-        }
         Ok(())
+    }
+
+    pub fn effective_limits(
+        &self,
+        defaults: WasmSandboxLimitsConfig,
+    ) -> Result<WasmSandboxLimitsConfig, ConfigError> {
+        let limits = self.limits.unwrap_or_default().resolve(defaults);
+        limits.validate("wasm.plugins.limits")?;
+        Ok(limits)
+    }
+
+    pub fn effective_admission(
+        &self,
+        defaults: WasmAdmissionBudgetConfig,
+    ) -> Result<WasmAdmissionBudgetConfig, ConfigError> {
+        let admission = self.admission.unwrap_or_default().resolve(defaults);
+        admission.validate("wasm.plugins.admission")?;
+        Ok(admission)
     }
 
     #[cfg(feature = "wasm")]
@@ -432,7 +452,7 @@ impl WasmPluginConfig {
         &self,
         default_limits: &WasmSandboxLimitsConfig,
     ) -> Result<fluxheim_wasm::WasmPluginManifest, ConfigError> {
-        let limits = self.limits.unwrap_or(*default_limits).to_wasm_limits()?;
+        let limits = self.effective_limits(*default_limits)?.to_wasm_limits()?;
         Ok(fluxheim_wasm::WasmPluginManifest {
             name: self.name.clone(),
             path: self.path.clone(),
@@ -464,14 +484,24 @@ pub struct WasmAttachmentConfig {
     #[serde(default = "default_wasm_attachment_priority")]
     pub priority: u32,
     #[serde(default)]
-    pub admission: Option<WasmAdmissionBudgetConfig>,
+    pub admission: Option<WasmAdmissionBudgetOverride>,
 }
 
 impl WasmAttachmentConfig {
+    pub fn effective_admission(
+        &self,
+        defaults: WasmAdmissionBudgetConfig,
+    ) -> Result<WasmAdmissionBudgetConfig, ConfigError> {
+        let admission = self.admission.unwrap_or_default().resolve(defaults);
+        admission.validate("wasm attachment admission")?;
+        Ok(admission)
+    }
+
     pub(crate) fn validate(
         &self,
         scope: &str,
         plugins: &HashMap<&str, &WasmPluginConfig>,
+        default_admission: WasmAdmissionBudgetConfig,
     ) -> Result<(), ConfigError> {
         validate_wasm_plugin_name("wasm attachment plugin", &self.plugin)?;
         let Some(plugin) = plugins.get(self.plugin.as_str()) else {
@@ -495,9 +525,7 @@ impl WasmAttachmentConfig {
                 });
             }
         }
-        if let Some(admission) = &self.admission {
-            admission.validate("wasm attachment admission")?;
-        }
+        self.effective_admission(default_admission)?;
         validate_wasm_attachment_priority(self.priority)?;
         Ok(())
     }
@@ -838,11 +866,12 @@ pub(crate) fn validate_wasm_attachments(
     attachments: &[WasmAttachmentConfig],
     scope: &str,
     plugins: &HashMap<&str, &WasmPluginConfig>,
+    default_admission: WasmAdmissionBudgetConfig,
 ) -> Result<(), ConfigError> {
     validate_config_list_len(scope, attachments.len(), MAX_WASM_ATTACHMENTS)?;
     let mut names = HashSet::new();
     for attachment in attachments {
-        attachment.validate(scope, plugins)?;
+        attachment.validate(scope, plugins, default_admission)?;
         let key = (
             attachment.plugin.clone(),
             attachment.vhost.clone(),

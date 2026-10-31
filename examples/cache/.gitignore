@@ -1,0 +1,5 @@
+/state/
+/fluxheim.pid
+/upgrade.sock
+/reload.sock
+operations-local.toml

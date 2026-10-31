@@ -1,0 +1,27 @@
+# Paths are relative to this file. Run under a supervisor, in the foreground.
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "lifecycle"
+
+[server.process]
+threads = 2
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+upstream_keepalive_pool_size = 128
+grace_period_seconds = 2
+graceful_shutdown_timeout_seconds = 5
+
+[cache]
+enabled = false
+
+[logging]
+level = "info"
+target = "stderr"
+
+[[vhosts]]
+name = "lifecycle"
+hosts = ["lifecycle.example.test"]
+
+[vhosts.web]
+root = "site"

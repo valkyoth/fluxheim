@@ -1,5 +1,7 @@
 #[path = "config_tests_php_core.rs"]
 mod core;
+#[path = "config_tests_php_examples.rs"]
+mod examples;
 #[path = "config_tests_php_headers_errors.rs"]
 mod headers_errors;
 #[path = "config_tests_php_managed.rs"]

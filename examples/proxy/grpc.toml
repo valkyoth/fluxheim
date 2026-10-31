@@ -1,0 +1,30 @@
+# Configuration illustration, NOT production gRPC qualification: see the documented limitation.
+[server]
+listen = ["127.0.0.1:8080"]
+trusted_proxies = []
+[server.host_routing]
+strict = true
+[server.process]
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+[cache]
+enabled = false
+[[vhosts]]
+name = "app"
+hosts = ["app.example.test"]
+[[vhosts.routes]]
+name = "rpc"
+path_prefix = "/example.Greeter/"
+[vhosts.routes.grpc]
+enabled = true
+require_content_type = true
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+upstream_http_version = "http2"
+upstream_h2_max_streams = 32
+read_timeout_secs = 30
+send_timeout_secs = 30
+[vhosts.routes.cache]
+enabled = false

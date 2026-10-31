@@ -1,7 +1,13 @@
 # Build And Rootless Podman
 
-Fluxheim pins Rust 1.99.1 in `rust-toolchain.toml` and `Cargo.toml`. The local
-toolchain and the container builder should stay on the same stable release.
+For a first installation, start with [package selection and minimal recipes](installation.md).
+This longer guide covers custom builds, base variants and persistent mounts.
+Cargo aliases are not published package names: consult the compiled-capability
+matrix before sharing one configuration across focused images.
+
+Use the checked-in `rust-toolchain.toml`, `Cargo.lock` and Containerfile digest
+pins from the same revision. `Cargo.toml` also records the minimum Rust version;
+a sufficiently new compiler is not automatically the exact qualified toolchain.
 
 The current development tree reports **1.9.0 (unreleased)**. Published
 `v1.8.3` is the stable baseline. The `v1.9.0` tag and release artifacts do
@@ -9,20 +15,23 @@ not exist yet; building `main` does not imply HTTP/3 support is ready.
 
 ## Local Builds
 
-Native builds are the best option when the binary should be optimized for the
-current CPU:
+Run from the repository root. A normal source build uses the target's baseline
+CPU settings; host-specific optimization is a separate, optional choice:
 
 ```bash
-cargo build --release
-RUSTFLAGS="-C target-cpu=native" cargo build --release
+cargo build --locked --release
+RUSTFLAGS="-C target-cpu=native" cargo build --locked --release
 ```
 
-Use `target-cpu=native` only for binaries that will run on the same CPU family
-they were built on. For portable release artifacts, omit the flag.
+Use `target-cpu=native` only when every deployment CPU supports the instructions
+selected on the build host. A family name alone is not a compatibility check.
+For portable release artifacts, omit the flag. Binaries appear under
+`target/release/`; Cargo does not install them or create a running service.
+Use `--bin fluxheim` when you only need the server executable.
 The cross-platform profile and archive contract is documented in
 [Portable Releases](portable-releases.md).
 
-The `v1.8.2` release adds native Windows x86_64 release-builder automation.
+Native Windows x86_64 release-builder automation is available.
 Linux cross-builds do not stand in for the Windows MSVC
 SDK, ACL, locking, or live-runtime gates. See
 [Windows Release Builders](windows-release-builders.md).
@@ -30,13 +39,13 @@ SDK, ACL, locking, or live-runtime gates. See
 Feature-reduced builds keep the binary small and reduce dependency surface:
 
 ```bash
-cargo build --release --no-default-features --features proxy
-cargo build --release --no-default-features --features proxy,load-balancer
-cargo build --release --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
-cargo build --release --no-default-features --features profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
-cargo build --release --no-default-features --features profile-cache-edge,acme-client
-cargo build --release --no-default-features --features profile-proxy-edge,acme-client
-cargo build --release --no-default-features --features profile-web-server,php-fpm,acme-client
+cargo build --locked --release --no-default-features --features proxy
+cargo build --locked --release --no-default-features --features proxy,load-balancer
+cargo build --locked --release --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+cargo build --locked --release --no-default-features --features profile-wasm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+cargo build --locked --release --no-default-features --features profile-cache-edge,acme-client
+cargo build --locked --release --no-default-features --features profile-proxy-edge,acme-client
+cargo build --locked --release --no-default-features --features profile-web-server,php-fpm,acme-client
 ```
 
 The default build enables `proxy`, `web`, `cache`, `tls-rustls`, and
@@ -44,16 +53,16 @@ The default build enables `proxy`, `web`, `cache`, `tls-rustls`, and
 grouped build profiles as normal feature aliases such as `profile-core`,
 `profile-static-site`, `profile-reverse-proxy`, `profile-cache-server`,
 `profile-load-balancer`, `profile-observability`, and `profile-privacy`.
-Fluxheim 1.3 also adds focused profile aliases: `profile-full`,
+Focused profile aliases include `profile-full`,
 `profile-web-server`, `profile-cache-edge`, `profile-proxy-edge`,
 `profile-load-balancer-edge`, `profile-wasm`, `profile-fips-openssl`, and
-`profile-iso19790-openssl`. The `1.3.5` release line introduced
-`profile-fips-rustls` and `profile-iso19790-rustls` for the rustls/AWS-LC FIPS
-candidate path, and `1.3.6` adds fail-closed internal-crypto gates and
-compliance evidence templates around those FIPS/ISO profiles.
-`profile-development` is a broad development profile with all compatible
-production modules enabled: full proxy/web/cache and load-balancer support,
-PHP-FPM, ACME, Prometheus, OTLP metrics, and OTel tracing.
+`profile-iso19790-openssl`, `profile-fips-rustls` and
+`profile-iso19790-rustls`. FIPS aliases select candidate provider integrations,
+not certification of the resulting application.
+`profile-development` combines `profile-full` with PHP-FPM, ACME, Prometheus,
+OTLP metrics and OTel tracing. It is not an all-features build: Wasm and beta
+UDP are not included. Avoid `--all-features` for application builds because
+some features deliberately conflict.
 
 TLS backends are mutually exclusive. Select exactly one of `tls-rustls`,
 `tls-rustls-fips`, or `tls-openssl`; `tls-rustls` is the default and
@@ -67,9 +76,9 @@ installation with a validated provider installed and configured by the
 operator:
 
 ```bash
-cargo build --release --no-default-features --features profile-fips-openssl
-cargo build --release --no-default-features --features profile-iso19790-openssl
-fluxheim crypto
+cargo build --locked --release --no-default-features --features profile-fips-openssl
+cargo build --locked --release --no-default-features --features profile-iso19790-openssl
+target/release/fluxheim crypto
 ```
 
 For rustls/AWS-LC FIPS candidate testing, build with `tls-rustls-fips` or a
@@ -78,12 +87,12 @@ required = true` or `[tls.iso19790] required = true`. This path builds
 `aws-lc-fips-sys`, so the build host needs CMake, Go, and a C compiler:
 
 ```bash
-cargo build --release --no-default-features --features profile-fips-rustls
-cargo build --release --no-default-features --features profile-iso19790-rustls
+cargo build --locked --release --no-default-features --features profile-fips-rustls
+cargo build --locked --release --no-default-features --features profile-iso19790-rustls
 scripts/validate-fips-rustls.sh check
 ```
 
-For the stronger `1.7.12` container evidence, build the exact proof binaries
+For provider qualification, build the exact proof binaries
 inside pinned UBI environments and exercise real downstream and upstream TLS:
 
 ```bash
@@ -112,11 +121,11 @@ the binary has exactly one TLS backend:
 
 ```bash
 # FIPS/ISO-capable cache edge
-cargo build --release --no-default-features \
+cargo build --locked --release --no-default-features \
   --features proxy,cache,security,tls-openssl-fips
 
 # FIPS/ISO-capable PHP-FPM web build
-cargo build --release --no-default-features \
+cargo build --locked --release --no-default-features \
   --features php-fpm,security,tls-openssl-fips
 ```
 
@@ -132,21 +141,22 @@ evidence area outside the TLS provider proof. In FIPS/ISO-required configs,
 Fluxheim rejects `[tls.acme] enabled = true`; compile-time availability of
 `acme-client` does not make managed ACME part of the approved boundary.
 
-The OpenSSL feature makes Fluxheim fail closed, loads the OpenSSL FIPS
-provider, enables default FIPS properties for the process, and exposes
-provider/default property diagnostics. The rustls/AWS-LC candidate installs or
+In required mode, the OpenSSL integration fails closed, loads the OpenSSL FIPS
+provider and enables default FIPS properties for the process. Its standalone
+diagnostic probe reports availability without activating those properties.
+The rustls/AWS-LC candidate installs or
 passes the rustls FIPS provider and checks rustls' FIPS indicators for required
 configs. Either deployment still needs the selected module's CMVP certificate,
 Security Policy, provider/build configuration, and platform evidence. See
 [FIPS-Capable Deployments](fips.md).
 
-`1.3.6` also closes other non-TLS crypto paths in FIPS/ISO-required mode:
-provider-backed admin auth is allowed in OpenSSL FIPS or rustls/AWS-LC FIPS
-builds, while local cache encryption, managed ACME, and remote/HTTPS OTLP
-export are rejected unless the path is non-secret, numeric-local-loopback-only,
-or externally evidenced as documented in the FIPS guide.
+Required mode also restricts non-TLS paths. Provider-backed admin authentication
+is supported; managed ACME and local cache encryption are rejected. OpenBao,
+OTLP, auth-request and mirroring permit only the documented numeric-loopback HTTP
+boundary. External evidence does not override a configuration rejection. Review
+the exact supported operations and deployment limitations in the FIPS guide.
 
-PHP support starts with `php-fpm` in `1.3.1`. It is never compiled by default;
+PHP support is selected with `php-fpm`. It is never compiled by default;
 build it explicitly with `profile-web-server,php-fpm` when Fluxheim should
 serve PHP applications through php-fpm.
 
@@ -159,25 +169,30 @@ container and tarball release assets also provide focused cache/proxy builds.
 Custom source builds can still omit `acme-client`, load-balancer, cache, web,
 or observability features when they are not needed.
 
-For package scripts or custom CI that accept user-provided feature strings, run
-the feature preflight before invoking Cargo:
+For package scripts or custom CI that accept feature strings, run the feature
+preflight before invoking Cargo:
 
 ```bash
 scripts/validate-features.sh proxy,web,tls-rustls
 ```
 
+Preflight is an additional policy check, not a complete expansion of Cargo's
+feature graph or a substitute for compilation. Always build the exact selection
+and validate the actual deployment config with that binary. Enabling a Cargo
+feature does not install an external daemon, provision a certificate, or make
+every enabled module active in configuration.
+
 ## System Build Dependencies
 
-Fluxheim builds with Rust 1.99.1. Starting in `1.6.34`, the default feature set
-uses the Fluxheim-owned native runtime with rustls, cache support, and static
-file serving; normal profiles no longer compile Pingora crates. Native builds
+The default feature set uses the Fluxheim-owned native runtime with rustls,
+cache support and static file serving; normal profiles do not compile Pingora
+crates. Linux source builds
 need a normal C/C++ toolchain plus a few build helpers for transitive native
 code.
 
 Required for the default build:
 
-- Rust 1.99.1, usually through `rustup` or the distro Rust packages when they
-  are new enough;
+- Rust selected by `rust-toolchain.toml`, normally installed through `rustup`;
 - C and C++ compiler toolchain;
 - `make`;
 - `cmake`;
@@ -206,8 +221,11 @@ Optional backend-specific packages:
 - `tls-openssl`: install OpenSSL development headers, such as `libssl-dev`,
   `openssl-devel`, or the distro equivalent.
 
-Container builds install the same requirements in the builder stage. The
-runtime images only need CA certificates plus the Fluxheim binary and config.
+These package commands prepare Linux build dependencies, not Rust itself or
+platform support. Windows needs MSVC/SDK tooling; macOS needs its native toolchain.
+Follow [portable builds](portable-releases.md) for those platforms.
+Containerfiles install build tools in the builder stage. Runtime packages depend
+on the variant and profile; PHP images additionally need PHP-FPM and its modules.
 
 ## Container Variants
 
@@ -222,9 +240,14 @@ OS that fits their security and operations model.
 | `debian` | `containers/Containerfile.debian` | `debian:trixie-slim` | Conservative glibc runtime for broad compatibility. |
 | `suse-bci` | `containers/Containerfile.suse-bci` | `registry.suse.com/bci/php:8` | PHP-only SUSE variant with the official BCI PHP repository and managed PHP-FPM. |
 
-The root `Containerfile` remains the Debian default for simple local builds.
-New packaging and publishing work should use the explicit variant files under
-`containers/`.
+The table shows tag names for readability; the actual Containerfiles pin both
+builder and runtime images by digest. Rebuilding an unchanged digest pin does
+not automatically fetch a newer base just because its tag says `latest`.
+See [runtime refresh](container-runtime-refresh.md) for the reviewed refresh flow.
+
+The root `Containerfile` uses `debian:bookworm-slim`, whereas the explicit Debian
+variant uses `debian:trixie-slim`. They are not identical recipes. New packaging
+and publishing work should use the explicit variant files under `containers/`.
 
 The Alpine, Wolfi, SUSE Micro, and PHP-only SUSE BCI variants build with the official Rust
 `1.99.1-alpine3.23` image to keep a musl-linked release binary portable across
@@ -232,11 +255,14 @@ small runtime bases. The Debian variant builds with the official Rust
 `1.99.1-bookworm` image and runs on `debian:trixie-slim`.
 
 The builder installs `cmake` for native TLS/compression transitives that may
-compile C code. The runtime runs as UID/GID `65532` and owns only:
+compile C code. The runtime runs as UID/GID `65532`; the Containerfiles prepare
+these application directories for that user:
 
 - `/etc/fluxheim`
+- `/run/fluxheim`
 - `/var/lib/fluxheim`
 - `/var/cache/fluxheim`
+- `/var/log/fluxheim`
 - `/srv/fluxheim`
 
 This default works under both rootless and rootful container engines. Running a
@@ -250,7 +276,7 @@ podman build \
   --build-arg FLUXHEIM_RUNTIME_UID=0 \
   --build-arg FLUXHEIM_RUNTIME_GID=0 \
   -t fluxheim:wolfi-root \
-  -f containers/Containerfile.wolfi .
+  -f containers/Containerfile.wolfi.
 ```
 
 You can also override the user at runtime with the container engine's `--user`
@@ -260,11 +286,12 @@ filesystem writes or low-port binding inside the container.
 Build the default Debian image:
 
 ```bash
-podman build -t fluxheim:dev -f Containerfile .
+podman build -t fluxheim:dev -f Containerfile.
 ```
 
-By default, the bundled Containerfiles compile the full production image
-profile:
+By default, the root Containerfile and the four general-purpose variants compile
+the full production image profile. The PHP-only SUSE BCI recipe is the exception;
+it defaults to `profile-web-server,php-fpm,acme-client`:
 
 ```text
 profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
@@ -342,18 +369,19 @@ manually trigger the Quay-only development image build:
 scripts/publish_dev_image.py --watch
 ```
 
-That workflow publishes `quay.io/<namespace>/<repository>:dev-wolfi` plus an
-immutable `dev-<short-sha>-wolfi` tag from `main`. The development image is
+That workflow publishes `quay.io/<namespace>/<repository>:dev-wolfi` plus a
+commit-labelled `dev-<short-sha>-wolfi` tag from `main`. Tags are still mutable;
+record the image digest when selecting an exact artifact. The development image is
 intentionally not mirrored to GHCR or Docker Hub, and it does not publish from
 pull requests, so registry secrets are not exposed to forked PR builds.
 
 Build a specific runtime variant:
 
 ```bash
-podman build -t fluxheim:wolfi -f containers/Containerfile.wolfi .
-podman build -t fluxheim:alpine -f containers/Containerfile.alpine .
-podman build -t fluxheim:suse-micro -f containers/Containerfile.suse-micro .
-podman build -t fluxheim:debian -f containers/Containerfile.debian .
+podman build -t fluxheim:wolfi -f containers/Containerfile.wolfi.
+podman build -t fluxheim:alpine -f containers/Containerfile.alpine.
+podman build -t fluxheim:suse-micro -f containers/Containerfile.suse-micro.
+podman build -t fluxheim:debian -f containers/Containerfile.debian.
 ```
 
 Build the cache-focused profile locally:
@@ -363,7 +391,7 @@ podman build \
   --build-arg FLUXHEIM_FEATURES=profile-cache-edge,acme-client \
   --build-arg FLUXHEIM_CONFIG=packaging/container/cache.toml \
   -t fluxheim:cache-wolfi \
-  -f containers/Containerfile.wolfi .
+  -f containers/Containerfile.wolfi.
 ```
 
 Build the proxy-focused profile locally:
@@ -373,18 +401,23 @@ podman build \
   --build-arg FLUXHEIM_FEATURES=profile-proxy-edge,acme-client \
   --build-arg FLUXHEIM_CONFIG=packaging/container/proxy.toml \
   -t fluxheim:proxy-wolfi \
-  -f containers/Containerfile.wolfi .
+  -f containers/Containerfile.wolfi.
 ```
 
-Build a PHP-FPM-enabled web profile locally:
+Build an external-PHP-FPM web profile locally (this does not install PHP-FPM):
 
 ```bash
 podman build \
   --build-arg FLUXHEIM_FEATURES=profile-web-server,php-fpm,acme-client \
-  --build-arg FLUXHEIM_CONFIG=examples/php-fpm.toml \
+  --build-arg FLUXHEIM_CONFIG=packaging/container/php.toml \
   -t fluxheim:php-fpm-wolfi \
-  -f containers/Containerfile.wolfi .
+  -f containers/Containerfile.wolfi.
 ```
+
+This config is a deployment template: replace the example domain and issuer
+policy, provide content and a reachable external FastCGI service, and validate
+before startup. Container loopback is not the host or another container. Use
+[PHP deployment](php.md) for shared document roots and upstream permissions.
 
 Build the self-contained managed PHP-FPM Wolfi profile locally:
 
@@ -394,7 +427,7 @@ podman build \
   --build-arg FLUXHEIM_CONFIG=packaging/container/php-managed.toml \
   --build-arg FLUXHEIM_RUNTIME_PACKAGES="$(paste -sd ' ' packaging/container/php-wolfi-runtime-packages.txt)" \
   -t fluxheim:php-wolfi \
-  -f containers/Containerfile.wolfi .
+  -f containers/Containerfile.wolfi.
 ```
 
 The managed PHP image smoke builds Wolfi, Alpine, Debian, and SUSE BCI images,
@@ -412,7 +445,7 @@ podman build \
   --build-arg FLUXHEIM_FEATURES=profile-development \
   --build-arg FLUXHEIM_CONFIG=packaging/container/fluxheim.toml \
   -t fluxheim:dev-wolfi \
-  -f containers/Containerfile.wolfi .
+  -f containers/Containerfile.wolfi.
 ```
 
 Build the load-balancer profile locally:
@@ -422,7 +455,7 @@ podman build \
   --build-arg FLUXHEIM_FEATURES=profile-load-balancer-edge,acme-client \
   --build-arg FLUXHEIM_CONFIG=packaging/container/load-balancer.toml \
   -t fluxheim:load-balancer-wolfi \
-  -f containers/Containerfile.wolfi .
+  -f containers/Containerfile.wolfi.
 ```
 
 Build a smaller proxy-only binary:
@@ -430,11 +463,26 @@ Build a smaller proxy-only binary:
 ```bash
 podman build \
   --build-arg FLUXHEIM_FEATURES=proxy \
+  --build-arg FLUXHEIM_CONFIG=packaging/container/proxy.toml \
   -t fluxheim:proxy \
-  -f containers/Containerfile.wolfi .
+  -f containers/Containerfile.wolfi.
 ```
 
-Build a zero-retention privacy image. The smoke script automatically uses
+This reduced image has no TLS, cache or static-file support. Its sample origin
+is `127.0.0.1:3000` inside the container; replace it for a real deployment.
+
+To check the config pairing without building an image:
+
+```bash
+cargo build --locked --no-default-features --features proxy --bin fluxheim
+python3 scripts/smoke_build_profiles.py
+```
+
+This checks acceptance of the matching proxy config and rejection of the full
+static-serving config. It relocates container-only paths into a private local
+fixture; it does not launch an origin or qualify a container deployment.
+
+Build a privacy-mode image. The smoke script automatically uses
 `examples/privacy.toml` for `profile-privacy`, but explicit builds should pass
 the matching config:
 
@@ -443,7 +491,7 @@ podman build \
   --build-arg FLUXHEIM_FEATURES=profile-privacy \
   --build-arg FLUXHEIM_CONFIG=examples/privacy.toml \
   -t fluxheim:privacy \
-  -f containers/Containerfile.wolfi .
+  -f containers/Containerfile.wolfi.
 ```
 
 Validate the bundled example config:
@@ -458,8 +506,10 @@ Run the complete local smoke:
 scripts/podman_smoke.sh
 ```
 
-The smoke script builds the image, validates the packaged config, and confirms
-the runtime user is `65532`.
+The smoke script builds the image, validates the packaged config, checks core
+limits and confirms the runtime user is `65532`. It does not start an HTTP
+listener or prove application behavior. Use the [live installation recipe](installation.md#minimal-container-test)
+and the relevant feature smoke for that additional proof.
 
 Run the focused load-balancer image as a real container and verify
 round-robin plus header persistence through two local origins:
@@ -474,7 +524,8 @@ checks plus round-robin/header persistence, and fails if the
 load-balancer-edge dependency tree or the `fluxheim-load-balancer` crate
 dependency tree contains any Pingora crate.
 
-Run every runtime variant smoke:
+Run the four general-purpose variant build/config smokes (PHP-only SUSE BCI is
+covered by the separate PHP image smoke above):
 
 ```bash
 scripts/podman_smoke_variants.sh
@@ -502,10 +553,11 @@ Fluxheim's published OCI images are Linux containers. They are not FreeBSD jail
 images and should not be expected to run natively on a FreeBSD kernel without a
 Linux VM or compatible Linux-container runtime layer.
 
-FreeBSD support should be treated as a native build target instead:
+FreeBSD is not a qualified release target in the current archive matrix. A
+native source build is experimental, not evidence of supported runtime behavior:
 
 ```bash
-cargo build --release
+cargo build --locked --release
 ```
 
 Native FreeBSD packaging should be documented separately after it is tested on a
@@ -518,7 +570,8 @@ platform-specific toolchains and libraries.
 
 ## Publishing Images
 
-The `Container Images` GitHub workflow builds the four variant Containerfiles
+The `Container Images` GitHub workflow builds the four general-purpose variants,
+substituting SUSE BCI for SUSE Micro in the PHP profile,
 and pushes tags to:
 
 - `ghcr.io/<owner>/fluxheim`
@@ -537,64 +590,61 @@ Optional Quay repository secrets and variables:
 - `QUAY_NAMESPACE`
 - `QUAY_REPOSITORY`
 
-The workflow publishes OS-variant tags for the full/default image profile:
+The current [image workflow](../../.github/workflows/images.yml) has two entry
+points: a pushed `v*` tag or manual dispatch. An ordinary push to `main` does
+not by itself run this publishing workflow. Manual dispatch can publish images;
+it is not a dry-run test button.
 
-The published `1.8.3` examples below retain this naming contract. For `1.9.0`,
-the same tags are planned with the new version, but are not release artifacts
-until that tag is approved and published.
+For an approved release tag `vX.Y.Z`, the naming contract is:
 
-- `v1.8.3-wolfi`, `v1.8.3-alpine`, `v1.8.3-suse-micro`, `v1.8.3-debian`
-- `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
-- `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
+| Profile | Variant tags | Wolfi short aliases |
+| --- | --- | --- |
+| Full | `vX.Y.Z-wolfi`, `vX.Y.Z-alpine`, `vX.Y.Z-debian`, `vX.Y.Z-suse-micro` | `vX.Y.Z`, `vX.Y.Z-base` |
+| Wasm | `vX.Y.Z-wasm-<variant>` | `vX.Y.Z-wasm` |
+| Cache | `vX.Y.Z-cache-<variant>` | `vX.Y.Z-cache` |
+| Proxy | `vX.Y.Z-proxy-<variant>` | `vX.Y.Z-proxy` |
+| Load balancer | `vX.Y.Z-load-balancer-<variant>` | `vX.Y.Z-load-balancer` |
+| PHP | `vX.Y.Z-php-wolfi`, `vX.Y.Z-php-alpine`, `vX.Y.Z-php-debian`, `vX.Y.Z-php-suse-bci` | `vX.Y.Z-php` |
 
-For the recommended Wolfi runtime, the full/default profile also gets short
-aliases:
+Non-PHP `<variant>` values are `wolfi`, `alpine`, `debian` and
+`suse-micro`. PHP substitutes `suse-bci` for `suse-micro`. The `-base`
+alias is the full profile, not a reduced server. These are naming patterns,
+not a claim that an unreleased version is downloadable.
 
-- `v1.8.3`
-- `v1.8.3-base`
-- `latest`
-- `latest-base`
+Each build also gets a `sha-<12-character-commit>-<profile-and-variant>` tag
+(the full profile omits its profile segment). The normal image job adds
+`latest-<profile-and-variant>` and corresponding Wolfi short aliases only when
+its ref name equals the default branch. A tag-triggered release therefore does
+not automatically update `latest`. The separate Quay-only development job
+described above has its own tags.
 
-The `-base` aliases are kept for compatibility with earlier release notes and
-automation. They point at the full/default image profile.
+All of these names are mutable registry tags, including commit-labelled ones.
+Use `repository@sha256:...` to select a particular image. The separate
+[runtime refresh workflow](container-runtime-refresh.md) can update versioned
+release aliases without changing the Fluxheim application version. It does not
+rewrite `sha-*`, `dev-*` or `latest*` aliases. Preserve the tested digest and
+refresh evidence instead of treating a version string as complete provenance.
 
-The focused image profiles publish tags with a profile segment:
+Load-balancer builds are included for tag pushes. Older-tag and branch manual
+dispatches may need `include_load_balancer=true`; the workflow's gate is the
+source of truth. The default platform is `linux/amd64`. A custom
+`linux/amd64,linux/arm64` input requests additional builds, not qualification:
+each selected base, native executable and runtime still needs its tests.
 
-- `v1.8.3-wasm-wolfi`, `v1.8.3-wasm-alpine`,
-  `v1.8.3-wasm-suse-micro`, `v1.8.3-wasm-debian`
-- `v1.8.3-cache-wolfi`, `v1.8.3-cache-alpine`,
-  `v1.8.3-cache-suse-micro`, `v1.8.3-cache-debian`
-- `v1.8.3-proxy-wolfi`, `v1.8.3-proxy-alpine`,
-  `v1.8.3-proxy-suse-micro`, `v1.8.3-proxy-debian`
-- `v1.8.3-load-balancer-wolfi`, `v1.8.3-load-balancer-alpine`,
-  `v1.8.3-load-balancer-suse-micro`, `v1.8.3-load-balancer-debian`
-- `v1.8.3-php-wolfi`, `v1.8.3-php-alpine`,
-  `v1.8.3-php-debian`, `v1.8.3-php-suse-bci`
-- `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`,
-  `sha-<short-sha>-load-balancer-wolfi`, `sha-<short-sha>-php-wolfi`, etc.
-- `latest-cache-wolfi`, `latest-proxy-wolfi`,
-  `latest-load-balancer-wolfi`, `latest-php-wolfi`, etc. when run from the
-  default branch
-- Wolfi short aliases: `v1.8.3-wasm`, `v1.8.3-cache`, `v1.8.3-proxy`,
-  `v1.8.3-load-balancer`, `v1.8.3-php`, `latest-wasm`, `latest-cache`,
-  `latest-proxy`, `latest-load-balancer`, and `latest-php`
+Manual inputs can override the feature selection, copied config and runtime
+UID/GID. Keep both IDs at `65532` and leave feature/config overrides empty for
+standard profiles. Overrides do not rename profile tags to describe the changed
+capabilities; use local custom-image builds for experiments rather than
+overwriting standard published profile names.
 
-Starting with `v1.5.0`, the load-balancer image profile is part of normal tag
-publishing. For older tags or development branches, it can still be included in
-manual workflow runs by setting `include_load_balancer=true`.
-
-The workflow defaults to `linux/amd64`. Use manual dispatch to test additional
-platforms, for example `linux/amd64,linux/arm64`, once every selected runtime
-base has been verified for those architectures.
-
-Manual workflow inputs also allow `runtime_uid`, `runtime_gid`, and a temporary
-feature override. Keep both IDs at `65532` for normal images. Use `0` only for
-a deliberate root-runtime image. Leave the feature override empty for normal
-release profile builds.
+Use the [release runbook](release-runbook.md), [release checklist](release-checklist.md)
+and [refresh guide](container-runtime-refresh.md) for their separate gates and
+publication requirements. None of the commands in this guide grants release
+approval.
 
 ## Config Tester Release Asset
 
-`1.3.2` adds a separate `fluxheim-config-tester` binary target for diagnosing
+The separate `fluxheim-config-tester` binary target diagnoses
 configs outside the runtime container. It is intended for cases where a Podman
 or systemd deployment cannot start and the operator still needs Fluxheim's real
 config parser, feature/profile checks, TLS storage checks, ACME target preview,
@@ -616,16 +666,17 @@ fluxheim-config-tester \
   --explain
 ```
 
-Use `--profile full`, `--profile cache`, `--profile proxy`, or
-`--profile web-php` to match the release artifact or image profile you plan to
-run. Add `--no-runtime-paths` when you only need syntax, semantic, and profile
-validation without touching runtime paths. During the `1.6.x` Pingora-exit
-line, `--runtime-cutover` prints the active runtime adapter and stable blocker
-keys for configs that still require compatibility glue.
-validation from outside the gateway container and do not have access to the
-service runtime mount such as `/run/fluxheim`. Leave that flag off when you
-want the tester to inspect `server.process.pid_file`, upgrade socket, and
-certificate reload socket paths as part of a deployment preflight.
+Select an appropriate tester filter, such as `--profile full`, `cache`, `proxy`
+or `web-php`, but do not treat it as proof of the deployed binary's feature set.
+The filters are not complete release-profile models. Validate with the actual
+server binary and mounts as well.
+
+`--no-runtime-paths` skips process runtime-path checks and runtime construction,
+not every filesystem read. Configuration/include trust checks still apply, and
+`--check-tls-storage` still inspects TLS storage when explicitly requested.
+`--runtime-cutover` prints diagnostic rows; it is not a strict readiness gate.
+See the [standalone tester guide](command-line.md#standalone-configuration-tester)
+for the full option table and current boundaries.
 
 Runtime images and RPMs do include `fluxheim-acme`, which is the ACME companion
 entry point for service-manager or container-scheduled renewal workflows:
@@ -652,8 +703,8 @@ these paths instead of writing inside the image layer.
 | `/etc/fluxheim/fluxheim.toml` | Main config file. | `ro,Z` after mapping ownership to UID `65532` |
 | `/etc/fluxheim/conf.d` | Optional config directory. | `ro,Z` after mapping ownership to UID `65532` |
 | `/etc/fluxheim/tls` | Static certificate chains and private keys. | `ro,Z` |
-| `/run/fluxheim` | Process runtime files such as PID files, upgrade sockets, and the certificate reload socket. | `Z,U` |
-| `/var/lib/fluxheim` | Runtime state: ACME storage and future snapshots. | `Z,U` |
+| `/run/fluxheim` | Active runtime sockets and managed PHP temporary state. PID/upgrade paths are currently inactive; see [lifecycle](service-lifecycle.md). | `Z,U` |
+| `/var/lib/fluxheim` | Runtime state: configured ACME and snapshots. | `Z,U` |
 | `/var/cache/fluxheim` | Disk cache root. | `Z,U` |
 | `/srv/fluxheim` | Default static content root if you want one shared root. | `ro,Z` |
 | `/srv/sites/<site>` | Per-site static roots referenced by vhosts. | `ro,Z` |
@@ -667,9 +718,20 @@ the ownership preparation described below. `:ro,Z,U` is an available shortcut
 for configuration only when changing its host ownership automatically is
 acceptable.
 
+Do not recursively change ownership on shared application/source trees merely
+to make a smoke test pass. These options are for dedicated paths. The examples
+using `:Z` assume one container owns the SELinux label. For gateway/renewal
+containers intentionally sharing files, establish a shared labeling policy;
+repeated private relabels can deny the other container access. Docker does not
+support Podman's `:U` mapping shortcut.
+
 The default image user is `65532:65532`, so writable host directories should be
-owned or mapped for that user. With rootless Podman, `:U` is often the easiest
-safe option for cache/state/log directories.
+owned or mapped for that user. With rootless Podman, `:U` can prepare dedicated
+cache/state/log directories. It recursively changes ownership and is not a
+permission repair: runtime and secret directories should be private (`0700`),
+and existing private keys, token files and file logs must be `0600`. Do not make
+private files group-readable to accommodate a collector; see
+[file logging and rotation](logging.md).
 
 ### Rootless Config Ownership
 
@@ -726,7 +788,8 @@ Example host layout:
 /srv/sites/app/public/
 ```
 
-Matching config paths:
+Matching config paths (requires a cache-capable, rustls server image and existing
+certificate/key files; it does not issue certificates):
 
 ```toml
 [server]
@@ -745,6 +808,9 @@ backend = "rustls"
 [[tls.certificates]]
 cert_path = "/etc/fluxheim/tls/fullchain.pem"
 key_path = "/etc/fluxheim/tls/key.pem"
+
+[cache]
+enabled = true
 
 [cache.disk]
 enabled = true
@@ -767,6 +833,14 @@ also loads visible `*.toml` files from `/etc/fluxheim/conf.d/` after the main
 file. When Fluxheim starts from `/etc/fluxheim`, it loads top-level TOML files
 first and then `/etc/fluxheim/conf.d/*.toml`.
 
+Select a tested image using `FLUXHEIM_GATEWAY_IMAGE`, preferably its immutable
+digest, using the [profile matrix](installation.md#choose-a-published-profile).
+Create the external `gateway_net` network before either example if it does not
+already exist. The following examples expose ports on all host interfaces;
+review the host firewall and rootless low-port binding policy first. To test
+locally without low-port privileges, use `127.0.0.1:8080:8080` and
+`127.0.0.1:8443:8443` instead.
+
 Podman run example:
 
 ```bash
@@ -774,7 +848,7 @@ podman run --rm --ulimit core=0:0 \
   --name fluxheim \
   --network gateway_net \
   --stop-signal SIGTERM \
-  --stop-timeout 15 \
+  --stop-timeout 45 \
   -p 80:8080 \
   -p 443:8443 \
   -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
@@ -784,7 +858,8 @@ podman run --rm --ulimit core=0:0 \
   -v /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U \
   -v /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U \
   -v /srv/sites/example/public:/srv/sites/example/public:ro,Z \
-  ghcr.io/valkyoth/fluxheim:latest-wolfi
+  "${FLUXHEIM_GATEWAY_IMAGE:?Select a tested gateway image}" \
+  --config /etc/fluxheim/fluxheim.toml
 ```
 
 Core-file limits are runtime settings: use `--ulimit core=0:0` for direct
@@ -793,7 +868,7 @@ ACME commands. Recreate existing containers after changing Compose settings.
 The image alone cannot enforce these limits. Verify a running container with:
 
 ```bash
-podman exec fluxheim_gateway cat /proc/1/limits
+podman exec fluxheim cat /proc/1/limits
 ```
 
 The `Max core file size` row must have soft and hard limits of `0`.
@@ -804,7 +879,9 @@ and `PR_GET_DUMPABLE`; blocking them rejects startup. See the
 [memory-dump policy](../../SECURITY.md#fatal-termination-and-memory-dumps)
 for older binaries, external children and remaining operator responsibilities.
 
-Compose example:
+Compose example (alternative to the direct run, not a second gateway on the
+same ports). Its container is named `fluxheim_gateway`; use that name for
+`podman exec` and log inspection when using Compose:
 
 ```yaml
 name: gateway
@@ -819,11 +896,12 @@ services:
       core:
         soft: 0
         hard: 0
-    image: ghcr.io/valkyoth/fluxheim:latest-wolfi
+    image: ${FLUXHEIM_GATEWAY_IMAGE:?Select a tested gateway image}
     container_name: fluxheim_gateway
     restart: always
     stop_signal: SIGTERM
-    stop_grace_period: 15s
+    stop_grace_period: 45s
+    command: ["--config", "/etc/fluxheim/fluxheim.toml"]
     ports:
       - "80:8080"
       - "443:8443"
@@ -840,165 +918,51 @@ services:
       - gateway_net
 ```
 
-For managed ACME in containers, use the same bind mounts for the gateway and
-the one-shot renewal container. A complete example with an external
-`fluxheim-acme` service is available at
-[examples/podman-compose-acme.yml](../../examples/podman-compose-acme.yml).
-Start the gateway first, then run due-only renewal with:
+For managed ACME in containers, use the reviewed
+[container renewal workflow](certificate-renewal.md#container-renewal) and
+[complete companion example](../../examples/podman-compose-acme.yml). It differs
+from the single-container recipe above:
+
+- Select tested gateway and renewal images explicitly; their profiles may differ.
+  Operation-scoped renewal validation requires 1.9.0; released 1.8.3 images do not
+  have it. Normal server validation still checks every enabled runtime feature.
+- Share configuration, certificate state, required secrets and the reload socket,
+  not every application/cache/log mount. Use shared SELinux labels (`:z`) on
+  intentionally shared paths and prepare ownership before starting either service.
+  Do not repeatedly relabel those paths privately or chown live state.
+- Set `tls.acme.automation = "external"` for an external companion. Start the
+  gateway and verify challenge readiness before running the opt-in renewal profile.
+
+After setting the two image variables and preparing the paths as described in
+that workflow:
 
 ```bash
 podman compose -f examples/podman-compose-acme.yml up -d fluxheim
-podman compose -f examples/podman-compose-acme.yml run --rm fluxheim-acme
+podman compose -f examples/podman-compose-acme.yml --profile renewal run --rm --no-deps fluxheim-acme
 ```
 
-Keep `tls.acme.automation = "external"` in this mode so the long-running
-gateway does not also run the background renewal loop.
+A successful container start is not challenge readiness. A one-shot renewal is
+not a scheduler, and certificate installation is not proof that the new
+certificate is being served. Follow the activation checks in the renewal guide.
 
 ### Container ACME First Issuance
 
-For HTTP-01 ACME, the CA must be able to reach Fluxheim on public port `80`.
-During first issuance, run Fluxheim with the HTTP listener enabled. Modern
-rustls-based builds can also keep `server.tls_listen` enabled while
-Fluxheim-managed ACME certificate files are missing; those certificates are
-treated as pending until issuance succeeds. Keep `[server.https_redirect]`
-disabled until the public HTTP-01 challenge path works, otherwise ordinary
-browser traffic may be redirected to HTTPS before a certificate is available.
+Use the [first HTTP-01 deployment](acme.md#first-http-01-deployment) recipe for
+the complete issuer, vhost and challenge setup. HTTP-01 needs public port 80
+reachable at this gateway; the renewal process alone does not serve challenges.
+Use the issuer's staging environment where available before production issuance.
 
-Example container main config shape for first issuance:
+Choose the gateway image for the entire server configuration. In particular, the
+published PHP profile does not include cache, and the full Wolfi image does not
+include PHP-FPM. Neither is a universal replacement for the other.
 
-```toml
-include_conf_d = true
-
-[server]
-listen = ["0.0.0.0:8080"]
-# Optional during first issuance on reloadable SNI TLS backends:
-tls_listen = ["0.0.0.0:8443"]
-default_vhost = "example.com"
-
-[server.https_redirect]
-enabled = false
-status = 308
-
-[tls]
-enabled = true
-backend = "rustls"
-
-[tls.acme]
-enabled = true
-storage = "/var/lib/fluxheim/acme"
-contact_email = "admin@example.com"
-default_issuer = "actalis"
-challenge = "http-01"
-
-[[tls.acme.issuers]]
-name = "actalis"
-directory_url = "https://acme-api.actalis.com/acme/directory"
-terms_of_service_agreed = true
-terms_of_service_url = "https://replace-with-the-current-issuer-terms.example/"
-
-[tls.acme.issuers.eab]
-key_id_credential = "actalis-eab-kid"
-hmac_key_credential = "actalis-eab-hmac-key"
-```
-
-For container secret files, mount the files read-only. If the host tree is
-already labeled with `container_file_t`, do not add a `:Z` relabel suffix to
-individual secret-file mounts:
-
-```bash
--v /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro
--v /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro
-```
-
-Validate the mounted config directly with `podman run --rm`. This avoids
-compose-provider differences around one-shot commands:
-
-```bash
-podman run --rm --ulimit core=0:0 \
-  --name fluxheim_validate \
-  --network gateway_net \
-  -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
-  -v /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z \
-  -v /srv/infra/fluxheim/run:/run/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/html:/srv/fluxheim:ro,Z \
-  -v /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro \
-  -v /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro \
-  ghcr.io/valkyoth/fluxheim:latest-wolfi \
-  --config /etc/fluxheim/fluxheim.toml \
-  --validate-config
-```
-
-Then start Fluxheim, replacing any existing gateway on the published ports. If
-you kept `server.tls_listen` enabled, also publish `443:8443`; otherwise publish
-only `80:8080` for the first issuance step:
-
-```bash
-podman run -d --ulimit core=0:0 \
-  --name fluxheim_gateway \
-  --network gateway_net \
-  --restart always \
-  -p 80:8080 \
-  -p 443:8443 \
-  -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
-  -v /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z \
-  -v /srv/infra/fluxheim/run:/run/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/html:/srv/fluxheim:ro,Z \
-  -v /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro \
-  -v /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro \
-  ghcr.io/valkyoth/fluxheim:latest-wolfi \
-  --config /etc/fluxheim/fluxheim.toml
-```
-
-Run due-only renewal from a second container. Missing certificate files are due
-targets, so first issuance does not require `--force-renew`:
-
-```bash
-podman run --rm --ulimit core=0:0 \
-  --name fluxheim_acme_due \
-  --network gateway_net \
-  --entrypoint /usr/local/bin/fluxheim-acme \
-  -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
-  -v /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z \
-  -v /srv/infra/fluxheim/run:/run/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U \
-  -v /srv/infra/fluxheim/html:/srv/fluxheim:ro,Z \
-  -v /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro \
-  -v /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro \
-  ghcr.io/valkyoth/fluxheim:latest-wolfi \
-  --config /etc/fluxheim/fluxheim.toml \
-  renew --vhost example.com
-```
-
-If you kept `server.tls_listen` disabled for the first run, enable HTTPS in the
-main config after every configured ACME target has renewed:
-
-```toml
-[server]
-listen = ["0.0.0.0:8080"]
-tls_listen = ["0.0.0.0:8443"]
-
-[server.https_redirect]
-enabled = true
-status = 308
-```
-
-Recreate the gateway with both published ports and verify SNI:
-
-```bash
-podman rm -f fluxheim_gateway
-podman compose -f gateway-fluxheim.yml up -d
-
-openssl s_client -connect example.com:443 -servername example.com </dev/null 2>/dev/null \
-  | openssl x509 -noout -subject -issuer -dates
-```
+Review and explicitly accept the issuer's actual terms; do not use a placeholder
+terms URL. Prepare secret-file ownership and labels as described in
+[secret handling](certificate-renewal.md#secret-handling).
+Keep the first-issuance and renewal instructions in those guides as the single
+source of truth, including missing-certificate startup, reload and public SNI
+verification. Do not force-remove the gateway as a substitute for graceful
+shutdown; a direct host-port replacement still has a listener gap.
 
 Optional mounted error pages should use a path whose parent already exists in
 the runtime image, such as `/var/lib/fluxheim/errors`. Avoid nested mountpoints
@@ -1033,10 +997,12 @@ load-balancer pools for container names that are expected to appear only after
 Fluxheim has already started until dynamic pool re-resolution is promoted to a
 stable feature.
 
-The container config sets `grace_period_seconds = 2` and
-`graceful_shutdown_timeout_seconds = 5`; keep the Podman stop timeout higher
-than the sum of those values so native accepted connections can drain and
-normal shutdown does not fall back to `SIGKILL`. Replacing a container that
+The linked container config sets `grace_period_seconds = 2` and
+`graceful_shutdown_timeout_seconds = 5`. The shorter inline TOML above leaves
+the runtime's default 30-second drain unchanged. Both deployment commands allow
+45 seconds before an engine-enforced kill. Size that budget above the configured
+pre-drain delay plus drain timeout, with additional teardown margin; the drain
+setting is not a total process-exit deadline. Replacing a container that
 directly owns its published host ports still has a listener gap; see
 [Zero-Downtime Upgrades](zero-downtime-upgrades.md) for the readiness-gated
 blue/green design.
@@ -1053,16 +1019,19 @@ that direct host-port replacement conflicts, then exercises failed-green
 rollback, external readiness probing, new-connection switching, and blue
 keep-alive drain behind a stable front listener.
 
-Published images default to the rootless-friendly
+The full and Wasm images use the rootless-friendly
 [packaging/container/fluxheim.toml](../../packaging/container/fluxheim.toml) and a
 self-contained default page at
 [packaging/default/index.html](../../packaging/default/index.html), installed in
 the image as `/srv/fluxheim/index.html`. Mount your own config or static root
-over those paths when deploying a real site.
+over those paths when deploying a real site. Focused profiles select their own
+config templates; they do not all serve that bundled static page.
 
-If using a root-runtime image, `:U` is usually not needed for ownership, but
-keeping separate writable directories for state/cache/logs is still recommended
-so the container does not need write access to static site content or TLS keys.
+Running the container engine as root does not change the image's configured
+runtime user. Prepare ownership for that actual user and engine mapping even
+with rootful Podman/Docker. Keep writable state/cache/log directories separate
+from read-only static content and TLS inputs; do not run Fluxheim as root merely
+to bypass ownership preparation.
 
 ## Native systemd
 
@@ -1087,67 +1056,77 @@ is blocked there; do not treat a generic build as proof that native works.
 See the [qualification ledger](../evidence/observability-12.md).
 
 ```bash
-scripts/build_fluxheim_rpm.py 1.4.5 --target opensuse-tumbleweed
-scripts/build_fluxheim_rpm.py 1.4.5 native --target fedora-44
+scripts/build_fluxheim_rpm.py "${RELEASE_VERSION:?Select an existing release tag}" generic --target opensuse-tumbleweed
+scripts/build_fluxheim_rpm.py --list-targets
 ```
 
 Untagged `latest` builds use the package name `fluxheim-unstable` and a date
 version so they are clearly separated from stable release packages:
 
 ```bash
-scripts/build_fluxheim_rpm.py latest native --target opensuse-tumbleweed
-scripts/build_fluxheim_rpm.py latest native --target opensuse-tumbleweed --rpm-release 2
+scripts/build_fluxheim_rpm.py latest generic --target opensuse-tumbleweed
+scripts/build_fluxheim_rpm.py latest generic --target opensuse-tumbleweed --rpm-release 2
 ```
 
 Those commands produce names shaped like
-`fluxheim-unstable-20260508-1.native.x86_64.rpm` and
-`fluxheim-unstable-20260508-2.native.x86_64.rpm`. The unstable package
+`fluxheim-unstable-YYYYMMDD-1.x86_64.rpm` and
+`fluxheim-unstable-YYYYMMDD-2.x86_64.rpm`. A native build adds `.native` to the
+RPM release field; a distribution-specific suffix may also appear. The unstable package
 conflicts with the stable `fluxheim` package because both install the same
 binary, service, config, and content paths.
 
 This helper is intended for installation testing on RPM-based hosts. The
 release-grade RPM source of truth remains `packaging/rpm/fluxheim.spec`.
 
+Without `--local-source`, the helper clones the remote repository: `latest`
+means its current default-branch checkout, not your working tree or the newest
+release tag. `--local-source` snapshots local tracked/non-ignored files instead;
+it can include unpublished edits and is not a publication or source-authenticity
+gate. Do not transfer a private review worktree to a builder merely to test this
+command. Final release builds require the separate release workflow and evidence.
+
 ## Codex And Rootless Podman
 
-When running Codex in a sandbox, include the rootless Podman runtime directories
-as writable roots and point Podman at the user socket:
+Sandbox permissions depend on the installed tool and host policy. This is not a
+Fluxheim runtime requirement. Check `codex resume --help` and the
+[official approval and sandbox guidance](https://learn.chatgpt.com/docs/agent-approvals-security)
+before granting access. Keep workspace restrictions and approval prompts enabled;
+grant only the required project/runtime paths, not the entire home directory.
+Do not enable unrestricted network access merely to solve a local file error.
 
-```bash
-CONTAINER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock" \
-codex resume <session-id> \
-  -a on-request \
-  -s workspace-write \
-  --add-dir "$XDG_RUNTIME_DIR/podman" \
-  --add-dir "$XDG_RUNTIME_DIR/libpod" \
-  --add-dir "$XDG_RUNTIME_DIR/containers" \
-  -c 'sandbox_workspace_write.network_access=true'
-```
+Local Podman does not require an API socket. If using the remote/API mode, verify
+the intended connection first. The usual rootless socket is
+`unix://$XDG_RUNTIME_DIR/podman/podman.sock`; `CONTAINER_HOST` selects a service
+endpoint. Access to that socket grants control of the account's containers and
+can execute code as that account, not merely inside the current checkout. Do not
+mount it into Fluxheim or make it world-accessible to bypass a permission error.
+See [Podman's API security guidance](https://docs.podman.io/en/latest/markdown/podman-system-service.1.html#security).
 
-Official Podman documentation describes the rootless API socket default as
-`unix://$XDG_RUNTIME_DIR/podman/podman.sock`, and `CONTAINER_HOST` has precedence
-over configured service destinations for Podman remote connections.
-
-Run rootless on an unprivileged port:
-
-```bash
-podman run --rm --ulimit core=0:0 \
-  --name fluxheim \
-  -p 8080:8080 \
-  -v ./examples/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
-  fluxheim:dev
-```
-
-For TLS, mount certificate files read-only and keep private keys owner-only on
-the host. Use the storage check before starting:
+From the repository root, use the self-contained static recipe and a tested full
+or Wasm image. This foreground command publishes only to host loopback; stop it
+normally with Ctrl-C:
 
 ```bash
 podman run --rm --ulimit core=0:0 \
-  -v ./fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
-  -v ./tls:/etc/fluxheim/tls:ro,Z \
-  fluxheim:dev \
-  --config /etc/fluxheim/fluxheim.toml --check-tls-storage
+  --name fluxheim-local-example \
+  --stop-timeout 15 \
+  --security-opt no-new-privileges \
+  -p 127.0.0.1:8080:8080 \
+  -v "$PWD/examples/installation/container.toml:/etc/fluxheim/fluxheim.toml:ro,Z" \
+  "${FLUXHEIM_GATEWAY_IMAGE:?Select a tested full or Wasm image}" \
+  --config /etc/fluxheim/fluxheim.toml
 ```
+
+In another terminal, request `http://127.0.0.1:8080/`. This recipe uses a
+five-second drain and disables cache, TLS and persistent logs. See
+[the installation walkthrough](installation.md#minimal-container-test) for
+detached execution, checks and cleanup. A kitchen-sink example is not a drop-in
+container config: it can require missing files, includes and external services.
+
+For TLS, use the [HTTPS guide](tls.md) and the [volume mapping](#volume-mapping)
+above. Preserve private-key ownership and mount inputs read-only. An explicit
+`--check-tls-storage` can inspect storage; it does not prove a public handshake,
+successful issuance or that the intended certificate is being served.
 
 Privileged ports such as `80` and `443` require host-level setup for rootless
 containers. Prefer host port forwarding to container ports `8080` and `8443`

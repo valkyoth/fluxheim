@@ -1,0 +1,46 @@
+# Public CSS asset proxy. The guide starts a loopback origin on port 9001.
+[server]
+listen = ["127.0.0.1:8088"]
+trusted_proxies = []
+
+[server.process]
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+grace_period_seconds = 1
+graceful_shutdown_timeout_seconds = 2
+
+[logging]
+level = "warn"
+format = "text"
+
+[logging.access]
+enabled = false
+request_id = false
+
+[tls]
+enabled = false
+
+[proxy]
+upstreams = ["127.0.0.1:9001"]
+upstream_tls = false
+connect_timeout_secs = 1
+read_timeout_secs = 3
+
+[cache]
+enabled = true
+status_header = "x-cache-status"
+status_reason_header = "x-cache-reason"
+content_types = ["text/css"]
+extensions = ["css"]
+methods = ["GET", "HEAD"]
+max_object_bytes = "256KiB"
+key_namespace = "public-css-v1"
+include_query = true
+status_ttls = { "200" = 120 }
+bypass_request_headers = ["cookie"]
+bypass_query_params = ["preview"]
+
+[cache.memory]
+enabled = true
+max_size_bytes = "8MiB"

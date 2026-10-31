@@ -4,6 +4,8 @@ mod core;
 mod disk;
 #[path = "config_tests_cache_encryption.rs"]
 mod encryption;
+#[path = "config_tests_cache_examples.rs"]
+mod examples;
 #[path = "config_tests_cache_headers.rs"]
 mod headers;
 #[path = "config_tests_cache_keys.rs"]

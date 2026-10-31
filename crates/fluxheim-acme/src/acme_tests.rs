@@ -33,12 +33,21 @@ mod account_api;
 #[path = "acme_tests_account_bootstrap.rs"]
 mod account_bootstrap;
 #[cfg(feature = "acme-client")]
+#[path = "acme_tests_account_outcome_contract.rs"]
+mod account_outcome_contract;
+#[cfg(feature = "acme-client")]
+#[path = "acme_tests_cleanup_contract.rs"]
+mod cleanup_contract;
+#[cfg(feature = "acme-client")]
 #[path = "acme_tests_lifecycle.rs"]
 mod lifecycle;
 #[path = "acme_tests_plan.rs"]
 mod plan;
 #[path = "acme_tests_renewal.rs"]
 mod renewal;
+#[cfg(feature = "acme-client")]
+#[path = "acme_tests_scheduling_contract.rs"]
+mod scheduling_contract;
 #[path = "acme_tests_storage.rs"]
 mod storage;
 #[cfg(feature = "acme-client")]

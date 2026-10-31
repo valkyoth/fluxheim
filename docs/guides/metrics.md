@@ -1,15 +1,19 @@
 # Metrics
 
-Requires a build with `metrics` (for example `profile-observability`). No new
-public listener is enabled by this release. Bind locally, or configure the
-existing protected token-file option and restrict network access:
+Metrics answer questions such as how many requests arrived, how long they took,
+and whether the cache or telemetry pipeline is failing. They are aggregate
+measurements, not a request log or a trace of an application's database calls.
+
+Requires a build with `metrics` (for example `profile-observability`). The
+listener is disabled by default and is separate from public vhost listeners.
+Start with loopback and a private token file:
 
 ```toml
 [metrics]
 enabled = true
 listen = "127.0.0.1:9091"
 require_loopback = true
-# token_file = "/run/secrets/fluxheim-metrics-token"
+token_file = "/run/secrets/fluxheim-metrics-token"
 ```
 
 Read `GET /metrics` with Prometheus. Optional `[metrics.otlp]` exports the same
@@ -18,11 +22,127 @@ units are seconds (`s`), byte units are bytes (`By`), other quantities use `1`.
 Zero-retention privacy builds continue to reject the `metrics` feature entirely;
 this checkpoint does not relax that boundary. In metrics-enabled builds,
 request/trace IDs, raw Host values, paths, queries, bodies, certificates and
-client IPs are never new metric labels.
+client IPs are not operational metric labels.
 Access-log filtering and sampled tracing do not disable aggregate measurements.
 See [OTLP export lifecycle](otlp-export.md) for collector authentication, byte
 limits, retries, shutdown and local exporter-health metrics. Oversized export
 snapshots are rejected without disabling local scraping.
+
+## Working Example
+
+[Complete proxy recipe](../../examples/metrics/proxy.toml) runs public HTTP at
+127.0.0.1:8080, forwards to an origin on 127.0.0.1:9001 and exposes metrics only at
+127.0.0.1:9091. Copy it into an owner-controlled configuration directory. The
+relative `metrics-token` filename is resolved beside the configuration file,
+not beside the executable. On Unix, from that directory:
+
+```sh
+umask 077
+openssl rand -hex 32 > metrics-token
+chmod 600 metrics-token
+fluxheim --config proxy.toml
+```
+
+Use an existing HTTP origin at the configured address. In a separate terminal:
+
+```sh
+curl --fail --resolve metrics.example.test:8080:127.0.0.1 \
+  http://metrics.example.test:8080/
+```
+
+Give the monitoring agent its own protected copy of the token. A Prometheus
+scrape fragment, when Prometheus runs on the **same host/network namespace**, is:
+
+```yaml
+scrape_configs:
+  - job_name: fluxheim
+    scrape_interval: 15s
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/fluxheim-metrics-token
+    static_configs:
+      - targets: ['127.0.0.1:9091']
+```
+
+The credentials file is read by Prometheus, so its path and read permission must
+work inside that process/container too. Container loopback is not host loopback.
+Use a same-network-namespace agent, or a separately authenticated TLS proxy for
+remote collection; do not publish this HTTP listener to the Internet. See the
+[collector examples and dashboards](collector-integrations.md) for runnable
+Prometheus/Grafana and SigNoz arrangements.
+
+## Every Configuration Option
+
+These are the complete leaf fields of `[metrics]` and `[metrics.otlp]`. They are
+global, not per vhost/route. Unknown fields are rejected. There is no configurable
+scrape interval inside Fluxheim: Prometheus chooses when to read `/metrics`.
+
+| Option | Default | Meaning and validation |
+| --- | --- | --- |
+| `metrics.enabled` | `false` | Start the dedicated HTTP scrape listener; requires the `metrics` build feature. Also required when metrics OTLP export is enabled. |
+| `metrics.listen` | `"127.0.0.1:9091"` | Numeric IP and port, for example `"[::1]:9091"`; not a DNS name. Parsed even when disabled. Port 0 is accepted but unsuitable for a fixed scrape target. |
+| `metrics.require_loopback` | `true` | When enabled, reject non-loopback bind addresses. Setting false permits a remote bind; it does **not** add TLS, a token, a firewall or trusted-proxy rules. |
+| `metrics.token_env` | absent | Legacy parsed field, always rejected even when metrics are disabled. Use a file instead. |
+| `metrics.token_file` | absent | Optional scrape bearer-token file. Without it, anyone who can reach the listener can scrape. Empty paths and unsafe parents are rejected; active startup reads and validates the file. |
+| `metrics.otlp.enabled` | `false` | Push cumulative metrics as OTLP/HTTP JSON; requires `metrics-otlp` and `metrics.enabled`. Not a second scrape server. |
+| `metrics.otlp.endpoint` | `"http://127.0.0.1:9090/api/v1/otlp/v1/metrics"` | Complete metrics ingestion URL, at most 2048 bytes. HTTPS except numeric loopback HTTP; no credentials, query or fragment. DNS `localhost` is not the HTTP exception. |
+| `metrics.otlp.service_name` | `"fluxheim"` | OTLP service identity, 1-128 visible ASCII bytes, without controls. Use a stable deployment name rather than a request-derived value. |
+| `metrics.otlp.interval_secs` | `15` | Push collection interval, 1-3600 seconds. Independent of Prometheus scraping. |
+| `metrics.otlp.timeout_secs` | `2` | Export request timeout, 1-60 seconds. |
+| `metrics.otlp.tls_ca_cert_path` | absent | Optional PEM CA bundle for an HTTPS collector; relative to the config file. Otherwise uses bundled WebPKI roots. |
+| `metrics.otlp.bearer_token_file` | absent | Separate protected collector credential, not the scrape token. Requires HTTPS even for loopback. Relative to the config file. |
+
+Disabled OTLP blocks skip exporter policy validation. In contrast, the parent
+metrics block still checks listen syntax, `token_env`, empty token paths and
+supplied path trust. Enabling OTLP without metrics fails validation. A FIPS-required
+configuration has additional transport restrictions; see [FIPS](fips.md).
+See [OTLP configuration and lifecycle](otlp-export.md) for delivery bounds,
+collector CA trust, credential rules, retries and shutdown behavior.
+
+## Scrape Authentication And Lifecycle
+
+The built-in endpoint is **plain HTTP**, including when public vhosts use HTTPS.
+Public vhost ACLs, external authentication and rate limits do not automatically
+protect the metrics service. Keep loopback, firewall it separately and use a
+token when local processes are not all trusted. A bearer token does not encrypt
+remote traffic. Prefer an authenticated TLS gateway or secure OTLP export for
+off-host monitoring.
+
+| Request | Result |
+| --- | --- |
+| `GET /metrics` with required token | 200, Prometheus text exposition |
+| `HEAD /metrics` with required token | 200, empty body, length of the generated representation |
+| `/metrics?anything` | Same endpoint; query does not select/filter metrics |
+| `/`, `/metrics/` or another path | 404, not a dashboard or health endpoint |
+| Missing/wrong token on `/metrics` | 401 and `WWW-Authenticate: Bearer realm="metrics"` |
+| Unsupported method with correct token | 405 and `Allow: GET, HEAD` |
+
+Use `Authorization: Bearer TOKEN` with that exact scheme spelling. Authentication
+is checked before method dispatch on the metrics path. The file is UTF-8, at most
+8192 bytes **including its trailing newline**; surrounding whitespace is trimmed
+and an empty result is rejected. Use a random single-line token. Missing,
+oversized or invalid-UTF-8 files fail active service startup, not anonymous fallback.
+Parent links and writable parents are rejected; do not use a symlinked secret
+mount without checking compatibility.
+
+**Current limitation:** unlike the Windows
+confidential-file ACL opener, the Unix metrics reader does not enforce private
+leaf-file permissions. Do not interpret successful startup as a confidentiality
+check. Provision the token as service-owned mode 0600 in an owner-controlled
+directory, with no group/other writes or untrusted ancestor links. Group/world
+readability or writability must be prevented by deployment permissions until the
+queued correction is implemented. Keep token values out of command arguments,
+logs and the repository. On Windows, use a protected ACL admitting only the
+service identity and trusted administrators/system.
+
+The token is read once when constructing the service. Replacing its file does
+**not** rotate the running credential; restart/upgrade Fluxheim and update the
+collector's copy in a coordinated window. Changing any `metrics.*` configuration
+is classified as requiring a process upgrade, not snapshot-only reload. A bind
+failure is fatal to startup; choose a free dedicated port. Scrapes observe current
+in-memory counters; they are not durable storage. Retention belongs to the
+monitoring backend.
 
 ## Request And Connection Measurements
 
@@ -95,10 +215,27 @@ encoded and written to get an event count. A missing dispatcher reports
 `state=available` as zero, rather than a healthy-looking set of zero failures.
 Snapshots use atomics; simultaneously sampled stages need not reconcile exactly.
 
-Existing ACME events, cache tier/activity/capacity and purge counters, PHP pool/
-retry/outcome metrics, load-balancer selection/retry/ejection/queue metrics, Wasm
-execution/admission metrics, TCP stream and UDP measurements retain their names
-and meanings. Cache activity reset does not reset Prometheus lifetime counters.
+## Subsystem Metrics And Known Gaps
+
+Registration of a metric family does not prove its producer runs. Variable-label
+families can be absent until the first observation. Use the feature guide for
+the event meanings and supported runtime; do not invent zeros for missing series.
+
+| Area | Measurements and current boundaries |
+| --- | --- |
+| [Cache](cache.md) | Configuration, memory/disk occupancy, activity, latency and purge families. Configuration capacity is not measured resident memory. Cache activity reset does not reset Prometheus lifetime counters. |
+| [Load balancer](load-balancer.md) | Configured pools, selection/retry/ejection events and queue-wait histogram; not complete active-health status or every accepted latency policy. |
+| [PHP](php.md) | Request/outcome/duration producers are live. Specific native pool/retry/STDERR metric producers remain unwired. |
+| [Access control](access-control.md) | Legacy scoped edge-policy producer remains unwired for auth/ACL/admission decisions. Operational security observations are a different signal. |
+| [ACME](acme.md) | Bounded lifecycle event counter; not certificate-expiry inventory. A separate one-shot companion process does not share the server's registry. |
+| [Wasm](wasm-extensibility.md) | Execution count, duration and admission rejection by bounded plugin/phase/outcome identities; not application-internal spans. |
+| [TCP streams](tcp-streams.md) | Connection outcomes and directional copied bytes; separate from logical HTTP traffic. |
+| [UDP](udp.md) | Datagram/drop/active-session families; active gauge incorrectly stays zero with an unlimited cap. |
+
+Inspect a real scrape for the selected build/workload. The registry and label
+allowlists live in `src/metrics_registry*.rs` and
+`crates/fluxheim-observability/src/metrics_labels.rs`. Legacy and operational
+families can describe overlapping work: sum only compatible signals.
 
 ## Series Budget And Reloads
 
@@ -165,6 +302,15 @@ ejection/selection events as events, not as a substitute for an active-health
 gauge. Features absent from the build or unused may have no event series.
 
 ## Verification
+
+`python3 scripts/smoke_metrics_examples.py --binary target/debug/fluxheim`
+executes the complete recipe with an actual local origin: authenticated and
+anonymous scraping, methods/paths, request counts, secret canaries, file rotation
+and restart, malformed token rejection, and the Unix permission-gap
+characterization. It uses private temporary fixtures, numeric loopback ports and
+bounded child cleanup. The characterization is not acceptance of weak permissions.
+Configuration tests cover all defaults, inactive validation and restart policy;
+the Python documentation guard checks every leaf field against the option table.
 
 `scripts/smoke_request_correlation.py --binary PATH` starts the real server and
 checks exact request/attempt/byte totals alongside HTTP/1.1, TLS HTTP/2,

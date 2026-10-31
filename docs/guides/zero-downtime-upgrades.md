@@ -1,26 +1,28 @@
 # Zero-Downtime Upgrades
 
-Fluxheim `1.7.11` provides the zero-downtime process-upgrade foundation. This
-document defines the supported listener inheritance, readiness, drain, and
-deployment contracts.
+This guide distinguishes connection-aware shutdown, persistent listening
+sockets and readiness-gated replacement. They solve different parts of an
+upgrade. For startup commands and every process option, see
+[service lifecycle](service-lifecycle.md).
 
 Zero downtime requires one component outside the replaceable Fluxheim process
 to keep ownership of the public listening socket. Replacing a process that is
 the sole owner of a bound port necessarily creates a listener gap, regardless
 of how quickly the replacement starts.
 
-## Current 1.7.11 Drain Contract
+## Drain Contract
 
 Native shutdown behavior is explicit:
 
-1. Fluxheim receives `SIGTERM`, `SIGQUIT`, or the platform shutdown signal.
+1. After startup, Fluxheim receives SIGINT, SIGTERM or SIGQUIT on Unix, or
+   console CTRL_C/CTRL_BREAK on Windows.
 2. An optional `server.process.grace_period_seconds` delay allows a supervisor
    to finish its handoff sequence before Fluxheim starts draining.
 3. Fluxheim requests process-wide shutdown. Native HTTP, HTTPS, HTTP/2, admin,
    and local Unix HTTP listeners stop accepting and drop their listener handle.
 4. Accepted connection tasks remain alive. Existing HTTP/1 keep-alive,
    WebSocket/takeover, TLS, and HTTP/2 connections may finish normally.
-5. The complete drain is bounded by
+5. The tracked async task drain is bounded by
    `server.process.graceful_shutdown_timeout_seconds`. If the field is omitted,
    Fluxheim applies a 30-second effective timeout.
 6. Work still active at the timeout is explicitly aborted, including when the
@@ -29,6 +31,12 @@ Native shutdown behavior is explicit:
 The service manager or container stop timeout must exceed the grace period plus
 the graceful drain timeout. Otherwise it can send `SIGKILL` before Fluxheim's
 own bound is reached.
+
+Leave additional teardown headroom. Exporter shutdown and already running
+blocking tasks are not bounded by this async drain timer. A drain timeout
+aborts tracked work but can still return exit status zero. The shipped systemd
+stop budget needs an override until the documented limitation is corrected; see
+[systemd deployment](systemd.md#reload-and-restart).
 
 This drain contract improves normal restarts. Inherited public HTTP/HTTPS TCP
 listeners let an external socket owner remove connection refusal during
@@ -45,8 +53,18 @@ The supported native design uses systemd socket activation:
 - Fluxheim never silently mixes inherited and newly bound public listeners;
 - the new process validates configuration, initializes TLS/routes/cache policy,
   adopts every expected listener, and reports readiness;
-- only after readiness does the supervisor ask the old process to drain;
 - systemd retains the listening sockets while either process exits.
+
+An ordinary single-service `systemctl restart` stops the old process before
+starting the new one. The socket can queue new connections during that gap;
+requests can still time out and a failed replacement does not leave the old
+process serving. It is not automatic blue/green deployment.
+
+A separate two-generation supervisor can keep the old process until the new
+one signals readiness, then ask the old generation to drain. The native upgrade
+smoke below implements that sequence. It is not supplied as a production
+supervisor by the packaged systemd service, nor does Fluxheim's inactive
+`server.process.upgrade_sock` implement it.
 
 The inherited descriptor environment is part of the trusted process-launch
 boundary. Fluxheim must fail closed on missing, duplicate, unexpected, or
@@ -93,7 +111,8 @@ ready only after all startup-blocking work succeeds, including:
 - complete configuration validation and `conf.d` merge;
 - route and vhost construction;
 - TLS certificate/key loading and SNI resolver construction;
-- cache storage/lease initialization;
+- cache policy construction (not proof of successful persistent storage;
+  [the documented limitation](cache.md) tracks initialization/reload gaps);
 - load-balancer pool construction;
 - required Wasm module validation and compilation;
 - binding or adopting every required listener;
@@ -109,9 +128,13 @@ state. On shutdown it sends `STOPPING=1` and a draining status before applying
 the optional grace period. Linux abstract notification sockets and filesystem
 sockets are both supported.
 
-If readiness fails, the old process must remain active and the replacement must
+For readiness-gated overlap, if readiness fails, the old process must remain active and the replacement must
 exit without asking it to drain. A timeout or failed health probe is a failed
 upgrade, not permission to continue.
+
+Readiness acknowledgements are not upstream health, successful exporter
+delivery or successful requests. Apply a bounded supervisor startup deadline
+and a functional probe of the required routes/TLS before switching traffic.
 
 ## Podman Design
 
@@ -159,7 +182,7 @@ same readiness and rollback sequence.
 
 Blue and green processes must not concurrently mutate storage that has a
 single-writer contract. Cache storage-bin leases, snapshot stores, ACME state,
-managed PHP-FPM state, PID/control sockets, and other process-owned paths need
+managed PHP-FPM state, active control sockets, and other process-owned paths need
 separate generation paths or an explicit shared-state handoff.
 
 Read-only configuration, certificate material, and static content may be shared

@@ -118,7 +118,10 @@ impl UpstreamLoadBalancer {
                 &self.queue_policy,
                 &self.queue_waiting,
             ),
-            retry: self.retry.clone(),
+            retry: super::LoadBalancerRetryRuntimeStats {
+                admitted: self.retry_budget.admitted(),
+                ..self.retry.clone()
+            },
             backends,
         }
     }

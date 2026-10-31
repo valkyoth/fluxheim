@@ -1,0 +1,13 @@
+# Merge into local.toml, but use HTTPS before relying on a browser cookie.
+[proxy.load_balance.persistence]
+enabled = true
+mode = "managed-cookie"
+cookie = "fluxheim_affinity"
+ttl_secs = 300
+table_max_entries = 4096
+managed_cookie_domain = "lb.example.test"
+managed_cookie_path = "/"
+managed_cookie_secure = true
+managed_cookie_http_only = true
+managed_cookie_same_site = "lax"
+managed_cookie_max_age_secs = 300

@@ -1,0 +1,29 @@
+# For public download files only. Listing URL limitations are documented.
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "downloads"
+
+[server.process]
+daemon = false
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+
+[cache]
+enabled = false
+
+[[vhosts]]
+name = "downloads"
+hosts = ["files.example.test"]
+
+[vhosts.web]
+root = "site"
+index_files = ["index.html"]
+deny_dotfiles = true
+cache_control = "no-store"
+
+[vhosts.web.directory_listing]
+enabled = true
+exact_size = true
+local_time = false

@@ -1,0 +1,20 @@
+# Merge these fields into the existing [cache] table, not a duplicate TOML table.
+[cache]
+min_uses = 2
+pass_uncacheable_after = 3
+status_ttls = { "404" = 15 }
+stale_while_revalidate_secs = 10
+stale_if_error_secs = 60
+stale_if_error_on = ["connect", "timeout", "connection-closed", "http-status"]
+stale_if_error_statuses = [502, 503, 504]
+vary_request_headers = ["accept-language"]
+no_store_response_headers = ["x-private-response"]
+
+[cache.lock]
+enabled = true
+age_timeout_secs = 30
+wait_timeout_secs = 10
+
+[cache.origin_protection]
+enabled = true
+max_concurrent_fills = 4

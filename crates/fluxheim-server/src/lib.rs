@@ -48,6 +48,8 @@ mod native_http1_proxy_peer_fill;
 mod native_http1_proxy_peer_fill_auth;
 mod native_http1_proxy_request;
 mod native_http1_proxy_response_finish;
+#[cfg(feature = "load-balancer")]
+mod native_http1_proxy_retry;
 mod native_http1_proxy_revalidation;
 mod native_http1_proxy_runtime;
 mod native_http1_proxy_static_dispatch;

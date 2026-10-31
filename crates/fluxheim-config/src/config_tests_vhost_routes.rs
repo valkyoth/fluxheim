@@ -1,5 +1,13 @@
 use super::*;
 
+#[path = "config_tests_access_examples.rs"]
+mod access_examples;
+#[path = "config_tests_admission_examples.rs"]
+mod admission_examples;
+
+#[path = "config_tests_routing_examples.rs"]
+mod guide_examples;
+
 #[test]
 fn parses_vhost_routes() {
     let config: Config = toml::from_str(

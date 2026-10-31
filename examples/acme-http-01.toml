@@ -1,5 +1,7 @@
+# Deployment template, not automatic agreement to CA terms. See docs/guides/acme.md.
 [server]
 listen = ["127.0.0.1:8080"]
+tls_listen = ["127.0.0.1:8443"]
 default_vhost = "site.example.test"
 
 [tls]
@@ -22,6 +24,13 @@ retry_initial_secs = 300
 retry_max_secs = 86400
 reload_after_renewal = true
 zero_downtime_reload = true
+
+[[tls.acme.issuers]]
+name = "letsencrypt-staging"
+directory_url = "https://acme-staging-v02.api.letsencrypt.org/directory"
+terms_of_service_agreed = false
+# After reviewing the exact advertised HTTPS terms URL, add terms_of_service_url
+# and change agreement above to true. No account is registered by this template.
 
 [[vhosts]]
 name = "site.example.test"

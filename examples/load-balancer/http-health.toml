@@ -1,0 +1,21 @@
+# Merge into local.toml; origins must implement this health-response contract.
+[proxy.load_balance.health_check]
+enabled = true
+protocol = "http"
+interval_secs = 2
+consecutive_success = 2
+consecutive_failure = 3
+parallel = true
+method = "GET"
+path = "/healthz"
+host = "app.internal.example"
+request_headers = [{ name = "x-health-probe", value = "fluxheim" }]
+expected_statuses = [200]
+expected_status_ranges = [{ start = 200, end = 299 }]
+expected_headers = [{ name = "x-health-state", value = "ready" }]
+expected_body_contains = ["ready"]
+expected_body_json = [{ path = "checks.database", equals = "true" }]
+health_weight_min_percent = 25
+reuse_connection = false # true is accepted but does not reuse native connections.
+connect_timeout_secs = 1
+read_timeout_secs = 2

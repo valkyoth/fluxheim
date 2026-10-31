@@ -1,0 +1,32 @@
+# Loopback demonstration, not a public administrative endpoint.
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "api"
+trusted_proxies = []
+[server.process]
+daemon = false
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+[cache]
+enabled = false
+
+[[vhosts]]
+name = "api"
+hosts = ["api.example.test"]
+[vhosts.access]
+enabled = true
+allow = ["127.0.0.1/32", "::1/128"]
+deny = []
+[vhosts.proxy]
+upstreams = ["127.0.0.1:9001"]
+
+[[vhosts.routes]]
+name = "admin"
+path_prefix = "/admin"
+# No method filter: the rule must protect every method for this route.
+[vhosts.routes.access]
+allow = ["192.0.2.10/32"]
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]

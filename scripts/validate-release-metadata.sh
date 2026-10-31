@@ -79,8 +79,8 @@ if ! grep -q "^# Fluxheim $cargo_version Release Notes$" "$release_notes"; then
     exit 1
 fi
 
-if ! grep -q "v$cargo_version" README.md; then
-    echo "release metadata: README.md does not reference v$cargo_version" >&2
+if ! grep -Fq 'https://github.com/valkyoth/fluxheim/releases/latest' README.md; then
+    echo "release metadata: README.md must link to the published releases" >&2
     exit 1
 fi
 

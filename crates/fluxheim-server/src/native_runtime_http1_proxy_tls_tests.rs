@@ -5,6 +5,10 @@ use tokio::net::TcpStream;
 use crate::native_runtime_http1_proxy_tests::upstream_response;
 use crate::{NativeHttp1ProxyRuntime, ServerPlan};
 
+#[cfg(feature = "tls-rustls-backend")]
+#[path = "native_tls_proxy_protocol_contract_tests.rs"]
+mod proxy_protocol_contract_tests;
+
 struct TemporaryCertificate {
     _temp: tempfile::TempDir,
     _cert_file: tempfile::NamedTempFile,

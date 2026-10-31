@@ -4,6 +4,10 @@ use std::time::Duration;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
+#[cfg(test)]
+#[path = "concurrency_contract_tests.rs"]
+mod contract_tests;
+
 #[derive(Debug)]
 pub(crate) struct NativeConcurrencyPermit {
     permit: Option<OwnedSemaphorePermit>,

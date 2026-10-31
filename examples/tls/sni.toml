@@ -1,0 +1,45 @@
+# Each certificate must cover the names assigned to it.
+[server]
+listen = []
+tls_listen = ["127.0.0.1:8443"]
+default_vhost = "fallback"
+
+[server.process]
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+
+[tls]
+enabled = true
+backend = "rustls"
+profile = "intermediate"
+alpn = "http1-and-http2"
+
+[[tls.certificates]]
+cert_path = "server.pem"
+key_path = "server-key.pem"
+
+[cache]
+enabled = false
+
+[[vhosts]]
+name = "fallback"
+hosts = ["site.example.test"]
+[vhosts.tls]
+enabled = true
+[vhosts.tls.certificate]
+cert_path = "server.pem"
+key_path = "server-key.pem"
+[vhosts.web]
+root = "site"
+
+[[vhosts]]
+name = "api"
+hosts = ["api.example.test", "*.api.example.test"]
+[vhosts.tls]
+enabled = true
+[vhosts.tls.certificate]
+cert_path = "api.pem"
+key_path = "api-key.pem"
+[vhosts.web]
+root = "site"

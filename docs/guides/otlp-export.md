@@ -1,6 +1,6 @@
 # OTLP Export Lifecycle
 
-Unreleased 1.9.0 supports optional OTLP/HTTP JSON metrics and traces. This is
+Fluxheim supports optional OTLP/HTTP JSON metrics and traces. This is
 best-effort telemetry, not durable audit storage, an application APM agent, or
 exactly-once delivery. Collector failure does not make the public listener or
 local metrics listener unready. See the qualified
@@ -51,7 +51,9 @@ bearer_token_file = "/run/secrets/collector-token"
 ```
 
 Both file options are optional. Without a custom CA, HTTPS uses bundled WebPKI
-roots. Certificate chains and server names are verified; verification cannot be
+roots. A custom bundle replaces those roots rather than appending to them. It is
+limited to 1 MiB and must contain at least one PEM certificate.
+Certificate chains and server names are verified; verification cannot be
 disabled. Custom CA files must be regular files in an integrity-protected path,
 not linked or writable by untrusted users. The token file must additionally be
 confidential: owner-only `0600` on Unix, or the existing confidential-secret ACL
@@ -72,6 +74,14 @@ proxies are deliberately disabled for this connection. Use a directly configured
 collector or collector gateway instead. Collector reply bodies, diagnostic
 messages and authorization values are not emitted by exporter diagnostics.
 
+Every configurable field is listed in the [metrics option table](metrics.md#every-configuration-option)
+and [tracing option table](opentelemetry-tracing.md#every-tracing-option).
+Changing either service's configuration requires process restart/upgrade.
+Endpoint validation does not contact the collector: syntactically valid but
+unreachable collectors can start and later report delivery failures. Invalid
+credentials/CA files can instead fail exporter construction at startup. A
+separate exporter connection does not inherit vhost upstream TLS/auth policies.
+
 Tracing retains its existing trusted-parent sampling policy. Enabling OTLP does
 not sample all traffic; see [tracing](opentelemetry-tracing.md).
 
@@ -79,7 +89,7 @@ not sample all traffic; see [tracing](opentelemetry-tracing.md).
 
 | Resource | Limit / behavior |
 | --- | --- |
-| Trace batch | One completed span per request; at most 256 bytes per string field before JSON encoding |
+| Trace batch | One completed span per export HTTP request (a logical application request can produce server and client spans); at most 256 bytes per string field before JSON encoding |
 | Metrics batch | One cumulative snapshot; preflight rejects oversized input before building a second JSON tree |
 | Metrics preflight | At most 1024 families; names 256 bytes, descriptions 1024; 16 labels per point, label names 128/value 256; 128 histogram buckets; aggregate weighted input budget 512 KiB |
 | Queued trace items | `queue_size`, 1..1,000,000; default 8192, subject also to the byte ceiling |

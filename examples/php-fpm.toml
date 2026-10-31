@@ -68,7 +68,7 @@ stderr_max_bytes = "2KiB"
 # stderr_failure_patterns = ["PHP Fatal error:"]
 # Remove selected headers emitted by PHP before the response is sent.
 hide_response_headers = ["x-powered-by"]
-# Let Fluxheim own cache headers after consuming PHP cache/offload controls.
+# Removes PHP cache headers; native offload/expiry controls are not integrated.
 # ignore_origin_cache_headers = false
 # Convert selected PHP error statuses into Fluxheim-generated error responses.
 intercept_error_statuses = []
@@ -88,7 +88,7 @@ path_info = "disabled"
 # SCRIPT_FILENAME, CONTENT_LENGTH, HTTPS, and HTTP_PROXY are managed by
 # Fluxheim and cannot be overridden here.
 # APP_ENV = "production"
-# PHP_VALUE = "memory_limit=256M"
+# PHP_VALUE and PHP_ADMIN_VALUE are forbidden; configure PHP ini separately.
 
 [vhosts.php.fpm]
 # Default: connect to an operator-managed external php-fpm pool.
@@ -161,14 +161,8 @@ tcp = "php-fpm:9000"
 # Generated socket/config/pid/log files live under socket_dir. Forced process
 # termination can leave stale files; remove them only while Fluxheim is stopped.
 
-# Optional shared cache migration preset for WordPress sites. Enable only for
-# routes where public-page caching is wanted; logged-in and query-string
-# requests bypass lookup and storage through the preset.
-# [vhosts.cache]
-# preset = "wordpress"
-# enabled = true
-# status_ttls = { "200" = 300, "301" = 300, "302" = 300, "404" = 60 }
-# stale_if_error_secs = 60
+# Native PHP response caching is not integrated.
+# Do not enable a WordPress cache block here; see docs/guides/php.md.
 
 [vhosts.web]
 root = "/srv/sites/php.example.test/public"

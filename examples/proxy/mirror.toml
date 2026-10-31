@@ -1,0 +1,27 @@
+# Local test traffic only. Destination must not create side effects.
+[server]
+listen = ["127.0.0.1:8080"]
+trusted_proxies = []
+[server.host_routing]
+strict = true
+[server.process]
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+[cache]
+enabled = false
+[[vhosts]]
+name = "app"
+hosts = ["app.example.test"]
+[vhosts.proxy]
+upstreams = ["127.0.0.1:9001"]
+[vhosts.proxy.mirror]
+enabled = true
+base_url = "http://127.0.0.1:9003/shadow"
+sample_per_mille = 1000
+methods = ["GET", "HEAD", "OPTIONS"]
+forward_headers = ["x-request-id"]
+timeout_secs = 1
+max_response_bytes = "1KiB"
+max_in_flight = 4

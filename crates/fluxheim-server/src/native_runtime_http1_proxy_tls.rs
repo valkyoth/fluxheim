@@ -19,6 +19,10 @@ use super::NativeHttp1ProxyRuntimeError;
 #[cfg(feature = "tls-rustls-backend")]
 const ACME_TLS_ALPN_PROTOCOL: &[u8] = b"acme-tls/1";
 
+#[cfg(all(test, feature = "tls-rustls-backend", feature = "acme"))]
+#[path = "native_acme_alpn_contract_tests.rs"]
+mod acme_alpn_contract_tests;
+
 #[cfg(feature = "tls-rustls-backend")]
 pub(super) fn native_rustls_server_config(
     config: &Config,

@@ -1,0 +1,29 @@
+# Start an HTTP origin at 127.0.0.1:9001. This example does not enable OTLP.
+[server]
+listen = ["127.0.0.1:8080"]
+trusted_proxies = []
+[server.process]
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+grace_period_seconds = 1
+graceful_shutdown_timeout_seconds = 2
+
+[metrics]
+enabled = true
+listen = "127.0.0.1:9091"
+require_loopback = true
+# Create this owner-private file before starting; see the metrics guide.
+token_file = "metrics-token"
+
+[[vhosts]]
+name = "metrics-guide"
+hosts = ["metrics.example.test"]
+[[vhosts.routes]]
+name = "application"
+path_prefix = "/"
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+upstream_tls = false
+upstream_http_version = "http1"

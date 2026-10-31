@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use h2::client::SendRequest;
 use http::{HeaderMap, Method, StatusCode, Uri};
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::task::{AbortHandle, JoinHandle};
 use zeroize::Zeroizing;
@@ -86,6 +87,7 @@ impl NativeHttp2UpstreamRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp2UpstreamResponse {
+    pub(crate) upstream_header_latency: Option<Duration>,
     status: StatusCode,
     headers: HeaderMap,
     body: Zeroizing<Vec<u8>>,
@@ -96,6 +98,7 @@ impl NativeHttp2UpstreamResponse {
     #[cfg(test)]
     pub(crate) fn for_test(status: StatusCode, headers: HeaderMap, body: impl AsRef<[u8]>) -> Self {
         Self {
+            upstream_header_latency: None,
             status,
             headers,
             body: Zeroizing::new(body.as_ref().to_vec()),
@@ -296,11 +299,15 @@ pub(crate) async fn send_native_http2_upstream_request(
         .await
         .map_err(|_| NativeHttp2StackError::ResponseWriteTimeout)??;
     }
+    let started = Instant::now();
     let response = tokio::time::timeout(policy.handler_timeout(), response)
         .await
         .map_err(|_| NativeHttp2StackError::HandlerTimeout)?
         .map_err(NativeHttp2StackError::Stream)?;
-    validate_inbound_response(response, policy).await
+    let header_latency = started.elapsed();
+    let mut response = validate_inbound_response(response, policy).await?;
+    response.upstream_header_latency = Some(header_latency);
+    Ok(response)
 }
 
 fn outbound_request_head(
@@ -399,6 +406,7 @@ async fn validate_inbound_response(
         validate_response_headers(trailers)?;
     }
     Ok(NativeHttp2UpstreamResponse {
+        upstream_header_latency: None,
         status,
         headers,
         body,

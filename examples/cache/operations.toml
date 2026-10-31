@@ -1,0 +1,33 @@
+# Append to local.toml for the currently supported CLI inspection scope.
+# Vhost policies are independent: explicitly configure this vhost's cache.
+[[vhosts]]
+name = "assets"
+hosts = ["cache.test"]
+
+[vhosts.cache]
+enabled = true
+status_header = "x-cache-status"
+status_reason_header = "x-cache-reason"
+content_types = ["text/css"]
+extensions = ["css"]
+methods = ["GET", "HEAD"]
+max_object_bytes = "256KiB"
+key_namespace = "public-css-v1"
+include_query = true
+status_ttls = { "200" = 120 }
+bypass_request_headers = ["cookie"]
+bypass_query_params = ["preview"]
+
+[vhosts.cache.memory]
+enabled = true
+max_size_bytes = "8MiB"
+
+[vhosts.cache.disk]
+enabled = true
+backend = "filesystem"
+path = "state/cache"
+max_size_bytes = "32MiB"
+
+[vhosts.proxy]
+upstreams = ["127.0.0.1:9001"]
+upstream_tls = false

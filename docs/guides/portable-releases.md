@@ -1,9 +1,9 @@
 # Portable Releases
 
-Fluxheim `1.8.0` establishes one portable archive contract for Linux, macOS,
-and Windows. This is the packaging baseline for later platform-parity work; it
-does not claim that every Linux deployment integration already has a native
-equivalent on macOS or Windows.
+Fluxheim uses a shared portable archive contract for Linux, macOS and Windows.
+Start with [installation and package selection](installation.md) if you are
+choosing a download. Shared archive naming does not imply that every Linux
+deployment integration has a native equivalent on macOS or Windows.
 
 ## Archive Contract
 
@@ -18,6 +18,11 @@ Each supported operating-system target uses the same public profile names:
 | `load-balancer` | `profile-load-balancer-edge` plus ACME |
 | `php` | `profile-web-server`, PHP-FPM, and ACME |
 | `config-tester` | `profile-development` |
+
+The tester artifact's Cargo build profile is distinct from its runtime
+`--profile` policy filter. See [CLI and tester documentation](command-line.md)
+for examples and current capability-filter limitations; validate deployment
+with the actual server artifact as well.
 
 `full` intentionally remains Wasm-free. Select `wasm` when in-process policy
 execution and its reviewed proxy-ABI and WASI capability surfaces are needed.

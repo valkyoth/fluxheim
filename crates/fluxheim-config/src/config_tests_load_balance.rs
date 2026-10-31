@@ -1,5 +1,7 @@
 #[path = "config_tests_load_balance_core.rs"]
 mod core;
+#[path = "config_tests_load_balance_examples.rs"]
+mod examples;
 #[path = "config_tests_load_balance_health.rs"]
 mod health;
 #[path = "config_tests_load_balance_health_protocols.rs"]

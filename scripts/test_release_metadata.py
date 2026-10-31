@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseMetadataTests(unittest.TestCase):
-    def validate(self, cargo_rust, toolchain, rpm_rust):
+    def validate(self, cargo_rust, toolchain, rpm_rust, overrides=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fixtures = {
@@ -24,13 +24,14 @@ class ReleaseMetadataTests(unittest.TestCase):
                 "LICENSE": "EUROPEAN UNION PUBLIC LICENCE v. 1.2\n",
                 "CHANGELOG.md": "## 1.8.3 (unreleased)\n",
                 "release-notes/RELEASE_NOTES_1.8.3.md": "# Fluxheim 1.8.3 Release Notes\n",
-                "README.md": "v1.8.3\n",
+                "README.md": "[Releases](https://github.com/valkyoth/fluxheim/releases/latest)\n",
                 "docs/guides/build-and-podman.md": "v1.8.3\n",
                 "packaging/rpm/fluxheim.spec": f"Version: 1.8.3\n%global rust_min_version {rpm_rust}\n",
                 "Cargo.lock": "",
                 "deny.toml": "",
                 ".cargo/audit.toml": "",
             }
+            fixtures.update(overrides or {})
             for relative, content in fixtures.items():
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -43,6 +44,18 @@ class ReleaseMetadataTests(unittest.TestCase):
     def test_matching_patch_minimum_passes(self):
         result = self.validate("1.99.1", "1.99.1", "1.99.1")
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_version_neutral_readme_still_requires_release_link(self):
+        result = self.validate("1.99.1", "1.99.1", "1.99.1", {"README.md": "# Fluxheim\n"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("README.md must link", result.stderr)
+
+    def test_version_neutral_readme_does_not_hide_wrong_release_notes(self):
+        result = self.validate("1.99.1", "1.99.1", "1.99.1", {
+            "release-notes/RELEASE_NOTES_1.8.3.md": "# Fluxheim 1.8.2 Release Notes\n",
+        })
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("wrong title", result.stderr)
 
     def test_understated_patch_minimum_fails(self):
         for rpm_rust in ("1.99", "1.99.0"):

@@ -174,12 +174,27 @@ plugin_roots = ["$TMP_DIR/plugins"]
 max_total_concurrent_executions = 64
 max_total_cache_concurrent_executions = 32
 
+[wasm.default_limits]
+fuel = 1000
+max_memory_bytes = "1MiB"
+compile_timeout_ms = 5000
+
+[wasm.default_admission]
+max_concurrent_executions = 1
+queue_limit = 0
+
 [[wasm.plugins]]
 name = "irules"
 path = "$TMP_DIR/plugins/irules-access-policy.wasm"
 sha256 = "$IRULES_SHA"
 phases = ["access-decision"]
 fail_mode = "fail-closed"
+
+[wasm.plugins.limits]
+timeout_ms = 500
+
+[wasm.plugins.admission]
+queue_limit = 1
 
 [[wasm.plugins]]
 name = "openresty"
@@ -215,6 +230,9 @@ vhost = "irules.test"
 route = "admin"
 priority = 100
 phases = ["access-decision"]
+
+[wasm.attachments.admission]
+queue_limit = 1
 
 [[wasm.attachments]]
 plugin = "openresty"
@@ -256,6 +274,15 @@ path_prefix = "/admin/"
 
 [vhosts.routes.proxy]
 upstreams = ["127.0.0.1:$STABLE_PORT"]
+websocket = true
+
+[[vhosts.routes]]
+name = "public-redirect"
+path_exact = "/admin/public"
+
+[vhosts.routes.redirect]
+to = "http://127.0.0.1:$FLUXHEIM_PORT/public"
+status = 302
 
 [[vhosts]]
 name = "openresty.test"
@@ -337,6 +364,57 @@ else
     fluxheim_bin="$ROOT_DIR/target/debug/fluxheim"
 fi
 
+python3 - "$fluxheim_bin" "$TMP_DIR" <<'PY'
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+
+binary = Path(sys.argv[1]).resolve(strict=True)
+root = Path(sys.argv[2]).resolve(strict=True)
+base_config = (root / "fluxheim.toml").read_text()
+for scope, route in (("route", 'route = "admin"\n'), ("vhost", "")):
+    config = root / ("unsupported-upgrade-" + scope + ".toml")
+    with config.open("x") as output:
+        output.write(base_config + '\n[[wasm.attachments]]\nplugin = "openresty"\n'
+                     'vhost = "irules.test"\n' + route + 'phases = ["request-headers"]\n')
+    log = root / ("unsupported-upgrade-" + scope + ".log")
+    with log.open("xb") as output:
+        result = subprocess.run(
+            [str(binary), "--config", str(config)],
+            stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
+            timeout=5, check=False,
+        )
+    if result.returncode == 0:
+        raise RuntimeError("unsupported upgrade configuration unexpectedly started")
+    with log.open("rb") as output:
+        if b"WebSocket-enabled proxy scopes do not support Wasm" not in output.read(16384):
+            raise RuntimeError("startup did not report the expected upgrade restriction")
+
+if os.name == "posix":
+    plugin = root / "plugins" / "irules-access-policy.wasm"
+    backup = root / "plugins" / "irules-access-policy.saved"
+    log = root / "special-file-startup.log"
+    plugin.rename(backup)
+    try:
+        os.mkfifo(plugin, 0o600)
+        with log.open("xb") as output:
+            result = subprocess.run(
+                [str(binary), "--config", str(root / "fluxheim.toml")],
+                stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
+                timeout=5, check=False,
+            )
+        if result.returncode == 0:
+            raise RuntimeError("invalid plugin startup unexpectedly succeeded")
+        with log.open("rb") as output:
+            if b"native route wasm hook configuration error" not in output.read(16384):
+                raise RuntimeError("startup did not report the expected plugin rejection")
+    finally:
+        plugin.unlink(missing_ok=True)
+        backup.rename(plugin)
+PY
+
 "$fluxheim_bin" --config "$TMP_DIR/fluxheim.toml" \
     >"$TMP_DIR/fluxheim.log" 2>&1 &
 FLUXHEIM_PID=$!
@@ -371,6 +449,18 @@ fi
 status=$(request irules-deny irules.test /admin/panel)
 test "$status" = "403"
 grep -q '^wasm access denied$' "$TMP_DIR/irules-deny.body"
+
+status=$(request irules-public irules.test /admin/public)
+test "$status" = "302"
+status=$(request irules-encoded irules.test /admin/%70ublic)
+test "$status" = "403"
+grep -q '^wasm access denied$' "$TMP_DIR/irules-encoded.body"
+status=$(request irules-upgrade irules.test /admin/%70ublic \
+    --header 'Connection: Upgrade' --header 'Upgrade: websocket' \
+    --header 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+    --header 'Sec-WebSocket-Version: 13')
+test "$status" = "403"
+grep -q '^wasm access denied$' "$TMP_DIR/irules-upgrade.body"
 
 status=$(request openresty openresty.test /gold/item)
 test "$status" = "200"

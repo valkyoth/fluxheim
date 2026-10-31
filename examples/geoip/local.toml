@@ -1,0 +1,48 @@
+# Local demonstration; replace database.mmdb with a verified, readable MMDB file.
+# Paths are relative to this configuration file. Do not place it under /tmp.
+[server]
+listen = ["127.0.0.1:8088"]
+default_vhost = "geo"
+trusted_proxies = []
+
+[server.process]
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+
+[tls]
+enabled = false
+
+[cache]
+enabled = false
+
+[logging]
+level = "warn"
+format = "text"
+
+[logging.access]
+enabled = false
+request_id = false
+
+[geoip]
+enabled = true
+fallback_enabled = true
+
+[[geoip.databases]]
+provider = "circl-geo-open"
+path = "database.mmdb"
+
+[[vhosts]]
+name = "geo"
+hosts = ["geo.example.test"]
+
+[vhosts.web]
+root = "site"
+index_files = ["index.html"]
+
+[vhosts.access]
+enabled = true
+allow_countries = ["US"]
+allow_asns = [13335]
+deny_countries = []
+deny_asns = []

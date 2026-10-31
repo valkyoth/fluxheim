@@ -10,6 +10,9 @@ use crate::{
     serve_native_http1_listener,
 };
 
+#[cfg(feature = "auth-request")]
+#[path = "native_http1_proxy_tests/auth_contract.rs"]
+mod auth_contract;
 #[path = "native_http1_proxy_tests/auth_mirror.rs"]
 mod auth_mirror_tests;
 #[path = "native_http1_proxy_tests/config_policy.rs"]
@@ -23,6 +26,12 @@ mod header_policy_tests;
 #[cfg(feature = "load-balancer")]
 #[path = "native_http1_proxy_tests/load_balanced_cache.rs"]
 mod load_balanced_cache_tests;
+#[cfg(feature = "load-balancer")]
+#[path = "native_http1_proxy_tests/load_balanced_contract.rs"]
+mod load_balanced_contract_tests;
+#[cfg(feature = "load-balancer")]
+#[path = "native_http1_proxy_tests/load_balanced_retry.rs"]
+mod load_balanced_retry_tests;
 #[path = "native_http1_proxy_tests/operational_events.rs"]
 mod operational_event_tests;
 #[path = "native_http1_proxy_tests/response_features.rs"]

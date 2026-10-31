@@ -1,0 +1,32 @@
+[server]
+listen = []
+
+[server.process]
+daemon = false
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+
+[cache]
+enabled = false
+
+[stream]
+enabled = true
+
+[[stream.routes]]
+name = "echo"
+listen = ["127.0.0.1:18080"]
+upstream = "127.0.0.1:19001"
+connect_timeout_secs = 2
+idle_timeout_secs = 5
+proxy_header_timeout_secs = 3
+max_connection_secs = 30
+max_connection_bytes = 1048576
+max_connections = 32
+allow_sources = ["127.0.0.1/32"]
+deny_sources = []
+downstream_proxy_protocol = "off"
+trusted_proxies = []
+upstream_proxy_protocol = "off"
+upstream_tls = false

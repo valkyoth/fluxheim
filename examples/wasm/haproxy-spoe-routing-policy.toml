@@ -1,4 +1,4 @@
-# Compile haproxy-spoe-routing-policy.wat to the configured .wasm path and
+# Compile haproxy-spoe-routing-policy.wat to the configured.wasm path and
 # replace the sha256 placeholder with the compiled module digest before use.
 
 [wasm]

@@ -41,6 +41,8 @@ mod policy_config;
 mod policy_runtime;
 mod policy_stats;
 mod queue;
+mod retry;
+mod retry_budget;
 mod runtime_mutation;
 mod runtime_state;
 mod selection;
@@ -95,6 +97,7 @@ pub use self::crypto::set_admin_hmac_sha256;
 #[cfg(feature = "metrics")]
 pub use self::metrics::set_load_balancer_event_recorder;
 pub use self::persistence::LoadBalancerRequestView;
+pub use self::retry::{LoadBalancerRetryPermit, LoadBalancerRetrySequence};
 pub use self::service::UpstreamLoadBalancerService;
 
 const BACKEND_STATE_PRUNE_INTERVAL: usize = 1024;
@@ -125,6 +128,7 @@ pub struct UpstreamLoadBalancer {
     max_iterations: usize,
     all_down_status: u16,
     retry: LoadBalancerRetryRuntimeStats,
+    retry_budget: Arc<retry_budget::RetryBudget>,
 }
 
 impl Debug for UpstreamLoadBalancer {
@@ -333,6 +337,10 @@ impl UpstreamLoadBalancer {
                 max_iterations: config.load_balance.max_iterations,
                 all_down_status: config.load_balance.all_down_status,
                 retry: LoadBalancerRetryRuntimeStats::from_config(&config.load_balance.retry),
+                retry_budget: Arc::new(retry_budget::RetryBudget::new(
+                    config.load_balance.retry.budget_per_window,
+                    config.load_balance.retry.budget_window_secs,
+                )),
             };
         balancer.load_runtime_state_if_configured();
         balancer

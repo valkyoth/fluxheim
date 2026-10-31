@@ -1,3 +1,6 @@
+# Migration fixture, not proof that every accepted setting is runtime-enforced.
+# Native HTTP does not consume the retry policy or provide least-time/passive
+# latency samples. See docs/guides/load-balancer.md for the supported boundaries.
 [server]
 listen = ["127.0.0.1:8080"]
 trusted_proxies = []

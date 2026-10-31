@@ -47,6 +47,11 @@ jobs:
       - name: Validate collector fixtures and dashboards
         run: |
           python3 scripts/test_collectors.py
+          python3 scripts/test_collector_guide.py
+          python3 scripts/test_admin_examples.py
+          python3 scripts/test_snapshot_examples.py
+          python3 scripts/test_cli_examples.py
+          python3 scripts/test_privacy_examples.py
           node --test tools/collector-browser/input.test.cjs
           python3 scripts/generate_observability_dashboards.py --check
       - name: Install pinned browser driver
@@ -80,6 +85,29 @@ jobs:
       - run: python3 scripts/test_core_dump_policy.py
       - run: python3 scripts/test_development_scope.py
       - run: python3 scripts/test_documentation_layout.py
+      - run: python3 scripts/test_configuration_examples.py
+      - run: python3 scripts/test_service_lifecycle.py
+      - run: python3 scripts/test_installation_profiles.py
+      - run: python3 scripts/test_logging_examples.py
+      - run: python3 scripts/test_metrics_examples.py
+      - run: python3 scripts/test_tracing_examples.py
+      - run: python3 scripts/test_cache_examples.py
+      - run: python3 scripts/test_routing_examples.py
+      - run: python3 scripts/test_load_balancer_retry_examples.py
+      - run: python3 scripts/test_proxy_hooks.py
+      - run: python3 scripts/test_proxy_transport.py
+      - run: python3 scripts/test_protocol_examples.py
+      - run: python3 scripts/test_static_examples.py
+      - run: python3 scripts/test_compression_examples.py
+      - run: python3 scripts/test_cors_examples.py
+      - run: python3 scripts/test_response_headers_examples.py
+      - run: python3 scripts/test_request_headers_examples.py
+      - run: python3 scripts/test_access_examples.py
+      - run: python3 scripts/test_admission_examples.py
+      - run: python3 scripts/test_stream_examples.py
+      - run: python3 scripts/test_udp_examples.py
+      - run: python3 scripts/test_php_examples.py
+      - run: python3 scripts/test_php_transport.py
       - run: python3 scripts/test_observability_baseline.py
       - run: python3 scripts/test_log_rotation_fixture.py
       - run: python3 scripts/test_native_archives.py
@@ -175,6 +203,11 @@ jobs:
 
       - name: Validate FIPS backend image evidence plan
         run: scripts/validate-fips-image-evidence-plan.sh
+      - name: Validate FIPS guide configuration matrix
+        run: |
+          cargo test --locked -p fluxheim-config --lib fips_guide
+          cargo test --locked -p fluxheim-config --lib --features tls-openssl-fips,metrics-otlp,otel-otlp,otel-tracing fips_guide
+          cargo test --locked -p fluxheim-config --lib --features tls-rustls-fips,metrics-otlp,otel-otlp,otel-tracing fips_guide
 
       - name: Validate panic policy on feature profiles
         run: |
@@ -210,6 +243,13 @@ jobs:
           cargo test --locked -p fluxheim-config --no-default-features observability
           cargo test --locked -p fluxheim-config --no-default-features --features metrics-otlp,otel-tracing,otel-otlp observability
           cargo test --locked -p fluxheim-config --no-default-features --features privacy-mode observability
+          cargo test --locked -p fluxheim-config --no-default-features --features privacy-mode logging
+          cargo test --locked -p fluxheim-config --no-default-features --features metrics-otlp metrics_guide
+          cargo test --locked -p fluxheim-config --no-default-features --features privacy-mode metrics_guide
+          cargo test --locked -p fluxheim-config --no-default-features tracing_guide
+          cargo test --locked -p fluxheim-config --no-default-features --features otel-tracing tracing_guide
+          cargo test --locked -p fluxheim-config --no-default-features --features otel-tracing,otel-otlp tracing_guide
+          cargo test --locked -p fluxheim-config --no-default-features --features privacy-mode tracing_guide
           cargo test --locked -p fluxheim --lib --no-default-features --features profile-observability
           cargo test --locked -p fluxheim --lib --no-default-features --features profile-privacy structured_event_
           cargo test --locked -p fluxheim --lib --no-default-features --features profile-privacy admin::tests::events
@@ -217,6 +257,14 @@ jobs:
           cargo test --locked -p fluxheim-server --lib --features wasm,php-fpm,tls-rustls,load-balancer
           cargo build --locked --no-default-features --features profile-observability --bin fluxheim
           python3 scripts/smoke_operational_events.py --binary target/debug/fluxheim
+          python3 scripts/smoke_logging_examples.py --binary target/debug/fluxheim
+          python3 scripts/smoke_metrics_examples.py --binary target/debug/fluxheim
+          python3 scripts/smoke_tracing_examples.py --binary target/debug/fluxheim
+          python3 scripts/smoke_collector_guide.py --binary target/debug/fluxheim
+          python3 scripts/smoke_admin_examples.py --binary target/debug/fluxheim
+          python3 scripts/smoke_snapshot_examples.py --binary target/debug/fluxheim
+          cargo build --locked --no-default-features --features profile-development --bin fluxheim-config-tester
+          python3 scripts/smoke_cli_examples.py --binary target/debug/fluxheim --tester target/debug/fluxheim-config-tester
           python3 scripts/smoke_log_file_rotation.py --binary target/debug/fluxheim
           python3 scripts/smoke_operational_backpressure.py --binary target/debug/fluxheim
           cargo build --locked --no-default-features --features profile-observability,stream-proxy,udp-proxy --bin fluxheim
@@ -349,6 +397,11 @@ jobs:
           cargo run --quiet --no-default-features --features profile-fips-rustls --bin fluxheim-config-tester -- --config examples/fips-rustls.toml --profile fips-rustls --no-runtime-paths --crypto
           cargo run --quiet --no-default-features --features profile-iso19790-rustls --bin fluxheim-config-tester -- --config examples/iso19790-rustls.toml --profile iso19790-rustls --no-runtime-paths --crypto
 
+      - name: Test privacy guide with real HTTP and verified TLS
+        run: |
+          cargo build --locked --no-default-features --features profile-privacy --bin fluxheim
+          python3 scripts/smoke_privacy_examples.py --binary target/debug/fluxheim --tls
+
       - name: Validate OpenSSL FIPS-capable profile
         run: scripts/validate-fips-openssl.sh check
 
@@ -446,10 +499,31 @@ jobs:
           cargo test --locked -p fluxheim --lib --no-default-features --features profile-observability runtime::runtime_logging
           cargo build --locked --no-default-features --features profile-observability --bin fluxheim
           python3 scripts/smoke_operational_events.py --binary target/debug/fluxheim
+          python3 scripts/smoke_logging_examples.py --binary target/debug/fluxheim
+          python3 scripts/smoke_metrics_examples.py --binary target/debug/fluxheim
+          python3 scripts/smoke_tracing_examples.py --binary target/debug/fluxheim
+          python3 scripts/smoke_collector_guide.py --binary target/debug/fluxheim
+          python3 scripts/smoke_admin_examples.py --binary target/debug/fluxheim
+          python3 scripts/smoke_snapshot_examples.py --binary target/debug/fluxheim
+          cargo build --locked --no-default-features --features profile-development --bin fluxheim-config-tester
+          python3 scripts/smoke_cli_examples.py --binary target/debug/fluxheim --tester target/debug/fluxheim-config-tester
           python3 scripts/smoke_log_file_rotation.py --binary target/debug/fluxheim
           python3 scripts/smoke_operational_backpressure.py --binary target/debug/fluxheim
           cargo build --locked --no-default-features --features profile-observability,stream-proxy,udp-proxy --bin fluxheim
           python3 scripts/smoke_fatal_listener_failures.py --binary target/debug/fluxheim
+
+      - name: Test macOS privacy guide
+        run: |
+          cargo build --locked --no-default-features --features profile-privacy --bin fluxheim
+          python3 scripts/smoke_privacy_examples.py --binary target/debug/fluxheim
+
+      - name: Test macOS load-balancer retry and latency policy
+        run: |
+          cargo test --locked -p fluxheim-server --lib --features wasm,php-fpm,load-balancer,tls-rustls
+          cargo build --locked --no-default-features --features profile-load-balancer-edge,acme-client --bin fluxheim
+          mkdir -p "$HOME/.fluxheim-lb-smoke"
+          chmod 700 "$HOME/.fluxheim-lb-smoke"
+          python3 scripts/smoke_load_balancer_examples.py "$HOME/.fluxheim-lb-smoke"
 
       - name: Test macOS live request and trace correlation
         run: |
@@ -533,8 +607,34 @@ jobs:
 
       - name: Test Windows protected log rotation
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           python scripts/test_log_rotation_fixture.py
+          python scripts/smoke_logging_examples.py --binary target/debug/fluxheim.exe
+          python scripts/smoke_metrics_examples.py --binary target/debug/fluxheim.exe
+          python scripts/smoke_tracing_examples.py --binary target/debug/fluxheim.exe
+          python scripts/smoke_collector_guide.py --binary target/debug/fluxheim.exe
+          python scripts/smoke_admin_examples.py --binary target/debug/fluxheim.exe
+          python scripts/smoke_snapshot_examples.py --binary target/debug/fluxheim.exe
+          cargo build --locked --no-default-features --features profile-development --bin fluxheim-config-tester
+          python scripts/smoke_cli_examples.py --binary target/debug/fluxheim.exe --tester target/debug/fluxheim-config-tester.exe
           python scripts/smoke_log_file_rotation.py --binary target/debug/fluxheim.exe
+
+      - name: Test Windows privacy guide
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          cargo build --locked --no-default-features --features profile-privacy --bin fluxheim
+          python scripts/smoke_privacy_examples.py --binary target/debug/fluxheim.exe
+
+      - name: Test Windows load-balancer retry and latency policy
+        run: |
+          cargo test --locked -p fluxheim-server --lib --features wasm,php-fpm,load-balancer,tls-rustls
+          if ($LASTEXITCODE -ne 0) { throw 'combined server tests failed' }
+          cargo build --locked --no-default-features --features profile-load-balancer-edge,acme-client --bin fluxheim
+          if ($LASTEXITCODE -ne 0) { throw 'load-balancer build failed' }
+          python scripts/smoke_load_balancer_examples.py $env:TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'load-balancer smoke failed' }
 
       - name: Test Windows live request and trace correlation
         run: |

@@ -22,7 +22,7 @@ use crate::native_http1_route_rewrite::{
 use crate::native_http1_route_wasm::{
     NativeWasmHeaderContext, NativeWasmRouteContext, NativeWasmRouteOutcome, status_reason,
     wasm_access_rejection, wasm_access_rejection_status, wasm_request_header_rejection,
-    wasm_response_header_failure,
+    wasm_response_header_failure, wasm_upgrade_supported,
 };
 use crate::{
     NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1Handler, NativeHttp1Proxy,
@@ -117,6 +117,8 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 }
             }
             #[cfg(feature = "wasm")]
+            let dispatch_route = selected_route;
+            #[cfg(feature = "wasm")]
             let selected_route = {
                 match self
                     .wasm_route_decision(&request, &path, selected_route)
@@ -171,8 +173,11 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 }
             }
             #[cfg(feature = "wasm")]
-            if let Some(response) =
-                wasm_access_rejection(self, decoded_policy_route.or(selected_route)).await
+            if let Some(response) = wasm_access_rejection(
+                self,
+                &[dispatch_route, decoded_policy_route, selected_route],
+            )
+            .await
             {
                 return response;
             }
@@ -504,8 +509,18 @@ impl NativeHttp1RouteProxy {
             return write_takeover_rejection(&mut stream, 403, "Forbidden", b"forbidden\n").await;
         }
         #[cfg(feature = "wasm")]
+        if !wasm_upgrade_supported(self, &[selected_route, decoded_policy_route]) {
+            return write_takeover_rejection(
+                &mut stream,
+                503,
+                "Service Unavailable",
+                b"wasm upgrade policy unavailable\n",
+            )
+            .await;
+        }
+        #[cfg(feature = "wasm")]
         if let Some((status, reason)) =
-            wasm_access_rejection_status(self, decoded_policy_route.or(selected_route)).await
+            wasm_access_rejection_status(self, &[selected_route, decoded_policy_route]).await
         {
             return write_takeover_rejection(
                 &mut stream,

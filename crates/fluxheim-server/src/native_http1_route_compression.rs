@@ -6,6 +6,10 @@ use fluxheim_compression::{
 
 use crate::{NativeHttp1Request, NativeHttp1Response};
 
+#[cfg(all(test, feature = "compression-gzip"))]
+#[path = "native_compression_contract_tests.rs"]
+mod contract_tests;
+
 pub(crate) fn apply_route_compression(
     request: &NativeHttp1Request,
     response: &mut NativeHttp1Response,

@@ -1,0 +1,7 @@
+[[vhosts]]
+name = "guide"
+hosts = ["configuration.example.test"]
+
+# This is split/conf.d/site, not split/site.
+[vhosts.web]
+root = "site"

@@ -1,4 +1,4 @@
-# Compile openresty-header-policy.wat to the configured .wasm path and replace
+# Compile openresty-header-policy.wat to the configured.wasm path and replace
 # the sha256 placeholder with the compiled module digest before use.
 
 [wasm]
@@ -41,3 +41,5 @@ strip_prefix = "/gold"
 
 [vhosts.routes.proxy]
 upstreams = ["127.0.0.1:3000"]
+# Header-policy hooks are supported on ordinary HTTP, not WebSocket upgrades.
+websocket = false

@@ -17,6 +17,9 @@ mod socket;
 #[cfg(test)]
 mod tests;
 mod upgrade;
+#[cfg(test)]
+#[path = "native_websocket_contract_tests.rs"]
+mod websocket_contract_tests;
 
 use pool::{NativeHttp1Pool, NativeHttp2Pool};
 
@@ -41,6 +44,7 @@ pub struct NativeHttp1Upstream {
     authority: String,
     protocol: NativeUpstreamHttpProtocol,
     h2c_upgrade: bool,
+    transport_replay: bool,
     http2_policy: DownstreamHttp2Policy,
     total_connection_timeout: Option<Duration>,
     connect_timeout: Duration,
@@ -141,6 +145,7 @@ impl PartialEq for NativeHttp1Upstream {
         self.authority == other.authority
             && self.protocol == other.protocol
             && self.h2c_upgrade == other.h2c_upgrade
+            && self.transport_replay == other.transport_replay
             && self.http2_policy == other.http2_policy
             && self.total_connection_timeout == other.total_connection_timeout
             && self.connect_timeout == other.connect_timeout
@@ -194,6 +199,7 @@ impl NativeHttp1Upstream {
             authority: authority.into(),
             protocol: NativeUpstreamHttpProtocol::Http1,
             h2c_upgrade: false,
+            transport_replay: true,
             http2_policy: DownstreamHttp2Policy::default(),
             total_connection_timeout: None,
             connect_timeout: Duration::from_secs(5),
@@ -221,6 +227,7 @@ impl NativeHttp1Upstream {
             authority: authority.into(),
             protocol: NativeUpstreamHttpProtocol::Http1,
             h2c_upgrade: false,
+            transport_replay: true,
             http2_policy: DownstreamHttp2Policy::default(),
             total_connection_timeout: None,
             connect_timeout: Duration::from_secs(5),
@@ -245,6 +252,12 @@ impl NativeHttp1Upstream {
 
     pub const fn with_connect_timeout(mut self, timeout: Duration) -> Self {
         self.connect_timeout = timeout;
+        self
+    }
+
+    #[cfg(feature = "load-balancer")]
+    pub(crate) fn without_transport_replay(mut self) -> Self {
+        self.transport_replay = false;
         self
     }
 

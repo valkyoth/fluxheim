@@ -122,7 +122,7 @@ fn rejects_invalid_proxy_upstream_policy() {
             "#,
     )
     .unwrap();
-    #[cfg(feature = "privacy-mode")]
+    #[cfg(all(feature = "traffic-mirror", feature = "privacy-mode"))]
     assert_eq!(
         mirror_without_url.validate(),
         Err(ConfigError::InvalidProxyUpstreamPolicy {
@@ -138,7 +138,7 @@ fn rejects_invalid_proxy_upstream_policy() {
             reason: "enabled traffic mirroring requires base_url",
         })
     );
-    #[cfg(all(not(feature = "traffic-mirror"), not(feature = "privacy-mode")))]
+    #[cfg(not(feature = "traffic-mirror"))]
     assert_eq!(
         mirror_without_url.validate(),
         Err(ConfigError::InvalidProxyUpstreamPolicy {

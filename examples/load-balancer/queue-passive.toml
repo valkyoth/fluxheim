@@ -1,0 +1,18 @@
+# Merge with local.toml. Pair with per-backend caps from pool-policy.toml.
+[proxy.load_balance.queue]
+max_waiting = 32
+timeout_ms = 200
+retry_interval_ms = 10
+
+[proxy.load_balance.passive_health]
+enabled = true
+consecutive_failure = 3
+ejection_secs = 30
+min_healthy_backends = 1
+failure_statuses = [500, 502, 503]
+failure_status_ranges = [{ start = 520, end = 529 }]
+max_latency_ms = 0 # Native HTTP currently supplies no latency sample.
+
+[proxy.load_balance.slow_start]
+enabled = true
+duration_secs = 30

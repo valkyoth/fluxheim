@@ -627,6 +627,7 @@ tries=0
 while [ "$tries" -lt 20 ]; do
     status=$(curl -sS -o /dev/null -w "%{http_code}" "http://127.0.0.1:$FLUXHEIM_PORT/all-down" || true)
     if [ "$status" = "503" ]; then
+        python3 "$ROOT_DIR/scripts/smoke_load_balancer_examples.py" "$TMP_DIR"
         echo "load-balancer smoke passed"
         exit 0
     fi

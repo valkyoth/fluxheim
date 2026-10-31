@@ -494,3 +494,7 @@ fn client_hello_requests_alpn_protocol(client_hello: &ClientHello<'_>, protocol:
 #[cfg(test)]
 #[path = "rustls_resolver_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "rustls_path_contract_tests.rs"]
+mod path_contract_tests;

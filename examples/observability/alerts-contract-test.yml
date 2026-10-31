@@ -1,0 +1,40 @@
+# Characterization of documented contract, not the desired repaired contract.
+rule_files:
+  - alerts.yml
+evaluation_interval: 1m
+tests:
+  - name: terminal-sink-failure-ages-out-without-worker-recovery
+    interval: 1m
+    input_series:
+      - series: 'up{job="fluxheim",instance="local"}'
+        values: '1+0x15'
+      - series: 'fluxheim_log_dispatch_events_total{job="fluxheim",instance="local",lane="audit",outcome="sink_errors"}'
+        values: '0 1+0x14'
+      - series: 'fluxheim_log_dispatch_state{job="fluxheim",instance="local",lane="audit",state="available"}'
+        values: '1+0x15'
+      - series: 'fluxheim_log_dispatch_state{job="fluxheim",instance="local",lane="audit",state="alive"}'
+        values: '1 0+0x14'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: FluxheimLogSinkFailure
+        exp_alerts:
+          - exp_labels: {instance: local, severity: warning}
+            exp_annotations: {summary: Fluxheim logging needs investigation}
+      - eval_time: 10m
+        alertname: FluxheimLogSinkFailure
+        exp_alerts: []
+    promql_expr_test:
+      - expr: 'fluxheim_log_dispatch_state{job="fluxheim",state="alive"}'
+        eval_time: 10m
+        exp_samples:
+          - labels: 'fluxheim_log_dispatch_state{job="fluxheim",instance="local",lane="audit",state="alive"}'
+            value: 0
+  - name: one-missing-target-is-not-a-whole-job-absence
+    interval: 1m
+    input_series:
+      - series: 'up{job="fluxheim",instance="remaining"}'
+        values: '1+0x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: FluxheimScrapeMissing
+        exp_alerts: []

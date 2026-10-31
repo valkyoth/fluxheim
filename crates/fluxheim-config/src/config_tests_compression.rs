@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "config_tests_compression_examples.rs"]
+mod examples;
+
 #[test]
 fn compression_config_validates_bounds() {
     let config: Config = toml::from_str(

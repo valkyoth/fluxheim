@@ -12,7 +12,7 @@ my @files;
 
 find(
     sub {
-        if (-d $_ && ($_ eq '.git' || $_ eq '.cargo-deny-advisory-dbs' || $_ eq 'dist' || $_ eq 'target' || $_ eq 'node_modules')) {
+        if (-d $_ && ($_ eq '.git' || $_ eq '.cargo-deny-advisory-dbs' || $_ eq 'dist' || $_ eq 'target' || $_ eq 'node_modules' || $_ eq 'local-review')) {
             $File::Find::prune = 1;
             return;
         }

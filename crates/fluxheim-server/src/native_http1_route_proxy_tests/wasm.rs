@@ -15,6 +15,12 @@ use super::{
     native_route_proxy_test_route, native_route_proxy_test_vhost, response_header,
 };
 
+#[path = "wasm_upgrade_contract.rs"]
+mod upgrade_contract;
+
+#[path = "wasm_protocol_contract.rs"]
+mod protocol_contract;
+
 #[tokio::test]
 async fn native_wasm_access_decision_denies_before_upstream() {
     let capture = fluxheim_observability::event_test_support::Capture::start();
@@ -250,7 +256,7 @@ async fn native_wasm_access_decision_fails_closed_on_timeout() {
         .limits
         .as_mut()
         .expect("busy-loop test plugin has explicit limits")
-        .timeout_ms = 5;
+        .timeout_ms = Some(5);
     let router =
         NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
     let proxy = router_listener(router).await;
@@ -290,33 +296,48 @@ async fn native_wasm_access_decision_enforces_attachment_admission_budget() {
 
 #[tokio::test]
 async fn native_wasm_access_decision_enforces_plugin_admission_budget_across_attachments() {
-    let fixture = WasmRouteFixture::new(&[("busy", WasmPluginBody::BusyLoop)]);
+    let fixture = WasmRouteFixture::new(&[("deny", WasmPluginBody::Decision(2))]);
     let upstream = super::upstream_expect_path("/never", "unexpected").await;
     let mut config = fixture.config_with_attachments(
         upstream,
         vec![
-            wasm_attachment("busy", "route", 100),
-            wasm_attachment("busy", "other", 100),
+            wasm_attachment("deny", "route", 100),
+            wasm_attachment("deny", "other", 100),
         ],
     );
     config.vhosts[0].routes.push(other_route());
-    config.wasm.plugins[0].admission = Some(fluxheim_config::WasmAdmissionBudgetConfig {
-        max_concurrent_executions: 1,
-        queue_limit: 0,
-    });
+    config.wasm.plugins[0].admission = Some(
+        fluxheim_config::WasmAdmissionBudgetConfig {
+            max_concurrent_executions: 1,
+            queue_limit: 0,
+        }
+        .into(),
+    );
     let router =
         NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let admission = router.select(Some("route.test")).unwrap().routes[0]
+        .wasm_hooks
+        .access_plugin_admission_for_test();
+    // Hold the actual plugin-wide slot instead of racing two requests against
+    // a short execution deadline. Both attachments must share this admission.
+    let held = admission.try_acquire().unwrap();
     let proxy = router_listener(router).await;
 
-    let first = tokio::spawn(async move { downstream_get(proxy, "/route").await });
-    tokio::time::sleep(Duration::from_millis(25)).await;
-    let second = downstream_get(proxy, "/other").await;
-    let first = first.await.unwrap();
-
-    assert!([first.as_str(), second.as_str()].iter().any(|response| {
-        response.starts_with("HTTP/1.1 503 Service Unavailable\r\n")
-            && response.ends_with("wasm access decision fail_closed\n")
-    }));
+    for path in ["/route", "/other"] {
+        let response = downstream_get(proxy, path).await;
+        assert!(
+            response.starts_with("HTTP/1.1 503 Service Unavailable\r\n")
+                && response.ends_with("wasm access decision fail_closed\n")
+        );
+        assert_eq!(admission.active_executions(), 1);
+    }
+    drop(held);
+    for path in ["/route", "/other"] {
+        let response = downstream_get(proxy, path).await;
+        assert!(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+        assert!(response.ends_with("wasm access denied\n"));
+        assert_eq!(admission.active_executions(), 0);
+    }
 }
 
 #[tokio::test]
@@ -1945,7 +1966,12 @@ async fn native_wasm_response_headers_apply_to_php_fpm_fallback() {
 
     let response = downstream_get(proxy, "/gold/index.php").await;
 
-    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected status: {:?}; PHP transport failure: {}",
+        response.lines().next(),
+        response.contains("php-fpm failed")
+    );
     assert_eq!(
         response_header(&response, "x-fluxheim-policy-branch").as_deref(),
         Some("gold")
@@ -2451,7 +2477,7 @@ fn wasm_plugin(root: &Path, name: &str, body: WasmPluginBody) -> fluxheim_config
         },
         phases: wasm_plugin_phases(body),
         fail_mode: fluxheim_config::WasmPluginFailMode::FailClosed,
-        limits,
+        limits: limits.map(Into::into),
         admission: None,
     }
 }
@@ -2600,10 +2626,13 @@ fn wasm_attachment_with_admission(
     max_concurrent_executions: u32,
 ) -> fluxheim_config::WasmAttachmentConfig {
     let mut attachment = wasm_attachment(plugin, route, priority);
-    attachment.admission = Some(fluxheim_config::WasmAdmissionBudgetConfig {
-        max_concurrent_executions,
-        queue_limit: 0,
-    });
+    attachment.admission = Some(
+        fluxheim_config::WasmAdmissionBudgetConfig {
+            max_concurrent_executions,
+            queue_limit: 0,
+        }
+        .into(),
+    );
     attachment
 }
 
@@ -2957,6 +2986,12 @@ async fn fastcgi_responder(stdout: &'static [u8]) -> std::net::SocketAddr {
             .await
             .unwrap();
         stream.shutdown().await.unwrap();
+        // Drain after half-close so unread FastCGI client records do not cause a TCP reset.
+        let _ = tokio::time::timeout(
+            Duration::from_secs(2),
+            tokio::io::copy(&mut stream.take(64 * 1024), &mut tokio::io::sink()),
+        )
+        .await;
     });
     addr
 }

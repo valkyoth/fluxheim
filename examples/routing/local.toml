@@ -1,0 +1,117 @@
+# Local routing demonstration. Supply site/hello.txt and an HTTP origin on 9001.
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "gateway"
+trusted_proxies = []
+regex_enabled = true
+
+[server.host_routing]
+strict = true
+
+[server.process]
+daemon = false
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+
+[cache]
+enabled = false
+
+[[vhosts]]
+name = "gateway"
+hosts = ["gateway.example.test"]
+
+# Deliberately put a broad matcher before more specific routes.
+[[vhosts.routes]]
+name = "api"
+path_prefix = "/api"
+strip_prefix = "/api"
+rewrite_prefix = "/internal/"
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+[vhosts.routes.headers.response.add]
+x-guide-route = "api"
+
+[[vhosts.routes]]
+name = "api-private"
+path_prefix = "/api/private"
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+[vhosts.routes.headers.response.add]
+x-guide-route = "private"
+
+[[vhosts.routes]]
+name = "api-status"
+path_exact = "/api/status"
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+[vhosts.routes.headers.response.add]
+x-guide-route = "status"
+
+[[vhosts.routes]]
+name = "regex-shadowed-by-prefix"
+path_regex = '^/api/.*$'
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+[vhosts.routes.headers.response.add]
+x-guide-route = "shadowed"
+
+[[vhosts.routes]]
+name = "product"
+path_regex = '^/products/(?P<id>[A-Za-z0-9_-]{1,64})$'
+rewrite_template = "/items/{route.regex.id}"
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+[vhosts.routes.headers.request.add]
+x-product-id = "{route.regex.id}"
+[vhosts.routes.headers.response.add]
+x-guide-route = "product"
+
+[[vhosts.routes]]
+name = "product-other"
+path_regex = '^/products/.*$'
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+[vhosts.routes.headers.response.add]
+x-guide-route = "product-other"
+
+[[vhosts.routes]]
+name = "write"
+path_exact = "/write"
+methods = ["POST"]
+max_request_body_bytes = 4
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+[vhosts.routes.headers.response.add]
+x-guide-route = "write"
+
+[[vhosts.routes]]
+name = "assets"
+path_prefix = "/assets"
+strip_prefix = "/assets"
+[vhosts.routes.web]
+root = "site"
+
+[[vhosts.routes]]
+name = "jump"
+path_exact = "/jump"
+[vhosts.routes.redirect]
+to = "https://destination.example.test{uri}"
+status = 308
+
+[[vhosts.routes]]
+name = "fallback"
+fallback = true
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+[vhosts.routes.headers.response.add]
+x-guide-route = "fallback"
+
+[[vhosts]]
+name = "wildcard"
+hosts = ["*.gateway.example.test"]
+[vhosts.proxy]
+upstreams = ["127.0.0.1:9001"]
+[vhosts.headers.response.add]
+x-guide-route = "wildcard"

@@ -128,6 +128,9 @@ pub(super) fn native_http2_response_to_http1(
     let status = response.status();
     let reason = status.canonical_reason().unwrap_or("");
     let mut native = NativeHttp1Response::new(status.as_u16(), reason, response.body().to_vec());
+    if let Some(latency) = response.upstream_header_latency {
+        native.set_upstream_header_latency(latency);
+    }
     for (name, value) in response.headers() {
         if native_http2_response_header_proxy_owned_or_hop_by_hop(name) {
             continue;

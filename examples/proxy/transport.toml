@@ -1,0 +1,40 @@
+# Local HTTP origin on port 9001. Create errors/gateway.html beside this file.
+[server]
+listen = ["127.0.0.1:8080"]
+trusted_proxies = []
+[server.host_routing]
+strict = true
+[server.process]
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+upstream_keepalive_pool_size = 8
+[cache]
+enabled = false
+[[vhosts]]
+name = "app"
+hosts = ["app.example.test"]
+[vhosts.proxy]
+upstreams = ["127.0.0.1:9001"]
+upstream_http_version = "http1"
+connect_timeout_secs = 2
+upstream_total_connection_timeout_secs = 3
+upstream_idle_timeout_secs = 10
+read_timeout_secs = 2
+send_timeout_secs = 2
+downstream_read_timeout_secs = 30
+downstream_write_timeout_secs = 10
+downstream_total_response_timeout_secs = 60
+
+[[vhosts.proxy.error_pages]]
+status = 502
+path = "/gateway.html"
+[vhosts.proxy.error_pages.web]
+root = "errors"
+
+[[vhosts.proxy.error_pages]]
+status = 504
+path = "/gateway.html"
+[vhosts.proxy.error_pages.web]
+root = "errors"

@@ -15,6 +15,10 @@ use crate::native_http1_cache::{
 #[cfg(unix)]
 use crate::native_http1_static_web::NativeStaticFile;
 
+#[cfg(unix)]
+#[path = "native_static_identity_contract_tests.rs"]
+mod identity_contract;
+
 #[test]
 fn static_cache_entry_weight_includes_entry_overhead() {
     let response =

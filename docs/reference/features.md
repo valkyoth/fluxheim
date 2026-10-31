@@ -13,8 +13,11 @@ Use `scripts/validate-features.sh` before packaging custom feature strings:
 scripts/validate-features.sh proxy,web,tls-rustls
 ```
 
-The validator expands profile aliases and rejects unsupported combinations
-before Cargo starts compiling Fluxheim.
+The shell validator is an early policy check, not Cargo's resolver. It expands
+aliases only once and currently misses some conflicting nested TLS selections
+and the privacy/GeoIP conflict. The real
+locked build remains mandatory. See [installation/package selection](../guides/installation.md)
+for the difference between these aliases and published artifacts.
 
 ## Stable Core Features
 
@@ -33,22 +36,25 @@ before Cargo starts compiling Fluxheim.
 | Feature | Default | Purpose |
 | --- | --- | --- |
 | `load-balancer` | No | Fluxheim load-balancing support, health checks, and runtime pool policy. |
+| `traffic-mirror` | No | Bounded HTTP request mirroring; see [projection and runtime limitations](../guides/traffic-mirroring.md). |
+| `php-fpm` | No | Static/PHP FastCGI routing and Unix managed pools or external TCP workers; does not install a PHP interpreter. |
 | `metrics` | No | Prometheus metrics listener. |
 | `metrics-otlp` | No | Optional OTLP/HTTP JSON metrics export to a local Prometheus OTLP receiver or collector. |
 | `otel-tracing` | No | W3C `traceparent` propagation and access-log trace ID correlation. |
 | `otel-otlp` | No | Optional OTLP/HTTP JSON trace export to a local collector or Jaeger endpoint. |
-| `acme` | No | ACME config, renewal planning, managed certificate/account paths, local HTTP-01 and rustls TLS-ALPN-01 challenge serving, and the renewal executor contract. |
+| `acme` | No | ACME config, renewal planning, managed certificate/account paths, local HTTP-01 serving and challenge primitives. Native TLS-ALPN-01 serving is incomplete; see [current ACME limits](../guides/acme.md). |
 | `acme-client` | No | Live ACME account/order HTTP client and background renewal service. |
 | `compression` | No | Shared response compression config and body-filter integration. |
 | `compression-brotli` | No | Brotli response compression for eligible known-length responses. |
 | `compression-gzip` | No | gzip response compression for eligible known-length responses. |
 | `compression-zstd` | No | Zstandard response compression for eligible known-length responses. |
-| `geoip` | No | Local MMDB Geo-Context lookup for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, exposed to bounded access policy and structured logs. |
-| `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream routes, source IP/CIDR allow/deny policy, DNS-rebinding guards for hostname upstreams, bounded idle/lifetime/byte caps, route-local PROXY protocol receive/send, stream upstream TLS/mTLS controls, and weighted/drain/backup policy. |
+| `geoip` | No | Local MMDB country/ASN lookup for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, used by bounded access policy. Current structured events do not export GeoIP fields. See the [GeoIP guide](../guides/geoip.md). |
+| `stream-proxy` | No | Raw L4 TCP with route-local source policy, DNS guards, copy-phase lifetime/idle/byte caps, PROXY framing, upstream TLS/mTLS and weighted/drain/backup selection. See [TCP streams](../guides/tcp-streams.md) for restart requirements and current identity/deadline limitations. |
+| `udp-proxy` | No | Explicit beta only, excluded from release profiles: per-datagram request/response or one-way forwarding. Not DNS/GSLB, QUIC or game-session support. See [UDP limits and known defects](../guides/udp.md). |
 | `wasm` | No | WebAssembly sandbox foundation with strict plugin-file loading, config-level plugin registry validation, typed loader manifests, authenticated registry status visibility, bounded Wasmtime execution, live access-decision hooks, bounded native HTTP/1 request/response header hooks, route-decision hooks, cache-lookup/cache-store hooks, compiled-module identities, and bounded host-call namespaces. |
 | `wasm-proxy-abi` | No | Opt-in Wasm proxy-ABI compatibility preview. Depends on `wasm`, requires `[wasm].allow_preview_abi = true`, and rejects unsupported preview calls deterministically. |
 | `wasm-wasi` | No | Opt-in WASI Preview 1 capability boundary for access-decision plugins. Depends on `wasm`; clocks and randomness require independent explicit grants, while environment, arguments, inherited stdio, filesystem, sockets/network, and process state remain unavailable. |
-| `privacy-mode` | No | Zero-retention static/proxy build profile. |
+| `privacy-mode` | No | Reduced-retention static/proxy profile; [exact privacy boundaries](../guides/zero-retention-privacy-mode.md). |
 | `tls` | No | Internal marker for TLS-aware code; select a concrete backend for serving. |
 
 ## TLS Backends
@@ -62,9 +68,9 @@ Select at most one:
 | `tls-rustls-iso19790` | ISO/IEC 19790 terminology alias for `tls-rustls-fips`. |
 | `tls-openssl` | Optional OpenSSL backend. |
 
-Cargo features are additive, and Fluxheim supports exactly one TLS backend per
-build. The feature validator catches conflicting TLS backend selections before
-build. BoringSSL and s2n-tls are no longer supported Fluxheim backends because
+Cargo features are additive. TLS serving needs one concrete backend; HTTP-only
+custom builds can omit TLS. Rust build guards reject conflicting backends even
+where the preliminary shell validator misses them. BoringSSL and s2n-tls are no longer supported Fluxheim backends because
 their integrations did not provide the same complete policy, SNI, upstream TLS,
 and client-auth coverage as rustls and OpenSSL.
 Use `scripts/validate-tls-backends.sh` to validate the supported TLS backends on
@@ -82,28 +88,34 @@ credential source, or container secret.
 
 `acme` contains the config, storage, challenge, certificate observation, and
 renewal-executor pieces. `acme-client` adds the live ACME HTTP client stack used
-to load or create issuer accounts and complete HTTP-01 or rustls TLS-ALPN-01
-orders through `instant-acme`, plus the runtime background renewal service. Keep
+to load or create issuer accounts and run orders through `instant-acme`, plus
+the runtime background renewal service. HTTP-01 has native challenge serving;
+the TLS-ALPN-01 client path is not sufficient because the native listener lacks
+challenge-store integration. Keep
 `acme-client` enabled only in builds that perform certificate issuance or
 renewal.
 
 ## PHP Runtime Modules
 
-`php-fpm` enables the `1.3.1` FastCGI bridge for PHP applications. It implies
+`php-fpm` enables the FastCGI bridge for PHP applications. It implies
 `proxy` and `web`, uses `fastcgi-client`, and must be selected explicitly:
 
 ```bash
 cargo build --no-default-features --features profile-web-server,php-fpm,acme-client
 ```
 
-Fluxheim `1.3.7` adds managed php-fpm process supervision as a runtime config
+Managed php-fpm process supervision is a runtime config
 mode inside this same `php-fpm` feature, not as a separate Cargo feature. It
 still uses the FastCGI bridge; only php-fpm process lifecycle changes from
 operator-managed to Fluxheim-supervised. Managed supervision is Unix-only;
 Windows builds support external TCP FastCGI and reject `mode = "managed"`.
 
-Fluxheim no longer reserves a pure-Rust PHP/phprs runtime for `1.3.8`. Managed
-php-fpm is the supported zero-admin PHP direction.
+PHP is a separately installed runtime, not an embedded interpreter. See
+[PHP deployment and routing](../guides/php.md), including the open native
+method, directory-CGI, offload and FastCGI-cache gaps. See also
+[transport and operations](../guides/php-runtime-support.md) for body suppression,
+spool memory, deadline, diagnostic and managed-extension limitations, and the
+[complete field reference](php-options.md) for accepted options/defaults.
 
 ## Profile Aliases
 
@@ -118,10 +130,10 @@ feature aliases for common deployment shapes.
 | `profile-cache-server` | `proxy`, `web`, `cache`, `tls-rustls`, `security` | Static/proxy server with cache enabled. |
 | `profile-load-balancer` | `proxy`, `web`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `load-balancer`, `tls-rustls`, `security` | Edge server with Fluxheim load balancing and all compression codecs compiled in. |
 | `profile-observability` | `profile-core`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Core server with Prometheus metrics, optional local OTLP metrics export, trace context propagation, and optional local OTLP trace export. |
-| `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Zero-retention static/proxy profile. |
-| `profile-full` | `profile-load-balancer`, `geoip`, `stream-proxy`, `traffic-mirror` | All stable production modules, including GeoIP, traffic mirroring, and the current stream/load-balancer runtime lines. |
+| `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Static/proxy profile with access/forwarding suppression; not whole-deployment zero retention. |
+| `profile-full` | `profile-load-balancer`, `geoip`, `stream-proxy`, `traffic-mirror` | Broad edge server; excludes PHP, Wasm, ACME client and observability exporter features unless added separately. |
 | `profile-wasm` | `profile-full`, `wasm-proxy-abi`, `wasm-wasi` | Explicit Wasm distribution profile; `profile-full` remains Wasm-free. |
-| `profile-development` | `profile-full`, `php-fpm`, `acme-client`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Broad development build with all compatible production modules. |
+| `profile-development` | `profile-full`, `php-fpm`, `acme-client`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Broad PHP/cache/observability development build; excludes Wasm and beta UDP. |
 | `profile-web-server` | `proxy`, `web`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Static webserver profile while serving still uses the shared proxy runtime. |
 | `profile-cache-edge` | `proxy`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Cache edge without local static web serving. |
 | `profile-proxy-edge` | `proxy`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Focused reverse proxy edge. |
@@ -131,13 +143,16 @@ feature aliases for common deployment shapes.
 | `profile-fips-rustls` | `proxy`, `security`, `tls-rustls-fips` | FIPS-capable rustls/AWS-LC candidate build. |
 | `profile-iso19790-rustls` | `profile-fips-rustls`, `tls-rustls-iso19790` | ISO/IEC 19790 terminology alias for the same rustls/AWS-LC candidate path. |
 
-Starting in `1.6.34`, normal Fluxheim profiles no longer compile Pingora
-crates. The internal `pingora-compat` feature name remains as a historical
+Normal Fluxheim profiles do not compile Pingora crates. The internal
+`pingora-compat` feature name remains as a historical
 compatibility boundary only; official release profiles use Fluxheim-owned
 runtime, listener, TLS, HTTP, cache, load-balancer, admin, metrics, stream, and
 background-service paths.
 
-Examples that match the official release artifacts:
+The first two examples match the published full/Wasm feature strings; the
+focused cache/proxy/load-balancer/PHP lines match those server packages.
+Development, privacy and FIPS lines are custom builds, not additional official
+archive profiles. Use `--locked` with each command for the reviewed lockfile.
 
 ```bash
 cargo build --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
@@ -244,7 +259,7 @@ Focused image profile status:
   serving.
 - Compatibility aliases may keep the older broad behavior, but published
   focused images are `full`, `wasm`, `cache`, `proxy`, `php`, and
-  `load-balancer`. The `wasm` profile starts with `1.8.0`; the unsuffixed
+  `load-balancer`. The unsuffixed
   `full` image remains Wasm-free.
 
 ## Incompatible Combinations
@@ -257,6 +272,8 @@ Focused image profile status:
 | `privacy-mode` + `metrics-otlp` | Zero-retention builds must not compile metrics export. |
 | `privacy-mode` + `otel-tracing` | Zero-retention builds must not compile trace context propagation. |
 | `privacy-mode` + `otel-otlp` | Zero-retention builds must not compile trace export. |
+| `privacy-mode` + `geoip` | Rust compilation rejects GeoIP lookup in privacy mode; the shell validator currently misses this. |
+| `privacy-mode` + compression or any compression codec | Zero-retention builds must not transform response bodies. |
 | `privacy-mode` + `wasm` | Zero-retention builds must not compile sandboxed policy extensions. |
 | `privacy-mode` + `wasm-proxy-abi` | Zero-retention builds must not compile sandboxed policy extensions. |
 | `privacy-mode` + `wasm-wasi` | Zero-retention builds must not compile sandboxed policy extensions. |
@@ -272,13 +289,17 @@ These are documented architecture tracks, not enabled Cargo features yet:
 | --- | --- |
 | Image filter | [Image Filter](../ideas/image-filter.md) |
 | Programmable media edge | [Programmable Media Edge](../ideas/programmable-media-edge.md) |
-| OpenTelemetry OTLP export | [OpenTelemetry Tracing](../guides/opentelemetry-tracing.md) |
 | Crypto RPC edge | [Crypto RPC Edge](../ideas/crypto-rpc-edge.md) |
 | WAF | [WAF Architecture](../ideas/waf-architecture.md) |
-| Cloudflare origin support | [Cloudflare Origin Support](../guides/cloudflare-origin-support.md) |
-| External authorization request | [External Authorization Request](../ideas/auth-request.md) |
+| Cloudflare origin module | [Unimplemented module proposal](../ideas/cloudflare-origin-support.md) |
 | Secure links | [Secure Links](../ideas/secure-links.md) |
-| PHP runtimes | [PHP Runtime Support](../guides/php-runtime-support.md) |
 | Perl CGI | [Perl CGI Support](../ideas/perl-cgi-support.md) |
 | Legacy static HTTP listeners | [Legacy Static HTTP Support](../ideas/legacy-static-http.md) |
 | WireGuard smart load balancing | [Sentinel Mesh](../ideas/sentinel-mesh.md) |
+
+OTLP export, external authorization subrequests and PHP-FPM are implemented
+feature families, not future-only items. Their guides document current limits:
+[OTLP](../guides/opentelemetry-tracing.md),
+[authorization](../guides/external-authorization.md), and
+[PHP](../guides/php-runtime-support.md). Embedding other interpreters is not
+implied by PHP-FPM support.

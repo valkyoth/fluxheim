@@ -1,0 +1,10 @@
+# Replace the WHOLE [proxy] block and children. Start a discovery service first.
+# The HTTP exception is for numeric loopback only; production uses HTTPS.
+[proxy]
+upstreams_http_url = "http://127.0.0.1:9005/backends"
+upstreams_http_refresh_secs = 5
+upstreams_http_allow_private_backends = true
+
+[proxy.load_balance]
+selection = "round-robin"
+all_down_status = 503

@@ -10,27 +10,28 @@ services:
       core:
         soft: 0
         hard: 0
-    image: ghcr.io/valkyoth/fluxheim:latest-wolfi
+    image: "${FLUXHEIM_GATEWAY_IMAGE:?Set a tested gateway image}"
+    command: ["--config", "/etc/fluxheim/fluxheim.toml"]
     container_name: fluxheim_gateway
     restart: always
     stop_signal: SIGTERM
-    stop_grace_period: 15s
+    # Allow margin beyond the default 30-second drain; increase for custom grace.
+    stop_grace_period: 45s
     ports:
       - "80:8080"
       - "443:8443"
     volumes:
-      - /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z
-      - /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z
-      - /srv/infra/fluxheim/run:/run/fluxheim:Z,U
-      - /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U
-      - /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U
-      - /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U
+      - /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,z
+      - /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,z
+      - /srv/infra/fluxheim/run:/run/fluxheim:z
+      - /srv/infra/fluxheim/state:/var/lib/fluxheim:z
+      - /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z
+      - /srv/infra/fluxheim/logs:/var/log/fluxheim:Z
       - /srv/infra/fluxheim/html:/srv/fluxheim:ro,Z
       - /srv/sites/example/public:/srv/sites/example/public:ro,Z
-      # Keep secret files pre-labeled for container access and avoid relabeling
-      # individual secrets with :Z.
-      - /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro
-      - /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro
+      # Shared labeling, private service-user permissions; provision ownership once.
+      - /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro,z
+      - /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro,z
     networks:
       - gateway_net
 
@@ -39,7 +40,8 @@ services:
       core:
         soft: 0
         hard: 0
-    image: ghcr.io/valkyoth/fluxheim:latest-wolfi
+    image: "${FLUXHEIM_RENEWAL_IMAGE:?Set a tested renewal image}"
+    profiles: ["renewal"]
     container_name: fluxheim_acme
     restart: "no"
     entrypoint:
@@ -51,15 +53,11 @@ services:
       - "/etc/fluxheim/fluxheim.toml"
       - "renew"
     volumes:
-      - /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z
-      - /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z
-      - /srv/infra/fluxheim/run:/run/fluxheim:Z,U
-      - /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U
-      - /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U
-      - /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U
-      - /srv/infra/fluxheim/html:/srv/fluxheim:ro,Z
-      - /srv/sites/example/public:/srv/sites/example/public:ro,Z
-      - /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro
-      - /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro
+      - /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,z
+      - /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,z
+      - /srv/infra/fluxheim/run:/run/fluxheim:z
+      - /srv/infra/fluxheim/state:/var/lib/fluxheim:z
+      - /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro,z
+      - /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro,z
     networks:
       - gateway_net

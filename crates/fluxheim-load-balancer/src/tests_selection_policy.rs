@@ -226,6 +226,42 @@ fn least_time_learns_from_recorded_latency() {
 }
 
 #[test]
+fn latency_ejection_preserves_floor_and_strict_selection_rules() {
+    install_test_crypto_provider();
+    for floor in [0, 1] {
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".into(), "127.0.0.1:3001".into()],
+            load_balance: LoadBalanceConfig {
+                selection: LoadBalanceSelection::LeastTime,
+                passive_health: LoadBalancePassiveHealthConfig {
+                    enabled: true,
+                    consecutive_failure: 1,
+                    max_latency_ms: 100,
+                    min_healthy_backends: floor,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap()
+        .unwrap();
+        for _ in 0..2 {
+            let selected = balancer.select(&request(), None).unwrap();
+            assert!(
+                selected
+                    .reporter
+                    .unwrap()
+                    .record_status(200, Some(Duration::from_millis(100)))
+                    .ejected
+            );
+        }
+        assert_eq!(balancer.runtime_stats().passive_ejected_backend_count, 2);
+        assert_eq!(balancer.select(&request(), None).is_some(), floor == 1);
+    }
+}
+
+#[test]
 fn builds_power_of_two_selection_from_proxy_upstreams() {
     install_test_crypto_provider();
     let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {

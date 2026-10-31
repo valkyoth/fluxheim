@@ -1,0 +1,20 @@
+# No origin needs to run for the validation and DNS-only commands.
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "cli-guide"
+
+[server.process]
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+
+[cache]
+enabled = false
+
+[[vhosts]]
+name = "cli-guide"
+hosts = ["cli.example.test"]
+
+[vhosts.proxy]
+upstream = "127.0.0.1:18080"

@@ -1,0 +1,43 @@
+# Loopback demonstration; replace the origin allowlist for your application.
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "api"
+
+[server.process]
+daemon = false
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+
+[cache]
+enabled = false
+
+[headers.cors]
+enabled = true
+allow_origins = ["https://app.example.test"]
+allow_methods = ["GET", "HEAD", "POST"]
+allow_headers = ["authorization", "content-type", "x-request-id"]
+expose_headers = ["x-request-id"]
+allow_credentials = true
+max_age_secs = 600
+
+[[vhosts]]
+name = "api"
+hosts = ["api.example.test"]
+
+[vhosts.proxy]
+upstreams = ["127.0.0.1:9001"]
+
+[[vhosts.routes]]
+name = "reports"
+path_prefix = "/reports"
+methods = ["POST"]
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+[vhosts.routes.headers.cors]
+allow_origins = ["https://reports.example.test"]
+allow_methods = ["POST"]
+allow_headers = ["content-type"]
+expose_headers = []
+max_age_secs = 0

@@ -14,6 +14,12 @@ findings without enabling HTTP/3 or changing production dependencies. The
 manual research checks must pass; the address-policy acceptance gate remains
 blocked by the documented API gap.
 
+Maintenance on 2026-10-31 updates the isolated Tokio pin to 1.53.3 and
+refreshes the lockfile hash. The crypto-owner inventory now includes the
+existing observability exporter TLS dependency. Neither change admits HTTP/3
+to production or re-enables its CI jobs; manual research checks remain separate
+from the blocked address-policy acceptance gate.
+
 Candidate reviewed on 2026-10-08. This is source admission evidence, not a
 claim that Fluxheim serves HTTP/3. Commit 2 requires revised source qualification,
 pentest, retest, and GitHub green. The [commit plan](../roadmap/http3-quic-commit-plan.md) remains
@@ -61,7 +67,7 @@ or Brynja package. Cargo's existing feature profiles are unchanged.
 | h3-quinn | 0.0.10 | MIT | Quinn transport implementation of h3 traits |
 | rustls | 0.23.46 | Apache-2.0 OR ISC OR MIT | TLS 1.3 QUIC session integration |
 | rustls-webpki | 0.103.16 | ISC | Transitive certificate verification |
-| tokio | 1.53.2 | MIT | Runtime, sockets and cancellation |
+| tokio | 1.53.3 | MIT | Runtime, sockets and cancellation |
 | http / bytes | 1.5.0 / 1.12.1 | MIT / MIT | HTTP fields and body buffers |
 | rcgen | 0.14.10 | MIT OR Apache-2.0 | Probe-only ephemeral certificate fixture |
 
@@ -206,7 +212,8 @@ or private transport/TLS adapter replacement. A future substitute must pass
 the same vector, malformed-input, side-channel and native-platform gates.
 
 The existing crypto-owner allowlist in JSON covers root CLI/runtime, TLS,
-server origin TLS/cache encryption, ACME, load-balancer health TLS, and snapshot
+server origin TLS/cache encryption, ACME, load-balancer health TLS,
+observability exporter TLS, and snapshot
 integrity. Those existing dependencies are not removed or declared unsafe by
 this train. New QUIC-specific dependencies remain inside the approved adapter;
 the allowlist is not permission to spread QUIC types through those crates.

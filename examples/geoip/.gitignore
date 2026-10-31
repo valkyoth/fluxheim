@@ -1,0 +1,3 @@
+# Operator-supplied datasets and local process sockets are not example source.
+/*.mmdb
+/*.sock

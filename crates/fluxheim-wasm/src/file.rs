@@ -8,7 +8,8 @@ use thiserror::Error;
 use crate::WasmSandboxLimits;
 
 #[cfg(unix)]
-const WASM_PLUGIN_O_NOFOLLOW: i32 = rustix::fs::OFlags::NOFOLLOW.bits() as i32;
+const WASM_PLUGIN_OPEN_FLAGS: i32 =
+    (rustix::fs::OFlags::NOFOLLOW.bits() | rustix::fs::OFlags::NONBLOCK.bits()) as i32;
 #[cfg(windows)]
 const WASM_PLUGIN_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 #[cfg(windows)]
@@ -118,7 +119,9 @@ fn open_plugin_file(
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(WASM_PLUGIN_O_NOFOLLOW);
+        // Check the opened handle without waiting for a FIFO writer, even if
+        // the leaf changes after path validation. Regular-file reads are unchanged.
+        options.custom_flags(WASM_PLUGIN_OPEN_FLAGS);
     }
     #[cfg(windows)]
     {
@@ -219,6 +222,10 @@ fn reject_symlink_components(path: &Path) -> Result<(), WasmPluginError> {
     let mut current = PathBuf::new();
     for component in path.components() {
         current.push(component);
+        // A Windows prefix is not a filesystem root until RootDir is appended.
+        if matches!(component, Component::Prefix(_)) {
+            continue;
+        }
         let metadata = fs::symlink_metadata(&current).map_err(|source| WasmPluginError::Io {
             path: current.clone(),
             source,
@@ -258,6 +265,11 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 #[cfg(test)]
+#[cfg(unix)]
+#[path = "file_contract_tests.rs"]
+mod contract_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
@@ -281,6 +293,29 @@ mod tests {
             loaded.sha256_hex(),
             "93a44bbb96c751218e4c00d479e4c14358122a389acca16205b1e4d0dc5f9476"
         );
+    }
+
+    #[test]
+    fn plugin_loader_accepts_canonical_regular_file_under_canonical_root() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let plugin = root.join("canonical.wasm");
+        fs::write(&plugin, b"\0asm\x01\0\0\0").unwrap();
+        let loaded = load_plugin_file(&plugin, &[root], WasmSandboxLimits::default()).unwrap();
+        assert_eq!(loaded.bytes(), b"\0asm\x01\0\0\0");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn plugin_loader_rejects_drive_relative_path() {
+        assert!(matches!(
+            load_plugin_file(
+                Path::new(r"C:plugin.wasm"),
+                &[PathBuf::from(r"C:\")],
+                WasmSandboxLimits::default(),
+            ),
+            Err(WasmPluginError::RelativePath { .. })
+        ));
     }
 
     #[test]

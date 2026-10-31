@@ -11,6 +11,164 @@ started with while new requests use the new config after an atomic pointer swap.
 The durable snapshot store gives operators an auditable rollback target and the
 admin API a current pointer to apply.
 
+This is configuration history, not a backup of your website, database, cache,
+certificates, PHP processes or external secret files. Snapshots serialize the
+effective configuration and its resolved paths. Referenced assets remain external:
+restoring old TOML does not restore their bytes. Retain compatible assets through
+your deployment and backup process.
+
+Start with the [admin guide](admin.md) and its
+[local example](../../examples/admin/local.toml) for listeners, roles and private
+credentials. The procedures here concern one instance, not a fleet transaction.
+
+## Source, Selection And Runtime
+
+| State | Meaning | What changes it |
+| --- | --- | --- |
+| Source TOML/includes | Deployment input selected by `--config` | Your deployment tooling/editor |
+| Store `current` | Snapshot selected for the next admin reload | Snapshot creation or pointer rollback |
+| Running router/configuration | Policy serving new requests | Startup or successful supported live apply |
+| `runtime_snapshot` / `known_good_snapshot` | Recovery bookkeeping | Apply, confirmation, rollback and startup state restoration; limitations below |
+| `pending_validation` | Candidate, rollback target, deadline and health counters | Self-healing reload, reports, confirmation or recovery |
+
+- CLI `snapshot` loads source, validates and stores its effective TOML, then
+  selects the new snapshot. It does not contact the server.
+- HTTP `POST /_fluxheim/snapshot` captures **running in-memory configuration**,
+  not edits on disk. It selects its new snapshot without applying a router.
+- HTTP `POST /_fluxheim/reload` applies the selected snapshot. Editing a source
+  file followed by this endpoint does not automatically capture the edit.
+- CLI rollback and HTTP rollback without `live=true` change only the pointer,
+  not active policy, source files or the next process's startup arguments.
+- Normal startup loads `--config`. It does **not** automatically boot or verify
+  the snapshot selected by `current`. Deploy the intended source before restart.
+
+### Current Recovery Limitations
+
+**Current limitation:** startup restores persisted snapshot labels
+(or assumes the current pointer is the running baseline) without reconciling them
+with the source actually loaded. After serving candidate B and restarting from
+source A, status can still report B as runtime/known-good. In a fresh process,
+creating snapshot A over HTTP also does not enroll A as the runtime baseline:
+the first reload can have no automatic rollback target. IDs alone are not proof
+of what is serving.
+
+**Current limitation:** reloading while validation is pending replaces
+that validation. Repeating the same reload resets health counters/window and
+makes the candidate its own rollback target. Loading a further candidate can
+make the previous **unconfirmed** candidate the rollback target; recovery then
+labels it known-good. Serialize deployments, finish confirmation or explicit
+rollback before another reload, and never blindly retry after a timeout.
+
+These are confirmed gaps queued for correction. The conservative workflow below
+avoids the reproduced sequential cases, but is not a concurrency/crash-atomicity
+guarantee or a substitute for the fixes.
+
+## Controlled Change Workflow
+
+Use one deployment controller at a time, running filesystem commands as the
+Fluxheim service identity. Prepare the private `control-header` file described
+in the admin guide; it contains credentials and must not be publicly readable.
+Adapt these paths consistently:
+
+```sh
+STORE=/var/lib/fluxheim/snapshots
+KEY=/etc/fluxheim/snapshot-integrity.key
+ADMIN=http://127.0.0.1:9090
+```
+
+1. **Capture and enroll the running baseline before trying a candidate.**
+
+```sh
+curl --fail-with-body --max-time 10 --header @control-header -X POST \
+  -H 'X-Fluxheim-Message: verified running baseline' "$ADMIN/_fluxheim/snapshot"
+```
+
+Record the returned ID as `BASELINE_ID`. Verify actual public behavior. To work
+around the fresh-store enrollment gap, explicitly live-apply that verified
+baseline through rollback:
+
+```sh
+fluxheim snapshots --store "$STORE" --integrity-key-file "$KEY" verify "$BASELINE_ID"
+curl --fail-with-body --max-time 10 --header @control-header -X POST \
+  "$ADMIN/_fluxheim/rollback?live=true&to=$BASELINE_ID"
+```
+
+This is an explicit operator decision to mark the baseline known-good, without
+opening a validation window. Check traffic and status. If live application is
+unsupported or fails, stop here. See the storage-bin limitation below.
+
+2. **Prepare and validate without publishing.**
+
+```sh
+fluxheim --config /etc/fluxheim/candidate.toml --validate-config
+fluxheim --reload-from "$STORE/configs/$BASELINE_ID.toml" \
+  --config /etc/fluxheim/candidate.toml
+```
+
+Classification prints `noop`, `snapshot` or `process-upgrade` with reasons. A
+successfully classified process-upgrade change also exits zero: **zero exit
+status is not approval for live reload**. Classification applies nothing and
+does not prove origin reachability or all later runtime initialization.
+
+3. **Publish an approved candidate with the key explicitly supplied.**
+
+```sh
+fluxheim --config /etc/fluxheim/candidate.toml snapshot \
+  --store "$STORE" --integrity-key-file "$KEY" --message 'candidate route policy'
+```
+
+Record its ID as `CANDIDATE_ID`. This moves `current`; serving is unchanged.
+The CLI key option does not inherit `admin.snapshot_integrity_key_file` from the
+candidate. Supply it consistently on all CLI store operations, or use the
+documented environment variable.
+
+4. **Apply once, inspect, test the application, then confirm or recover.**
+
+```sh
+curl --fail-with-body --max-time 10 --header @control-header -X POST \
+  "$ADMIN/_fluxheim/reload"
+curl --fail-with-body --max-time 5 --header @control-header \
+  "$ADMIN/_fluxheim/status"
+```
+
+With self-healing enabled, check that `pending_validation.previous_snapshot`
+names the intended baseline. After meaningful tests of the public application,
+not merely a green admin health response:
+
+```sh
+curl --fail-with-body --max-time 5 --header @control-header -X POST \
+  "$ADMIN/_fluxheim/self-heal/confirm"
+```
+
+On failure, report failure or explicitly live-rollback to `BASELINE_ID`. When
+self-healing is disabled, successful reload is immediately recorded known-good;
+there is no confirmation window. After any timeout/error inspect traffic and
+state before retrying: an error can follow a runtime change.
+
+5. **Make restart behavior intentional.** Deploy the accepted source through
+   configuration management; live reload does not rewrite the original source.
+   Check source and selected snapshot before restart, then verify traffic and
+   reconcile recovery identity afterward. Do not manually edit authenticated
+   state files to make the status look consistent.
+
+### Reload Classification
+
+| Change | Behavior / boundary |
+| --- | --- |
+| Identical effective configuration | `noop`; currently still applied, so do not retry during validation |
+| Routing/vhost, root proxy/static/cache/headers/compression/GeoIP, request access-log policy | Normally `snapshot`, unless startup-owned services change; feature-specific gaps still apply |
+| Listener addresses, trusted proxies, PROXY protocol, server limits or process settings | `process-upgrade` |
+| Logging level/format/target/file/crash file | `process-upgrade` |
+| TLS mode/provider/protocol/ALPN/ciphers/curves/client authentication/compliance | `process-upgrade`; certificate lookup fields are classified separately, not proof of listener certificate replacement |
+| Admin, metrics, tracing, cache-purger, TCP streams, UDP or Wasm runtime | `process-upgrade` |
+| Managed PHP process or managed ACME service changes | `process-upgrade`; PHP request policy is classified separately |
+| Load-balancer pools/discovery/startup services | `process-upgrade`; nonidentical router changes also reject active background health/discovery services |
+| Unclassified startup state | `process-upgrade`, not assumed safe |
+
+Classify complete effective configurations. A snapshot-safe result permits an
+attempt; it does not resolve the feature gaps elsewhere in these guides. For
+restart procedures, see [service lifecycle](service-lifecycle.md).
+
 ## Store Layout
 
 Use an operator-chosen state directory, for example
@@ -18,7 +176,7 @@ Use an operator-chosen state directory, for example
 
 ```text
 /var/lib/fluxheim/snapshots
-├── .snapshot.lock
+├──.snapshot.lock
 ├── current
 ├── generation.toml
 ├── prune-boundaries.toml
@@ -29,7 +187,8 @@ Use an operator-chosen state directory, for example
     └── s1777900000-123456789-00000000000000000001-00000000000000000042.integrity.toml
 ```
 
-`current` contains the active snapshot id. Fluxheim uses an atomically replaced
+`current` contains the selected durable snapshot id, not proof of the serving
+router's identity. Fluxheim uses an atomically replaced
 pointer file instead of a symlink. A symlink swap is a good Linux-only design,
 but the pointer file keeps the store straightforward in rootless Podman,
 restricted volume mounts, and non-Unix development environments while still
@@ -157,26 +316,27 @@ Create a snapshot from a config:
 ```bash
 fluxheim --config /etc/fluxheim/fluxheim.toml snapshot \
   --store /var/lib/fluxheim/snapshots \
+  --integrity-key-file /etc/fluxheim/snapshot-integrity.key \
   --message "known good before cache change"
 ```
 
 List snapshots:
 
 ```bash
-fluxheim snapshots --store /var/lib/fluxheim/snapshots
+fluxheim snapshots --store "$STORE" --integrity-key-file "$KEY"
 ```
 
 Inspect, compare, verify, diagnose, and safely prune snapshots:
 
 ```bash
-fluxheim snapshots --store /var/lib/fluxheim/snapshots show SNAPSHOT_ID
-fluxheim snapshots --store /var/lib/fluxheim/snapshots diff OLD_ID NEW_ID
+fluxheim snapshots --store "$STORE" --integrity-key-file "$KEY" show SNAPSHOT_ID
+fluxheim snapshots --store "$STORE" --integrity-key-file "$KEY" diff OLD_ID NEW_ID
 fluxheim snapshots --store /var/lib/fluxheim/snapshots \
   --integrity-key-file /etc/fluxheim/snapshot-integrity.key verify SNAPSHOT_ID
 fluxheim snapshots --store /var/lib/fluxheim/snapshots \
   --integrity-key-file /etc/fluxheim/snapshot-integrity.key doctor
-fluxheim snapshots --store /var/lib/fluxheim/snapshots prune --keep 100
-fluxheim snapshots --store /var/lib/fluxheim/snapshots prune --older-than-days 90
+fluxheim snapshots --store "$STORE" --integrity-key-file "$KEY" prune --keep 100
+fluxheim snapshots --store "$STORE" --integrity-key-file "$KEY" prune --older-than-days 90
 ```
 
 Pruning protects the durable current snapshot, persisted runtime and known-good
@@ -185,16 +345,41 @@ When pruning removes an older ancestor of another retained snapshot, Fluxheim
 writes an authenticated history-start boundary so `doctor` can distinguish the
 intentional retention cut from filesystem damage.
 
+### CLI Options And Output
+
+| Command/option | Meaning |
+| --- | --- |
+| `snapshot --store PATH --message TEXT` | Load `--config`, validate, publish and select; optional trimmed message, at most 4096 bytes without controls |
+| `rollback --store PATH --to ID` | Select a verified target; omit `--to` to follow current metadata's parent, not latest filename |
+| `snapshots --store PATH` | List entries with current marker, integrity/status and message |
+| `snapshots... show ID` | Metadata, generation, parent, timestamp, integrity and path; not raw config |
+| `snapshots... diff OLD NEW` | Changed top-level field names, not a line-by-line secret-bearing diff |
+| `snapshots... verify ID` | Print `authenticated` or `unverified` under supplied key policy; success without a key is not proof of HMAC verification |
+| `snapshots... doctor` | Diagnose structure/history/integrity/temp files; failure exit if unhealthy, not automatic repair |
+| `snapshots... prune --keep N` | Delete eligible entries outside newest N by generation/time; protected entries remain |
+| `snapshots... prune --older-than-days DAYS` | Delete eligible entries at least that old; zero includes all ages except protected entries |
+| `--integrity-key-file PATH` | Shared snapshot/rollback/snapshots option; put before snapshots subcommand |
+| `FLUXHEIM_SNAPSHOT_STORE` | Environment default for required store path |
+| `FLUXHEIM_SNAPSHOT_INTEGRITY_KEY_FILE` | Environment default for explicit CLI key option |
+
+Prune needs a selector and has **no dry-run**. Supplying both selectors combines
+them with OR, not AND: an eligible entry outside the keep window **or** old
+enough can be deleted. `--keep 0` permits all unprotected entries to be removed.
+Listing/doctor is not a deletion preview. Back up first and quiesce deployments;
+do not run retention with ambiguous/unrecorded runtime identity. Retained counts
+can exceed `--keep` because protection wins. Metadata and paths are sensitive
+operational information even when tokens are not printed.
+
 Move the current pointer back to the previous snapshot:
 
 ```bash
-fluxheim rollback --store /var/lib/fluxheim/snapshots
+fluxheim rollback --store "$STORE" --integrity-key-file "$KEY"
 ```
 
 Move to a specific snapshot:
 
 ```bash
-fluxheim rollback --store /var/lib/fluxheim/snapshots --to s1777900000-123456789-42
+fluxheim rollback --store "$STORE" --integrity-key-file "$KEY" --to "$BASELINE_ID"
 ```
 
 Rollback updates the durable current pointer by default. Before applying a
@@ -290,7 +475,7 @@ Create a snapshot over HTTP:
 
 ```bash
 curl -sS -X POST \
-  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  --header @control-header --fail-with-body --max-time 10 \
   -H "X-Fluxheim-Message: known good before upstream change" \
   http://127.0.0.1:9090/_fluxheim/snapshot
 ```
@@ -299,7 +484,7 @@ Move the durable current pointer back to the previous snapshot:
 
 ```bash
 curl -sS -X POST \
-  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  --header @control-header --fail-with-body --max-time 10 \
   http://127.0.0.1:9090/_fluxheim/rollback
 ```
 
@@ -307,7 +492,7 @@ Move the durable current pointer to a specific snapshot:
 
 ```bash
 curl -sS -X POST \
-  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  --header @control-header --fail-with-body --max-time 10 \
   "http://127.0.0.1:9090/_fluxheim/rollback?to=s1777900000-123456789-42"
 ```
 
@@ -315,7 +500,7 @@ Live-apply the previous snapshot when it is snapshot-safe:
 
 ```bash
 curl -sS -X POST \
-  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  --header @control-header --fail-with-body --max-time 10 \
   "http://127.0.0.1:9090/_fluxheim/rollback?live=true"
 ```
 
@@ -328,7 +513,7 @@ marks it `noop` or `snapshot`:
 
 ```bash
 curl -sS -X POST \
-  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  --header @control-header --fail-with-body --max-time 10 \
   http://127.0.0.1:9090/_fluxheim/reload
 ```
 
@@ -338,13 +523,20 @@ metrics service, or startup-owned load-balancer service changes. Existing
 requests keep their old runtime snapshot; new requests use the freshly swapped
 proxy snapshot.
 
+**Current limitation:** the replacement router can fail
+to acquire the old router's exclusive cache-root lease while reload still
+reports success. Disk caching can disappear or a tiered policy can retain only
+memory. Until the planned correction, use a controlled stop/start for bin-backed
+routers and verify real disk reuse, not just reload status. See
+[cache recovery](cache-recovery.md) for the current limitation and procedure.
+
 Load-balancer service changes include adding or removing vhost/route pools and
 changing static pool members, file/DNS/HTTP discovery sources, discovery refresh
 intervals, or HTTP discovery bearer-token files. These refresh loops are
 registered at process startup, so use the normal supervisor/process-upgrade path
 for those changes.
 
-Live router replacement also fails closed when an unchanged background
+Nonidentical router replacement also fails closed when an unchanged background
 load-balancer health or discovery service is active, because replacing its
 router without replacing the associated service would detach health state from
 traffic selection. Use a zero-downtime process upgrade for snapshots in that
@@ -362,7 +554,19 @@ The smoke starts Fluxheim, captures an authenticated baseline through the admin
 HTTP API, publishes a second validated config through the CLI, live-applies it,
 verifies changed data-plane content without a PID change, performs a live
 rollback, runs snapshot doctor, restarts Fluxheim, and verifies both baseline
-serving behavior and the persisted current snapshot pointer.
+serving behavior and the persisted current snapshot pointer. It restarts from
+the baseline source explicitly: it does not prove automatic current-pointer
+boot selection or correct recovery identity reconciliation.
+
+The [guide smoke](../../scripts/smoke_snapshot_examples.py) adds real CLI/HTTP
+proof of source-versus-memory capture, pointer-only selection, explicit baseline
+enrollment, health reports, expiry recovery without admin traffic, and the
+the documented limitation characterizations:
+
+```sh
+python3 scripts/test_snapshot_examples.py
+python3 scripts/smoke_snapshot_examples.py --binary target/debug/fluxheim
+```
 
 ## Self-Healing Guard
 
@@ -382,7 +586,7 @@ Confirm the candidate after local health checks succeed:
 
 ```bash
 curl -sS -X POST \
-  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  --header @control-header --fail-with-body --max-time 10 \
   http://127.0.0.1:9090/_fluxheim/self-heal/confirm
 ```
 
@@ -391,7 +595,7 @@ fail:
 
 ```bash
 curl -sS -X POST \
-  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  --header @control-header --fail-with-body --max-time 10 \
   http://127.0.0.1:9090/_fluxheim/self-heal/fail
 ```
 
@@ -403,11 +607,11 @@ Report health-check results from a local watchdog:
 
 ```bash
 curl -sS -X POST \
-  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  --header @control-header --fail-with-body --max-time 10 \
   "http://127.0.0.1:9090/_fluxheim/self-heal/report?health=ok"
 
 curl -sS -X POST \
-  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  --header @control-header --fail-with-body --max-time 10 \
   "http://127.0.0.1:9090/_fluxheim/self-heal/report?health=error"
 ```
 
@@ -416,34 +620,62 @@ Successful reports confirm the pending snapshot once
 when the observed error rate exceeds
 `admin.self_healing.max_error_rate_per_mille`.
 
+These are explicit report counts, not measured HTTP traffic. The rate is integer
+`failed * 1000 / (successful + failed)`. Rollback requires it to be **strictly
+greater** than the threshold and is checked before confirmation. At the default
+threshold 100, a first failed report is 1000 and immediately triggers rollback.
+The default minimum of one successful report permits immediate confirmation.
+Set desired thresholds before startup; changing admin policy requires restart.
+Manual `confirm` is an operator decision and bypasses the report-count threshold,
+but cannot override failed deadline enforcement.
+
+Accepted values, case-insensitively: `ok`, `success`, `successful`, `healthy`,
+`true`, `1`, `yes`, `on`; or `error`, `fail`, `failed`, `unhealthy`, `false`, `0`,
+`no`, `off`. Header `X-Fluxheim-Health` wins over query `health`, then `ok`, then
+`success`. Invalid input or absent pending validation returns 400. Reports do
+not perform an application, origin or collector probe themselves.
+
 Pending validation fails closed and is persisted in `self-healing.toml`,
 including health counters and failed rollback attempts. If the validation
-window expires before confirmation, the native watchdog retries the same
-known-good rollback without waiting for operator traffic. A rollback decision
+window expires before confirmation, the native watchdog retries its recorded
+rollback target without waiting for operator traffic. A rollback decision
 does not consume pending state; only successful runtime application plus a
 durable current-pointer update clears it.
 
-At startup Fluxheim converts the persisted Unix expiry to a monotonic deadline.
-Later wall-clock corrections cannot extend or prematurely end the live
-validation window. Admin requests also enforce the deadline as a secondary
-guard.
+Startup restores persisted recovery bookkeeping and converts the remaining Unix
+expiry to a monotonic deadline. Within a process, later wall-clock corrections
+do not change that deadline; restart necessarily consults wall time again. This
+does not reconcile startup configuration identity. The
+watchdog checks at `validation_window_secs` clamped to 1..5 seconds, not an exact
+expiry instant. Authenticated legacy admin requests also enforce recovery;
+operational status and explicitly public health do not.
 
 Public proxy traffic does not confirm or roll back pending snapshots. This keeps
 unauthenticated data-plane clients from influencing admin reload state. Only
 authenticated admin self-healing actions, local watchdog expiry, and explicit
 operator-driven health reports can advance pending validation.
 
-The self-healing path uses these state transitions:
+The watchdog is an expiry/error-report recovery loop, not an automatic public
+HTTP checker or general startup-service fault detector. Verify/enroll a baseline,
+apply one candidate, then confirm or recover before another change. Missing
+targets, invalid manifests, runtime-construction failures or audit admission
+failure can prevent automatic rollback. Check actual public behavior as well as
+recovery state; a healthy admin listener does not imply successful recovery.
 
-1. Mark the pre-reload snapshot as known-good.
-2. Validate and apply a snapshot-safe reload through `POST /_fluxheim/reload`.
-3. Watch a configurable health window with the background watchdog.
-4. Treat clear failures as broken, for example local health-check failure,
-   startup-owned service failure, or an authenticated failure report from the
-   local watchdog.
-5. Automatically swap back to the previous known-good runtime snapshot when the
-   new snapshot is unhealthy.
-6. Leave process-upgrade-only changes to the supervised process replacement path.
+## Failure Handling
 
-The first implementation should be conservative. It should prefer keeping the
-old known-good config over guessing that a risky new config is healthy.
+| Outcome | Action |
+| --- | --- |
+| Snapshot published but current update failed | History can remain; diagnose/verify before selecting an ID instead of blindly creating copies |
+| Reload 409 `process_upgrade_required` | Live config not accepted; publication may already have selected the candidate; choose verified baseline or perform intentional restart |
+| Candidate construction fails | Existing router retained; inspect selected pointer separately |
+| Apply succeeds but recovery-state/pointer persistence fails | HTTP error does not mean no change; inspect traffic and runtime/store views before retrying |
+| Expiry recovery fails | Keep pending recovery, repair the cause and observe retries; do not delete state to clear readiness |
+| Doctor reports damage | Quiesce writers, preserve evidence/backups and restore a consistent verified store/key through deployment procedures |
+| Integrity key lost/changed | A different key cannot verify old history; retain the original securely or establish an explicitly new trusted store |
+
+Router publication, admin bookkeeping and filesystem writes are not one atomic
+transaction. Serializing deployments limits operator overlap but cannot eliminate
+crashes or disk failures between stages. HMAC authenticity also does not prove
+freshness against coordinated whole-store rollback. See the store boundaries
+above and the correction ledger.

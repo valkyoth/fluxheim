@@ -1,0 +1,40 @@
+# Complete local-file example, not an overlay for local.toml.
+[server]
+listen = ["127.0.0.1:8088"]
+trusted_proxies = []
+
+[server.process]
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+grace_period_seconds = 1
+graceful_shutdown_timeout_seconds = 2
+
+[logging]
+level = "warn"
+
+[logging.access]
+enabled = false
+request_id = false
+
+[tls]
+enabled = false
+
+[web]
+root = "site"
+cache_control = "public, max-age=120"
+
+[cache]
+enabled = true
+local_static = true
+status_header = "x-cache-status"
+content_types = ["text/css"]
+extensions = ["css"]
+max_object_bytes = "256KiB"
+
+[cache.memory]
+enabled = true
+max_size_bytes = "8MiB"
+
+[cache.disk]
+enabled = false

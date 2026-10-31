@@ -1,8 +1,14 @@
 # Load Balancer Migration Notes
 
-Fluxheim `1.5.x` focuses on HTTP/TCP edge load-balancer operations that map
-cleanly from HAProxy, nginx, Envoy, and F5 LTM-style pools. The validated
-starting fixture is `examples/load-balancer-enterprise.toml`.
+For a first deployment, start with the [load-balancing guide](load-balancer.md)
+and [complete option reference](../reference/load-balancer-options.md). This page
+compares pool concepts from HAProxy, nginx, Envoy and F5 LTM. The larger migration
+fixture is `examples/load-balancer-enterprise.toml`.
+
+**Runtime scope:** native HTTP retry eligibility is deliberately bounded, and
+least-time/passive latency ejection measures response-header wait rather than
+full response time. Validating a migration fixture is not a live qualification.
+See [retry and latency boundaries](load-balancer.md#retry-and-latency-boundaries).
 For pull-based control-plane upstream lists, use
 `examples/load-balancer-http-discovery.toml`.
 For local command-based monitors, use
@@ -13,9 +19,10 @@ it owns. Runtime status and health-check backend summaries expose only the
 protocol, not the exec command path or arguments.
 
 This is a migration guide for pool behavior, not a claim that Fluxheim clones
-every product module. UDP, GSLB/DNS steering, WAF policy, VPN/firewall
-appliance behavior, and iRules/Lua/Wasm scripting are tracked as separate
-roadmap lines.
+every product module. GSLB/DNS steering, WAF policy and VPN/firewall appliance
+behavior are not provided by these pool settings. Existing beta UDP and
+[Wasm hooks](wasm-extensibility.md) are separate features, not native execution
+of arbitrary iRules or Lua configurations.
 
 For active-active managed-cookie and persistence-state boundaries, see
 [Load Balancer HA Design Notes](../ideas/load-balancer-ha.md).
@@ -93,7 +100,7 @@ administrative state, persistence, and manual drain/resume workflows.
 
 Fluxheim maps those pieces as follows:
 
-| F5 / BIG-IP concept | Fluxheim `1.5.x` mapping |
+| F5 / BIG-IP concept | Fluxheim mapping |
 | --- | --- |
 | Pool members | `proxy.upstreams` |
 | Member names | `proxy.upstream_aliases` |
@@ -203,9 +210,8 @@ curl -X POST \
 
 ## Known Migration Boundaries
 
-The following are intentional current load-balancer boundaries. They are not
-defects in the shipped load-balancer behavior; they are architectural gaps
-tracked for future module lines.
+The following boundaries distinguish supported local pool behavior from
+unimplemented integrations and future cluster features.
 
 - Runtime add/remove/update-member operations are available for static upstream
   pools only. DNS/file/HTTP-discovery pools reject them because discovery
@@ -214,7 +220,7 @@ tracked for future module lines.
   runtime mutation, health/discovery loops, and selection policy. The native
   HTTP proxy transport path now consumes the same Fluxheim-owned selector,
   health, discovery, persistence, and runtime mutation state.
-- During the `1.6.32` native runtime cutover, static native HTTP proxy pools
+- Static native HTTP proxy pools
   with active load-balancer health checks share one `UpstreamLoadBalancer`
   instance between request selection and the native background health service.
   Static advanced pool policy, including priority groups, locality preference,
@@ -228,14 +234,14 @@ tracked for future module lines.
   Hash/ring selectors need future table-rebuild semantics before runtime
   weights are accepted there.
 - Load-balancer-managed cookie insertion is available through
-  `mode = "managed-cookie"` in the `1.5.3` line. It is signed/opaque and local
+  `mode = "managed-cookie"`. It is signed/opaque and local
   to one Fluxheim process, with daily local signing-key rotation and current or
   previous generation verification. Restart-persistent managed-cookie state,
   shared signing keys, and active-active cookie mirroring remain future HA work.
 - HA persistence/cookie mirroring is future cluster-state work. Persistence
   tables and runtime member/weight overrides can be restart-persisted locally
-  with `proxy.load_balance.runtime_state_file`, but passive health, retry
-  budgets, queue counters, and managed-cookie signing keys remain local to one
+  with `proxy.load_balance.runtime_state_file`, but passive health,
+  queue counters, and managed-cookie signing keys remain local to one
   Fluxheim process in the current load-balancer implementation. Active-active
   deployments must either accept independent local state or place another HA
   layer in front until cross-node synchronization lands.
@@ -262,9 +268,9 @@ tracked for future module lines.
 - Runtime state is local to one Fluxheim process. Runtime member-state
   overrides, runtime weight overrides, and persistence tables can be
   restart-persisted with `proxy.load_balance.runtime_state_file`, but mutated
-  backend sets, passive health, retry budgets, queue counters, and
+  backend sets, passive health, queue counters, and
   managed-cookie signing keys are not cluster-synced.
-- UDP, GSLB/DNS steering, WAF, VPN/firewall appliance behavior, and scripted
-  iRules/Lua/Wasm behavior are intentionally separate roadmap lines.
+- These pool settings do not provide GSLB/DNS steering, WAF or VPN/firewall
+  appliance behavior. Beta UDP and Wasm hooks have their own documented scopes.
 - `proxy.load_balance.queue` is opt-in. Defaults keep fail-fast behavior when
   no backend is selectable.

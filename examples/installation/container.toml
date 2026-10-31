@@ -1,0 +1,25 @@
+# Minimal static deployment, shared by the full and Wasm image profiles.
+[server]
+listen = ["0.0.0.0:8080"]
+default_vhost = "site"
+
+[server.process]
+pid_file = "/run/fluxheim/fluxheim.pid"
+upgrade_sock = "/run/fluxheim/fluxheim-upgrade.sock"
+certificate_reload_sock = "/run/fluxheim/fluxheim-cert-reload.sock"
+graceful_shutdown_timeout_seconds = 5
+
+[cache]
+enabled = false
+
+[logging]
+target = "stderr"
+
+[[vhosts]]
+name = "site"
+hosts = ["localhost", "127.0.0.1"]
+
+[vhosts.web]
+root = "/srv/fluxheim"
+index_files = ["index.html"]
+deny_dotfiles = true

@@ -107,7 +107,7 @@ pub(crate) struct NativeProxyCacheStoreMetadata {
 #[derive(Debug)]
 pub(crate) enum NativePeerFillDecision {
     Skip,
-    Hit(NativeHttp1Response),
+    Hit(Box<NativeHttp1Response>),
     FailClosed(&'static str),
 }
 

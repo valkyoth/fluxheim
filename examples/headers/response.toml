@@ -1,0 +1,78 @@
+# Local wire-inspection recipe. HSTS does not make this HTTP listener secure.
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "api"
+[server.process]
+daemon = false
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+[cache]
+enabled = false
+
+[headers.response]
+enabled = true
+x_content_type_options = "nosniff"
+x_frame_options = "DENY"
+referrer_policy = "no-referrer"
+content_security_policy = "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+content_security_policy_report_only = "default-src 'self'; report-to csp"
+cross_origin_opener_policy = "same-origin"
+cross_origin_resource_policy = "same-origin"
+cross_origin_embedder_policy = "require-corp"
+x_permitted_cross_domain_policies = "none"
+remove = ["x-origin-secret"]
+
+[headers.response.hardening]
+profile = "baseline"
+[headers.response.hsts]
+enabled = true
+max_age_secs = 300
+include_subdomains = false
+preload = false
+[headers.response.permissions_policy]
+enabled = true
+profile = "deny-sensitive"
+[headers.response.reporting_endpoints]
+csp = "https://reports.example.test/csp"
+[headers.response.add]
+x-edge = "demo"
+[headers.response.append]
+link = ['</style.css>; rel=preload; as=style', '</app.js>; rel=preload; as=script']
+[headers.response.metadata]
+identifier = "edge-demo"
+cache_status = true
+proxy_status = true
+content_digest = true
+repr_digest = true
+
+[[headers.response.rewrite.location]]
+from = "http://origin.example.test/internal/"
+to = "https://public.example.test/app/"
+[[headers.response.rewrite.refresh]]
+from = "http://origin.example.test/internal/"
+to = "https://public.example.test/app/"
+[[headers.response.rewrite.cookie_domain]]
+from = "origin.example.test"
+to = "public.example.test"
+[[headers.response.rewrite.cookie_path]]
+from = "/internal/"
+to = "/app/"
+
+[[vhosts]]
+name = "api"
+hosts = ["api.example.test"]
+[vhosts.proxy]
+upstreams = ["127.0.0.1:9001"]
+
+[[vhosts.routes]]
+name = "child"
+path_prefix = "/child"
+max_request_body_bytes = 4
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+[vhosts.routes.headers.response]
+referrer_policy = "same-origin"
+[vhosts.routes.headers.response.add]
+x-route = "child"

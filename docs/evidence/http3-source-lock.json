@@ -7,7 +7,7 @@
   "address_policy": "seamless-validated-migration",
   "address_policy_evidence": "blocked-api-gap",
   "address_change_requirements": ["nat-port", "nat-ip", "active-client-migration", "same-connection-stream-continuity", "validated-peer-policy", "bounded-prefix-accounting", "failed-path-recovery", "native-live-matrix"],
-  "probe_lock_sha256": "d2d144a099d15bec0954cae76b214e2775aca4fffd250bc7be684f5cfdaad4c9",
+  "probe_lock_sha256": "f861c540ff8b6a90f2d38efbf815f1793bbc2358e1bdb2436229f00479b6bd41",
   "pins": {
     "bytes": "1.12.1",
     "h3": "0.0.8",
@@ -19,7 +19,7 @@
     "rcgen": "0.14.10",
     "rustls": "0.23.46",
     "rustls-webpki": "0.103.16",
-    "tokio": "1.53.2"
+    "tokio": "1.53.3"
   },
   "platforms": ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-pc-windows-msvc"],
   "artifact_features": ["profile-full", "http3", "php-fpm", "acme-client", "metrics", "metrics-otlp", "otel-tracing", "otel-otlp"],
@@ -27,6 +27,7 @@
     "Cargo.toml": ["aws-lc-rs", "ring", "rustls"],
     "crates/fluxheim-acme/Cargo.toml": ["rustls"],
     "crates/fluxheim-load-balancer/Cargo.toml": ["ring", "rustls"],
+    "crates/fluxheim-observability/Cargo.toml": ["rustls"],
     "crates/fluxheim-server/Cargo.toml": ["ring", "rustls"],
     "crates/fluxheim-snapshot/Cargo.toml": ["ring"],
     "crates/fluxheim-tls/Cargo.toml": ["rustls"]

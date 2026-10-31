@@ -1,0 +1,14 @@
+# Merge fields into local.toml's [proxy]; do not append a duplicate table.
+[proxy]
+upstream_weights = [2, 1]
+upstream_priority_groups = [100, 10]
+upstream_priority_group_min_active = 1
+upstream_localities = ["zone-a", "zone-b"]
+preferred_upstream_localities = ["zone-a"]
+upstream_max_in_flight = [10, 10]
+upstream_tags = [["primary"], ["recovery"]]
+
+[proxy.load_balance]
+selection = "least-connections"
+max_iterations = 256
+all_down_status = 503

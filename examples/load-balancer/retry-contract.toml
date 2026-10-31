@@ -1,0 +1,10 @@
+# Merge into a native HTTP pool configuration; not a standalone server config.
+# Up to two additional safe empty-body sends, also limited by a shared pool budget.
+[proxy.load_balance.retry]
+enabled = true
+max_retries = 2
+methods = ["GET", "HEAD", "OPTIONS"]
+statuses = [503]
+status_ranges = [{ start = 520, end = 529 }]
+budget_per_window = 100
+budget_window_secs = 10

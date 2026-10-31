@@ -395,8 +395,8 @@ fn least_time_score_is_lower(
     selected_connections: usize,
     selected_weight: usize,
 ) -> bool {
-    let candidate = candidate_latency.saturating_mul(selected_weight as u64);
-    let selected = selected_latency.saturating_mul(candidate_weight as u64);
+    let candidate = u128::from(candidate_latency) * selected_weight as u128;
+    let selected = u128::from(selected_latency) * candidate_weight as u128;
     candidate < selected
         || (candidate == selected
             && least_connections_score_is_lower(
@@ -444,6 +444,14 @@ pub(super) fn select_maglev(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn least_time_weighted_comparison_preserves_order_at_maximum_latency() {
+        assert!(least_time_score_is_lower(u64::MAX, 0, 3, u64::MAX, 0, 2));
+        assert!(!least_time_score_is_lower(u64::MAX, 0, 2, u64::MAX, 0, 3));
+        assert!(least_time_score_is_lower(200, 0, 3, 100, 0, 1));
+        assert!(least_time_score_is_lower(100, 1, 1, 100, 2, 1));
+    }
 
     #[test]
     fn maglev_candidate_uses_exact_wide_modular_arithmetic() {

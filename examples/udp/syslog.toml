@@ -1,0 +1,28 @@
+# One-way beta UDP forwarding. No delivery acknowledgement or durable queue.
+[server]
+listen = []
+[server.process]
+daemon = false
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+[cache]
+enabled = false
+
+[udp]
+enabled = true
+[[udp.routes]]
+name = "local-syslog"
+mode = "syslog-forward"
+listen = ["127.0.0.1:15514"]
+upstream = "127.0.0.1:19514"
+idle_timeout_secs = 30
+response_timeout_secs = 3
+max_datagram_bytes = 8192
+max_sessions = 64
+max_sessions_per_source = 8
+max_responses_per_source_per_second = 256
+passive_health_enabled = true
+passive_health_failures = 3
+passive_health_ejection_secs = 10

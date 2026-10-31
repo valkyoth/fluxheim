@@ -1,6 +1,6 @@
 # Logging Architecture
 
-## Current Status (2026-10-24)
+## Current Status
 
 Legacy runtime messages use `log` with bounded asynchronous output. Their
 JSON records have timestamp, level, target and message strings; stderr is the
@@ -30,10 +30,13 @@ See the [file lifecycle guide](../guides/logging.md) and
 [Commit 05 qualification](../evidence/observability-05.md). Native cross-platform
 and performance acceptance must not be inferred from Linux tests.
 
-Access-log configuration and helper functions exist, but the former Pingora
-completion hook is not wired into the current native request lifecycle.
-Do not treat `logging.access.enabled` as proof that native access events or
-request-ID correlation are emitted. See the [Commit 01 inventory](../evidence/observability-baseline.md).
+Native request completion and trusted-peer/local request-ID correlation are now
+implemented. The six legacy include_* controls still have no native event effect
+(documented contract); paths, hosts, client IPs, routes, upstreams and cache phases are not
+added by enabling them. Use the [logging guide](../guides/logging.md) for current
+options/schema and [tracing guide](../guides/opentelemetry-tracing.md) for lifecycle
+coverage. The [Commit 01 inventory](../evidence/observability-baseline.md) records
+the earlier baseline, not current implementation status.
 
 ## Historical Design (Not A Configuration Reference)
 

@@ -6,7 +6,6 @@ use crate::native_http1_proxy_cache_headers::{
 };
 use crate::native_http1_proxy_cache_policy::native_cache_stale_event_for_error;
 use crate::native_http1_proxy_cache_response::native_cached_hit_response;
-use crate::native_http1_proxy_config::native_http1_static_failover_method_allowed;
 use crate::native_http1_proxy_error_page::{
     native_error_page_response, native_proxy_status_reason,
 };
@@ -43,8 +42,6 @@ impl NativeHttp1Proxy {
             return NativeHttp1Response::new(502, "Bad Gateway", b"bad gateway\n")
                 .close_connection();
         };
-        let retry_allowed =
-            request.body.is_empty() && native_http1_static_failover_method_allowed(&request.method);
         let client_ip = request
             .effective_client_addr
             .or(request.peer_addr)
@@ -259,7 +256,7 @@ impl NativeHttp1Proxy {
                 NativePeerFillDecision::Hit(response) => {
                     return self.finish_response(
                         &request,
-                        response,
+                        *response,
                         Some((&cache.config, "PEER-HIT", None, None)),
                         #[cfg(any(
                             feature = "compression-brotli",
@@ -378,63 +375,33 @@ impl NativeHttp1Proxy {
         } else {
             None
         };
-        let mut last_error = None;
-        let max_attempts = self.upstreams.len().max(1);
-        for attempt in 0..max_attempts {
+        let last_error = {
             let Some(selected) = load_balancer.select_or_wait(&request, client_ip).await else {
                 fluxheim_observability::operational::security(
                     fluxheim_observability::event::SecurityReason::AdmissionRejected,
                 );
-                if attempt == 0 {
-                    let status = load_balancer.all_down_status();
-                    if let Some((cache, key, _, _, _)) = proxy_cache_fill.as_ref()
-                        && let Some(stale) = cache
-                            .get_stale(
-                                key,
-                                &request,
-                                CacheStaleEvent::UpstreamError(
-                                    fluxheim_config::CacheStaleErrorKind::Connect,
-                                ),
-                            )
-                            .await
-                    {
-                        cache.record_policy_activity("stale");
-                        return self.finish_response(
+                let status = load_balancer.all_down_status();
+                if let Some((cache, key, _, _, _)) = proxy_cache_fill.as_ref()
+                    && let Some(stale) = cache
+                        .get_stale(
+                            key,
                             &request,
-                            stale.to_response(),
-                            Some((
-                                &cache.config,
-                                "STALE",
-                                Some("upstream-error"),
-                                Some(stale.age_secs()),
-                            )),
-                            #[cfg(any(
-                                feature = "compression-brotli",
-                                feature = "compression-gzip",
-                                feature = "compression-zstd"
-                            ))]
-                            compression_request,
-                        );
-                    }
-                    let error_response = native_error_page_response(
-                        &self.error_pages,
-                        self.response_write_policy,
-                        &request,
-                        status,
-                    )
-                    .await
-                    .unwrap_or_else(|| {
-                        NativeHttp1Response::new(
-                            status,
-                            native_proxy_status_reason(status),
-                            b"service unavailable\n",
+                            CacheStaleEvent::UpstreamError(
+                                fluxheim_config::CacheStaleErrorKind::Connect,
+                            ),
                         )
-                        .close_connection()
-                    });
+                        .await
+                {
+                    cache.record_policy_activity("stale");
                     return self.finish_response(
                         &request,
-                        error_response,
-                        proxy_cache_status,
+                        stale.to_response(),
+                        Some((
+                            &cache.config,
+                            "STALE",
+                            Some("upstream-error"),
+                            Some(stale.age_secs()),
+                        )),
                         #[cfg(any(
                             feature = "compression-brotli",
                             feature = "compression-gzip",
@@ -443,35 +410,39 @@ impl NativeHttp1Proxy {
                         compression_request,
                     );
                 }
-                break;
-            };
-            let authority = selected.authority();
-            let dynamic_upstream = self
-                .upstream_for_authority(&authority)
-                .is_none()
-                .then(|| self.dynamic_upstream_for_authority(&authority))
-                .flatten();
-            let upstream = self
-                .upstream_for_authority(&authority)
-                .or(dynamic_upstream.as_ref());
-            let Some(upstream) = upstream else {
-                if let Some(reporter) = selected.reporter() {
-                    reporter.record_failure();
-                }
-                log::debug!(
-                    target: "fluxheim::native_http1",
-                    "native load-balanced upstream {authority} has no configured transport"
+                let error_response = native_error_page_response(
+                    &self.error_pages,
+                    self.response_write_policy,
+                    &request,
+                    status,
+                )
+                .await
+                .unwrap_or_else(|| {
+                    NativeHttp1Response::new(
+                        status,
+                        native_proxy_status_reason(status),
+                        b"service unavailable\n",
+                    )
+                    .close_connection()
+                });
+                return self.finish_response(
+                    &request,
+                    error_response,
+                    proxy_cache_status,
+                    #[cfg(any(
+                        feature = "compression-brotli",
+                        feature = "compression-gzip",
+                        feature = "compression-zstd"
+                    ))]
+                    compression_request,
                 );
-                continue;
             };
+            let (selected, result) = self.send_load_balanced(&mut request, selected, None).await;
             let managed_affinity_cookie = selected
                 .managed_affinity_cookie()
                 .map(|cookie| cookie.header_value.clone());
-            match upstream.send(&mut request).await {
+            match result {
                 Ok(mut response) => {
-                    if let Some(reporter) = selected.reporter() {
-                        reporter.record_status(response.status(), None);
-                    }
                     let mut cache_status = proxy_cache_status;
                     if let Some((cache, key, status, reason, stale_entry)) =
                         proxy_cache_fill.as_ref()
@@ -622,29 +593,15 @@ impl NativeHttp1Proxy {
                         compression_request,
                     );
                 }
-                Err(error) if retry_allowed && attempt + 1 < max_attempts => {
-                    if let Some(reporter) = selected.reporter() {
-                        reporter.record_failure();
-                    }
-                    log::debug!(
-                        target: "fluxheim::native_http1",
-                        "native load-balanced upstream attempt failed before retry: {error:?}"
-                    );
-                    last_error = Some(error);
-                }
                 Err(error) => {
-                    if let Some(reporter) = selected.reporter() {
-                        reporter.record_failure();
-                    }
                     log::debug!(
                         target: "fluxheim::native_http1",
                         "native load-balanced upstream attempt failed: {error:?}"
                     );
-                    last_error = Some(error);
-                    break;
+                    Some(error)
                 }
             }
-        }
+        };
         let status = if last_error
             .as_ref()
             .is_some_and(native_proxy_error_is_timeout)

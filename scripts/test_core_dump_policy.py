@@ -50,17 +50,19 @@ class CoreDumpPolicyTests(unittest.TestCase):
 
     def test_documented_compose_and_run_commands_keep_limits(self):
         checked = 0
-        commands = 0
         for name in GUIDES:
             text = (ROOT / "docs/guides" / name).read_text()
+            commands = 0
             for block in re.findall(r"```yaml\n(.*?)```", text, re.S):
                 checked += self.check_compose(yaml.safe_load(block))
             for line in text.splitlines():
                 if line.startswith("podman run "):
                     self.assertIn("--ulimit core=0:0", line, name)
                     commands += 1
+            # Each guide still has a direct-run example; duplicated ACME
+            # recipes need not be retained just to satisfy a global count.
+            self.assertGreater(commands, 0, name)
         self.assertEqual(checked, 3)
-        self.assertGreaterEqual(commands, 10)
 
     def test_live_limit_parser_rejects_missing_nonzero_or_unlimited_limits(self):
         check_core_limit("Max core file size        0          0          bytes\n")

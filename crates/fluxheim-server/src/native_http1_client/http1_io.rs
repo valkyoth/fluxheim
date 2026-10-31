@@ -57,7 +57,8 @@ impl NativeHttp1Upstream {
         let (response, reusable) = match result {
             Ok(result) => result,
             Err(error)
-                if reused
+                if self.transport_replay
+                    && reused
                     && pooled_connection_error_can_retry(&error)
                     && request.body.is_empty()
                     && native_http1_retry_method_allowed(&request.method) =>

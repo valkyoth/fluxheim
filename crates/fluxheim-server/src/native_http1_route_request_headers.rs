@@ -409,3 +409,7 @@ fn flatten_append_headers(
     }
     flattened
 }
+
+#[cfg(test)]
+#[path = "native_request_header_contract_tests.rs"]
+mod contract_tests;

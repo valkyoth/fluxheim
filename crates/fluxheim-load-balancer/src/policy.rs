@@ -25,6 +25,7 @@ pub(super) struct BackendSelectionPolicy {
     backup: Arc<std::collections::HashSet<u64>>,
     drain: Arc<std::collections::HashSet<u64>>,
     disabled: Arc<std::collections::HashSet<u64>>,
+    retry_excluded: [Option<u64>; 11],
     runtime: Arc<RuntimeBackendPolicyOverrides>,
     priority: Arc<std::collections::HashMap<u64, u16>>,
     localities: Arc<std::collections::HashMap<u64, Arc<str>>>,
@@ -49,6 +50,7 @@ impl BackendSelectionPolicy {
             backup: backend_keys(&config.backup_upstreams).into(),
             drain: backend_keys(&config.drain_upstreams).into(),
             disabled: backend_keys(&config.disabled_upstreams).into(),
+            retry_excluded: [None; 11],
             runtime: Arc::new(RuntimeBackendPolicyOverrides::default()),
             priority: priority.into(),
             localities: backend_localities(config).into(),
@@ -68,6 +70,17 @@ impl BackendSelectionPolicy {
 
     pub(super) fn health_weights(&self) -> Arc<HealthDerivedWeights> {
         self.health_weights.clone()
+    }
+
+    pub(super) fn exclude_attempted(&mut self, addresses: &[std::net::SocketAddr]) -> bool {
+        if addresses.len() > self.retry_excluded.len() {
+            return false;
+        }
+        self.retry_excluded.fill(None);
+        for (slot, address) in self.retry_excluded.iter_mut().zip(addresses) {
+            *slot = Some(super::key::backend_authority_key(&address.to_string()));
+        }
+        true
     }
 
     pub(super) fn permits(
@@ -130,7 +143,9 @@ impl BackendSelectionPolicy {
     }
 
     pub(super) fn disabled(&self, key: u64) -> bool {
-        self.disabled.contains(&key) || self.runtime.disabled(key)
+        self.retry_excluded.contains(&Some(key))
+            || self.disabled.contains(&key)
+            || self.runtime.disabled(key)
     }
 
     pub(super) fn priority_group(&self, key: u64) -> Option<u16> {

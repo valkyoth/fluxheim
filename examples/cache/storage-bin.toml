@@ -1,0 +1,11 @@
+# Alternative to filesystem.toml, not an additional table to append after it.
+[cache.disk]
+enabled = true
+backend = "storage-bin"
+path = "state/cache"
+max_size_bytes = "32MiB"
+
+[cache.disk.storage_bin]
+bin_size_bytes = "1MiB"
+preallocate = false
+max_open_bins = 4

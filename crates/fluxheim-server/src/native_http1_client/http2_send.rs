@@ -26,6 +26,10 @@ use crate::{
     NativeHttp2StackError,
 };
 
+#[cfg(test)]
+#[path = "../native_h2_timeout_contract_tests.rs"]
+mod timeout_contract_tests;
+
 impl NativeHttp1Upstream {
     pub(super) async fn send_http2(
         &self,
@@ -51,7 +55,8 @@ impl NativeHttp1Upstream {
                 }
             }),
         )?;
-        let retry_allowed = request.body.is_empty()
+        let retry_allowed = self.transport_replay
+            && request.body.is_empty()
             && native_http1_retry_method_allowed(upstream_request.method.as_str());
         let retry_request = retry_allowed
             .then(|| upstream_request.retry_snapshot())
@@ -145,7 +150,11 @@ impl NativeHttp1Upstream {
                     if h2c_upgrade_error_can_fallback(&error)
                         && (body_was_empty || !request.body.is_empty()) =>
                 {
-                    crate::native_request_telemetry::retry_attempt();
+                    // The h2c probe precedes the application request. Pool retry
+                    // accounting counts application sends, not negotiation.
+                    if self.transport_replay {
+                        crate::native_request_telemetry::retry_attempt();
+                    }
                     self.invalidate_http2_connection().await;
                     log::debug!(
                         target: "fluxheim::native_http2",

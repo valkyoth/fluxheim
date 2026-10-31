@@ -1,5 +1,9 @@
 use std::error::Error;
 
+#[cfg(all(test, feature = "acme-client", unix))]
+#[path = "acme_companion_reload_contract_tests.rs"]
+mod contract_tests;
+
 #[cfg(all(feature = "acme-client", unix))]
 use super::config_loader::load_validated_config;
 #[cfg(feature = "acme-client")]

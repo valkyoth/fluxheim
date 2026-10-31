@@ -1,5 +1,7 @@
+# External-renewal template. Review issuer terms and provision EAB credentials.
 [server]
 listen = ["127.0.0.1:8080"]
+tls_listen = ["127.0.0.1:8443"]
 default_vhost = "actalis.example.test"
 
 [tls]
@@ -26,8 +28,9 @@ zero_downtime_reload = true
 [[tls.acme.issuers]]
 name = "actalis"
 directory_url = "https://acme-api.actalis.com/acme/directory"
-terms_of_service_agreed = true
-# Replace this with the exact current Actalis terms URL you reviewed.
+terms_of_service_agreed = false
+# Replace this with the exact current Actalis terms URL you reviewed, then
+# change agreement above to true. The placeholder is not consent.
 terms_of_service_url = "https://replace-with-the-current-issuer-terms.example/"
 
 [tls.acme.issuers.eab]

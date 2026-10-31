@@ -1,0 +1,6 @@
+# Append to local.toml for memory + filesystem caching.
+[cache.disk]
+enabled = true
+backend = "filesystem"
+path = "state/cache"
+max_size_bytes = "32MiB"

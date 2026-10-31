@@ -41,6 +41,12 @@ async fn fastcgi_responder(stdout: &'static [u8]) -> std::net::SocketAddr {
             .await
             .unwrap();
         stream.shutdown().await.unwrap();
+        // Drain after half-close so unread FastCGI client records do not cause a TCP reset.
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            tokio::io::copy(&mut stream.take(64 * 1024), &mut tokio::io::sink()),
+        )
+        .await;
     });
     addr
 }

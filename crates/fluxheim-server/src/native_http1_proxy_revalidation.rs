@@ -81,6 +81,20 @@ impl NativeHttp1Proxy {
         let max_body_bytes = cache.config.range.slice.size_bytes.as_u64();
         let capped_body_bytes = usize::try_from(max_body_bytes.saturating_add(1)).ok()?;
         let mut request = native_origin_slice_request(request, bounds)?;
+        #[cfg(feature = "load-balancer")]
+        if let Some(pool) = &self.load_balancer {
+            let client_ip = request
+                .effective_client_addr
+                .or(request.peer_addr)
+                .map(|addr| addr.ip());
+            let selected = pool.select_or_wait(&request, client_ip).await?;
+            let (_, result) = self
+                .send_load_balanced(&mut request, selected, Some(capped_body_bytes))
+                .await;
+            return result
+                .ok()
+                .filter(|response| response.body().len() as u64 <= max_body_bytes);
+        }
         let start = self.next_upstream.fetch_add(1, Ordering::Relaxed);
         let total = self.upstream_slots.len();
         let mut attempted = vec![false; self.upstreams.len()];
@@ -166,36 +180,10 @@ impl NativeHttp1Proxy {
             )
             .into());
         };
-        let authority = selected.authority();
-        let dynamic_upstream = self
-            .upstream_for_authority(&authority)
-            .is_none()
-            .then(|| self.dynamic_upstream_for_authority(&authority))
-            .flatten();
-        let Some(upstream) = self
-            .upstream_for_authority(&authority)
-            .or(dynamic_upstream.as_ref())
-        else {
-            if let Some(reporter) = selected.reporter() {
-                reporter.record_failure();
-            }
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotConnected,
-                format!(
-                    "native proxy cache refresh selected upstream {authority} without transport"
-                ),
-            )
-            .into());
-        };
         let mut outbound = request.metadata_snapshot();
-        let result = upstream.send(&mut outbound).await;
-        if let Some(reporter) = selected.reporter() {
-            match &result {
-                Ok(response) => reporter.record_status(response.status(), None),
-                Err(_) => reporter.record_failure(),
-            };
-        }
-        result
+        self.send_load_balanced(&mut outbound, selected, None)
+            .await
+            .1
     }
 
     #[cfg(feature = "load-balancer")]

@@ -22,7 +22,7 @@ The packaged unit is intentionally conservative:
 - sets both core-file limits to zero for the server and ACME companion;
 - stops with `SIGTERM` and lets Fluxheim shut down gracefully.
 
-These systemd controls are the supported `1.0` host sandbox. They are
+These systemd controls are deployment hardening for the native service. They are
 deployment-level controls and do not require a special Fluxheim binary.
 
 The packaged native config listens on `0.0.0.0:80` by default. HTTPS uses
@@ -145,7 +145,7 @@ sudo systemctl restart fluxheim.service
 
 ## Reload And Restart
 
-For `1.0`, treat native service changes as validate-then-restart unless a
+Treat native service changes as validate-then-restart unless a
 specific runtime reload path is documented for the setting you changed:
 
 ```bash
@@ -153,15 +153,33 @@ sudo -u fluxheim /usr/bin/fluxheim --config /etc/fluxheim/fluxheim.toml --valida
 sudo systemctl restart fluxheim.service
 ```
 
-Fluxheim exits on `SIGTERM`; the unit uses `TimeoutStopSec=30s` so the process
-has time to drain and shut down cleanly before systemd escalates.
+Fluxheim handles `SIGTERM`. The shipped `TimeoutStopSec=30s` equals its default
+30-second async drain, leaving no room for a grace delay or remaining teardown
+. Until packaging is corrected,
+use `sudo systemctl edit fluxheim.service` to add, for example:
 
-Starting with `1.7.11`, native listeners stop accepting after the configured
+```ini
+[Service]
+TimeoutStopSec=45s
+```
+
+Then run `sudo systemctl daemon-reload`. Choose a larger value if your configured
+grace period plus drain plus teardown needs it; 45 seconds is an example, not a
+universal bound. Verify with `systemctl show fluxheim.service -p TimeoutStopUSec`.
+The service manager can forcibly kill the process when its limit expires.
+
+Native listeners stop accepting after the configured
 grace interval and wait for established connection tasks within the configured
 graceful-shutdown timeout. Public HTTP/HTTPS listeners can also be inherited
 through systemd socket activation. This makes restarts bounded and
 connection-aware and lets systemd retain the listening socket between process
 generations.
+
+See [service lifecycle](service-lifecycle.md) for every process setting, signal
+behavior and the distinction between async draining and total process exit.
+There is no `ExecReload` in the packaged unit; `systemctl reload` is not a
+general configuration reload API. Use the documented admin/snapshot workflow
+for supported live changes. Do not send SIGHUP as a substitute.
 
 RPM packages ship a disabled `fluxheim.socket` matching the packaged
 `server.listen = ["0.0.0.0:80"]` default. The addresses in the socket unit must
@@ -197,6 +215,14 @@ Keep `fluxheim.socket` enabled and do not re-enable `fluxheim.service`; incoming
 traffic can activate the service, and explicit service restarts retain the
 socket in systemd. After this one-time conversion, validate an update and use
 `systemctl restart fluxheim.service` while the socket unit remains active.
+
+This ordinary restart stops the old service first. The persistent socket can
+queue new connections during startup, subject to backlog/client timeouts; it
+does not provide overlapping generations, preserve existing connections past
+drain, or roll back automatically if the replacement fails. The separate
+readiness-gated overlap smoke is a custom supervisor, not this unit's restart
+behavior. Keep the packaged `Restart=on-failure` policy distinct from rollback:
+it retries the configured service, not a previously known-good binary/config.
 
 Do not add addresses that are absent from the Fluxheim config and do not omit
 configured public addresses. Fluxheim rejects partial activation, wrong-process
@@ -279,10 +305,10 @@ The default native paths are:
 | `/etc/fluxheim/conf.d` | Optional split config directory. |
 | `/etc/fluxheim/tls` | Static certificate chains and private keys. |
 | `/srv/fluxheim` | Default static site root. |
-| `/var/lib/fluxheim` | State and future ACME/snapshot storage. |
+| `/var/lib/fluxheim` | ACME/snapshot state when configured there. |
 | `/var/cache/fluxheim` | Cache storage. |
 | `/var/log/fluxheim` | Optional file logs. |
-| `/run/fluxheim` | PID file, upgrade socket, and certificate reload socket. |
+| `/run/fluxheim` | Runtime sockets, including the enabled certificate reload service. Native PID-file/upgrade-socket settings are currently inactive; see [process options](service-lifecycle.md#process-options). |
 
 Keep private keys mode `0600` or stricter and owned by the runtime user when
 Fluxheim reads them directly:

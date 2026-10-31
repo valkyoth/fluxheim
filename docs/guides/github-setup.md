@@ -86,7 +86,7 @@ scripts/release_checks.sh
 8. Commit the integration:
 
 ```bash
-git add .
+git add.
 git commit -m "Import Fluxheim project"
 ```
 

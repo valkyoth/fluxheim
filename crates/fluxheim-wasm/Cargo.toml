@@ -25,8 +25,8 @@ fluxheim-common = { path = "../fluxheim-common" }
 sha2 = "0.11.1"
 thiserror = "2.0.21"
 tokio = { version = "1.54.0", default-features = false, features = ["rt", "sync", "time"], optional = true }
-wasmtime = { version = "50.0.0", default-features = false, features = ["cranelift", "runtime", "std"], optional = true }
-wasmtime-wasi = { version = "50.0.0", default-features = false, features = ["p1"], optional = true }
+wasmtime = { version = "50.0.1", default-features = false, features = ["cranelift", "runtime", "std"], optional = true }
+wasmtime-wasi = { version = "50.0.1", default-features = false, features = ["p1"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1.5", features = ["fs"] }

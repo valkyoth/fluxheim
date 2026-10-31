@@ -61,7 +61,7 @@ impl NativeProxyMemoryCache {
                         continue;
                     }
                     self.record_policy_activity("peer_fill_hit");
-                    return NativePeerFillDecision::Hit(response);
+                    return NativePeerFillDecision::Hit(Box::new(response));
                 }
                 Ok(None) => {}
                 Err(error) => {

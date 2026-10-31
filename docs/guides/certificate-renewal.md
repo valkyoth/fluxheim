@@ -1,6 +1,13 @@
 # Certificate Renewal And Reload
 
-Fluxheim should support both operator-owned certificates and ACME-managed
+For first setup, use the [ACME operator guide](acme.md) and
+[complete option reference](../reference/acme-options.md). This page retains
+the deeper lifecycle and recovery details; its historical implementation notes
+are not a substitute for the current limitations listed in that guide.
+For incident procedures and current crash/cleanup limitations, read
+[ACME recovery](acme-recovery.md) before changing managed state.
+
+Fluxheim supports both operator-owned certificates and ACME-managed
 certificates. Manual certificates are configured with `cert_path` and `key_path`.
 ACME certificates are configured per vhost and managed under `tls.acme.storage`.
 Fluxheim derives managed certificate paths under
@@ -10,10 +17,14 @@ sanitized and hash-suffixed by Fluxheim, not supplied by the operator.
 For HTTP-01, Fluxheim also derives a local challenge store at
 `<storage>/http-01/<safe-vhost-segment>/` and serves safe challenge token files
 directly when `tls.acme.challenge = "http-01"`.
-TLS-ALPN-01 is also supported in `1.1.0` for the default rustls backend. During
-renewal, Fluxheim writes short-lived challenge certificates under
-`<storage>/tls-alpn-01/<safe-domain-segment>/` and the rustls SNI resolver serves
-them only when the client offers the `acme-tls/1` ALPN protocol. DNS-01 remains
+TLS-ALPN-01 configuration and challenge-generation primitives exist, but
+**Current limitation:**. During renewal,
+the engine writes challenge certificates under
+`<storage>/tls-alpn-01/<safe-domain-segment>/`; the native listener does not
+attach the challenge store to its resolver. Advertising `acme-tls/1` alone does
+not serve these certificates. Use HTTP-01 until the integration is qualified.
+Challenge generation does not set an order-bounded validity window, so do not
+rely on certificate expiry to clean leftover state. DNS-01 remains
 future work because secure provider integrations need explicit, provider-specific
 secret handling rather than generic shell hooks.
 The `fluxheim-tls` challenge-capable resolver accepts only an atomically
@@ -285,10 +296,13 @@ When Fluxheim is built with `acme-client`, it can load existing credentials from
 that path or recoverably create a new issuer account through `instant-acme`.
 EAB HMAC keys are treated as base64/base64url
 encoded ACME MAC keys before they are passed to the issuer client. The same
-feature also contains the live HTTP-01 and rustls TLS-ALPN-01 order paths:
+feature also contains the HTTP-01 and TLS-ALPN-01 client order paths:
 create order, publish challenge material, mark challenges ready, finalize the
 generated CSR, retrieve the certificate chain, install it atomically, and clean
-up challenge files.
+up challenge files. The TLS-ALPN-01 serving gap above prevents claiming a working
+native end-to-end TLS-ALPN workflow. **Current limitation:** cleanup is skipped if the
+renewal future is cancelled and stops at the first removal error; normal-return
+cleanup tests do not prove timeout/crash cleanup.
 
 Production packages and container images ship the `fluxheim-acme` companion as
 the preferred external renewal command. It uses the same ACME engine, storage
@@ -315,9 +329,20 @@ public challenge paths that the issuer should have reached. It exits non-zero
 if any target failed, while still reporting successful renewals from the same
 run.
 
-`fluxheim-acme renew` also asks the running gateway to reload its certificate
-handles after a successful renewal when `server.process.certificate_reload_sock`
-is reachable. Use `reload` explicitly after manually installing managed files:
+Certificate issuance, installation on disk, and activation by the running
+gateway are separate steps. After at least one successful installation,
+`fluxheim-acme renew` requests reload when both the command's default reload
+behavior and `tls.acme.renewal.reload_after_renewal` are enabled. It does not
+silently skip an unreachable `server.process.certificate_reload_sock`: a reload
+error makes the command fail even though new certificate files may already be
+installed. Preserve those files and repair activation rather than forcing another
+issuance just because the command returned an error.
+
+`renew --no-reload` explicitly installs without requesting activation. The external
+reload command requires a Unix socket and is not available on Windows; use the
+supported service restart/activation procedure there. Check the certificate
+actually served after activation. Use `reload` explicitly after manually
+installing managed files:
 
 ```bash
 fluxheim-acme --config /etc/fluxheim/fluxheim.toml reload
@@ -338,8 +363,8 @@ renewals can hit issuer rate limits:
 fluxheim-acme --config /etc/fluxheim/fluxheim.toml renew --force-renew
 ```
 
-`--all` is accepted as a backward-compatible alias for `--force-renew`, but it
-prints a deprecation warning and should not be used in new automation.
+The legacy `fluxheim acme-renew --all` alias prints a deprecation warning; it is
+not a `fluxheim-acme renew` flag and should not be used in new automation.
 
 `doctor` checks target consistency, storage, account credentials, explicit
 terms acceptance, system time, transaction recovery/locking, and
@@ -360,14 +385,20 @@ Account key rollover currently fails before making a remote change. The ACME
 client generates the replacement key internally, so Fluxheim cannot durably
 journal that exact key before activation at the issuer; enabling rollover would
 create an account-orphaning crash window. Deactivation first moves local
-credentials into a locked pending state, restores them if the remote operation
-fails, and deletes them only after issuer confirmation. An interrupted pending
-state blocks account loading rather than ambiguously using stale credentials.
+credentials into a locked pending state, but **Current limitation:** prevents treating
+its outcome as authoritative: the client can accept an HTTP rejection as success
+and delete credentials. A truncated response after remote application instead
+causes local credential restoration. Outer timeout/interruption can leave
+pending state blocking account loading. See the
+[account guide](acme-accounts.md) and [incident workflow](acme-recovery.md);
+neither a successful exit nor local restoration proves the remote account state.
 `fluxheim-acme doctor` reports `account-rollover=unavailable` explicitly so
 operators can see this capability limit before an incident.
 
-Revocation remains available for managed targets even when automatic renewal is
-disabled. Fluxheim first quarantines the certificate and key atomically under
+The revocation library selects managed targets even when automatic renewal is
+disabled. **Current limitation:** the companion's renewal-only precheck rejects those
+targets before calling the library. Do not assume the CLI supports that incident
+workflow until corrected. Fluxheim quarantines the certificate and key under
 the same mutation lock used by TLS readers, then reads and submits the exact
 quarantined certificate while retaining that lock so concurrent renewal cannot
 substitute another identity. A durable fixed-name journal records
@@ -380,6 +411,10 @@ requests a live certificate reload and reports
 `replacement_required=true`. If reload fails, stop or isolate the listener
 until a replacement certificate is installed; do not continue serving the
 revoked in-memory identity.
+Disk quarantine alone does not remove an already loaded certificate. Ambiguous
+remote failure also returns before requesting reload, and the external Windows
+command cannot use the Unix reload socket. Preserve state and isolate the
+listener rather than inferring CA or serving state from the command exit code.
 
 Official RPM and container release assets include `acme-client` by default. If
 you compile from source with a custom feature list, include it explicitly:
@@ -390,12 +425,22 @@ cargo build --release --locked --no-default-features --features profile-core,acm
 
 ## Initialize ACME
 
-Packaged builds include a guided initializer for the global issuer setup:
+Packaged builds include an initializer for the global issuer setup. Even in
+interactive mode it requires explicit terms acceptance and the issuer's reviewed
+HTTPS terms URL. Choose one issuer, review its terms, and set `ACME_TERMS_URL`
+to that URL before running the corresponding command:
 
 ```bash
-sudo fluxheim acme-init actalis
-sudo fluxheim acme-init letsencrypt
-sudo fluxheim acme-init letsencrypt-staging
+sudo fluxheim acme-init actalis \
+  --terms-of-service-url "${ACME_TERMS_URL:?Set the reviewed issuer terms URL}" \
+  --accept-terms-of-service
+# Alternatives, using the terms URL for the selected issuer:
+sudo fluxheim acme-init letsencrypt \
+  --terms-of-service-url "${ACME_TERMS_URL:?Set the reviewed issuer terms URL}" \
+  --accept-terms-of-service
+sudo fluxheim acme-init letsencrypt-staging \
+  --terms-of-service-url "${ACME_TERMS_URL:?Set the reviewed issuer terms URL}" \
+  --accept-terms-of-service
 ```
 
 For Actalis, the command asks for the contact email, EAB key id, and EAB HMAC
@@ -406,28 +451,35 @@ key. The HMAC prompt is hidden. By default it writes:
 - `/etc/fluxheim/secrets/actalis-eab-hmac-key`
 - `/etc/systemd/system/fluxheim.service.d/actalis-eab.conf`
 
-It refuses to overwrite existing files unless `--force` is supplied.
+It refuses to overwrite existing files unless `--force` is supplied. The default
+Actalis drop-in is for the gateway only: configure the companion's credentials
+as described below before starting its service. Initialization writes local
+configuration and secret files; it does not issue a certificate. Ensure the main
+configuration includes the generated fragment and add the vhost ACME settings.
 
 Automation should pass secrets through files, not command-line values:
 
 ```bash
 sudo fluxheim acme-init actalis \
   --email info@example.com \
-  --terms-of-service-url https://replace-with-current-issuer-terms.example/ \
+  --terms-of-service-url "${ACME_TERMS_URL:?Set the reviewed issuer terms URL}" \
   --accept-terms-of-service \
   --kid-file /root/actalis-eab-kid \
   --hmac-key-file /root/actalis-eab-hmac-key \
   --non-interactive
 ```
 
-After initialization, add `[vhosts.tls.acme]` blocks to the vhosts that should
-receive managed certificates, reload systemd when a drop-in was created, and run
-the renewal command:
+After initialization and credential setup for both services, add
+`[vhosts.tls.acme]` blocks to the vhosts that should receive managed certificates.
+Prepare the shared state directory for the service user and confirm that the
+gateway can serve HTTP-01 challenges before starting renewal. On a packaged
+systemd installation:
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl restart fluxheim
-sudo fluxheim-acme --config /etc/fluxheim/fluxheim.toml renew
+sudo systemctl start fluxheim-acme.service
+sudo systemctl status fluxheim-acme.service --no-pager
 ```
 
 ## Packaged Actalis Credentials
@@ -446,15 +498,26 @@ sudo install -d -m 0700 -o root -g root /etc/fluxheim/secrets
 sudo install -m 0600 -o root -g root actalis-eab-kid /etc/fluxheim/secrets/actalis-eab-kid
 sudo install -m 0600 -o root -g root actalis-eab-hmac-key /etc/fluxheim/secrets/actalis-eab-hmac-key
 
-sudo install -d /etc/systemd/system/fluxheim.service.d
+sudo install -d /etc/systemd/system/fluxheim.service.d /etc/systemd/system/fluxheim-acme.service.d
 sudo cp /usr/share/doc/fluxheim/systemd/actalis-eab.conf \
   /etc/systemd/system/fluxheim.service.d/actalis-eab.conf
+sudo cp /usr/share/doc/fluxheim/systemd/actalis-eab-acme.conf \
+  /etc/systemd/system/fluxheim-acme.service.d/actalis-eab.conf
 sudo systemctl daemon-reload
 sudo systemctl restart fluxheim
 ```
 
-Then point the issuer EAB sources at credential names. The same TOML works for
-`fluxheim.service`, `fluxheim-acme.service`, and container secrets:
+Each unit needs its own `LoadCredential` configuration. A manually invoked
+`sudo fluxheim-acme` does not inherit the gateway's systemd credential directory.
+Use the configured companion service, or an explicitly provisioned file-based
+credential configuration for manual execution. Do not make root-only source
+secrets world-readable to work around a missing service credential.
+
+The following is an issuer fragment, not a complete ready-to-register policy.
+Retain the reviewed `terms_of_service_url` and explicit acceptance in the full
+issuer configuration. Credential names can be shared across both configured
+units; containers must provide the corresponding files in their credential
+directory (for example `/run/secrets`):
 
 ```toml
 [[tls.acme.issuers]]
@@ -478,26 +541,35 @@ is implemented and produces queue items with:
 - certificate expiration time
 - next renewal time
 
-The first renewal time should be the later of:
+The local planner's renewal time is the later of:
 
 - `certificate_not_after - tls.acme.renewal.renew_before_secs`
 - `tls.acme.renewal.renew_after`, when set
 
-`renew_after` lets an operator defer automatic renewal until a chosen TOML
-offset datetime, for example `2026-06-01T00:00:00Z`. Local TOML datetimes are
-rejected so the queue cannot interpret operator intent in the wrong timezone.
+`renew_after` accepts a TOML offset datetime, for example
+`2099-01-01T00:00:00Z`; local TOML datetimes are rejected. **Current limitation:**
+the executor does not consistently enforce the planner's hold. All-target
+execution attempts missing certificates despite a future hold, and ARI/emergency
+precedence needs correction. Do not treat the displayed queue time as a reliable
+issuance embargo. See the operator guide for stopping automatic scheduling.
 
 When Fluxheim is built with `acme-client`, the runtime registers a background
 renewal service when ACME-managed vhosts are configured and
 `tls.acme.automation = "background"`. This is the default for simple
-single-process installs. The service observes managed certificate expiry, wakes
-every `tls.acme.renewal.check_interval_secs`, and renews missing or due
+single-process installs. The service observes managed certificate expiry, sleeps
+for `tls.acme.renewal.check_interval_secs` after each tick, and renews missing or due
 certificates through the same ACME challenge path used by the CLI.
 
-After successful renewal, Fluxheim reloads the downstream SNI certificate
+After successful background renewal, Fluxheim reloads the downstream SNI certificate
 resolver or callback so new handshakes can use the freshly installed files
 without restarting. If a TLS backend or listener shape cannot provide a reload
 handle, Fluxheim logs that a restart or process reload is required.
+
+**Current limitation:** this background path does not check `reload_after_renewal`;
+the companion and reload-control service planning do. `zero_downtime_reload`
+has no runtime consumer. Neither flag currently selects an alternative restart
+workflow. Corrections and live reload-policy proof are planned after the
+documentation audit.
 
 This reload happens inside the long-running Fluxheim process. The gateway also
 owns a local Unix-domain certificate reload socket at
@@ -514,6 +586,10 @@ long-running gateway caps concurrent reload-control requests, and each accepted
 request still uses a short fixed read timeout. The
 companion reads the gateway response with a small fixed bound so a compromised
 or replaced local socket cannot grow companion memory without limit.
+That byte cap is not a time bound: the companion does not set socket I/O
+deadlines and waits for EOF. A stalled peer can hold the maintenance invocation.
+The reload-policy correction includes bounded client transport and explicit
+unknown-activation reporting; use a supervisor deadline meanwhile.
 
 Production packages include the `fluxheim-acme` companion binary while keeping
 the integrated background worker for simple installs. In this model,
@@ -707,9 +783,19 @@ container limits alone do not disable a host's piped collector. Review the
 [memory-dump policy](../../SECURITY.md#fatal-termination-and-memory-dumps)
 for older binaries and other platforms.
 
-For Compose, keep `fluxheim` and `fluxheim-acme` on the same network and use
-the same bind mounts. The companion service should override only the entrypoint
-and command:
+For Compose, use the same state, configuration, secrets and reload-socket mounts;
+the companion does not need the gateway's cache or PHP application mounts.
+Set `FLUXHEIM_GATEWAY_IMAGE` to the tested profile required by the server and
+`FLUXHEIM_RENEWAL_IMAGE` to a tested image with the operation-scoped renewal
+behavior described above. These can be different profiles. Prefer immutable
+digests and do not assume `latest` includes an unreleased correction.
+
+This fragment uses Compose's default shared network. Add any site roots and
+server-specific volumes required by your gateway configuration. The complete
+[example](../../examples/podman-compose-acme.yml) uses an existing `gateway_net`
+network instead. The `renewal` profile keeps the one-shot command out of a normal
+`compose up`. `depends_on` provides startup ordering, not challenge readiness:
+check the gateway and public HTTP-01 reachability before invoking renewal.
 
 ```yaml
 services:
@@ -718,43 +804,51 @@ services:
       core:
         soft: 0
         hard: 0
-    image: ghcr.io/valkyoth/fluxheim:latest-wolfi
+    image: "${FLUXHEIM_GATEWAY_IMAGE:?Set a tested gateway image}"
+    command: ["--config", "/etc/fluxheim/fluxheim.toml"]
     ports:
       - "80:8080"
       - "443:8443"
     volumes:
-      - /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z
-      - /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z
-      - /srv/infra/fluxheim/run:/run/fluxheim:Z,U
-      - /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U
-      - /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro
-      - /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro
+      - /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,z
+      - /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,z
+      - /srv/infra/fluxheim/run:/run/fluxheim:z
+      - /srv/infra/fluxheim/state:/var/lib/fluxheim:z
+      - /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro,z
+      - /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro,z
 
   fluxheim-acme:
     ulimits:
       core:
         soft: 0
         hard: 0
-    image: ghcr.io/valkyoth/fluxheim:latest-wolfi
+    image: "${FLUXHEIM_RENEWAL_IMAGE:?Set a tested renewal image}"
+    profiles: ["renewal"]
+    restart: "no"
     entrypoint: ["/usr/local/bin/fluxheim-acme"]
     command: ["--config", "/etc/fluxheim/fluxheim.toml", "renew"]
     depends_on:
       - fluxheim
     volumes:
-      - /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z
-      - /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z
-      - /srv/infra/fluxheim/run:/run/fluxheim:Z,U
-      - /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U
-      - /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro
-      - /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro
+      - /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,z
+      - /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,z
+      - /srv/infra/fluxheim/run:/run/fluxheim:z
+      - /srv/infra/fluxheim/state:/var/lib/fluxheim:z
+      - /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro,z
+      - /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro,z
 ```
 
 Run it on demand with:
 
 ```bash
-podman compose run --rm fluxheim-acme
+podman compose -f examples/podman-compose-acme.yml --profile renewal run --rm --no-deps fluxheim-acme
 ```
 
+The command assumes the gateway is already running and ready. If you saved the
+fragment elsewhere, substitute its filename. A one-shot container is not a timer.
+The complete example allows 45 seconds for gateway shutdown; increase that
+budget when using an additional grace period or slower teardown, as described
+in [service lifecycle](service-lifecycle.md#readiness-and-replacement).
 For scheduled container renewals, use a host systemd timer, Kubernetes CronJob,
 or the platform scheduler to start the one-shot companion. Keep
 `tls.acme.automation = "external"` so the gateway does not also run the
@@ -762,21 +856,17 @@ background renewal loop.
 
 ## Runtime Crate Candidates
 
-Latest checked ACME runtime candidates:
-
-- `instant-acme 0.8.5`: Apache-2.0, async pure-Rust ACME client with EAB
-  support. Fluxheim pins a source-identical local copy with one narrow
-  caller-provided account-key builder API; see `vendor/instant-acme/PATCH.md`.
-  It remains the current first candidate because it does not own the TLS
-  listener model.
-- `rustls-acme 0.15.1`: Apache-2.0 OR MIT, useful reference for rustls-focused
-  certificate management, but less aligned with Fluxheim's multiple Pingora TLS
-  backend targets.
+This heading is retained for older links; runtime selection is no longer an
+operator choice. The `acme-client` feature uses the vendored `instant-acme`
+integration. Its upstream base and deliberate local changes are recorded in
+[the patch inventory](../../vendor/instant-acme/PATCH.md). The deployed dependency
+graph is defined by the manifests and lockfile, not a candidate list in this
+guide. Another ACME client cannot be selected through TOML.
 
 ## FIPS/ISO-Required Deployments
 
 Managed Fluxheim ACME is intentionally outside the strict FIPS/ISO-required
-runtime boundary in `1.3.6`. A config with `[tls.fips] required = true` or
+runtime boundary. A config with `[tls.fips] required = true` or
 `[tls.iso19790] required = true` rejects `[tls.acme] enabled = true` because
 ACME account key generation, JWS account signing, External Account Binding
 HMAC, outbound ACME HTTPS transport, and TLS-ALPN challenge certificate
@@ -786,9 +876,9 @@ For regulated deployments, use local static certificate files in
 `[vhosts.tls.certificate]` and renew them with an external process that has its
 own evidence package. If that external process is ACME-based, keep the ACME
 client version, host FIPS/ISO mode, key-generation policy, CA/audit evidence,
-and renewal logs with the deployment evidence. Conservative public-Web PKI
-profiles should request RSA 2048 or RSA 3072 certificate keys unless the
-assessor explicitly accepts the selected ECDSA certificate profile and chain.
+and renewal logs with the deployment evidence. Certificate key algorithms,
+sizes and chains must satisfy your assessed deployment policy; this guide does
+not qualify a particular profile. See the [FIPS deployment guide](fips.md).
 
 The Fluxheim ACME storage path hashing uses SHA-256 and does not use MD5 for
 local account or certificate directory labels, but that is not enough to make
@@ -798,15 +888,16 @@ signing, key generation, EAB, and outbound TLS evidence.
 
 ## Retry Policy
 
-Failed renewal attempts should retry with bounded backoff:
-
-- start at `tls.acme.renewal.retry_initial_secs`
-- grow up to `tls.acme.renewal.retry_max_secs`
-- never remove the currently active certificate because of a failed renewal
-
-The scheduler should wake at least every
-`tls.acme.renewal.check_interval_secs` to catch newly due certificates and config
-changes.
+**Current limitation:** failure backoff is not wired into the background worker.
+`retry_initial_secs` and `retry_max_secs` are validated settings, and a retry
+calculation helper exists, but production renewal ticks do not retain target
+failure counts or retry deadlines. The worker waits `check_interval_secs` after
+each tick, including a failing tick. External invocation frequency is controlled
+by the operator's timer. Keep intervals conservative; these settings do not
+currently protect an aggressively scheduled deployment from repeated CA calls.
+Failed issuance preserves the existing certificate pair; that storage property
+is separate from scheduling backoff. Implementing and qualifying backoff remains
+a planned correction, not a completed feature.
 
 ## Atomic Install
 
@@ -825,8 +916,14 @@ active files. It uses a per-target advisory lock, random transaction names, a
 durable phase journal, backups, and crash recovery. Rustls and OpenSSL readers
 take a shared lease while loading the pair, so reload cannot combine files from
 different transactions. Failed issuance or installation preserves the previous
-pair; a secondary cleanup failure is logged without replacing the primary
-error.
+pair when recovery completes before publication is committed. A failure after
+publication may instead leave the new pair installed while cleanup reports an
+error. **Current limitation:** recovery can itself be interrupted after consuming a
+backup without recording that progress; its next attempt then fails on the
+missing backup. Do not assume recovery is restart-idempotent. The recovery guide
+describes the current phase behavior and when operator intervention is needed.
+A secondary recovery/cleanup failure is logged without replacing the primary
+error; inspect state rather than equating any error with an unchanged pair.
 
 The renewal worker uses ACME Renewal Information (ARI) when the issuer supports
 RFC 9773. Fluxheim selects a stable certificate-derived point inside the

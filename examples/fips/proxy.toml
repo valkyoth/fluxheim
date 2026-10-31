@@ -1,0 +1,44 @@
+# Supply certs/server.pem, certs/server-key.pem and certs/origin-ca.pem.
+# Requires profile-fips-openssl and a separately running TLS origin.
+# For profile-fips-rustls change backend to "rustls".
+[server]
+listen = []
+tls_listen = ["127.0.0.1:8443"]
+default_vhost = "fips.test"
+
+[tls]
+enabled = true
+backend = "openssl"
+profile = "modern"
+min_protocol = "tls1.3"
+alpn = "http1"
+curve_preferences = ["CurveP256", "CurveP384"]
+cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
+
+[tls.fips]
+required = true
+require_disk_cache_encryption = true
+
+[[tls.certificates]]
+cert_path = "certs/server.pem"
+key_path = "certs/server-key.pem"
+
+[[vhosts]]
+name = "fips.test"
+hosts = ["fips.test"]
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "certs/server.pem"
+key_path = "certs/server-key.pem"
+
+[vhosts.proxy]
+upstreams = ["127.0.0.1:9444"]
+upstream_tls = true
+upstream_sni = "localhost"
+upstream_verify_cert = true
+upstream_verify_hostname = true
+upstream_ca_path = "certs/origin-ca.pem"
+upstream_http_version = "http1"

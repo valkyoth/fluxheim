@@ -1,360 +1,161 @@
 # Production Readiness
 
-Fluxheim has a stable `1.3` shared ingress and TLS feature split on top of the
-`1.2` cache/operations line, the `1.1` certificate-operations line, and the
-`1.0` gateway foundation. This page states what each released line supports and
-what operators should verify before using a build beyond local testing.
+Use this checklist before exposing a deployment to real users. It describes
+this source checkout, not a blanket stability promise for every configuration.
+For an installed release, use its tagged guides and
+[release notes](../../release-notes). Historical milestone descriptions are not
+evidence that the current native runtime implements every old promise.
 
-## 0.5 Basic-Sites Preview
+A successful build or configuration check is necessary but insufficient:
+it does not prove live authorization, certificate renewal, recovery or capacity.
+The [coverage ledger](../reference/documentation-coverage.md) records reviewed
+behavior, open corrections and tests still needed. The documentation audit is
+not release approval; do not deploy a workflow that depends on an unresolved
+blocker merely because it has a configuration field.
 
-The `0.5.x` line is intentionally limited:
+## Choose And Identify The Build
 
-- static file hosting from configured vhost roots;
-- simple whole-vhost reverse proxying to one configured upstream target;
-- vhost routing by exact and wildcard host names;
-- cache code compiled by default, with runtime caching disabled until a storage
-  tier is configured;
-- static certificate loading for user-managed certificates;
-- rustls as the default TLS backend;
-- secure default response header policy with configurable request and response
-  header operations;
-- explicit request header, URI, and body limits;
-- optional cleartext-to-HTTPS redirect;
-- rootless Podman deployment paths and container examples;
-- local release gates for formatting, linting, tests, license policy,
-  dependency advisories, core feature profiles, SBOM generation, reproducible
-  build evidence, and localhost smoke checks.
+- Select the actual [package profile](installation.md), not only a version.
+  PHP, Wasm, metrics and other modules are not present in every artifact.
+- Verify release checksums and the published source identity. Keep the artifact
+  digest, configuration revision and deployment time in your operational record.
+  Checksums and repeat builds from one builder do not prove independent provenance;
+  see [supply-chain boundaries](supply-chain-security.md).
+- Use supported [platforms and archives](portable-releases.md). Windows managed
+  PHP-FPM is unavailable; use external FastCGI over TCP. Container instructions
+  do not qualify an installed Windows service or a macOS binary.
+- Recheck image digests and bundled OS/PHP dependencies when applying a
+  [container runtime refresh](container-runtime-refresh.md).
 
-## Stable 1.0 Gateway Foundation
+## Validate As The Service User
 
-The `1.0` line is the first gateway-ready release for representative real
-multi-site configs. In addition to the `0.5.x` behavior, it supports:
+First complete the loopback example in [installation](installation.md#native-quick-start).
+Then validate your real configuration with the same binary, identity, mounts
+and environment that the service will use:
 
-- static TLS with one default certificate;
-- SNI certificate selection across multiple configured certificates in the
-  default rustls build;
-- route-level exact, prefix, and fallback matching;
-- route actions for proxy, static serving, and redirects;
-- cleartext ACME challenge exception routes plus HTTPS redirect for everything
-  else;
-- apex/`www` redirect vhosts that preserve the request URI safely;
-- websocket-safe proxy smoke coverage for routes such as `/chat/`;
-- per-route body limits, prefix stripping, and upstream connect/read/send
-  timeouts;
-- typed forwarding headers plus a small validated dynamic request-header
-  template set for common proxy migrations;
-- custom upstream error pages;
-- static aliases and secure directory listing;
-- container DNS behavior suitable for local Podman deployments, including
-  graceful direct-proxy DNS failures;
-- property-based invariant tests for parser, normalization, and security policy
-  code that accepts attacker-controlled values;
-- crate-level direct unsafe prohibition with safe wrappers for OS calls and
-  safe test wakers;
-- release-profile abort-on-panic plus clippy enforcement that production code
-  does not use `unwrap()`, `expect()`, or `panic!()`;
-- zeroizing admin token buffers and vetted constant-time comparison for
-  authentication token verification;
-- native systemd support for manually compiled binaries, including a hardened
-  service unit, documented install paths, runtime directory handling, config
-  validation before start, graceful shutdown/reload behavior, no-new-privileges,
-  no ambient capabilities, strict filesystem protection, limited address
-  families, and a conservative syscall filter.
-- release evidence that includes SPDX/CycloneDX SBOMs, signed tags, checksums,
-  immutable container digests, and a local reproducible-build check.
+```bash
+fluxheim --version
+fluxheim --config /etc/fluxheim/fluxheim.toml --validate-config
+fluxheim --config /etc/fluxheim/fluxheim.toml --check-tls-storage
+```
 
-## Not Stable In 1.0
+Run those as separate commands. Do not combine validation flags with mutation
+subcommands: the current [CLI mode limitation](command-line.md) can execute the
+subcommand instead. `--check-tls-storage` checks configured local certificate
+material; it does not contact a CA or prove that an origin's TLS policy works.
 
-These features may exist in code, documentation, or feature flags, but they are
-not part of the `1.0` stable support promise:
+The [standalone tester](command-line.md) is useful for diagnostics, but its
+profile filter is not an exact simulation of every released binary.
+`--no-runtime-paths` skips filesystem checks; `--runtime-cutover` is a diagnostic
+report, not an authoritative readiness exit status. Neither substitutes for
+starting the actual package and making requests.
 
-- ACME runtime issuance or automatic renewal;
-- load balancing and health-check policy;
-- admin snapshot and rollback API;
-- remote logging pipelines;
-- metrics exporters;
-- OpenTelemetry tracing;
-- WAF, auth-request, image filters, media modules, or WASM extension points;
-- in-process seccomp or Landlock sandboxing;
-- PHP, CGI, or any dynamic script execution;
-- Cloudflare automation;
-- legacy HTTP compatibility listeners;
-- WireGuard/Sentinel Mesh or clustered state.
+Review [configuration composition](configuration.md): includes, relative paths,
+duplicate names and replacement rules matter. Test the assembled configuration,
+not each fragment in isolation. Keep credentials out of printed resolved configs
+and support logs.
 
-Treat these as design or incubator work until a later versioning-plan milestone
-promotes them. Some of these items have since been promoted in `1.1`, `1.2`, or
-`1.3`; use the sections below for the current support promise.
+## Protect Files And Interfaces
 
-## Stable 1.1 Certificate Operations
+- Run as an unprivileged service identity. For containers, start with the
+  [rootless deployment guide](build-and-podman.md); for Linux services, review
+  the [systemd unit](systemd.md) and its capability/mount policy.
+- Keep config, TLS keys, ACME state, token files, logs and snapshot stores under
+  trusted ownership. Use private secret files and log replacements (`0600` on
+  Unix), private directories and a restrictive umask such as `0077`. Audit
+  extended ACLs too; a mode-bit check is not a universal effective-access proof.
+  Use the corresponding Windows ACL policy rather than treating chmod as portable.
+- Keep state and secrets outside static document roots. Do not expose PHP source,
+  application backups, configuration dumps or secret mounts through an alias.
+- Restrict public listeners and trusted proxies explicitly. Treat forwarding
+  headers and request IDs as metadata, not authenticated identity.
+- Keep admin and metrics listeners private and authenticated. Configure separate
+  control/observer credentials where appropriate. A remote admin hop needs the
+  documented trusted TLS terminator; a declaration alone does not encrypt it.
+  Read [admin](admin.md) and [metrics](metrics.md) for current token/socket limits.
+- Remote OTLP collectors require HTTPS; a bearer token requires HTTPS even on
+  loopback. Provision trust and protect token files using [OTLP export](otlp-export.md).
+- Review [logging](logging.md) before enabling debug output. Typed event schemas
+  and JSON escaping are not general redaction of arbitrary dependency messages.
+  The [privacy profile](zero-retention-privacy-mode.md) is reduced retention, not
+  anonymity or zero retention across the application, OS and collectors.
 
-The `1.1` line makes TLS and certificate operations practical for normal
-production deployments. In addition to the `1.0` behavior, it supports:
+## Prove Your Actual Workflows
 
-- explicit safe TLS policy profiles;
-- minimum TLS version config bounded to safe values;
-- ALPN policy, curve preferences, cipher-suite allow-lists, and per-backend TLS
-  validation;
-- structured HSTS policy;
-- ACME runtime issuance for Let's Encrypt, Actalis, and Google Trust Services;
-- HTTP-01 and rustls TLS-ALPN-01 challenge handling for configured vhosts;
-- Actalis and Google Trust Services External Account Binding support;
-- safe ACME storage and key/certificate permission validation;
-- renewal scheduling with a configurable renew-before window;
-- renewal failure behavior that keeps the previous valid certificate serving.
+Test a disposable deployment before changing a production site. Keep real
+requests, expected outcomes and bounded failure/recovery cases in the record.
 
-DNS-01, wildcard automation, Cloudflare Origin CA automation, external secret
-store deploy hooks, and full zero-downtime reload through the later snapshot
-model are not part of the first `1.1` promise unless they are explicitly
-promoted with tests and release evidence.
+| Deployment uses | Minimum checks and current boundaries |
+| --- | --- |
+| Static files and routing | Known/unknown hosts, index and missing files, traversal rejection and your rewrite/method rules; review [static semantics](static-files.md) and [routing](routing.md) |
+| TLS and certificates | Verified client handshake with the right hostname and CA, SNI, expired/untrusted certificate rejection and any required client certificate; read [TLS](tls.md) and [origin trust](upstream-tls.md) |
+| ACME | Use the [HTTP-01 workflow](acme.md) with staging first, persist state, confirm publication and renewed serving certificate; scheduling, backoff, recovery and native TLS-ALPN integration have open corrections |
+| Authorization and identity | Test rejected credentials, absent identity and upgrade paths; current [auth](external-authorization.md) limitations mean ordinary HTTP success does not prove WebSocket authorization |
+| Proxy, HTTP/2 or gRPC | Validate origin TLS, deadlines, failures, cancellation and actual application protocol; [gRPC](grpc.md) has trailer/streaming gaps, not general pass-through support |
+| Load balancing | Observe selected members, unhealthy/all-down behavior, failover, draining and restart state; configured retry/latency knobs are not all wired into native dispatch; see [pool boundaries](load-balancer.md) |
+| Caching | Prove public/private response admission, variants, byte ranges, purge, stale behavior and restart; use [cache guidance](cache.md) and its advanced pages, not only a HIT counter |
+| PHP | Exercise uploads, login, static assets and errors against the real application/pool; review [routing](php.md) and [runtime limits](php-runtime-support.md) |
+| Logs, metrics and traces | Confirm actual emitted signals in your collector, test token rejection and exporter loss/recovery, and distinguish a missing series from zero; see [collector integration](collector-integrations.md) |
+| Reload and rollback | Verify the baseline and serving response, apply one candidate, confirm it, then test explicit recovery; [snapshot identity/overlap corrections](config-snapshots.md#current-recovery-limitations) remain open |
+| Shutdown or upgrade | Use the real supervisor and a request lasting through shutdown; keep its stop deadline beyond Fluxheim's drain/teardown needs; see [lifecycle](service-lifecycle.md) and [upgrades](zero-downtime-upgrades.md) |
 
-## Stable 1.2 Operations And Cache
+This table highlights cross-cutting risks, not an exhaustive new finding list.
+Consult each feature guide and the ledger for the full set. Documented limits
+are not automatically accepted risks or completed fixes.
 
-The `1.2` line is the cache-server and operations-hardening milestone. It
-promotes:
+## Capacity And Recovery
 
-- vhost and route-scoped proxy cache policies with memory, disk, and tiered
-  storage;
-- cache key preview tooling, cache status visibility, and protected purge
-  endpoints;
-- indexed hard and soft purges by primary key, path, user tag, and cache tag;
-- request collapsing with bounded cache-lock waits to reduce backend stampedes;
-- stale-if-error and stale-while-revalidate behavior with explicit cache
-  activity metrics;
-- stable on-disk cache object metadata for combined keys, primary keys, tags,
-  and path indexes;
-- Prometheus metrics plus OpenTelemetry metric and trace export basics;
-- strict host-routing mode that rejects missing, invalid, and unknown host
-  headers instead of failing open to the default vhost;
-- built-in admin bearer-token brute-force throttling with per-source and global
-  failure windows, progressive lockouts, security logs, and metrics;
-- authenticated admin health checks by default, with explicit loopback-only
-  unauthenticated mode and optional empty `204` responses for local probes;
-- fail-closed remote admin transport guardrails: non-loopback admin listeners
-  require an explicit `trusted_tls_terminator` declaration until first-class
-  admin TLS/mTLS lands;
-- release-gate coverage for proxy cache, local observability smoke suites, and
-  the published full/default, cache, and proxy container feature profiles.
+Set request/body/header limits, timeouts, worker counts, cache/spool budgets and
+connection limits for your workload. Exercise modest load and cancellation with
+representative payload sizes. Check host CPU, memory and disk as well as gateway
+latency; collecting a body before proxy/PHP dispatch can change the memory budget.
 
-Release evidence for the `1.2` line includes the stable gate, cache behavior
-smokes, observability smokes, and focused follow-up checks. Bounded
-single-range caching, the storage-bin disk backend, optional encrypted cache at
-rest, distributed cache peer fill, and fixed-slice range composition are covered
-by focused `1.2.x` releases. Varnish-style ban expressions and WASM cache hooks
-remain future work unless explicitly promoted with tests and release evidence.
+Back up configuration and persistent certificate/account state with appropriate
+secret protection. Test restoration on a separate instance. A configuration
+snapshot is not a backup of every external application, database or credential.
+Protect swap, crash capture and privileged diagnostics at the OS level; Linux
+dump suppression does not qualify the non-Linux host policy.
 
-## Stable 1.3 Split Profiles
+Audit queue admission is not durable audit persistence. If your environment
+requires durable or independently protected audit records, the current logging
+contract alone does not satisfy that requirement.
 
-The `1.3.0` line starts the shared ingress/TLS feature-graph split. It does not
-make the future PHP, advanced proxy, load-balancer, or WASM milestones stable;
-instead it gives operators and packagers cleaner binaries and container images
-for the modules that are already supported.
+## Repository Qualification
 
-The `1.3.0` support promise includes:
-
-- shared `ingress` and `tls` feature boundaries so TLS, ACME, proxy, cache, web,
-  and future load-balancer modules can compose without every focused build
-  compiling every application module;
-- focused profile aliases: `profile-full`, `profile-web-server`,
-  `profile-cache-edge`, `profile-proxy-edge`, and
-  `profile-load-balancer-edge`;
-- official full/default, cache-edge, and proxy-edge container image variants;
-- TLS and ACME support in focused cache and proxy builds without requiring local
-  static web-serving config in those images;
-- runtime config guardrails that reject enabled static web config when the
-  binary was compiled without `web`, and reject enabled cache config when the
-  binary was compiled without `cache`;
-- full native and RPM packages that keep the broad production feature set for
-  operators who prefer one complete binary.
-
-The load-balancer edge profile was compile- and config-validated in `1.3.0`;
-the production load-balancer control-plane and runtime feature line shipped
-through `1.5.x` and continues to be carried through the current `1.6.x`
-Pingora-exit work.
-
-The `1.3.1` support promise adds an opt-in `php-fpm` module for PHP
-applications. PHP remains outside default and focused cache/proxy builds. A
-PHP-FPM build is production-eligible only when php-fpm is isolated separately,
-the PHP root is trusted, request body limits are configured, and operators have
-validated their framework/application behavior with their php-fpm pool.
-WordPress install, login, admin, plugin, and theme flows have release-candidate
-coverage for both direct PHP-FPM serving and reverse-proxy gateway deployments.
-The same release also normalizes split browser `Cookie` headers before proxying
-or generating PHP-FPM `HTTP_COOKIE`, matching the behavior WordPress expects
-behind HTTP/2 and container gateways.
-
-The same line also supports pending Fluxheim-managed ACME certificates during
-first issuance on reloadable SNI TLS backends. This lets operators add a new
-ACME vhost without taking existing HTTPS sites down: HTTP-01 can validate on
-port `80`, and the background renewal worker reloads the SNI certificate set
-after the certificate files are installed. Static certificate paths remain
-fail-closed.
-
-The `1.3.4` support promise adds an OpenSSL FIPS/ISO-capable TLS build path for
-operators who need to validate a deployment against an externally validated
-OpenSSL 3 provider. This path is opt-in through `profile-fips-openssl` /
-`tls-openssl-fips` or the ISO/IEC 19790 aliases
-`profile-iso19790-openssl` / `tls-openssl-iso19790`, and requires `[tls]
-backend = "openssl"` plus `[tls.fips] required = true` or `[tls.iso19790]
-required = true`. Fluxheim validates the TLS policy, loads the FIPS provider,
-enables OpenSSL default FIPS properties for the process-default library
-context, verifies those default properties, and exposes release evidence
-through `fluxheim crypto`, `fluxheim-config-tester --crypto`, and
-`scripts/validate-fips-openssl.sh`. It does not make Fluxheim itself a
-validated cryptographic module; operators still need the selected module's CMVP
-certificate, Security Policy, provider configuration, platform evidence, and
-operational records.
-
-The `1.3.5` release line adds a rustls/AWS-LC FIPS candidate through
-`profile-fips-rustls`, `tls-rustls-fips`, and the ISO/IEC 19790 terminology
-alias `profile-iso19790-rustls`. It requires `[tls] backend = "rustls"` plus a
-FIPS/ISO-required guard, uses rustls' AWS-LC FIPS provider path, and requires
-the `aws-lc-fips-sys` build toolchain including CMake, Go, and a C compiler.
-Treat it as backend evidence only, with the same non-TLS crypto caveats.
-
-The `1.3.7` support promise completes the production PHP-FPM line. External
-php-fpm remains the default, while `mode = "managed"` lets Fluxheim generate a
-private php-fpm pool, supervise the php-fpm master, respawn it after post-start
-crashes with bounded backoff, and run WordPress-compatible PHP through the same
-FastCGI request path. The focused Wolfi, Alpine, Debian, and SUSE BCI PHP images
-include managed PHP-FPM and a shared smoke-tested application extension
-baseline. SUSE PHP is published as `php-suse-bci`; the minimal SUSE Micro base
-continues to serve only non-PHP profiles.
-
-The `1.4.0` support promise is the first production proxy parity baseline.
-It adds opt-in edge ACLs, request rate limits, concurrency limits,
-gzip/zstd/brotli compression, response and URI rewrite helpers, advanced
-load-balancer selection, passive health/outlier ejection, retry budgets, active
-HTTP health checks, bounded proxy metrics, upstream connection and socket
-tuning, listener/client-certificate policy, PROXY protocol v1/v2 receive/send,
-upstream TLS trust and mTLS controls, HTTP/2 origin controls, and gRPC
-pass-through policy. Dynamic discovery, traffic mirroring, richer rewrite
-templates, local operational sockets, explicit WebSocket upgrades, bounded auth
-subrequests, regex/method routing, and safe path-only regex rewrite templates
-are the `1.4.1` follow-up line.
-
-`1.4.2` is intentionally reserved for proxy runtime module extraction before
-the next large proxy feature. The stop line is structural: preserve behavior
-while splitting the current monolithic proxy runtime. Access logging,
-compression, auth subrequests, traffic mirroring, edge policy, route policy,
-outbound PROXY protocol framing, PHP-FPM process supervision, request-body
-spooling, FastCGI transport, timeout/retry classification, and CGI response
-parsing are extracted domains. The remaining PHP code in `proxy.rs` is the
-Pingora request/session integration layer. The first `proxy_cache` slices hold
-request-side cache identity, bypass, revalidation, response admission, `Vary`
-helpers, and bounded range-cache request/key/admission policy plus fixed-slice
-range planning, freshness, status-header, stale-serving, and response-header
-mutation policy. Cache admin/API request and result DTOs live in `cache_api`;
-cache runtime/storage, slice object assembly, and the remaining proxy core
-orchestration stay in scope for this maintenance line.
-
-Going forward, large optional features should not be added directly to the
-proxy/runtime files. A feature with its own config, validation rules, metrics,
-external dependencies, or security boundary should start as a focused module
-with small integration hooks. GeoIP/Geo-Context is the reference pattern for
-future work: an optional domain module first, then thin config, policy, logging,
-metrics, and tracing integration.
-
-## Operator Checks
-
-Before using a Fluxheim build for a real site, run the stable gate from the repo
-root:
+These commands are for maintainers in a source checkout, not commands to run
+inside a production container. They require the toolchain and external services
+listed in the [release checklist](release-checklist.md) and
+[runbook](release-runbook.md):
 
 ```bash
 scripts/stable_release_gate.sh check
 ```
 
-For current candidates, this gate also runs the proxy cache and local
-observability smoke suites, and verifies the published full, cache-edge,
-proxy-edge, load-balancer-edge, and PHP-FPM container feature profiles against
-their packaged container configs.
-
-For a release candidate, also run the deeper optional checks that fit the
-deployment:
-
-```bash
-FLUXHEIM_GATE_TLS_BACKENDS=1 \
-FLUXHEIM_GATE_FIPS_OPENSSL=1 \
-FLUXHEIM_GATE_FIPS_RUSTLS=1 \
-FLUXHEIM_GATE_TLS_SCAN=1 \
-FLUXHEIM_GATE_LOAD=1 \
-FLUXHEIM_GATE_UDP=1 \
-FLUXHEIM_GATE_FRAMING=1 \
-FLUXHEIM_GATE_FUZZ_CHECK=1 \
-scripts/stable_release_gate.sh check
-```
-
-For longer UDP beta soak while iterating on `udp-proxy`, combine the UDP gate
-with `FLUXHEIM_UDP_SMOKE_ITERATIONS=<count>`. The default UDP smoke stays
-short enough for local release evidence.
-
-Use `check` mode for local development on rolling distributions. For release
-mode rustls/AWS-LC FIPS evidence, prefer the supported builder workflow in
-[FIPS-Capable Deployments](fips.md); otherwise set
-`FLUXHEIM_GATE_FIPS_RUSTLS=0` locally and attach the rustls evidence from that
-builder.
-
-Run the Podman smoke when container paths or image definitions change:
+That local gate has optional checks. A successful exit with skipped services
+does not qualify them. Enable applicable checks explicitly, for example:
 
 ```bash
 FLUXHEIM_GATE_PODMAN=1 scripts/stable_release_gate.sh check
+FLUXHEIM_GATE_WORDPRESS=1 scripts/stable_release_gate.sh check
+FLUXHEIM_GATE_OPENBAO=1 scripts/stable_release_gate.sh check
+FLUXHEIM_GATE_TLS_BACKENDS=1 scripts/stable_release_gate.sh check
 ```
 
-Keep the generated release evidence with the release notes:
+For deployments requiring a FIPS-capable backend, follow [FIPS qualification](fips.md)
+and its supported builder requirements first. `profile-fips-rustls` and the
+OpenSSL alternative are build choices, not Fluxheim certification:
 
 ```bash
-scripts/capture_release_gate_report.sh
+FLUXHEIM_GATE_FIPS_OPENSSL=1 scripts/stable_release_gate.sh check
+FLUXHEIM_GATE_FIPS_RUSTLS=1 scripts/stable_release_gate.sh check
 ```
 
-## Configuration Review
+Use `scripts/capture_release_gate_report.sh check` to record a gate run. Retain
+the exact revision, features, platform, commands, pass/fail/skip results and
+limitations. Do not reuse an old report to qualify a changed binary. Native
+Windows/macOS runs, collector/container tests and exact archive checks remain
+distinct evidence. Cross-compilation is not native execution.
 
-Before starting the server:
-
-- validate every config with `fluxheim --validate-config --config <path>` before
-  service start;
-- use `fluxheim-config-tester --config <path> --profile <profile> --no-runtime-paths`
-  when diagnosing a mounted config without access to `/run/fluxheim`;
-- during the `1.6.x` Pingora-exit line, add `--runtime-cutover` to the
-  config-tester command to record which native-runtime blockers still apply to
-  that exact config;
-- prefer split `conf.d` files with one `[[vhosts]]` per file;
-- use `upstreams = ["host:port"]` for proxy targets;
-- do not mix compatibility aliases such as `upstream` with preferred fields
-  such as `upstreams`;
-- keep TLS private keys, ACME storage, log files, cache roots, runtime paths,
-  admin token files, and snapshot stores outside group- or world-writable directories;
-- audit POSIX extended ACLs on those same sensitive paths. Fluxheim rejects
-  unsafe Unix mode bits and symlinks, but it does not yet parse extended ACL
-  entries that can grant write access without setting `020` or `002`;
-- run Fluxheim with a restrictive umask such as `0077` or `0027`; Fluxheim sets
-  private modes for its snapshot store, but a restrictive service umask remains
-  useful defense in depth for operator-created paths and future state files;
-- disable swap and core dumps, or use equivalent host controls, for deployments
-  that treat admin bearer tokens, EAB credentials, TLS private keys, or cache
-  encryption credentials as high-assurance secrets;
-- keep admin and metrics listeners loopback-only unless a trusted local
-  sidecar or network policy protects them;
-- set `[admin.transport] mode = "trusted_tls_terminator"` only when a trusted
-  local TLS/mTLS terminator protects every remote hop to the admin plane;
-- keep admin authentication throttling enabled unless a stricter external
-  control-plane rate limiter is already enforcing equivalent limits;
-- keep admin health authenticated unless a local-only supervisor needs an
-  unauthenticated loopback probe;
-- explicitly decide whether access logging may include raw host and path
-  values.
-
-## Deployment Notes
-
-The recommended container mode is rootless with host ports mapped to the
-container's high internal listener ports. If a deployment deliberately runs the
-container as root for direct low-port binding, keep mounted config, content,
-certificate, cache, and runtime directories separate and permission them for the
-chosen runtime user.
-
-The recommended native package mode binds public ports directly. The packaged
-default config listens on `80`, and the systemd unit grants only
-`CAP_NET_BIND_SERVICE` so the service can also bind `443` when TLS is enabled
-without running Fluxheim as root.
-
-Fluxheim's memory-safety baseline does not replace operational security checks.
-Continue running dependency audits, license checks, malformed request framing
-tests, TLS scans, and load smoke tests for every stable release branch.
+The [final release gate](../roadmap/observability-commit-plan.md#final-release-gate)
+also requires the queued corrections or explicit owner-approved dispositions,
+fresh qualification, pentest and green CI/CodeQL before release authorization.

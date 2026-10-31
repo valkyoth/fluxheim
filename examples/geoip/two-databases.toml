@@ -1,0 +1,12 @@
+# Replace [geoip] and its database entries in local.toml with this block.
+[geoip]
+enabled = true
+fallback_enabled = true
+
+[[geoip.databases]]
+provider = "maxmind"
+path = "GeoLite2-Country.mmdb"
+
+[[geoip.databases]]
+provider = "maxmind"
+path = "GeoLite2-ASN.mmdb"

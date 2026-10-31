@@ -3,6 +3,17 @@
 Fluxheim config is TOML. Unknown fields are rejected, so misspelled settings
 fail during `--check-config` instead of being ignored.
 
+Start with the [configuration-loading guide](../guides/configuration.md) for
+complete single-file/split recipes. The [composition reference](configuration-loading.md)
+lists every root section's merge semantics and nested exceptions. In particular,
+global observability/header sections and nested server policies currently
+replace whole tables: a partial later table can reset earlier settings
+. Keep those policies together until the planned correction.
+
+`--check-config` prints the effective configuration and can expose configured
+values; keep its output private. Prefer the non-printing `--validate-config`
+for routine preflight, and protect any parse-error diagnostics as well.
+
 Inspect a config before running it:
 
 ```bash
@@ -98,8 +109,10 @@ max_request_body_bytes = "16MiB"
 max_buffered_request_body_bytes = "1GiB"
 
 [server.process]
+# Legacy accepted fields below do not implement daemon/PID/upgrade/log behavior.
+# See the service lifecycle guide before relying on any process setting.
 daemon = false
-error_log = "/run/fluxheim/error.log"
+# Use [logging.file] instead of the inactive error_log field.
 pid_file = "/run/fluxheim/fluxheim.pid"
 upgrade_sock = "/run/fluxheim/fluxheim-upgrade.sock"
 certificate_reload_sock = "/run/fluxheim/fluxheim-cert-reload.sock"
@@ -164,33 +177,44 @@ Notes:
   main file, set top-level `include_conf_d = true`; alternatively point
   `--config` at the config directory so visible `.toml` files are loaded in
   sorted order.
-- `trusted_proxies` should contain only peers you operate, such as a container
-  gateway, Cloudflare, or a trusted edge proxy. When the direct peer is trusted,
-  Fluxheim walks `X-Forwarded-For` from right to left and restores the last
-  non-trusted hop for generated client-IP headers, equivalent to nginx
-  `real_ip_recursive on`. The list is capped at 512 entries. Entries must be
+- `trusted_proxies` should contain only actual trusted proxy peers, such as an
+  operator-controlled gateway or explicitly reviewed CDN ranges. It is not a
+  connection allowlist and does not fetch provider ranges. When the direct peer
+  is trusted, the generic resolver walks `X-Forwarded-For` from right to left
+  and selects the first non-trusted hop it encounters. Generated upstream
+  headers have separate stripping/regeneration behavior and current limitations;
+  see [request headers](../guides/request-headers.md) and
+  [CDN origin deployments](../guides/cloudflare-origin-support.md).
+  Do not assume this restores visitor identity through every consumer.
+  The list is capped at 512 entries. Entries must be
   concrete IP addresses or bounded CIDR ranges; catch-all and near-global trust
   scopes such as `0.0.0.0/0`, IPv4 prefixes broader than `/8`, `::/0`, IPv6
   prefixes broader than `/29`, and unspecified addresses are rejected.
 - `proxy_protocol` defaults to `off`. Set it to `v1` or `v2` only on listeners reached
   exclusively through trusted load balancers or edge proxies that send HAProxy
-  PROXY protocol before TLS/HTTP/stream bytes. Fluxheim requires
-  `server.trusted_proxies` when this is enabled, rejects direct peers outside
-  that trust list before parsing the header, and restores the PROXY source
-  address before TLS, HTTP, and stream handling. The v2 parser supports TCP4/TCP6 and
+  PROXY protocol before HTTP bytes. Fluxheim requires `server.trusted_proxies`
+  and the native plaintext HTTP listener rejects direct peers outside that
+  list before reading the preamble. **Native HTTPS currently bypasses this
+  configured preamble/trust path**; do not depend on it to
+  restrict HTTPS access. See the [PROXY guide](../guides/proxy-protocol.md).
+  Stream listeners have separate route-local policies. The v2 parser supports TCP4/TCP6 and
   LOCAL/UNSPEC frames, skips bounded TLV payloads, and rejects unsupported
   address families, oversized v1/v2 input, or a v2 payload whose byte length
   differs from the frame header.
-- `[server.process]` maps safe process settings into Fluxheim's native runtime
-  process plan. Changes to these values require a process upgrade, not a live
-  snapshot reload. Keep `threads` conservative in containers because worker
-  threads and listener tasks are process-level resources.
+- `[server.process]` is retained in the process plan. Not every field is wired
+  to the native runtime: `daemon`, `error_log`, `pid_file`, `upgrade_sock`,
+  `listener_tasks_per_fd`, `work_stealing` and `max_retries` are currently
+  inactive. See [all process settings](../guides/service-lifecycle.md#process-options)
+  for defaults, limits and supported alternatives. Process-plan changes require
+  a process upgrade, not a live snapshot reload. `threads` controls Tokio async
+  workers, not total process threads or admission limits.
 - On process shutdown, `grace_period_seconds` delays the drain request when it
   is configured. Fluxheim then drops native accept sockets while established
   HTTP, HTTPS, HTTP/2, and local HTTP connections drain.
   `graceful_shutdown_timeout_seconds` bounds that drain; omitting it uses an
-  effective 30-second timeout. The supervisor stop timeout must exceed the sum
-  of the configured grace and effective drain timeout.
+  effective 30-second timeout. This is not a whole-process exit deadline; allow
+  teardown headroom beyond grace plus drain in the supervisor stop timeout.
+  The shipped systemd budget currently needs an override.
 - `pid_file`, `upgrade_sock`, `certificate_reload_sock`, and optional
   `error_log` must not contain parent traversal, must not be below symlinked
   existing parent directories, and on Unix must not use a group- or
@@ -212,12 +236,9 @@ Notes:
 `[stream]` is disabled by default and requires a build with the
 `stream-proxy` feature. Stream routes are raw L4 TCP services. They do not run
 HTTP routing, headers, cache, compression, auth subrequests, PHP, or web
-serving logic. The current stream datapath and listener loop are
-Fluxheim-owned in the `1.5.6` line, including the internal async IO boundary
-used by accepted TCP connections and selected upstream connections. Stream
-upstream TLS also uses Fluxheim-owned `tokio-rustls` / `tokio-openssl`
-connectors in `1.5.6`; it no longer depends on Pingora's stream wrapper or TLS
-connector adapter.
+serving logic. See [TCP streams](../guides/tcp-streams.md) for the complete
+operator guide, examples, option checklist and current limitations. Stream
+configuration changes require restart, not dynamic HTTP configuration reload.
 
 ```toml
 [stream]
@@ -255,7 +276,7 @@ upstream_dns_allow_private_addresses = false
 
 - `listen` entries are `ip:port` TCP listeners. Each listener may appear on
   only one stream route.
-- Configure either `upstream = "host:port"` or `upstreams = ["host:port", ...]`.
+- Configure either `upstream = "host:port"` or `upstreams = ["host:port",...]`.
   Multiple upstreams use stream-local round-robin selection by default.
 - `upstream_weights` optionally enables weighted stream selection and must have
   one value from 1 through 1000 for each `upstreams` entry; the aggregate must
@@ -266,7 +287,9 @@ upstream_dns_allow_private_addresses = false
   `upstreams`. Drained stream upstreams do not receive new connections. Backup
   stream upstreams are not selected while a primary is available, but are tried
   as connect-fallback candidates before the downstream stream starts copying.
-- `connect_timeout_secs` bounds DNS/connect setup and defaults to `5`.
+- `connect_timeout_secs` bounds DNS/TCP/TLS setup per candidate and defaults to
+  `5`. Only the first permitted DNS address of each hostname is tried; later
+  addresses are not retried.
 - `idle_timeout_secs` is a true stream idle timer and defaults to `300`. The
   timer resets whenever either direction transfers bytes. Both copy directions
   retain their read/write state across dispatcher polls, so simultaneous
@@ -278,8 +301,10 @@ upstream_dns_allow_private_addresses = false
   complete downstream PROXY v1 or v2 preamble. It defaults to `10`, must be
   non-zero, and cannot exceed `60`. Individual bytes do not refresh it. The
   setting has no effect while `downstream_proxy_protocol = "off"`.
-- `max_connection_secs` is optional and bounds total accepted stream lifetime
-  when set. Leave it unset for no wall-clock lifetime cap.
+- `max_connection_secs` is optional and currently bounds only copying, excluding
+  downstream preamble, candidate setup and outbound preamble writing.
+  the documented limitation / the local follow-up tracks an accept-to-close deadline. Leave it unset
+  for no copy-phase wall-clock cap.
 - `max_connection_bytes` is optional and caps copied bytes per direction for a
   single stream connection.
 - `max_connections` caps concurrent accepted connections before connecting
@@ -297,6 +322,10 @@ upstream_dns_allow_private_addresses = false
   trusted PROXY client address; otherwise it evaluates the direct TCP peer.
   HTTP access, auth subrequest, rate-limit, and geo policies do not apply to
   raw TCP stream routes.
+  With an empty allow list, PROXY UNKNOWN/LOCAL with no client address passes
+  even a nonempty deny list. Use a positive allow
+  list when identity is required. IPv4/mapped-IPv6 source-policy parity remains
+  tracked under the documented limitation / the local follow-up.
 - `upstream_proxy_protocol` writes a HAProxy PROXY protocol header to the
   selected upstream before forwarding stream bytes. Use it only when the
   upstream explicitly expects PROXY protocol. It cannot be combined with
@@ -322,25 +351,28 @@ upstream_dns_allow_private_addresses = false
   verification also requires hostname verification to be disabled so the policy
   cannot imply a hostname check that is not happening.
 - `upstream_alternative_cn` replaces the SNI-derived verification hostname with
-  one explicit non-wildcard hostname. It is not an additional hostname checked
-  alongside SNI. `upstream_ca_path` loads a route-local PEM CA bundle.
+  one explicit non-wildcard hostname in OpenSSL streams. Rustls streams accept
+  but ignore it; use the expected certificate name
+  as SNI rather than relying on this override. It is not an additional name
+  checked alongside SNI. `upstream_ca_path` loads a route-local PEM CA bundle.
   `upstream_client_cert_path` and `upstream_client_key_path` configure upstream
   mTLS client material and must be set together. Custom trust roots and
   upstream client certificates are supported for rustls and OpenSSL builds.
-  Fluxheim zeroizes the PEM input buffers after parsing; in rustls builds the
-  parsed private-key DER is then owned by rustls 0.23, which does not yet
-  provide zeroing of private-key DER bytes on drop. This is a known upstream
-  limitation. BoringSSL and s2n are not supported Fluxheim TLS backends.
+  Private-key PEM parsing uses secret buffers. This is not a promise that all
+  TLS library allocations are erased. BoringSSL and s2n are not supported
+  Fluxheim TLS backends.
 
 When `metrics` is compiled and enabled,
 `fluxheim_stream_connections_total{route,outcome}` records bounded connection
 outcomes and `fluxheim_stream_bytes_total{route,direction}` records copied
-bytes in each direction.
+bytes in each direction on successful completion only. Bytes transferred before
+timeouts or errors are not reported by this byte counter.
 
 ## UDP Beta
 
-`[udp]` is disabled by default. In `1.5.21` it is a beta UDP/GSLB exploration
-runtime, not a production UDP platform. Normal release profiles do not enable
+`[udp]` is disabled by default. It is a beta datagram-forwarding experiment,
+not a production UDP/GSLB platform. See the [UDP operator guide](../guides/udp.md)
+for complete examples, all options, tested behavior and known gaps. Normal release profiles do not enable
 the `udp-proxy` feature, and `udp.enabled = true` fails clearly unless
 Fluxheim is built with that beta feature.
 
@@ -349,7 +381,7 @@ remain TCP-only and do not accept UDP listeners.
 
 ```toml
 [udp]
-enabled = false
+enabled = true # Requires an explicit udp-proxy build; omit routes when disabled.
 
 [[udp.routes]]
 name = "dns-edge"
@@ -376,18 +408,25 @@ passive_health_ejection_secs = 10
   reserved until route-local UDP session affinity is implemented.
 - `listen` entries are `ip:port` UDP listeners. Each listener may appear on
   only one UDP route.
-- Configure either `upstream = "host:port"` or `upstreams = ["host:port", ...]`.
+- Configure either `upstream = "host:port"` or `upstreams = ["host:port",...]`.
   `upstream_weights` and `upstream_aliases` are valid only with `upstreams` and
   must match its length.
 - `idle_timeout_secs` is required and non-zero. `response_timeout_secs`
   defaults to `3` and must be less than or equal to `idle_timeout_secs`.
-  `dns-load-balance` uses it for upstream connect and response waits so
-  unanswered datagrams do not hold route slots for the full idle window.
+  The idle option defaults to `30` but is not consumed at runtime
+. Connect and reply waits each use a separate
+  response timeout; send awaits are outside those wrappers. Do not infer a
+  total exchange deadline from either option.
 - `max_datagram_bytes` must be between 1 and 65507. Route examples should use
   smaller protocol-aware values where possible, such as 1232 bytes for DNS over
   UDP deployments that want conservative fragmentation behavior.
+  Until the documented limitation / the local follow-up is fixed, keep the cap below 65507: a larger
+  Linux IPv6 datagram can be truncated to that buffer size and forwarded at
+  the maximum cap instead of dropped.
 - `max_sessions` defaults to `4096`. `max_sessions = 0` means unlimited for
   that UDP route. Non-zero values are capped at 1000000.
+  Unlimited also currently stops active counting, making the active-session
+  metric incorrectly report zero.
 - `max_sessions_per_source` defaults to `64`. It limits concurrent in-flight
   datagram sessions per source IP and is released when the datagram finishes.
   `0` disables the per-source cap. Non-zero values are capped at 1000000.
@@ -408,7 +447,7 @@ passive_health_ejection_secs = 10
 - `dns-load-balance` is beta and can act as a UDP reflector if exposed to
   untrusted networks. Bind beta listeners to loopback or internal interfaces
   unless the deployment has upstream ingress filtering such as BCP38. Fluxheim
-  logs a security warning when a `dns-load-balance` route listens on a
+  logs a security warning when any UDP route listens on a
   non-loopback address, but this is still an operator decision during beta.
 - In rootless container deployments, prefer binding UDP beta routes to an
   explicit host/container IP and publish only the required UDP port. Avoid
@@ -418,8 +457,8 @@ passive_health_ejection_secs = 10
   `fluxheim_udp_datagrams_total`, `fluxheim_udp_drops_total`, and
   `fluxheim_udp_active_sessions`. The admin API exposes configured UDP route
   status at `GET /_fluxheim/udp/status` when both admin and `udp-proxy` are
-  compiled in.
-- `1.5.21` does not add QUIC pass-through, game-server UDP proxying, generic
+  compiled in. This is configuration status, not live member/session state.
+- This beta does not add QUIC pass-through, game-server UDP proxying, generic
   UDP proxying, an authoritative DNS server, WAF, VPN/firewall appliance
   behavior, HTTP/3 ingress, or Wasm/iRules/Lua scripting.
 
@@ -427,14 +466,17 @@ passive_health_ejection_secs = 10
 
 `[admin]` is disabled by default. When enabled, it must be authenticated and
 loopback-only unless the operator explicitly relaxes that.
+See the [admin operator guide](../guides/admin.md) for a runnable example,
+complete endpoint/role inventory and current native limitations.
 
 ```toml
 [admin]
 enabled = false
 listen = "127.0.0.1:9090"
 require_loopback = true
-token_env = "FLUXHEIM_ADMIN_TOKEN"
+# token_env = "FLUXHEIM_ADMIN_TOKEN" # alternative to token_file, not both
 token_file = "/run/secrets/fluxheim-admin-token"
+# operational_token_file = "/run/secrets/fluxheim-observer-token"
 snapshot_store = "/var/lib/fluxheim/snapshots"
 snapshot_integrity_key_file = "/etc/fluxheim/snapshot-integrity.key"
 
@@ -474,8 +516,12 @@ min_successful_checks = 1
 max_error_rate_per_mille = 100
 ```
 
-If `admin.enabled = true`, configure `token_env` or `token_file`. Snapshot and
-rollback endpoints also require `snapshot_store`.
+If `admin.enabled = true`, configure exactly one of `token_env` or `token_file`
+and a `snapshot_store`, including for read-only use. Keep control tokens private
+and service-owned (`0600` on Unix). The current Unix control-token loader does
+not enforce confidential leaf permissions, unlike the observer-token loader;
+the documented limitation / the local follow-up tracks that gap. Do not infer safe leaf permissions
+from successful startup.
 `snapshot_integrity_key_file` is optional; when set, snapshot creation writes
 HMAC-SHA-256 manifests and rollback requires a valid manifest. Keep the key
 outside the store in a private regular file containing 32..=4096 bytes. On
@@ -502,20 +548,24 @@ listener. Direct first-class admin TLS/mTLS remains planned; do not expose the
 admin listener over cleartext networks.
 
 `[admin.ops_socket]` enables a separate Unix-domain HTTP socket for local,
-read-only operational checks. It exposes only `GET /_fluxheim/status`,
-`GET /_fluxheim/cache/status`, `GET /_fluxheim/snapshots`, and the configured
+read-only operational checks. It exposes `GET /_fluxheim/status`,
+`GET /_fluxheim/operational-status`, `GET /_fluxheim/cache/status`,
+`GET /_fluxheim/load-balancer/status`, `GET /_fluxheim/udp/status`,
+`GET /_fluxheim/snapshots`, and the configured
 admin health path; mutating admin endpoints such as reload, rollback, and cache
 purge are not routed on this socket. The socket requires `admin.enabled = true`,
 is Unix-only, and validates its path with the same parent traversal, symlink, and
 unsafe-writable-parent checks used for process sockets. `mode` must grant owner
 read/write access, may grant group read/write access, and must not grant world
-access; use `0600` for service-owner-only status or `0660` for a dedicated
-operator group. By default, the Unix socket's filesystem permissions are the
+access. However, native startup currently ignores the configured mode and
+always creates `0600`. Use `0600`; configuring
+`0660` does not currently provide group access. By default, the Unix socket's filesystem permissions are the
 trust boundary. Set `require_bearer_token = true` to require the same
-`Authorization: Bearer ...` token as the TCP admin listener for read-only ops
+`Authorization: Bearer...` token as the TCP admin listener for read-only ops
 socket status requests. `GET /_fluxheim/snapshots` always requires the bearer
 token on the ops socket because snapshot IDs and messages expose deployment
-change history.
+change history. Operational status always requires a control or observer token.
+The socket does not apply the HTTP certificate assertion or source throttle.
 
 When compiled with `load-balancer`, `GET /_fluxheim/status` includes a
 `load_balancer` object for configured vhost and route pools. The status is
@@ -655,15 +705,19 @@ Successful and rejected weight operations are counted as `member_weight`,
 `member_weight_invalid`, and `member_weight_not_found`.
 
 When compiled with `wasm`, `GET /_fluxheim/status` includes a read-only `wasm`
-object for the validation-stage plugin registry. It reports whether `[wasm]` is
+object describing the configured plugin registry. It reports whether `[wasm]` is
 enabled, whether preview ABIs are allowed, plugin root/plugin/attachment counts,
 the process-wide `max_total_concurrent_executions` ceiling, the preview-specific
 `max_total_preview_concurrent_executions` ceiling, the cache-specific
 `max_total_cache_concurrent_executions` ceiling, plugin names, plugin paths,
 configured expected SHA-256 digests, declared ABI and host-call namespace,
 phases, fail mode, attachment priority, and whether each plugin or attachment
-overrides the default admission/limit policy. Runtime loaded plugin hashes are
-added by later `1.7.x` hook releases. All Wasm active-execution and queued
+overrides the default admission/limit policy. This reports configured
+`expected_sha256` values, not runtime loaded-hash attestation. See the
+[Wasm deployment guide](../guides/wasm-extensibility.md) and
+[complete option reference](wasm-options.md), including the the documented limitation
+field-inheritance correction and older-binary compatibility note. Wasm configuration changes require a
+process-upgrade; this is not a live plugin-generation API. All Wasm active-execution and queued
 admission values are bounded to `0..=256`, with active limits required to be
 non-zero. Runtime acquisition proceeds from attachment and plugin scopes toward
 the process-wide scope so a narrow backlog cannot consume global permits.
@@ -680,20 +734,24 @@ threads running after returning a timeout. Deployments that require hard
 compiler cancellation must isolate the Fluxheim startup/reload process with OS
 CPU and memory limits; killable per-plugin workers require a future
 process-isolated Wasm execution architecture.
-`1.7.1` enables the first live
-native HTTP/1 request-path hook family: `access-decision`. The current preview
+For exact host-call IDs, precedence and protocol coverage, see the
+[Wasm ABI reference](wasm-policy-abi.md). WebSocket-enabled proxy scopes reject
+Wasm route-decision and request/response-header attachments;
+access-decision remains supported. Vhost-wide attachments cover all its routes.
+Use HTTP-only named routes for those hooks, or disable WebSocket. See the
+[WebSocket guide](../guides/websocket.md) for the separate remaining limitations.
+The native request-path access hook is `access-decision`. The current preview
 ABI calls `fluxheim_access_decision() -> i32`, where `0` continues the chain,
 `1` allows/continues, and `2` denies with `403`. Built-in Fluxheim access
 policy runs first and cannot be overridden by Wasm.
 
-`1.7.2` adds live native HTTP/1 `request-headers` and `response-headers`
-hooks. These hooks use the `fluxheim_policy_v1` host-call namespace with
+Native `request-headers` and `response-headers` hooks are also available. These hooks use the `fluxheim_policy_v1` host-call namespace with
 bounded integer IDs for coarse request context and allow-listed synthetic
 header mutations. They do not expose raw request headers, response headers,
 `Authorization`, `Cookie`, `Set-Cookie`, request bodies, private keys, admin
 credentials, filesystem, network, or process APIs.
 
-`1.7.3` adds live native HTTP/1 `route-decision` hooks. The first preview ABI
+Native `route-decision` hooks select configured routes. The first preview ABI
 supports `continue`, `deny`, and configured `canary` or `mirror` branch
 selection. Fluxheim accepts a selected branch only when it maps to an existing
 configured route that still matches the current request method and path;
@@ -705,8 +763,7 @@ Fluxheim still chooses the backend through the configured `proxy.load_balance`
 policy. A selected route may also use normal configured load-balancer
 persistence; plugins do not provide arbitrary persistence keys in this preview.
 
-`1.7.4` adds the first live native HTTP/1 cache-policy hooks: `cache-lookup`
-and `cache-store`. The `cache-lookup` preview ABI calls
+Native proxy-cache policy hooks are `cache-lookup` and `cache-store`. The `cache-lookup` preview ABI calls
 `fluxheim_cache_lookup() -> i32`, where `0` continues normal cache
 lookup/storage, `1` passes the request through origin without lookup or
 storage, `2` bypasses cache lookup/storage, and `3` denies with `403`. The
@@ -721,13 +778,13 @@ controls still run in their normal order. Cache hooks use the separate
 hot cache-policy routes cannot starve security-decision hooks that use
 `wasm.max_total_concurrent_executions`. Cache-store hook chains use
 most-restrictive-wins aggregation: a later `deny` still runs and wins after an
-earlier `skip`. `1.7.5` adds the first bounded cache-key mutation host call:
+earlier `skip`. The bounded cache-key mutation host call works as follows:
 plugins can read the symbolic `X-Device-Class` context and append either the
 fixed `wasm-device-class=mobile` or `wasm-device-class=desktop` component to
 the cache key. The host rejects duplicate components, unknown IDs, and
 component counts above the hard cap across the full hook chain. Wasm-selected
 components are included in complete-object, single-range, and fixed-slice
-range-cache keys. `1.7.5` also adds fixed-ID cache-store TTL/tag/header
+range-cache keys. There is also fixed-ID cache-store TTL/tag/header
 metadata: `set_cache_ttl(1, 0)`, `set_cache_ttl(2, 0)`,
 `add_cache_tag(1, 0)`, `add_cache_tag(2, 0)`,
 `set_cache_store_header(1, 1)`, and `set_cache_store_header(1, 2)`. The stored
@@ -741,7 +798,7 @@ expose raw headers, request bodies, arbitrary cache-key bytes, arbitrary TTLs,
 arbitrary tag strings, arbitrary stored response headers, or response-store
 body mutation; those stay staged behind later bounded cache-policy ABIs.
 
-`1.7.7` adds the opt-in `wasm-proxy-abi` compatibility preview boundary. A
+The opt-in `wasm-proxy-abi` compatibility preview has a separate boundary. A
 plugin may use the proxy preview host-call namespace only when all of these are
 true: the binary was built with `wasm-proxy-abi`, `[wasm].allow_preview_abi =
 true`, the plugin declares `abi = "proxy-wasm-preview"`, and the plugin declares
@@ -755,16 +812,19 @@ the plugin fail mode.
 enabled = true
 allow_preview_abi = true
 max_total_preview_concurrent_executions = 16
+plugin_roots = ["/etc/fluxheim/plugins"]
 
 [[wasm.plugins]]
 name = "proxy_preview"
 path = "/etc/fluxheim/plugins/proxy-preview.wasm"
+# Template: replace with the deployed module SHA-256.
+sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 abi = "proxy-wasm-preview"
 host_call_namespace = "proxy-wasm-preview"
 phases = ["access-decision"]
 ```
 
-`1.7.8` adds the separate opt-in `wasm-wasi` capability preview for WASI
+The separate opt-in `wasm-wasi` capability preview supports WASI
 Preview 1 core modules. The binary must be built with `wasm-wasi`, preview ABIs
 must be allowed, and the ABI/namespace pair must both be `wasi-preview`.
 Capabilities default to false and are part of the compiled-module identity.
@@ -774,6 +834,7 @@ Only clock and randomness imports are currently reviewable grants:
 [wasm]
 enabled = true
 allow_preview_abi = true
+plugin_roots = ["/etc/fluxheim/plugins"]
 
 [[wasm.plugins]]
 name = "wasi_random_policy"
@@ -894,7 +955,12 @@ vhost. Purge responses include the selected vhost/route, the normalized
 so bulk purge output can be audited without decoding cache keys.
 Indexed scope, prefix, tag, and wildcard purge endpoints accept `soft=true` or
 `x-fluxheim-cache-soft: true` to mark matched objects stale without deleting
-their cached bodies. Hard purge remains the default.
+their cached bodies in memory/filesystem tiers. Storage-bin currently hard
+deletes instead. Bounded purge continuation and disk stale
+dry-run also have open corrections; read
+[operation safeguards](../guides/cache-operations.md#current-invalidation-warnings)
+before interpreting completion flags or requesting a supposedly read-only preview.
+Hard purge remains the default.
 
 `admin.self_healing.health_path` must be an absolute path no longer than 2048
 bytes and cannot contain whitespace, control characters, backslashes, `?`, or
@@ -927,7 +993,12 @@ network even when token authentication is enabled.
 environment mutation as unsafe and Fluxheim forbids unsafe code in the root
 crate. Use `metrics.token_file` instead. Token files can be permissioned,
 mounted from a secret store, and rotated without exposing the token in the
-process environment.
+process environment. The running metrics service reads its token once: replacing
+the file requires a restart/upgrade to activate the new value. On Unix, provision
+service-owned mode 0600 explicitly; private leaf permissions are not yet enforced
+by this reader. The listener is plain HTTP, not
+protected by public-vhost TLS or ACL rules. See the [metrics operator guide](../guides/metrics.md)
+for every option, a complete authenticated recipe and current measurement gaps.
 
 ```toml
 [metrics]
@@ -1003,16 +1074,14 @@ trust and sampling, and [export policy](../guides/otlp-export.md) for failure se
 `tracing.otlp.tls_ca_cert_path` can point at a PEM CA bundle for private PKI
 collectors; when omitted, the bundled WebPKI roots are used. HTTP is accepted
 only for numeric loopback addresses; HTTPS is required for private/remote
-addresses and DNS names, including `localhost`. When Fluxheim is built with the `cache`
-feature, exported request spans include bounded cache attributes for the cache
-phase plus cache lookup and request-collapsing wait durations. They do not
-include cache keys, paths beyond the normal HTTP span name, query strings,
-cookies, or request header values. `otel-tracing` and `otel-otlp` are
-incompatible with `privacy-mode`.
-Load-balanced spans may include `fluxheim.load_balancer.upstream` from the
-configured `proxy.upstream_aliases` value and
-`fluxheim.load_balancer.retries`; raw upstream URLs are not exported as trace
-attributes.
+addresses and DNS names, including `localhost`. Native spans do not populate
+optional cache, load-balancer, compression, PHP or route attributes, and
+`fluxheim.vhost` is currently empty. Serializer support is not runtime producer
+support. No raw paths, upstream URLs, queries, cookies
+or header values are captured in these spans. See the tracing guide for the
+exact field and option inventory. `otel-tracing` and `otel-otlp` are incompatible
+with `privacy-mode`. Any tracing configuration change requires process upgrade;
+token/CA file replacement alone is not exporter reload.
 
 ## Logging
 
@@ -1029,9 +1098,9 @@ admission, including INFO success outcomes; use
 general logging. Neither queueing nor a successful write/flush guarantees durable
 audit persistence. Shutdown waits at most 500 ms for all logging workers.
 
-Runtime logs support the configuration below. Access-log settings are accepted,
-but the native completion hook is not wired yet; do not rely on these flags
-alone for an access audit trail. The 1.9 plan includes that missing integration.
+Runtime logs support the configuration below. Native access completion is wired,
+but the six include_* options remain unused; see the current field
+contract below and the [complete logging guide](../guides/logging.md).
 
 ```toml
 [logging]
@@ -1054,7 +1123,7 @@ request_id = true
 request_id_header = "x-request-id"
 ```
 
-`level` values: `error`, `warn`, `info`, `debug`, `trace`.
+`level` values: `off`, `error`, `warn`, `info`, `debug`, `trace`.
 
 `format` values: `json`, `text`.
 
@@ -1130,54 +1199,28 @@ durable auditing. Disk exhaustion, power loss, external kills and same-UID/root
 compromise remain outside this guarantee. Neither this file nor ordinary audit
 admission implements a durable audit journal.
 
-### Historical Access Field Semantics
+### Native Access Field Semantics
 
-The descriptions below document the former access producer, not events emitted
-by the current native runtime. They are compatibility inputs for Commit 06;
-the new schema/privacy review must explicitly decide which fields to preserve.
+Native HTTP completion now emits bounded structured access events, with method,
+status, outcome, duration, response-byte accounting and attempt count. Correlation
+IDs are attached according to the trusted-peer/request policy. Not every
+connection or parser rejection reaches this producer.
 
-`logging.access.include_path = false` keeps access logging enabled while
-emitting an empty `path` field. This is useful when request paths may contain
-tenant IDs, filenames, or other sensitive identifiers.
-
-`logging.access.include_host = false` keeps access logging enabled while
-emitting an empty raw `host` field. The configured `vhost` name is still logged
-after Fluxheim resolves the request.
-
-`logging.access.include_client_ip = false` emits an empty `client_ip` field.
-When enabled, the logged address is the same trusted-proxy-aware client IP used
-by access policy and rate limiting.
-
-`logging.access.include_cache_phase = false` emits an empty `cache_phase` field.
-When enabled in cache-capable builds, Fluxheim logs the effective request cache
-phase, such as `hit`, `miss`, `bypass`, or `disabled`.
-
-Access log events include `compression_encoding` when Fluxheim applies response
-compression; the field is empty when the response is served without a Fluxheim
-compression encoder.
-
-Access log events include downstream TLS identity fields:
-`tls_version`, `tls_cipher`, `tls_client_cert_sha256`,
-`tls_client_cert_serial`, and `tls_client_cert_organization`. These fields are
-empty when the request is not TLS, when no client certificate was presented, or
-when the selected TLS backend does not expose a given certificate attribute.
-
-Access log events also include the resolved route name and selected upstream
-address when a request reaches a proxy action; fallback, local static, or
-unrouted requests emit empty `route` or `upstream` fields as applicable.
-Load-balanced requests also include `upstream_alias` when configured through
-`proxy.upstream_aliases`, plus `upstream_retries` for the number of retry
-attempts Fluxheim made after the first selected upstream.
-
-`logging.access.include_route = false` emits an empty `route` field.
-`logging.access.include_upstream = false` emits empty `upstream` and
-`upstream_alias` fields, which is useful when internal backend addresses or
-operator-defined backend labels should not appear in logs.
+The six `logging.access.include_*` options remain accepted but have no native
+producer effect. They do not emit raw host/path/client IP, configured
+route, upstream or cache phase, nor empty placeholders when false. Former
+compression/TLS/client-certificate/alias fields are also not part of the current
+native access schema. See the [logging guide](../guides/logging.md) for every
+option, actual record shape, filtering, privacy and the planned correction.
+Do not mistake historical producer descriptions for currently emitted fields.
 
 ## Headers
 
-Header policies can be global or per-vhost. Vhost policies overlay the global
-policy.
+Header policies can be global, per-vhost or per-route. See the
+[response header guide](../guides/response-headers.md) and
+[complete response options](response-header-options.md) for browser policy,
+rewrite ordering and current inheritance/error-coverage limitations. Request
+forwarding and [CORS](../guides/cors.md) are separate policies.
 
 ```toml
 [headers.request]
@@ -1237,12 +1280,19 @@ from = "/app/"
 to = "/"
 ```
 
+See the [request-header guide](../guides/request-headers.md) for every option,
+examples, template availability and trust limitations.
+
 `x_forwarded_for` values: `off`, `replace`, `append`. `x_real_ip = true`
-emits `X-Real-IP` from the effective client address. If the direct peer matches
-`server.trusted_proxies`, Fluxheim recursively restores that address from the
-trusted `X-Forwarded-For` chain before writing `X-Real-IP`, `X-Forwarded-For`,
-`Forwarded`, or `{remote_addr}` templates. In privacy builds it defaults off and
-client-IP forwarding remains stripped. IPv4-mapped IPv6 socket addresses such as
+emits `X-Real-IP` from the effective client address. **Current limitation:** the
+native forwarding path can strip the trusted X-Forwarded-For chain before
+restoring its client address, while ACL evaluation used the original chain.
+It can therefore forward the proxy address instead of the ACL-selected client
+. Append with stripping disabled also repeats the derived
+client rather than the direct proxy hop. Do not use these fields for origin
+authorization until corrected; disabling stripping is not a general workaround.
+In privacy builds client-IP forwarding remains stripped.
+IPv4-mapped IPv6 socket addresses such as
 `::ffff:192.0.2.10` are normalized to IPv4 before trusted-proxy, access-policy,
 rate-limit, and GeoIP decisions, so IPv4 CIDR rules apply consistently on
 dual-stack listeners.
@@ -1251,9 +1301,10 @@ The inbound identity denylist includes `Client-IP`, `X-Client-IP`,
 `X-Forwarded-For`, `X-Real-IP`, `Forwarded`, common CDN identity fields,
 `X-Envoy-External-Address`, `X-Original-Forwarded-For`, `X-Azure-ClientIP`,
 `Fly-Client-IP`, `X-ProxyUser-IP`, `X-Forwarded-Client-Cert`, and the generated
-forwarded host/protocol fields. Malformed trusted
-`X-Forwarded-For` hops, including repeated or unbalanced quotes, invalidate the
-whole chain and fall back to the directly observed peer. Add deployment-specific
+forwarded host/protocol fields. A malformed `X-Forwarded-For` hop examined by
+the right-to-left client-IP helper causes fallback to the directly observed
+peer. Hops left of the selected untrusted address are not all validated.
+Add deployment-specific
 identity headers to `headers.request.remove` when an upstream or edge product
 uses a name outside Fluxheim's built-in list.
 
@@ -1265,22 +1316,24 @@ headers independently.
 
 Request header values can use a small safe dynamic template set:
 
-- `{host}`: original request `Host` header.
-- `{remote_addr}`: observed client IP address.
+- `{host}`: current mutable `Host` header, not an immutable original.
+- `{remote_addr}`: effective or peer IP, subject to the documented limitation; empty in privacy builds.
 - `{scheme}`: `http` or `https` from the downstream listener.
 - `{uri}`: current request path and query.
 - `{path}`: current request path.
 - `{query}`: current request query without `?`, or empty.
-- `{request_id}`: Fluxheim request ID when access request IDs are enabled.
-- `{tls.cipher}` and `{tls.version}`: downstream TLS cipher and protocol when
-  the request arrived over TLS.
+- `{request_id}`: current X-Request-Id; provenance depends on correlation handling,
+  not the renderer. Diagnostic metadata only.
+- `{tls.version}`: downstream TLS protocol when available.
 - `{tls.client_cert_sha256}`: lowercase SHA-256 fingerprint of the verified
   downstream client certificate when one was presented.
-- `{tls.client_cert_serial}` and `{tls.client_cert_organization}`: serial number
-  and organization parsed from the verified downstream client certificate when
-  the TLS backend exposes them.
-- `{http.<header-name>}`: safe request-header forwarding, for example
-  `{http.upgrade}`.
+- `{tls.client_cert_serial}`: client certificate serial when available.
+- `{http.upgrade}`: current Upgrade header; does not authorize a tunnel.
+- `{route.regex.<name>}` / `{route.regex.<number>}`: selected route captures when
+  provided; see the [routing limits](../guides/routing.md).
+- `{tls.cipher}`, `{tls.client_cert_organization}` and other
+  `{http.<header-name>}` expressions pass validation but currently resolve to
+  empty in the native renderer, even with populated input.
 
 Unknown variables fail config validation. Rendered values are still passed
 through HTTP header validation before Fluxheim sends them upstream.
@@ -1290,23 +1343,27 @@ an attacker-supplied inbound header would otherwise remain before the
 TLS-derived value. Use `add`/`set` for TLS identity headers so Fluxheim removes
 any inbound copy before forwarding the trusted value.
 
-Common proxy migration headers:
+Example identity replacements (requires appropriate TLS client verification):
 
 ```toml
 [headers.request.add]
-host = "{host}"
 x-real-ip = "{remote_addr}"
 x-forwarded-for = "{remote_addr}"
 x-forwarded-proto = "{scheme}"
 x-forwarded-host = "{host}"
 x-client-cert-sha256 = "{tls.client_cert_sha256}"
-upgrade = "{http.upgrade}"
-connection = "upgrade"
 ```
 
 Prefer the typed `x_forwarded_for`, `x_real_ip`, `x_forwarded_host`, and
 `x_forwarded_proto` fields where they fit. Use dynamic values when a backend
 expects an exact legacy-style header.
+
+Leave Host untouched to preserve it. Do not set `host = "{host}"`: replacement
+removes its destination before rendering, losing Host and causing backend
+authority fallback; later templates also see the mutated request
+. URI/path/query templates see the post-rewrite target.
+Missing values disappear, but literal surrounding text remains. Configure
+[WebSocket routes](../guides/websocket.md) instead of manually forcing Upgrade.
 
 For header mutations, `remove`/`add` are the preferred readable names.
 `unset`/`set` remain supported for compatibility. The nested
@@ -1314,14 +1371,18 @@ For header mutations, `remove`/`add` are the preferred readable names.
 `[vhosts.headers.*.operations]` tables are useful when you want all explicit
 header operations grouped together. Do not define the same header in more than
 one `set`, `add`, or `operations.add` table in the same policy; Fluxheim rejects
-that as ambiguous. Each header mutation policy is bounded: remove/unset, set/add,
+that as ambiguous. Current cross-scope merging can also reject parent `add`
+plus child replacement, and a child's removal cannot cancel inherited generic
+set/append. Response values are literal despite sharing request
+template validation. See the response guide before relying on
+inheritance. Each header mutation policy is bounded: remove/unset, set/add,
 and append header-name collections are capped at 128 entries each, and a single
 append header may contain at most 32 values. Static header values must be
 non-empty after trimming and cannot contain HTTP control bytes, including
 horizontal tab, so one config works safely for both HTTP/1.x and HTTP/2
 upstreams. Dynamic template variables strip control characters before insertion.
 
-Security headers are easy to enable globally:
+Security headers can be configured globally after application/TLS review:
 
 ```toml
 [headers.response]
@@ -1332,15 +1393,17 @@ referrer_policy = "no-referrer"
 
 [headers.response.hsts]
 enabled = true
-max_age_secs = 63072000
+max_age_secs = 300
 include_subdomains = false
 preload = false
 ```
 
 You may still set `headers.response.strict_transport_security` directly as a raw
 header value, but do not combine it with `[headers.response.hsts]` in the same
-policy. HSTS and CSP are intentionally not enabled blindly in examples because
-they are site-specific and can break local HTTP testing or asset policies.
+effective policy, including inherited settings. These are opt-in examples,
+not universal defaults. HSTS does not enable HTTPS; CSP can block application
+assets. Explicitly choose a short HSTS rollout duration rather than inheriting
+the typed table's two-year default, and test the complete application.
 
 Response hardening profiles are opt-in and default to `off`, preserving existing
 site behavior. `baseline` removes the `Server` banner and emits a conservative
@@ -1378,12 +1441,19 @@ CSP before enforcement, keep the endpoint on trusted infrastructure, and bound
 its retention and ingestion independently. The generic response mutation layer
 remains available for deliberately site-specific policies. For example,
 `Clear-Site-Data` should be limited to logout or account-reset routes, never a
-global header:
+global header. This fragment adds a proxy route inside an existing vhost;
+the application must still implement logout authorization and CSRF protection.
+The static header is not conditional on successful logout: emit it from the
+application instead if success-dependent behavior is required.
 
 ```toml
 [[vhosts.routes]]
 name = "logout"
 path_exact = "/logout"
+methods = ["POST"]
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
 
 [vhosts.routes.headers.response.add]
 clear-site-data = "\"cache\", \"cookies\", \"storage\""
@@ -1444,6 +1514,9 @@ integrity metadata, not authentication or authorization.
 
 ### CORS
 
+See the [operator guide](../guides/cors.md) for every option, list-replacement
+semantics, a runnable recipe and current route-disable/wildcard limitations.
+
 CORS is disabled by default and must use the dedicated request-aware policy.
 Static `Access-Control-Allow-*` response strings cannot safely implement origin
 allowlists or preflight behavior.
@@ -1465,8 +1538,13 @@ rejects duplicate origins/methods/headers, rejects non-origin URLs, and never
 allows wildcard origin `*` with credentials. Valid preflights are answered
 locally with `204`; denied preflights receive `403` and do not reach the origin.
 Fluxheim owns the resulting CORS headers, replaces unsafe upstream values, and
-manages `Vary: Origin`, `Vary: Access-Control-Request-Method`, and
-`Vary: Access-Control-Request-Headers`. Response compression separately manages
+merges `Vary: Origin` for explicit-origin actual responses and all three
+`Origin`, `Access-Control-Request-Method`, `Access-Control-Request-Headers`
+tokens for successful preflights. Wildcard-origin actual responses currently
+omit Origin variation despite conditional allow-origin emission.
+Child CORS disable can fall back to parent preflight handling;
+use explicit method/header names rather than accepted-but-nonfunctional `*`
+entries. Early errors can bypass response policy. Response compression separately manages
 `Vary: Accept-Encoding`. Actual responses receive CORS authorization headers
 only when both the request origin and request method are allowed. CORS controls
 whether browser JavaScript may read a response; it is not CSRF protection and
@@ -1493,11 +1571,14 @@ delay. Quoted `Refresh` URLs such as `url="https://backend/"` and
 `url='https://backend/'` are matched against the unquoted URL and keep their
 quote style after rewriting. `from` and `to` values must be absolute
 `http://` / `https://` prefixes or absolute paths, must not contain control
-characters, and each header supports up to 32 rules. When `from` is an absolute
-URL prefix, Fluxheim only rewrites matches that end at the URL boundary or are
+characters, and each header supports up to 32 rules. When `from` is an authority-only
+absolute URL prefix, Fluxheim only rewrites matches that end at the URL boundary or are
 followed by `/`, `?`, or `#`; this prevents authority-continuation values such
 as `http://backend.internal@evil.example/` from matching a backend origin
-prefix.
+prefix. Path-containing URL prefixes and path-only prefixes are literal:
+`/internal` also matches `/internalized`. Use trailing slashes when descendants,
+not arbitrary string continuations, are intended. First matching rule wins;
+child rules append after parent rules.
 
 `[[headers.response.rewrite.cookie_domain]]` and
 `[[headers.response.rewrite.cookie_path]]` rewrite `Set-Cookie` `Domain=` and
@@ -1721,16 +1802,18 @@ Changing a load-balanced pool's discovery source, discovery refresh interval,
 HTTP bearer-token file, or route/vhost pool membership is classified as a
 process-upgrade change rather than a live snapshot reload because the refresh
 loop is registered with the process service set at startup.
+See the [verified-origin and mTLS guide](../guides/upstream-tls.md) for complete
+examples, verification controls and file-refresh limits.
 When `upstream_tls = true`, Fluxheim sends TLS to the origin. `upstream_sni`
-overrides the SNI name; if it is omitted, Fluxheim derives SNI from the primary
+overrides the SNI name; if it is omitted, the native connector derives SNI from the selected
 upstream host. `upstream_verify_cert` and `upstream_verify_hostname` default to
 `true`. Disabling certificate verification is an explicit insecure policy and
 also requires `upstream_verify_hostname = false` so the config cannot imply
 hostname validation while certificate validation is off. IP-addressed upstreams
 with `upstream_tls = true` and certificate verification enabled require explicit
 `upstream_sni`; otherwise the upstream TLS connector cannot perform normal
-certificate verification. `upstream_alternative_cn` adds one additional hostname
-that may match the upstream certificate when the configured SNI does not.
+certificate verification. `upstream_alternative_cn` replaces the certificate
+verification name without changing SNI; it is not an additional fallback name.
 Wildcards are rejected for this field.
 `upstream_ca_path` points at a PEM CA bundle used instead of the platform trust
 store for this proxy policy. `upstream_client_cert_path` and
@@ -1738,7 +1821,10 @@ store for this proxy policy. `upstream_client_cert_path` and
 key for origin mTLS and must be set together. These file paths are resolved
 relative to the containing config file, reject parent-directory traversal,
 reject symlinked existing path components, and reject group/world-writable
-existing parents. Rustls and OpenSSL builds support custom upstream trust roots
+existing parents during configuration validation. Unix runtime reads do not
+retain that parent-trust boundary; a final-leaf
+no-follow check alone is not protection against parent replacement.
+Rustls and OpenSSL builds support custom upstream trust roots
 and upstream client certificates. BoringSSL and s2n are not supported Fluxheim
 TLS backends.
 `upstream_proxy_protocol` defaults to `off`. Set it to `v1` or `v2` to send a
@@ -1752,7 +1838,7 @@ address is used. If Fluxheim
 cannot produce a same-family TCP4/TCP6 source and destination pair, it sends
 `PROXY UNKNOWN` for v1 or an empty v2 PROXY/UNSPEC frame for v2.
 `upstream_http_version` defaults to `http1`. Set it to `http2` for origins
-that require HTTP/2, including gRPC-style upstreams, or to `http1-and-http2`
+that require HTTP/2, or to `http1-and-http2`
 to allow HTTP/2 with HTTP/1.1 fallback where the selected TLS/backend connector
 can negotiate it. For plaintext origins, `http2` means h2c; use it only when
 the origin is known to accept cleartext HTTP/2 prior knowledge.
@@ -1770,14 +1856,19 @@ latency-sensitive deployments should use a larger value unless the origin
 requires single-stream behavior. `upstream_h2_ping_interval_secs` enables
 upstream HTTP/2 keepalive pings. Both h2 settings require
 `upstream_http_version` to allow HTTP/2.
-During the 1.6 native preview, the native HTTP/1 proxy path supports
+The native HTTP proxy path supports
 h2c/prior-knowledge upstreams and TLS ALPN-negotiated upstream HTTP/2 for
 `upstream_http_version = "http2"`, including `upstream_h2_max_streams` and
 `upstream_h2_ping_interval_secs`. For TLS upstreams,
 `upstream_http_version = "http1-and-http2"` advertises both `h2` and
 `http/1.1`, then sends the upstream request with the protocol selected by ALPN.
-Plaintext `http1-and-http2` remains HTTP/1.1-only unless
-`upstream_h2c_upgrade = true` is explicitly configured.
+Plaintext `http1-and-http2` without `upstream_h2c_upgrade = true` currently
+passes general config validation but is rejected by native proxy construction.
+Use `http1` for plaintext origins without upgrade support. Mixed TLS mode uses
+a fresh connection per request and bypasses the shared H2 stream semaphore and
+reusable pools; the stream setting is not an aggregate origin
+admission cap in that mode. See the [reverse-proxy guide](../guides/reverse-proxy.md)
+and [transport reference](proxy-transport-options.md).
 For downstream HTTP/2, `:authority` is the sole vhost-routing authority;
 Fluxheim discards any ordinary `Host` fields before adapting the request and
 rejects requests without authority. Native HTTP/1 origins may send a bounded
@@ -1799,23 +1890,29 @@ downstream delivery or cache admission.
 For explicit gRPC routes, set route-scoped `[vhosts.routes.grpc] enabled =
 true`; Fluxheim then requires the route proxy to allow upstream HTTP/2, rejects
 non-`POST` requests, accepts only `application/grpc` or `application/grpc+*`
-content types, and leaves gRPC-Web/JSON transcoding out of scope.
-`connect_timeout_secs` bounds the low-level socket connect phase.
+content types, and leaves gRPC-Web/JSON transcoding out of scope. This is only
+a route filter: the routed proxy currently loses response trailers
+ and buffers bodies rather than implementing bidirectional
+streaming. See the [gRPC limits](../guides/grpc.md) before deployment.
+`connect_timeout_secs` bounds DNS plus socket connect and, separately, the TLS
+handshake phase.
 `upstream_total_connection_timeout_secs` wraps full upstream establishment,
-including protocol/TLS setup where the selected connector exposes it.
+including protocol/TLS setup where the selected connector exposes it. It is
+not a request-wide deadline. The first pooled H2 response-header wait is also
+shortened by this setting, unlike reused H2 requests.
 `upstream_idle_timeout_secs` controls how long reusable idle upstream
 connections remain in the native HTTP/1.1 upstream pool before they are closed.
 `upstream_tcp_keepalive_idle_secs`, `upstream_tcp_keepalive_interval_secs`, and
 `upstream_tcp_keepalive_count` configure TCP keepalive probes on upstream
 connections and must be set together. `upstream_tcp_user_timeout_ms` maps to
-Linux `TCP_USER_TIMEOUT` through the same keepalive setting and is ignored by
-non-Linux kernels. `upstream_tcp_recv_buffer_bytes` requests a receive-buffer
+the native socket user-timeout option through the same keepalive setting;
+native construction rejects it on unsupported targets, including Windows and
+macOS. `upstream_tcp_recv_buffer_bytes` requests a receive-buffer
 size for new upstream sockets, capped at 256MiB. `upstream_dscp` accepts a DSCP
-value from 0 through 63. `upstream_tcp_fast_open` enables upstream TCP Fast Open
-where the platform and kernel allow it on the compatibility runtime. During the
-1.6 native-runtime cutover preview it remains an explicit native HTTP/1
-transport-policy blocker until Fluxheim has a safe native socket path with
-parity tests.
+value from 0 through 63; OS/address-family restrictions still apply.
+`upstream_tcp_fast_open = true` remains an explicit native transport-policy
+blocker, not a usable native optimization. The connector currently tries only
+the first DNS address; later addresses are not automatic fallback.
 `upstream_weights` is optional and, when set, must contain one positive weight
 for each `upstreams` entry. It enables weighted selection in `load-balancer`
 builds. Each weight must be at most 1000 and the total configured weight must
@@ -1912,10 +2009,9 @@ backend with weight `4` can carry roughly four times the in-flight request
 share of a backend with weight `1`. `least-sessions` requires
 `proxy.load_balance.persistence.enabled = true` and selects by the lowest
 bounded persistence-entry share per backend, weighted by `upstream_weights`.
-`least-time` uses the same request permits plus an EWMA of observed upstream
-latency from completed requests, weighted by `upstream_weights`; unsampled
-healthy backends are allowed to receive traffic so new or recovered pool
-members can establish a latency baseline. Runtime weight overrides through the
+The `least-time` selector can use latency samples, but the native HTTP dispatcher
+currently supplies none: do not rely on it for measured-latency balancing. Use
+`least-connections` for current request-load selection. Runtime weight overrides through the
 admin API are honored by `round-robin`, `least-connections`, `least-sessions`,
 and `least-time` in the current release. Hash, consistent hash, bounded-load
 consistent hash, nginx-compatible Ketama, Maglev, and power-of-two selections reject runtime weight
@@ -1938,10 +2034,13 @@ Queued requests that actually wait also record
 bounded outcome (`waited` or `timeout`).
 When persistence is enabled, the same counter records bounded
 `persistence_hit`, `persistence_miss`, and `persistence_fallback` events.
-`examples/load-balancer-enterprise.toml` is the validated 1.5 migration
+`examples/load-balancer-enterprise.toml` is a validated migration
 fixture for a richer HAProxy/F5-style pool: weighted members, aliases, priority
 groups, backup/drain policy, active and passive health, slow start,
-source-IP persistence, retry budgets, metrics, and explicit all-down behavior.
+source-IP persistence, metrics, and explicit all-down behavior. Its retry and
+latency settings parse but are not effective in native HTTP dispatch; see the
+[load-balancer guide](../guides/load-balancer.md) and
+[option reference](load-balancer-options.md) before using it.
 `examples/load-balancer-exec-health.toml` shows the local exec health-check
 shape for operators that need a bounded command monitor instead of a network
 probe.
@@ -2113,8 +2212,9 @@ instead of failing the entire pool. Set it to `0` only when strict fail-closed
 behavior is preferred over availability during a full-pool passive ejection.
 `failure_statuses` may narrow the failure set to specific 5xx status codes, and
 `failure_status_ranges` accepts inclusive 5xx ranges such as
-`[{ start = 520, end = 529 }]`. `max_latency_ms = 0` disables latency ejection;
-a positive value treats responses at or above that latency as passive failures.
+`[{ start = 520, end = 529 }]`. `max_latency_ms = 0` disables latency ejection.
+A positive value configures the classifier, but native HTTP currently supplies
+no latency samples, so it does not eject slow responses on that path.
 Passive ejection is also exposed in load-balancer runtime status as
 `circuit_state = "open"` with a pool-level `circuit_open_backend_count` so
 temporary outlier removal is explainable through the admin plane.
@@ -2128,18 +2228,16 @@ recovered load-balanced backends over `duration_secs` before they receive their
 full normal selection share. If all otherwise healthy candidates are still
 warming, Fluxheim allows a selection instead of failing the entire pool, so
 slow-start is a traffic-shaping guard rather than an availability blocker.
-`proxy.load_balance.retry.enabled = true` enables bounded redispatch for
-connection failures that happen before the request is sent upstream. It is
-limited by `max_retries` and by
-`methods`, which accepts only safe method tokens such as `GET`, `HEAD`,
-`OPTIONS`, and `TRACE`. `statuses = [500, 502, 503]` can additionally
-redispatch selected HTTP 5xx responses before response streaming starts, and
-`status_ranges = [{ start = 520, end = 529 }]` accepts inclusive 5xx ranges.
-Empty `statuses` and `status_ranges` keep response-status retries disabled.
-`budget_per_window = 0` disables the shared retry budget; set it to a positive value with
-`budget_window_secs` to cap total redispatch attempts for this vhost or route
-over a moving window. Fluxheim does not retry after response streaming has
-started.
+`proxy.load_balance.retry` governs the native HTTP pool's additional application
+attempts. Disabled or zero retries means no pool redispatch; enabled retries
+require a configured safe method and replayable empty-body non-upgrade request.
+`statuses` and `status_ranges` opt into server-error response retries; transport
+failures are otherwise eligible. Already attempted members are excluded.
+`budget_per_window` and `budget_window_secs` share retry admission across pool
+requests and cache workers; zero budget disables that cap, not the request count.
+`retry.admitted` reports cumulative admissions, not successful origin responses.
+Single static upstreams and non-HTTP transports are separate. See the
+[runtime boundaries](../guides/load-balancer.md#retry-and-latency-boundaries).
 `proxy.load_balance.queue` is disabled by default. Set both `max_waiting` and
 `timeout_ms` to let a bounded number of requests wait briefly when no backend is
 selectable, for example because every member is at its per-upstream
@@ -2225,6 +2323,9 @@ workers indefinitely.
 `websocket = true` enables HTTP/1.1 WebSocket upgrade forwarding on that proxy
 block. Fluxheim validates this with `upstream_http_version = "http1"` because
 HTTP/2 origins do not use the same hop-by-hop upgrade mechanism.
+See the [WebSocket guide](../guides/websocket.md) for the open authorization
+bypass, lost origin rejection replies and incomplete handshake
+validation. These are not fixed by enabling the setting.
 `downstream_read_timeout_secs`,
 `downstream_write_timeout_secs`,
 `downstream_total_response_timeout_secs`, and
@@ -2267,19 +2368,26 @@ in that mode so normal proxy routes cannot tunnel upgraded protocols
 accidentally.
 
 `[proxy.auth_request]` is Fluxheim's NGINX-style external authorization hook for
-proxy actions. When enabled, Fluxheim sends a bounded `GET` subrequest to `url`
+ordinary proxy actions. See the [authorization guide](../guides/external-authorization.md)
+for the open WebSocket bypass  and missing-identity passthrough
+, including tested pre-auth identity removal.
+When enabled, Fluxheim sends a bounded `GET` subrequest to `url`
 before forwarding the real request. Only headers listed in `forward_headers`
 are forwarded to the auth endpoint. For common request-context headers,
-Fluxheim does not copy client-supplied values: `X-Original-URI`,
+Fluxheim synthesizes these values when context is available: `X-Original-URI`,
 `X-Forwarded-URI`, `X-Auth-Request-Redirect`, `X-Forwarded-For`, `X-Real-IP`,
-`X-Forwarded-Host`, and `X-Forwarded-Proto` are synthesized from the trusted
-request context when those names are allow-listed. Repeated `Cookie` fields are
+`X-Forwarded-Host`, and `X-Forwarded-Proto`. The target can already be rewritten;
+IP context uses the direct peer. Unavailable synthesis currently falls back to
+inbound values, including privacy-suppressed IP context.
+Repeated `Cookie` fields are
 joined with `; ` before the auth subrequest, matching the origin request path.
 Any 2xx auth response allows the request and headers listed in
 `allow_response_headers` are copied into the upstream request; 4xx/5xx auth
 responses stop the request and return the auth status with a bounded text body.
 Other auth statuses are treated as a gateway-side auth failure. The hook can be
 configured globally, per vhost proxy, or per route proxy block.
+Auth connect/read timeout fields currently form one global deadline equal to
+their sum, not independently enforced phases.
 `max_in_flight` bounds active synchronous authorization calls for each
 configured auth service. Fluxheim acquires this permit before submitting work
 to Tokio's blocking pool; saturation fails closed with `503` instead of
@@ -2296,27 +2404,34 @@ leaving another `128` slots outside request-driven admission for lifecycle,
 admin, and recovery work. Valid per-service values are `1..=256` and the default is `64`. In
 FIPS/ISO-required mode, auth subrequests are limited to numeric local
 `http://127.0.0.1/...` or `http://[::1]/...` sidecars until outbound TLS client
-evidence is routed through the selected validated provider. With metrics
-enabled, auth subrequest decisions are counted by
-`fluxheim_edge_policy_events_total` with bounded `auth_request` policy labels
-and `allow`, `deny`, or `error` outcomes.
+evidence is routed through the selected validated provider. The native auth
+hook does not currently emit the previously advertised `auth_request` decision
+samples in `fluxheim_edge_policy_events_total`; an accepted metric
+label is not a wired producer.
 
 `[[proxy.error_pages]]` entries are internal static fallback pages for proxy
 failures. The `path` is an internal request path resolved below the entry's
 `web.root`; it is not exposed as a public route unless you also configure a
-route for that root.
+route for that root. They handle final transport failures (502/504) and managed
+pool all-down responses, not arbitrary origin error statuses. Missing or
+unusable pages fall back to the built-in error. See the
+[worked error-page example](../guides/reverse-proxy.md#serve-a-friendly-gateway-error).
 
 `[proxy.mirror]` is an opt-in traffic shadowing hook available in binaries
-built with the `traffic-mirror` feature. The first implementation mirrors only
-safe, bodyless requests (`GET`, `HEAD`, `OPTIONS`, or `TRACE`) to `base_url`
-and appends the original path and query. Mirror requests are fire-and-forget:
+built with the `traffic-mirror` feature. See the [mirroring guide](../guides/traffic-mirroring.md).
+The selector accepts GET, HEAD, OPTIONS or TRACE and appends the current proxy
+target to `base_url`. It does not currently check body absence; body-bearing
+GETs are mirrored without their body. Repeated allowlisted
+Cookie values also use comma joining rather than cookie delimiters.
+Mirror requests are fire-and-forget:
 timeouts, response statuses, and failures never affect the primary response.
 Only headers listed in `forward_headers` are copied; credentials and cookies are
 not mirrored unless explicitly allow-listed. `sample_per_mille` deterministically
-selects 1 through 1000 requests per 1000 for a stable method/host/path key.
+selects a fraction of method/Host/target keys, including query, using a per-process
+random salt. Repeated requests to one key are not independent samples.
 `max_response_bytes` bounds how much of the mirror response Fluxheim drains
-before discarding it. `max_in_flight` caps outstanding mirror worker tasks per
-vhost/route mirror key; requests above the cap skip mirroring and continue on
+before discarding it. `max_in_flight` compares against a counter shared by the
+literal destination URL across vhosts/routes; requests above the cap skip mirroring and continue on
 the primary path. Mirroring is rejected in `privacy-mode`; in FIPS/ISO required
 mode it is limited to numeric local `http://127.0.0.1/...` or
 `http://[::1]/...` sidecars until outbound TLS client evidence is routed
@@ -2326,7 +2441,7 @@ through the selected validated provider.
 
 `[compression]` is a global opt-in response compression policy. It is available
 only in binaries built with one or more codec features: `compression-gzip`,
-`compression-zstd`, or `compression-brotli`. The 1.4 production profile aliases
+`compression-zstd`, or `compression-brotli`. The production profile aliases
 used for official full/cache/proxy/PHP artifacts compile all three codecs so
 operators can enable compression by vhost or route without rebuilding; default
 developer builds still omit compression code. `privacy-mode` builds reject
@@ -2350,7 +2465,9 @@ Each vhost inherits the global compression policy unless it declares
 `[vhosts.compression]`. Each route inherits the vhost compression policy unless
 it declares `[vhosts.routes.compression]`. This lets one site enable
 compression while another site continues to serve identity responses, or lets a
-specific path prefix opt in or out:
+specific path prefix opt in or out. A declared child block is a complete policy:
+omitted fields use built-in defaults, not the parent's individual values. See
+the [compression guide](../guides/compression.md) for complete runnable recipes:
 
 ```toml
 [[vhosts]]
@@ -2382,33 +2499,42 @@ max_input_bytes = "2MiB"
 max_output_bytes = "4MiB"
 ```
 
-The compression path compresses only eligible `GET` responses with known
-`Content-Length`, status `200`, a matching client `Accept-Encoding`, no
+The native compression path works on fully buffered eligible `GET` responses,
+using known length or buffered body length, with status `200`, a matching client `Accept-Encoding`, no
 existing `Content-Encoding`, no `Set-Cookie`, no request `Cookie` or
 `Authorization`, no `Content-Range`, no `Cache-Control: no-transform`, and a
 conservative text, JavaScript, JSON, XML, or SVG media type. `Cache-Control:
 private` and `no-store` also suppress compression, including qualified forms
 such as `private="Set-Cookie"`. Fluxheim prefers
 `br`, then `zstd`, then `gzip` when those codecs are enabled and accepted by
-the client. Fluxheim removes `Content-Length` and `ETag` from compressed
-responses and adds `Vary: Accept-Encoding`. `Accept-Encoding` q-values are
+the client (higher quality wins before that tie-break). Fluxheim removes original
+length, ETag, Content-Digest and Repr-Digest metadata and adds
+`Vary: Accept-Encoding` on successful compression; the HTTP/1 writer supplies
+the encoded body's new Content-Length. `Accept-Encoding` q-values are
 parsed as finite RFC-style values from `0` through `1` with at most three
 decimal digits. Explicit coding entries take precedence over `*`; malformed,
-unknown, duplicate, or empty parameter/list forms fail closed to an identity
-response rather than enabling an encoding.
+unknown, duplicate, or empty parameter/list forms select identity rather than
+enabling an encoding. However, identity exclusion is not enforced,
+and identity/HEAD/304 can omit Vary despite encoding-dependent output
+. Neither behavior is a completed negotiation contract.
 
 `min_bytes` and `max_input_bytes` bound the original response size.
 `max_output_bytes` bounds the encoded response size with a codec sink that
 rejects a write before its logical output length exceeds the limit. It is not
 an exact RSS ceiling: the allocator may reserve additional `Vec` capacity and
-codec-internal working memory is separate. Emitted output allocations are
-transferred without a second body copy, and an encoder is discarded after any
+codec-internal working memory is separate. An encoder is discarded after any
 output-limit or allocation failure. The configured input maximum cannot exceed
-64 MiB and the output maximum cannot exceed 128 MiB.
+64 MiB and the output maximum cannot exceed 128 MiB. Native full-body encoding
+runs synchronously on the request executor; dedicated CPU admission and worker
+isolation remain unimplemented. On encoding failure the original
+response is retained, including the forbidden-identity limitation above.
 `gzip_level` must be between `0` and `9`, `zstd_level` between `1` and `19`,
 and `brotli_quality` between `0` and `11`.
 
 ## Web
+
+See the [static-file guide](../guides/static-files.md) for complete local/vhost/
+route recipes, every option, MIME types and current HTTP/publication limitations.
 
 ```toml
 [web]
@@ -2430,12 +2556,15 @@ when a later descendant is missing. Request paths are symlink-free, including
 intermediate directories. Static serving also rejects traversal, dotfiles by
 default (including non-UTF-8 OS filenames beginning with `.`), and unknown
 nested index file names. `index_files` is capped at 32 entries. Static body reads
-re-check the opened file handle and full-body reads are length-exact, failing
-if the file changes while it is being read. The current static response path is
+check that the opened handle is a regular file and full-body reads are
+length-exact. This does not detect all changes: same-size replacement can pair
+new bytes with old metadata/validators. The current static response path is
 buffered and refuses response bodies larger than 64 MiB; larger-file streaming
 is planned before this limit is relaxed. Static responses support MIME
 detection, `GET`/`HEAD`, `ETag`, `If-Match`, `If-Unmodified-Since`,
 `If-None-Match`, `If-Modified-Since`, and single byte ranges.
+Refresh directives suppress matching 304 responses, HEAD evaluates Range and
+unknown range units return 416; these are queued for correction.
 
 `web.directory_listing` is disabled by default. When enabled, Fluxheim only
 generates a listing after no index file matches. Listings inherit dotfile
@@ -2443,6 +2572,11 @@ protection, skip symlink entries, cap entry count, and use `private, no-store`
 so repository indexes are not accidentally cached by shared intermediaries.
 `local_time = true` renders listing modification times with the server's local
 UTC offset; otherwise listings use GMT HTTP-date timestamps.
+`exact_size = false` displays `-`, not human-readable sizes. Directory indexes
+do not redirect to slash-terminated URLs; listing links lose stripped route
+prefixes and do not URL-encode parent segments. The bounded
+scan can silently omit entries when filtered names consume its inspection
+budget. Keep listings small and use simple unrewritten paths.
 
 `cache_control` is emitted on static responses and defaults to
 `public, max-age=60`. Use response header policy when you need to append or
@@ -2451,6 +2585,11 @@ provider-specific cache controls. `expires` is optional and must be an HTTP
 header-safe value when set. Per-vhost static settings use `[vhosts.web]`.
 
 ## Cache
+
+Use the [option reference](cache-options.md) for the complete current defaults
+and the [backend guide](../guides/cache-backends.md) for native storage and
+inspection boundaries. These examples are policy configuration, not proof of
+disk initialization, durable storage or successful invalidation.
 
 `[cache]` is disabled by default at runtime even when the `cache` feature is
 compiled.
@@ -2561,7 +2700,10 @@ to avoid poisoning complete-object entries. Without slice caching,
 `range.max_bytes` must be greater than zero and no larger than
 `cache.max_object_bytes`.
 
-`[cache.range.slice]` enables the `1.2.6` fixed-slice range cache. Fluxheim
+See [range caching](../guides/cache-ranges.md) before enabling slices: native
+slice storage is memory-only and fills currently bypass load-balancer selection
+. Use one fixed origin for the documented recipe.
+`[cache.range.slice]` enables the fixed-slice range cache. Fluxheim
 normalizes client ranges into fixed-size slices, stores each slice under a
 slice-specific key, and can compose fresh compatible slices into single-range,
 open-ended, suffix, or `multipart/byteranges` responses. Missing slices can be
@@ -2595,15 +2737,17 @@ When `range.slice.enabled = true`, `range.max_bytes` may be larger than
 `cache.max_object_bytes`, and `range.max_bytes` must not exceed
 `range.slice.size_bytes * range.slice.max_slices`.
 
-`cache.disk.backend` defaults to `filesystem`, the stable complete-object disk
-backend used by `1.2.0` and `1.2.1`. `storage-bin` selects the focused `1.2.2`
-slab/bin disk backend, which stores objects inside bounded `.fhbin` data files
-with a durable object index and free-range reuse. The `[cache.disk.storage_bin]`
+`cache.disk.backend` defaults to `filesystem`, the complete-object disk backend.
+`storage-bin` stores objects inside bounded `.fhbin` data files with a persisted
+object index and free-range reuse. The `[cache.disk.storage_bin]`
 table defines the allocator shape:
 `bin_size_bytes` must be at least `cache.max_object_bytes` and no larger than
-`cache.disk.max_size_bytes`, `preallocate` controls whether Fluxheim should
-reserve full bin files ahead of object writes, and `max_open_bins` bounds the
-number of concurrently opened bin files.
+`cache.disk.max_size_bytes`. Encoded metadata/encryption also needs room within
+one bin, so leave headroom beyond the maximum body size. `preallocate` extends
+new files to bin size; actual physical reservation is filesystem-dependent.
+`max_open_bins` is validated and manifest-bound but does not currently enforce
+a concurrent-open cap. The [maintenance guide](../guides/cache-recovery.md)
+covers layout changes, index durability and pending initialization/reload fixes.
 
 The storage-bin backend holds a root-local advisory lock before creating or
 validating persistent layout metadata. Cross-node exclusion therefore depends
@@ -2639,8 +2783,10 @@ durable counter for that effective root key. Encryption fails closed at `2^32`
 object-encryption invocations and logs a security warning before that bound.
 Preserve `.fluxheim-encryption-*`, `.fluxheim-gcm-*`, and
 `.fluxheim-index-key-*` state with the cache root. Missing, truncated, or
-inconsistent active-key or counter state fails startup instead of resetting a
-counter. A missing root identity causes a new root key and mandatory cold purge.
+inconsistent active-key or counter state rejects disk-cache initialization
+instead of resetting a counter. The router can currently continue without that
+disk tier; this is not a guarantee of process startup failure.
+A missing root identity causes a new root key and mandatory cold purge.
 Do not clone or restore one initialized encrypted root into multiple
 concurrently active replicas; use independent roots and peer fill.
 
@@ -2652,10 +2798,9 @@ encryption state is cryptographic state: filesystem rollback of that complete
 state cannot be detected locally. High-assurance deployments requiring
 externally enforced rollback resistance should use OpenBao/KMS-managed key
 lifecycle and must not restore cache cryptographic state from an old snapshot.
-Filesystem disk-cache fills with the local provider encrypt streamed objects in
-bounded AEAD chunks, so enabling local encryption does not require Fluxheim to
-copy a complete streamed origin response back into heap before committing it to
-disk.
+The local provider's storage interface supports bounded AEAD chunks. This does
+not make native ordinary proxy fills unbuffered: that admission path receives a
+materialized response body. Plan in-flight RAM separately from disk budgets.
 
 `provider = "openbao-transit"` uses OpenBao Transit for regulated deployments
 that need centralized key custody and rotation. Fluxheim calls the Transit
@@ -2698,31 +2843,30 @@ policy may also store local `[web]`, `[vhosts.web]`, and route-scoped
 `[vhosts.routes.web]` file responses. Local static caching is opt-in because it
 changes an otherwise direct file-read path into a shared in-process cache path.
 Fluxheim keys local static cache objects by the request cache key plus canonical
-file identity metadata, so a changed local file creates a new cache key instead
-of serving the old body. Memory storage is preferred when both memory and disk
-tiers are configured, avoiding a second disk copy of files that already exist
-under the static site root. Disk-only cache policies are still accepted for
-operators who explicitly want disk-backed local static caching.
+file identity metadata. This is not a content hash or a guarantee that every
+concurrent replacement is detected; see the publication/validator limitation
+the documented limitation in [static serving](../guides/static-files.md#memory-file-publication-and-caching).
+Native local-static caching requires memory enabled
+and disk disabled; disk-only and tiered local-static caching are not supported.
+Use the [local-static recipe](../guides/cache.md#local-static-files).
 
 `status_header` is optional. When set, Fluxheim emits a cache debug header such
 as `X-Cache-Status: HIT`, `MISS`, `STALE`, `BYPASS`, `EXPIRED`, or
 `REVALIDATED` for requests that participate in the proxy cache or opt-in local
 static cache.
 `status_reason_header` is optional. When set, Fluxheim emits a bounded reason
-header such as `OriginNotCache`, `ResponseTooLarge`, or `cache-min-uses` when
+header such as `object-too-large`, `ttl-missing`, or `cache-min-uses` when
 the cache phase has an explicit no-cache reason. Leave it unset unless you are
 actively debugging cache policy.
 
 `[cache.predictor]`, `[vhosts.cache.predictor]`, and
 `[vhosts.routes.cache.predictor]` are opt-in cacheability predictors. The
-native HTTP/1 memory-cache path uses Fluxheim-owned bounded cache-pass counters;
-When enabled, Fluxheim can remember recent origin-level uncacheable outcomes
-such as `private`/`no-store` cache responses or oversized responses and bypass
-future cache lookup and cache locking for the same primary key until the
-bounded predictor entry ages out of its LRU table. Fluxheim-specific custom
-policy reasons are intentionally skipped so settings such as `min_uses`,
-configured request bypasses, and explicit response-header refusal policies stay
-controlled by Fluxheim's own policy counters.
+native path uses Fluxheim-owned bounded, expiring cache-pass counters, not a
+guaranteed LRU table. A store rejection can seed a future pass decision, except
+for the explicit `cache-min-uses` threshold. Other store rejection reasons,
+including policy refusals, can contribute. Request bypasses do not attempt a
+store and therefore do not themselves record a failed store. See
+[fill controls](cache-options.md#fill-controls) for capacity and expiry.
 
 `[cache.origin_protection]`, `[vhosts.cache.origin_protection]`, and
 route-scoped `origin_protection` configure a cache-aware origin-fill budget for
@@ -2753,6 +2897,13 @@ records `origin_protected` when the budget rejects a fill.
 `1.2.4` line. Peer fill is disabled by default and currently requires the
 owning cache policy to be enabled. The configuration is intentionally strict so
 runtime peer retrieval can stay bounded:
+
+**Current integrity warning:** the documented limitation is not fixed. Custom negotiation
+headers are omitted from peer requests, which can store the wrong representation
+under the caller's variant key. HMAC signatures also do not bind negotiation
+request headers. Disable affected peer policies and use verified HTTPS or an
+independently authenticated encrypted transport for untrusted links; a shared
+secret alone is insufficient. See the [peer guide](../guides/cache-peer-fill.md).
 
 ```toml
 [cache.peer_fill]
@@ -2979,8 +3130,11 @@ positive TTL in seconds. When a cache-participating origin response matches, the
 cache policy replaces response freshness headers with
 `Cache-Control: max-age=<ttl>` before cache admission. Origin
 `private`, `no-store`, `no-cache`, `Set-Cookie`, and other shared-cache
-rejections are preserved and still prevent storage unless
-`ignore_origin_cache_headers` is explicitly enabled for a trusted static route.
+rejections are not removed merely by configuring a TTL.
+`ignore_origin_cache_headers` separately removes origin `Cache-Control` and
+`Expires`, not `Set-Cookie`. Stripping `Set-Cookie` through response-header
+removal also removes its protection signal; do not do that for personalized
+responses. Keep these overrides disabled on private or mixed-public routes.
 Non-200 origin responses are admitted only when their status appears in
 `status_ttls`, or when `default_status_ttl_secs` is set as a fallback for any
 status. Use `default_status_ttl_secs` carefully: it can make unusual or error
@@ -2998,7 +3152,11 @@ serve stale solely because the upstream failed. `stale_if_error_on` optionally
 narrows which upstream error classes may use that stale-on-error window. Valid
 values are `connect`, `timeout`, `read`, `write`, `connection-closed`,
 `http-status`, `protocol`, `tls`, and `other`. The default includes all
-classes. `stale_if_error_statuses` optionally narrows HTTP-status stale serving
+classes. The native classifier currently never emits `read`, `write` or `tls`;
+it maps generic I/O kinds instead of retaining transport phase. This is a tracked
+runtime gap, not a working phase-specific
+policy. See [cache options](cache-options.md#freshness-and-stale-responses).
+`stale_if_error_statuses` optionally narrows HTTP-status stale serving
 to selected 5xx origin statuses; when it is empty, any upstream 5xx status that
 Fluxheim marks stale-if-error eligible is allowed. Stored responses carrying
 `must-revalidate`, `proxy-revalidate`, or `s-maxage` are never reused stale;
@@ -3049,14 +3207,18 @@ When enabled, Fluxheim periodically scans indexed disk-cache entries for each
 vhost and route cache, removes entries whose stored freshness window has
 expired, and stops after the configured bounded `limit` and `batches` per
 target. It does not walk arbitrary cache directories. Truncated non-dry-run
-stale purges rotate scanned fresh entries to the back of the bounded index, so
-later batches can reach expired entries that are behind a fresh front page.
+continuation is not reliable in the native helper today: it reports
+`truncated = false`, and scanned fresh entries are not rotated to let later
+scans reach stale entries behind them. Additional configured
+batches can therefore stop early. This is a pending correction, not proof that
+periodic cleanup covers every expired object.
 Keep `limit` and `batches` modest on large production caches; the admin
-`/_fluxheim/cache/purge-stale` endpoint remains available for explicit dry-runs
-or larger operator-controlled cleanup windows. With metrics enabled,
+`/_fluxheim/cache/purge-stale` endpoint shares these limits. Its disk
+`dry_run=true` can mutate state during lookup, so it is not a
+guaranteed read-only preview. With metrics enabled,
 `fluxheim_cache_purger_runs_total{outcome}` and
-`fluxheim_cache_purger_entries_total{result}` show whether the background
-purger is cleanly keeping up or returning `truncated` runs.
+`fluxheim_cache_purger_entries_total{result}` report observed work, not proof
+that all expired objects have been examined or removed.
 `fluxheim_cache_purger_duration_seconds{outcome}` reports per-tick cleanup
 duration with bounded outcome labels and without cache paths or keys.
 Aggregate storage-pressure gauges such as `fluxheim_cache_memory_entries`,
@@ -3067,6 +3229,12 @@ Use the protected admin cache-status endpoint when you need vhost or route
 breakdowns.
 
 ## TLS
+
+Start with the [HTTPS/SNI/mTLS operator guide](../guides/tls.md) and
+[downstream option tables](tls-options.md). Unix runtime certificate reads have
+an open-time trust gap: configuration path checks do not guarantee
+that later reloads reject replaced symlinks or unsafe parent permissions. Keep
+the tree protected and stable pending the local follow-up; do not use symlink rotation.
 
 ```toml
 [tls]
@@ -3321,10 +3489,17 @@ rule as private keys.
 
 ## ACME
 
+Start with the [ACME operator guide](../guides/acme.md) and
+[complete option reference](acme-options.md). Current execution gaps are tracked
+as the documented limitation (hold enforcement), the documented limitation (unwired failure backoff) and
+the documented limitation (background reload flags). Accepted settings do not prove those
+contracts are implemented.
+
 ACME config parsing, renewal planning, managed certificate storage paths, local
 HTTP-01 challenge serving, and the local renewal execution contract exist.
 Builds with `acme-client` can load or create issuer accounts and complete
-HTTP-01 or rustls TLS-ALPN-01 orders through `instant-acme`. By default, the
+HTTP-01 orders through `instant-acme`. The TLS-ALPN-01 client path exists but
+native challenge serving is incomplete. By default, the
 runtime registers a background renewal service for configured ACME vhosts when
 `acme-client` is compiled in. Set `tls.acme.automation = "external"` when a
 systemd timer, container scheduler, or another supervisor runs `acme-renew`.
@@ -3355,8 +3530,10 @@ fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew
 By default the command renews missing or due certificates only. `--force-renew`
 attempts every configured ACME vhost even when certificates are still valid;
 use it sparingly because repeated forced renewals can hit issuer rate limits.
-`--all` is accepted as a backward-compatible alias, but it prints a deprecation
-warning and should not be used in new automation.
+The legacy `fluxheim acme-renew --all` alias prints a deprecation warning;
+it is not a companion `fluxheim-acme renew` flag. The companion's explicit
+reload request uses a Unix socket; it is not available on Windows. The legacy
+command installs but does not request that reload socket.
 
 ```toml
 [tls.acme]
@@ -3378,19 +3555,19 @@ reload_after_renewal = true
 zero_downtime_reload = true
 ```
 
-Managed ACME supports `http-01` and, with the default rustls backend,
-`tls-alpn-01`. HTTP-01 is easiest to operate when port 80 is reachable.
-TLS-ALPN-01 is useful when port 443 is reachable and Fluxheim owns the TLS
-listener; it requires `server.tls_listen`, `tls.backend = "rustls"`, and an
+Managed ACME accepts `http-01` and `tls-alpn-01` configuration. Use HTTP-01
+with public port 80 reachable until native TLS-ALPN-01 serving is integrated.
+The latter validates with `server.tls_listen`, `tls.backend = "rustls"`, and an
 ACME-managed or static fallback certificate for the listener. DNS-01 remains
 future work because provider integrations need explicit secret handling and
 record-cleanup behavior.
 See [examples/acme-http-01.toml](../../examples/acme-http-01.toml) for a minimal
-HTTP-01 managed-certificate config. It can be used for first issuance with a
-public HTTP listener only, or with a rustls SNI HTTPS listener whose managed
-certificate is still pending. See
+HTTP-01 managed-certificate template. It has loopback HTTP and HTTPS listeners;
+adapt listen addresses/public port mapping and explicitly review CA terms
+before issuance. Missing managed certificates can remain pending. See
 [examples/acme-actalis.toml](../../examples/acme-actalis.toml) for the same flow
-with file-backed External Account Binding secrets.
+with systemd-credential-backed External Account Binding secrets; the operator
+guide also provides a container secret-file alternative.
 
 Built-in issuer names include `letsencrypt`, `letsencrypt-staging`,
 `actalis`, `google-trust-services`, and `google-trust-services-staging`.
@@ -3518,9 +3695,12 @@ Fluxheim generates temporary ACME challenge certificates below:
 <storage>/tls-alpn-01/<safe-domain-segment>/privkey.pem
 ```
 
-These certificates are served only for TLS handshakes that offer the
-`acme-tls/1` ALPN protocol. Normal browser and proxy traffic continues to use
-the configured static or ACME-managed vhost certificate selected by SNI.
+The intended serving contract selects these only for `acme-tls/1` and the
+matching SNI. **Current limitation:** the native listener does not currently attach
+that challenge store. A loopback test confirms it returns the ordinary fallback
+certificate, even when these files exist and after reload. Normal TLS and
+HTTP-01 support do not prove TLS-ALPN-01 issuance. See the
+[ACME guide](../guides/acme.md#challenge-selection) for the current limitation.
 
 ## Vhosts
 
@@ -3590,8 +3770,9 @@ aliases and 256 routes.
 `server.limits.max_request_body_bytes` for that host. Route-level
 `max_request_body_bytes` still wins when a matching route sets its own limit.
 
-`[vhosts.access]` and `[vhosts.routes.access]` provide the first `1.4` ACL
-surface. IP rules accept exact IP addresses or CIDR ranges. `deny` entries win
+See the [access-control guide](../guides/access-control.md) for complete options,
+recipes and real HTTP/TLS tests. `[vhosts.access]` and `[vhosts.routes.access]`
+accept exact IP addresses or CIDR ranges. `deny` entries win
 first. When `allow` is non-empty, the effective client IP must match at least
 one allow entry. The effective client IP is the direct peer address unless the
 direct peer matches `server.trusted_proxies`; only then does Fluxheim inspect
@@ -3603,8 +3784,18 @@ certificate, `deny_client_cert_sha256` rejects matching fingerprints, and
 is non-empty. Fingerprints are 64-character hex SHA-256 values and are matched
 case-insensitively. A vhost policy is evaluated before any matching route
 policy, so route ACLs can further restrict traffic but cannot bypass a
-vhost-level denial. With metrics enabled, ACL denials are counted by
-`fluxheim_edge_policy_events_total` with bounded labels.
+vhost-level denial. Separate routes do not inherit each other's ACLs: a more
+specific route or a method-filtered route's fallback needs its own protection.
+A deny-only certificate list does not require a certificate; require one or use
+a nonempty allowlist when missing identities must be rejected.
+
+**Current limitation:** mapped IPv6 CIDRs such as `::ffff:192.0.2.10/128`
+currently validate but do not match normalized IPv4 clients. Use ordinary IPv4
+CIDRs (`192.0.2.10/32`) for those clients until corrected. Native IPv6 CIDRs
+remain separate. Ordinary native ACL rejection calls the bounded operational
+security producer, but the legacy `fluxheim_edge_policy_events_total` helper
+has no production callers; its missing native decision wiring is tracked with
+the documented limitation in the local follow-up. Do not treat absent counter samples as proof of no denials.
 
 When Fluxheim is built with the optional `geoip` feature, `[geoip]` enables
 local MMDB Geo-Context lookup for access policy:
@@ -3639,13 +3830,16 @@ eight databases are accepted. Aggregate capacity is checked from the verified
 open descriptor before its contents are allocated, read, or parsed. The loader
 allocates exactly the admitted length, reads it completely, then probes for one
 extra byte separately so concurrent file growth cannot amplify the heap
-allocation. Paths must be absolute and symlink-free; the file and every parent
-directory must be owned by root, the effective service user, or the platform
-root-equivalent owner and must not be group- or world-writable. Fluxheim rejects
+allocation. Relative paths in configuration are resolved against the config
+base directory; runtime paths must be absolute and symlink-free. On Unix the
+file and every parent directory must be owned by root, the effective service
+user, or the platform root-equivalent owner and must not be group- or
+world-writable. Windows uses trusted owner/ACL checks. Fluxheim rejects
 shortened, grown, descriptor-identity-changed, or metadata-changed databases
 during loading. GeoIP update jobs should prepare and verify a replacement under
 a trusted directory, apply safe ownership and modes, then atomically rename it
-into place before reloading Fluxheim.
+into place before applying a changed configuration or restarting Fluxheim.
+Replacing bytes alone is not watched; prefer a versioned database path.
 
 Vhost and route access policies can then use:
 
@@ -3666,15 +3860,21 @@ a resolved match. See
 pattern.
 
 `[vhosts.rate_limit]` and `[vhosts.routes.rate_limit]` enable local token-bucket
-request limiting. The first implementation keys by the same trusted-proxy-aware
+request limiting. See [rate and concurrency limits](../guides/rate-and-concurrency-limits.md)
+for every default/bound, complete recipes, queues and qualification limits.
+The native implementation keys by the same trusted-proxy-aware
 client IP used for ACLs. `requests_per_second` sets the refill rate, `burst`
 sets the bucket capacity, and `status` controls the rejection status. `mode =
 "nodelay"` consumes burst capacity immediately and rejects once the bucket is
 empty. `mode = "delay"` reserves future tokens and sleeps the request up to
 `max_delay_ms`; if the backlog would exceed that bounded delay budget, Fluxheim
 rejects instead of queueing indefinitely. If `burst` is omitted or zero,
-Fluxheim uses `requests_per_second` as the burst. State is bounded by
-`table_max_entries` and stale entries are pruned after `entry_ttl_secs`. The
+Fluxheim uses `requests_per_second` as the burst. **Current limitation:** the current
+table allocates `ceil(table_max_entries / 16)` entries per shard, so the total
+can exceed the configured value by up to 15; setting 1 allows 16 identities.
+One full shard can reject new clients despite spare space in other shards.
+Stale entries become eligible for cleanup after `entry_ttl_secs`, not
+automatically removed or reset at that instant. The
 native HTTP/1 runtime shards the local rate-limit table and uses bounded
 incremental prune scans when a shard is full, so cleanup work does not sweep an
 entire table in one request. Very large `table_max_entries` values can still
@@ -3685,23 +3885,25 @@ effective client IP, the request uses one shared anonymous bucket for that
 vhost or route; do not rely on anonymous-IP rate limiting as the only
 protection for sensitive internal paths. Set `reject_indeterminate = true` to
 reject those requests instead of placing them in the shared bucket.
-With metrics enabled, delayed and rejected rate-limit decisions are counted by
-`fluxheim_edge_policy_events_total` with bounded labels.
+The legacy `fluxheim_edge_policy_events_total` currently has no native production
+producer for these decisions; shared the local follow-up covers this wiring gap.
 In delay mode, delayed native requests are intentionally counted against
 vhost/route concurrency limits while they sleep. This prevents unbounded delayed
 tasks from parking outside the configured concurrency budget; use a conservative
 `max_delay_ms` and `max_in_flight` together for public routes.
 
 `[vhosts.concurrency]` and `[vhosts.routes.concurrency]` cap active in-flight
-requests. They are local process limits, not distributed cluster limits.
+handler work. They are local process limits, not distributed cluster limits.
 `max_in_flight` sets the active request budget and `status` controls the
 rejection status when the budget is exhausted. `queue_timeout_ms = 0` rejects
 immediately. A positive `queue_timeout_ms` lets Fluxheim wait briefly for a
 permit before rejecting. `max_queue` caps waiting requests; `0` derives a
-bounded default from `max_in_flight`. Vhost permits are acquired before route
-permits and are released automatically when the request finishes.
-With metrics enabled, concurrency-limit rejections are counted by
-`fluxheim_edge_policy_events_total` with bounded labels.
+bounded default of `min(4 * max_in_flight, 1_000_000)`. Vhost permits are acquired
+before route permits. Normal handler permits end before downstream response
+writing, and takeover drops them before the origin handshake/tunnel
+. Do not rely on them for full connection/download lifetime or
+simultaneous WebSocket tunnel counts. Ordinary rejection emits a separate bounded
+operational security observation, not the missing scoped legacy policy counter.
 
 Vhosts can also contain ordered route tables. Routes may optionally set
 `methods = ["GET", "HEAD"]`; when present, the route only matches those
@@ -3710,11 +3912,15 @@ then the first configured regex route, then one optional fallback route. Regex
 routes require explicit global opt-in with
 `server.regex_enabled = true`; configs that use `path_regex` without that flag
 are rejected. Regex patterns use Rust's bounded `regex` engine and are checked
-at config load time. Regex routes expose bounded request-header template
-variables for migration patterns: `{route.regex.0}` is the full match,
-`{route.regex.1}` through `{route.regex.15}` are numbered captures, and
-`{route.regex.name}` reads a named capture such as `(?P<name>...)`. Capture
-values are capped before template rendering and are not used as metric labels.
+at config load time. See the [routing guide](../guides/routing.md) for tested
+examples and **Current limitation:**, the open capture-handling inconsistency.
+Rewrite lookup supports `{route.regex.0}` for the full match, numbered positions
+1 through 15 and named captures within those positions, each up to 256 bytes.
+Missing, optional-unmatched or oversized values currently disappear from a
+rewrite rather than rejecting it. Header capture collection omits `.0` and
+does not enforce those per-capture bounds before copying groups. Use required,
+explicitly bounded groups and verify the origin path; do not assume a universal
+capture bound. Captures are not operational metric labels.
 A route must define exactly one matcher: `path_exact`, `path_prefix`,
 `path_regex`, or `fallback = true`, and one action: `redirect`, `proxy`, `web`,
 or `php`. Regex routes may also set `rewrite_template` to build a new upstream
@@ -3743,7 +3949,7 @@ require_content_type = true
 
 [[vhosts.routes]]
 name = "versioned-api"
-path_regex = "^/api/v(?P<version>[0-9]+)/(?P<rest>.*)$"
+path_regex = "^/api/v(?P<version>[0-9]{1,3})/(?P<rest>[A-Za-z0-9_-]{1,64})$"
 rewrite_template = "/internal/v{route.regex.version}/{route.regex.rest}"
 
 [vhosts.routes.headers.request.add]
@@ -3954,10 +4160,11 @@ route owns its own proxy action.
 `[vhosts.routes.grpc]` is disabled by default and is valid only on proxy
 routes. When enabled, the route proxy must set `upstream_http_version = "http2"`
 or `"http1-and-http2"`, cache must remain disabled for that route, and
-`require_content_type` must stay `true`. This is a pass-through compatibility
-policy: Fluxheim preserves HTTP/2 proxying behavior and rejects obvious
-non-gRPC requests before forwarding, but it does not transcode gRPC-Web or JSON
-to gRPC.
+`require_content_type` must stay `true`. It rejects obvious non-gRPC requests,
+but is not a production-qualified general gRPC pass-through contract: response
+trailers are lost by the proxy adapter and bodies are buffered. See
+[gRPC configuration and corrections](../guides/grpc.md). It does not transcode
+gRPC-Web or JSON to gRPC.
 
 Managed PHP-FPM validates `php_fpm_binary` at config load and again immediately
 before each supervised spawn. The binary path must be absolute, must not contain
@@ -3974,13 +4181,13 @@ PHP routing, limits, FastCGI transport, and response policy remain snapshot-safe
 For PHP actions, `max_request_body_bytes` bounds the request sent to php-fpm
 and `max_response_bytes` bounds the FastCGI STDOUT/STDERR bytes accepted from
 php-fpm before Fluxheim rejects the response. `max_in_flight` caps concurrent
-PHP-FPM requests for that vhost or route before request body buffering and
-FastCGI dispatch; it defaults to `8` to bound the number of fully buffered PHP
-responses held at once. Set `php.request_body_spool_threshold_bytes` with
+PHP-FPM dispatches for that vhost or route, but only after HTTP body collection.
+It defaults to `8`; it does not cap all ingress or downstream response memory.
+Set `php.request_body_spool_threshold_bytes` with
 `php.request_body_spool_dir` to spill larger request bodies to an owner-safe
-temporary file before php-fpm dispatch. This keeps `CONTENT_LENGTH` exact for
-FastCGI and lets retries replay the same upload without cloning a large memory
-buffer; both spool settings must be configured together. On Unix, the securely
+temporary file before php-fpm dispatch. This supplies replay storage but leaves
+the original collected HTTP body allocated during dispatch.
+Both spool settings must be configured together. On Unix, the securely
 created spool entry is unlinked immediately and Fluxheim retains its open file
 descriptor for request and retry readers, preventing a crash from leaving a
 named plaintext upload behind. Overlapping readers use independent logical
@@ -4002,8 +4209,8 @@ filesystem roots while Fluxheim still checks scripts under `php.root`.
 layouts where the final `php.root` path is a symlink. The default is false.
 When enabled, Fluxheim resolves that final symlink at startup and still rejects
 parent-directory traversal, symlinked parent directories, and unsafe writable
-parents; script resolution and static offload continue to run under the
-canonical target root.
+parents; script resolution uses the canonical target root. Native PHP static
+offload is not integrated; see the documented limitation below.
 `php.max_response_header_bytes` caps the CGI-style response header block before
 body parsing and defaults to `64KiB`.
 `php.deny_path_prefixes` rejects PHP script execution for configured absolute
@@ -4046,20 +4253,19 @@ translated to CGI `HTTP_*` params. `php.server_port` can override CGI
 `Host` authority and otherwise falls back to `443` for TLS or `80` for
 cleartext. `php.pass_request_body` controls whether the
 HTTP request body is sent to php-fpm; when disabled, Fluxheim still drains and
-limits the downstream body but sends `CONTENT_LENGTH=0` and an empty FastCGI
-stdin.
-`php.stderr_log` controls whether FastCGI STDERR is written to Fluxheim logs.
-`php.stderr_log_level` controls the emitted log level and accepts `error`,
-`warn`, `info`, or `debug`; the default is `warn`.
-`php.stderr_max_bytes` bounds each logged STDERR message and defaults to `2KiB`;
-larger output is sanitized and marked as truncated.
+limits the downstream body and sends empty FastCGI stdin, but currently retains
+the original CONTENT_LENGTH. Keep body forwarding enabled for
+normal applications until corrected.
+`php.stderr_log`, `php.stderr_log_level` and `php.stderr_max_bytes` are accepted
+but not wired into native STDERR logging. The accepted level values
+are `error`, `warn`, `info`, `debug` (default warn); the accepted log cap defaults
+to 2 KiB. These settings do not prove that a diagnostic was emitted.
 `php.stderr_failure_patterns` is a default-empty list of literal ASCII-safe
 substrings. If any configured pattern appears in FastCGI STDERR, Fluxheim treats
 the PHP response as invalid. With `php.fpm.retry_invalid_response = true`, this
 can fail over safe methods to another php-fpm upstream for fatal PHP runtime
-failures such as `PHP Fatal error:`. Matching STDERR is still sanitized,
-bounded by `php.stderr_max_bytes`, and logged when `php.stderr_log` is enabled
-before Fluxheim rejects the response. Up to 32 patterns are allowed, each 1 to
+failures such as `PHP Fatal error:`. Pattern rejection works independently of
+the missing native logging path. Up to 32 patterns are allowed, each 1 to
 512 bytes without ASCII control characters.
 `php.hide_response_headers` removes selected headers emitted by php-fpm before
 Fluxheim applies the normal response header policy. This is useful for
@@ -4069,20 +4275,12 @@ The list is case-insensitively deduplicated and capped at 64 header names.
 `Expires`, and `Pragma` response headers after Fluxheim has consumed internal PHP
 control headers. It defaults to `false`; use response header policy to set
 replacement cache directives when needed.
-Fluxheim consumes PHP `X-Accel-Redirect` and `X-Sendfile` headers for
-PHP-assisted static offload instead of forwarding them to clients.
-`X-Accel-Redirect` targets are internal URI paths resolved under `php.root`;
-`X-Sendfile` targets are absolute filesystem paths resolved under `php.root`,
-and are mapped from `php.fpm_root` for split-container layouts. Fluxheim refuses
-to offload files with configured PHP script extensions.
-Fluxheim also consumes PHP `X-Accel-Expires` control headers instead of
-forwarding them to clients. Positive TTLs become normal `Cache-Control` and
-`Expires` headers; responses with `Set-Cookie` use `private` cache directives,
-and zero or past expiries become `no-store, private`. When the PHP response
-already carries restrictive origin cache policy such as `Cache-Control:
-private`, `no-store`, `no-cache`, or `Pragma: no-cache`, Fluxheim strips only
-the internal `X-Accel-Expires` header and preserves the origin cache policy
-instead of promoting the response to shared-cache eligibility.
+The native adapter strips `X-Accel-Redirect`, `X-Sendfile` and `X-Accel-Expires`
+without performing offload or translating expiry. Earlier
+offload/TTL claims described helper capabilities, not the wired native handler.
+Do not rely on them for download delivery or response privacy. Similarly,
+`cache.preset = "wordpress"` does not enable native FastCGI response caching
+. See [PHP deployment and current gaps](../guides/php.md).
 Fluxheim always strips hop-by-hop php-fpm response headers such as
 `Connection`, `Transfer-Encoding`, and headers named by `Connection` before it
 frames the client response.
@@ -4104,9 +4302,9 @@ canonical `308` redirect before executing the script, for example `/blog` to
 `/blog/` when `/blog/index.php` exists.
 `max_response_bytes` defaults to `64MiB`; set a smaller value on
 memory-constrained or high-assurance edge nodes. Because PHP responses are
-currently buffered, the configured value is capped at `64MiB`. Use
-`X-Accel-Redirect` or `X-Sendfile` for large files so Fluxheim can serve the
-static asset path instead of buffering PHP output.
+currently buffered, the configured value is capped at `64MiB`. Serve large
+public files from explicit static routes. Do not rely on X-Accel-Redirect or
+X-Sendfile until the native offload gap is resolved.
 `php.fpm.keepalive` enables
 FastCGI keep-connection reuse with an idle pool capped by
 `php.fpm.pool_max_idle`; it is off by default for conservative compatibility.
@@ -4126,8 +4324,9 @@ discarded before reuse. `pool_max_idle` must be between 1 and 1024 when
 keepalive is enabled. `php.fpm.max_retries` defaults to `0`; when set,
 Fluxheim retries only connection failures and connect timeouts for configured
 `php.fpm.retry_methods` before php-fpm has returned a response.
-`php.fpm.retry_timeout_secs` optionally caps the total retry window for one PHP
-request. With
+`php.fpm.retry_timeout_secs` limits when another attempt may start, but does not
+interrupt an already running attempt. Connect and exchange budgets also restart
+per attempt; there is no single PHP end-to-end deadline. With
 `tcp_upstreams`, Fluxheim tries enough endpoints to cover the configured list
 for safe methods even when `max_retries = 0`. Request timeouts are not retried
 to avoid duplicating side effects. `php.fpm.retry_invalid_response` and
@@ -4136,7 +4335,9 @@ FastCGI responses and selected PHP 5xx responses. They default to disabled;
 configure them only for idempotent request methods where replaying the PHP
 request is acceptable. `php.fpm.retry_methods` is capped at 16 uppercase safe-method
 tokens and only accepts `GET`, `HEAD`, `OPTIONS`, and `TRACE`; `php.fpm.retry_statuses` is capped at the valid 500-599 server-error
-status range.
+status range. See [PHP runtime operations](../guides/php-runtime-support.md)
+and the [full option reference](php-options.md) for current boundaries, including
+the fixed `.php` managed-pool extension policy.
 `[vhosts.php.params]` or `[vhosts.routes.php.params]`
 adds administrator-controlled FastCGI parameters such as `APP_ENV` or
 `APP_MEMORY_LIMIT`; Fluxheim rejects unsafe names, control-character values, and
@@ -4184,13 +4385,14 @@ Build:
 cargo build --no-default-features --features profile-privacy
 ```
 
-Use `examples/privacy.toml` as the baseline config. It disables access logging,
-request IDs, metrics, cache, and client-IP forwarding headers.
-
-Invalid privacy combinations are rejected by release checks:
-
-- `privacy-mode` with `cache`
-- `privacy-mode` with `metrics`
+Use [the local privacy example](../../examples/privacy/local.toml), or
+`examples/privacy.toml` for the existing container layout. These explicitly
+disable access logging, request-ID generation, metrics, cache and forwarding
+synthesis. There is no `[privacy]` runtime table. Application headers and content
+are not generally anonymized; operational/admin output and external retention
+remain possible. See [privacy and data handling](../guides/zero-retention-privacy-mode.md)
+for the full compile-time exclusions, tested behavior and the current missing
+metrics-feature validation gap.
 
 ## Feature Preflight
 
@@ -4200,5 +4402,6 @@ Before packaging a custom feature set, validate it:
 scripts/validate-features.sh proxy,web,tls-rustls
 ```
 
-This catches unsupported combinations before Cargo starts compiling Fluxheim.
+This catches some unsupported combinations before Cargo starts compiling Fluxheim;
+it is not complete for nested TLS/privacy feature graphs.
 See [Feature Matrix](features.md) for the complete feature/profile list.

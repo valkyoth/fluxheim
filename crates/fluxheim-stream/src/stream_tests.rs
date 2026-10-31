@@ -218,6 +218,36 @@ fn stream_dns_rebind_guard_rejects_private_resolved_addresses() {
     ));
 }
 
+#[test]
+fn mapped_stream_source_does_not_match_ipv4_deny_characterization() {
+    // documented contract: retain the known gap until the shared correction is made.
+    let route = StreamRouteConfig {
+        name: "mapped".into(),
+        listen: vec!["127.0.0.1:18080".into()],
+        upstream: Some("127.0.0.1:19001".into()),
+        deny_sources: vec!["192.0.2.0/24".into()],
+        ..Default::default()
+    };
+    route.validate().unwrap();
+    let policy = StreamSourcePolicy::from_route(&route).unwrap();
+    assert!(!policy.source_allowed(Some("192.0.2.1:5000".parse().unwrap())));
+    assert!(policy.source_allowed(Some("[::ffff:192.0.2.1]:5000".parse().unwrap())));
+}
+
+#[test]
+fn padded_stream_matcher_validates_but_fails_runtime_construction() {
+    // Include validation/parser agreement in documented contract's shared correction.
+    let route = StreamRouteConfig {
+        name: "padded".into(),
+        listen: vec!["127.0.0.1:18080".into()],
+        upstream: Some("127.0.0.1:19001".into()),
+        allow_sources: vec![" 127.0.0.1/32 ".into()],
+        ..Default::default()
+    };
+    route.validate().unwrap();
+    assert!(StreamSourcePolicy::from_route(&route).is_err());
+}
+
 #[tokio::test(start_paused = true)]
 async fn stream_downstream_proxy_protocol_v1_has_one_absolute_header_deadline() {
     assert_proxy_header_drip_times_out(DownstreamProxyProtocol::V1, b"PROX").await;

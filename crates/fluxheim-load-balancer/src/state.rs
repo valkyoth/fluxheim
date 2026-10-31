@@ -402,7 +402,14 @@ impl BackendConnectionCounters {
 
 #[derive(Default)]
 pub(super) struct BackendLatencyState {
-    latency_micros: Mutex<std::collections::HashMap<u64, u64>>,
+    latency_micros: Mutex<std::collections::HashMap<u64, BackendLatencySample>>,
+}
+
+const LATENCY_RESAMPLE_AFTER: Duration = Duration::from_secs(30);
+
+struct BackendLatencySample {
+    micros: u64,
+    observed_at: Instant,
 }
 
 impl BackendLatencyState {
@@ -415,17 +422,26 @@ impl BackendLatencyState {
         latency_micros
             .entry(key)
             .and_modify(|stored| {
-                *stored = stored
-                    .saturating_mul(3)
-                    .saturating_add(sample)
-                    .saturating_add(2)
-                    / 4;
+                stored.micros = if stored.observed_at.elapsed() >= LATENCY_RESAMPLE_AFTER {
+                    sample
+                } else {
+                    ((u128::from(stored.micros) * 3 + u128::from(sample) + 2) / 4) as u64
+                };
+                stored.observed_at = Instant::now();
             })
-            .or_insert(sample);
+            .or_insert_with(|| BackendLatencySample {
+                micros: sample,
+                observed_at: Instant::now(),
+            });
     }
 
     pub(super) fn score(&self, backend: &impl BackendIdentity) -> Option<u64> {
-        self.score_key(backend_key(backend))
+        self.latency_micros
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&backend_key(backend))
+            .filter(|sample| sample.observed_at.elapsed() < LATENCY_RESAMPLE_AFTER)
+            .map(|sample| sample.micros)
     }
 
     pub(super) fn score_key(&self, key: u64) -> Option<u64> {
@@ -433,7 +449,7 @@ impl BackendLatencyState {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(&key)
-            .copied()
+            .map(|sample| sample.micros)
     }
 
     pub(super) fn prune_stale(&self, live_keys: &std::collections::HashSet<u64>) {
@@ -445,29 +461,5 @@ impl BackendLatencyState {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::backend::FluxBackend;
-
-    #[test]
-    fn slow_start_zero_duration_permits_without_division() {
-        let backend = FluxBackend::new("127.0.0.1:3000").unwrap();
-        let state = SlowStartState::from_config(&LoadBalanceSlowStartConfig {
-            enabled: true,
-            duration_secs: 0,
-        });
-
-        assert!(state.permits(&backend));
-        assert!(state.permits_read_only(&backend));
-    }
-
-    #[test]
-    fn latency_ewma_rounds_instead_of_sticking_on_fractional_update() {
-        let state = BackendLatencyState::default();
-
-        state.record_latency(1, Duration::from_micros(1000));
-        state.record_latency(1, Duration::from_micros(1003));
-
-        assert_eq!(state.score_key(1), Some(1001));
-    }
-}
+#[path = "state_tests.rs"]
+mod tests;

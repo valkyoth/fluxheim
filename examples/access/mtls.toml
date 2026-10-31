@@ -1,0 +1,38 @@
+# Supply real server/CA files and replace the placeholder fingerprint.
+# Optional TLS authentication allows HTTP-level 403 for clients without a cert;
+# the vhost policy below still requires and pins a verified certificate.
+[server]
+listen = []
+tls_listen = ["127.0.0.1:8443"]
+default_vhost = "site"
+[server.process]
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+[tls]
+enabled = true
+backend = "rustls"
+profile = "intermediate"
+alpn = "http1-and-http2"
+[[tls.certificates]]
+cert_path = "server.pem"
+key_path = "server-key.pem"
+[tls.client_auth]
+mode = "optional"
+ca_path = "client-ca.pem"
+[cache]
+enabled = false
+[[vhosts]]
+name = "site"
+hosts = ["site.example.test"]
+[vhosts.tls]
+enabled = true
+[vhosts.tls.certificate]
+cert_path = "server.pem"
+key_path = "server-key.pem"
+[vhosts.access]
+require_client_cert = true
+allow_client_cert_sha256 = ["0000000000000000000000000000000000000000000000000000000000000000"]
+[vhosts.web]
+root = "site"
+index_files = ["index.html"]

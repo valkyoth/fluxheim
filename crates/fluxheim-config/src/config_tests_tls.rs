@@ -2,6 +2,8 @@
 mod acme;
 #[path = "config_tests_tls_certificates.rs"]
 mod certificates;
+#[path = "config_tests_tls_examples.rs"]
+mod examples;
 #[path = "config_tests_tls_fips.rs"]
 mod fips;
 #[path = "config_tests_tls_policy.rs"]

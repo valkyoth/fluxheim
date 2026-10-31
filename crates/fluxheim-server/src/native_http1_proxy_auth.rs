@@ -6,6 +6,9 @@ use sanitization::SecretString;
 use crate::NativeHttp1Request;
 
 const MAX_GLOBAL_AUTH_REQUESTS_IN_FLIGHT: usize = 256;
+#[cfg(test)]
+#[path = "native_auth_contract_tests.rs"]
+mod contract_tests;
 static GLOBAL_AUTH_REQUESTS_IN_FLIGHT: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
 
 #[derive(Clone, Debug)]

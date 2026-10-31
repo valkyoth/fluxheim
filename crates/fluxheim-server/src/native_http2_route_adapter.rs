@@ -150,6 +150,10 @@ fn native_http1_response_to_http2(response: NativeHttp1Response) -> NativeHttp2R
 }
 
 #[cfg(test)]
+#[path = "native_grpc_contract_tests.rs"]
+mod grpc_contract_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

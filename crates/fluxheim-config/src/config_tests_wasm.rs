@@ -1,6 +1,10 @@
 use super::{Config, ConfigError};
 
 #[cfg(feature = "wasm")]
+#[path = "config_tests_wasm_contract.rs"]
+mod contract;
+
+#[cfg(feature = "wasm")]
 fn base_wasm_config(extra: &str) -> Config {
     toml::from_str(&format!(
         r#"

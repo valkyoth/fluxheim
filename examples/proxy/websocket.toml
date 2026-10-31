@@ -1,0 +1,27 @@
+# Local compatibility demonstration only; do not rely on auth_request for upgrades.
+[server]
+listen = ["127.0.0.1:8080"]
+trusted_proxies = []
+[server.host_routing]
+strict = true
+[server.process]
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+[cache]
+enabled = false
+[[vhosts]]
+name = "app"
+hosts = ["app.example.test"]
+[[vhosts.routes]]
+name = "socket"
+path_prefix = "/socket/"
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+upstream_http_version = "http1"
+websocket = true
+connect_timeout_secs = 2
+send_timeout_secs = 2
+# Currently an absolute tunnel lifetime, not an inactivity timer.
+read_timeout_secs = 30

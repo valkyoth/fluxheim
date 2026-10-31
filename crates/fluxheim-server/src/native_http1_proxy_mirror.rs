@@ -8,6 +8,9 @@ use sanitization::ct::ConstantTimeEq;
 use crate::NativeHttp1Request;
 
 const NATIVE_TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS: usize = 4096;
+#[cfg(test)]
+#[path = "native_mirror_contract_tests.rs"]
+mod contract_tests;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct NativeTrafficMirror {

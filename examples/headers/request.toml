@@ -1,0 +1,49 @@
+# Direct-client loopback demonstration. Do not trust arbitrary proxy networks.
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "api"
+trusted_proxies = []
+regex_enabled = true
+[server.process]
+daemon = false
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+[cache]
+enabled = false
+
+[headers.request]
+enabled = true
+strip_inbound_client_ip_headers = true
+x_forwarded_for = "replace"
+x_real_ip = true
+x_forwarded_host = true
+x_forwarded_proto = true
+forwarded = true
+remove = ["x-internal-user"]
+[headers.request.add]
+x-public-host = "{host}"
+x-request-target = "{uri}"
+x-request-path = "{path}"
+x-request-query = "{query}"
+x-client-address = "{remote_addr}"
+x-downstream-scheme = "{scheme}"
+x-diagnostic-id = "{request_id}"
+[headers.request.append]
+x-edge-note = ["first", "second"]
+
+[[vhosts]]
+name = "api"
+hosts = ["api.example.test"]
+[vhosts.proxy]
+upstreams = ["127.0.0.1:9001"]
+
+[[vhosts.routes]]
+name = "item"
+path_regex = '^/items/(?P<id>[A-Za-z0-9_-]{1,64})$'
+rewrite_template = "/internal/{route.regex.id}"
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+[vhosts.routes.headers.request.add]
+x-item-id = "{route.regex.id}"

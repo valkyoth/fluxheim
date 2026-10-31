@@ -1,16 +1,24 @@
 # 1.9.0 Observability Commit Plan
 
-Status: Commits 01-11, 07A and 10A accepted for progression; Commit 12 implemented,
-2026-10-29. The owner approved a compatible dependency refresh in this checkpoint,
-requiring new native qualification rather than reuse of previous runtime archives.
+Status (2026-10-30): Commits 01-12, 07A and 10A accepted for progression;
+Commit 13 documentation audit in progress. Owner-approved runtime corrections
+follow the documentation chain. Their detailed queue and acceptance evidence are
+kept locally until remediation and disclosure review are complete.
 Candidate checks and approved generic-RPM qualification are recorded in
-[Commit 12 evidence](../evidence/observability-12.md); pentest, final-checkpoint CI
+[Commit 12 evidence](../evidence/observability-12.md); final release qualification
 and owner acceptance remain pending. CPU-native RPM compilation is blocked by
 the documented compiler crash, and cross-platform performance measurement
 limits remain explicit.
 Main stays at **1.9.0
 (unreleased)**. This document replaces the earlier ten-checkpoint outline;
 no previously accepted implementation checkpoint is being renumbered.
+
+Owner-approved sequencing exception (2026-10-30): continue the documentation
+phase and its requested early Wasm corrections with local regression testing.
+Defer pentest until the full documentation phase is finished, rather than
+stopping for it between these corrections. This overrides the per-correction
+pentest stop instructions below for this phase only; it does not waive final
+pentest, green GitHub, native qualification or release acceptance.
 
 ## Release Outcome And Scope
 
@@ -49,6 +57,8 @@ to implement the full API now.
 - No new protocol features hidden inside an observability checkpoint.
   Preserve HTTP/1.1, HTTP/2, WebSocket, stream/UDP, cache, TLS, ACME, PHP,
   load-balancer and Wasm behavior. Windows PHP remains external TCP FastCGI.
+  The explicit post-documentation correction chain repairs existing advertised
+  contracts; it does not authorize unrelated feature expansion.
 
 ## Starting Point And Maintenance Reconciliation
 
@@ -718,6 +728,7 @@ Release gate:
 - Record immutable candidate, toolchain, artifact checksums, source/tag trust,
   default-binary reproducibility scope and explicit release authorization.
 - Do not authorize publication here: Commit 13 is required before release.
+  Its post-documentation correction chain and final release gate are also required.
   Source changes after qualification
   require affected tests again; documentation-only changes must prove identical
   runtime inputs and obtain their own CI result.
@@ -730,6 +741,15 @@ Operator value: a customer can understand, configure, operate and troubleshoot
 every supported Fluxheim capability without reading Rust or guessing settings.
 This is a whole-product documentation checkpoint, not only an observability
 guide or a cosmetic website update. It is required before publishing 1.9.0.
+
+Owner scope update: work only in this repository. The fluxheim.eu website is
+deferred to a separate follow-up; it is not an exit condition for this
+checkpoint. Repository guides are the canonical source for that later work.
+Track the feature-by-feature audit in the
+[documentation coverage ledger](../reference/documentation-coverage.md).
+Owner sequencing update: finish this documentation chain first, then implement
+the separately reviewed corrections tracked locally. Discovering a flaw during the
+audit adds work to that chain; it does not silently expand a documentation patch.
 
 ### Work Feature By Feature
 
@@ -788,7 +808,7 @@ verification, weakening filesystem trust or exposing FastCGI/admin publicly
 just to make a tutorial pass. Destructive examples must be clearly labelled
 and tested only with disposable resources.
 
-### Examples And Website Proof
+### Examples And Repository Proof
 
 - Keep executable configurations in repository examples/fixtures and reference
   them from the guides. Validate every complete example with the matching
@@ -800,38 +820,100 @@ and tested only with disposable resources.
   add missing coverage. Record exact commands, candidate SHA and results in the
   matrix. Platform-specific instructions require native platform evidence;
   missing environments are a gap, not a pass.
-- Identify the fluxheim.eu source repository and publishing workflow. Use the
-  repository guides as the canonical content source with a reproducible site
-  import/build, avoiding manually maintained divergent copies. Provide a clear
-  getting-started path, feature navigation, search and cross-links between
-  guides, reference, examples and troubleshooting.
+- Provide a clear repository getting-started path and feature navigation from
+  the README, guides, reference, examples and troubleshooting. Replace the
+  README's historical version narrative with grouped implemented-feature tables
+  and documentation links; retain real platform/profile restrictions.
 - Separate released documentation from unreleased main and show applicability
   and platform/profile restrictions. Keep routine instructions version-neutral
   where possible; do not hide real compatibility differences. Preserve old
   public URLs with redirects where supported and check internal links/anchors.
-- Preview the actual site on desktop and mobile: check readable code blocks,
-  navigation/search, example links and representative end-to-end operator
-  journeys. Arrange access/approval for the website repository and deployment;
-  record its revision and deployment evidence. A local Markdown edit alone
-  does not complete the fluxheim.eu deliverable. Do not advertise 1.9 as released
-  before release authorization.
+- Check repository Markdown links, readable examples and representative
+  operator journeys. Do not change the website or claim site deployment
+  evidence in this checkpoint. Its later import, navigation/search and
+  desktop/mobile verification remain separate work. Do not advertise 1.9 as
+  released before release authorization.
 
-Exit and final release gate:
+Documentation exit gate (not release authorization):
 - Every supported capability/option has reviewed code-to-guide-to-example/test
   coverage. No unexplained omissions, untested copy-ready recipes or misleading
   claims. Have an operator follow representative recipes without source-code
   assistance, and resolve the confusing steps they encounter.
-- Run documentation/example/site checks and the normal incremental pentest,
+- Run documentation/example checks and the normal incremental pentest,
   retest and exact-SHA green GitHub/CodeQL cycle. Track progress per feature;
   this large checkpoint may have reviewable documentation/remediation commits.
+- Obtain explicit user acceptance of the documentation batch and recorded
+  findings before progressing to corrections. Guides must describe current
+  limitations until their fixes pass, rather than describing planned behavior
+  as already implemented. Accepted evidence gaps remain tracked for final
+  qualification; documentation acceptance cannot waive a runtime release blocker.
+
+### Documentation Findings And Follow-Up Rules
+
+- Record every confirmed flaw or missing existing contract in the local review
+  ledger with a stable finding ID, source locations, reproduction, impact,
+  affected profiles/platforms, intended behavior and acceptance tests. Distinguish
+  a runtime defect from a documentation error, missing test evidence or a genuinely
+  new feature idea. Deduplicate findings with the same root cause.
+- Fix wording/examples in the relevant documentation batch. Give runtime fixes
+  explicit post-documentation commits; retain existing numbers in the local queue
+  and assign the next unused number for further independently reviewable corrections. Related findings
+  may share a commit only when their implementation and verification are cohesive.
+- Keep the acceptance ledger and coverage finding table synchronized. Every
+  finding must be fixed and verified, or have explicit owner-approved deferral
+  with an honest documented limitation and release-risk decision. Merely writing
+  down a defect is not remediation. Pending corrections remain release work;
+  locally implemented corrections still require their acceptance gates.
+- Do not automatically turn missing speculative features into 1.9.0 scope. Ask
+  for a scope decision where correcting an advertised contract would require a
+  new subsystem or incompatible product change. Surface an urgent exploitable
+  security defect immediately instead of silently waiting for the entire audit.
+- Each correction starts with a reproducer and changes any characterization test
+  to assert the corrected contract. Keep regression tests for earlier pentest
+  findings; do not weaken them to make CI green. Update guides, examples and the
+  finding disposition in the same correction.
+- For each commit, run focused and affected broader suites, strict Clippy,
+  formatting and docs/example checks. Prove behavior with actual Fluxheim and
+  faulting origins, not mocks alone: Linux native and Podman plus native Windows
+  and macOS for affected runtime paths. Record ARM64 qualification where affected.
+  An unavailable machine is pending evidence, not a skipped-success substitute.
+- Stop after each correction for the user's incremental pentest/retest, exact-SHA
+  green GitHub CI/CodeQL, and explicit approval before starting the next commit.
+  Record the previous accepted SHA and new tip as the pentest range. Repeat
+  affected verification after any remediation, including CI-only follow-ups.
+
+## Post-Documentation Corrections
+
+The numbered correction queue, source-level findings and reproduction evidence
+are maintained locally during remediation. This public outline deliberately does
+not enumerate unresolved defects. Their absence here does not mean they are fixed,
+accepted risks or out of scope. Existing checkpoint numbers are reserved.
+
+Publish correction details and regression tests only after the associated fixes
+are verified and disclosure timing is approved. Review guide drafts, examples,
+tests, commit messages and CI artifacts together before publishing; moving the
+queue alone does not sanitize the rest of the worktree.
+
+## Final Release Gate
+
+This gate follows Commit 13 and every approved correction in the local review
+queue. Finishing documentation alone does not authorize a
+release. No finding may disappear from the ledger merely because it was deferred.
+
+- Reconcile all finding dispositions and finish missing documentation/example
+  evidence. Update README claims only after implementation is verified; retain
+  explicit platform/profile restrictions and owner-approved limitations.
 - Reconcile Commit 12 qualification with the final candidate. Any runtime,
-  dependency, packaging or build-input change requires affected gates again;
-  documentation-only changes require evidence of unchanged runtime inputs and
-  fresh CI, not relabelled old binaries as final-candidate tests.
-- Obtain explicit user acceptance of documentation, website and final release
-  evidence. Only then authorize signing/tagging/building/publishing 1.9.0 through
-  the existing release workflow. Do not begin a new feature project here to
-  conceal a documentation-discovered limitation.
+  dependency, packaging or build-input change requires affected gates again,
+  including fresh native archives and smokes for Linux x86_64/ARM64, macOS Apple
+  Silicon and Windows x86_64. Do not relabel earlier binaries as final evidence.
+- Run the full release checks, cumulative regression/security review and
+  exact-SHA green GitHub CI/CodeQL. Retain the existing generic-RPM exception
+  only with its documented owner acceptance; do not imply CPU-native RPM passed.
+- Obtain explicit user acceptance of repository documentation, finding
+  dispositions and final release evidence. Only then authorize signing/tagging/
+  building/publishing 1.9.0 through the existing release workflow. The website,
+  management API/UI, HTTP/3 and unrelated feature projects remain out of scope.
 
 ## Command Baseline
 
@@ -875,10 +957,8 @@ collector behavior is not the new required-collector acceptance contract.
 | 10 - Live containers/collectors | Accepted for progression | Owner reported clean pentest, green GitHub and resolved scanning alerts through `76c938bc`, then authorized 10A. [Collector integration guide](../guides/collector-integrations.md), importable dashboards and [qualification evidence](../evidence/observability-10.md). |
 | 10A - ACME validation scope / server feature parity | Accepted for progression | Owner reported clean pentest and green GitHub through `4b4864c0`, then authorized Commit 11. [Evidence](../evidence/observability-10a.md). |
 | 11 - Native archives | Accepted for progression | Owner supplied clean pentest through `390cfc9c`, reported GitHub green and authorized 12. All nine scanning alerts were resolved. [Evidence and scope](../evidence/observability-11.md). |
-| 12 - Observability docs / candidate qualification | Implemented; acceptance pending | [Evidence](../evidence/observability-12.md): operator docs, examples/alerts, metadata, handoff, refreshed runtime `babbe3e7`, 28 native profile checks and deep gate plus separately qualified generic RPM. Owner approved generic RPM instead of the reproducibly failing CPU-native optimization. Final pentest, exact-checkpoint CI and measurement-limit review pending. |
-| 13 - Documentation / final release acceptance | Not started | Pending |
-
-Commit 11 is accepted for progression. Commit 12 is the current checkpoint.
-Stop for pentest, green GitHub checks and explicit approval before proceeding
-to Commit 13. No release tag or publication is authorized by Commit 12.
-No licensing purchase or changes to another project's VM are authorized.
+| 12 - Observability docs / candidate qualification | Accepted for progression | Owner supplied clean pentest for `390cfc9c..5b2ae83b`, reported GitHub green and authorized 13. [Evidence](../evidence/observability-12.md) retains the generic-RPM exception, measurement limits and requirement to requalify native archives after the PHP metrics runtime fix. Acceptance for progression is not final release qualification. |
+| 13 - Documentation | Locally complete; review pending | Product inventory, guide/reference sweep, README feature navigation and executable examples reconciled. [Coverage ledger](../reference/documentation-coverage.md#reconciliation-and-exit-checklist) separates documentation from remaining corrections and release qualification. Website deferred. |
+| 14 - Native retry policy | Locally qualified; review pending | Linux, Windows, macOS and container policy checks passed. [Evidence and remaining platform gates](../evidence/observability-13-15.md). |
+| 15 - Native latency policy | Locally qualified; review pending | Header-wait measurement, weighted selection/resampling and passive thresholds verified. [Evidence and remaining platform gates](../evidence/observability-13-15.md). |
+| Post-documentation corrections | Pending | Detailed numbering and evidence retained locally; no release acceptance claimed. |

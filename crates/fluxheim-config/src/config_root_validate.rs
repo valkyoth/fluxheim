@@ -253,6 +253,7 @@ impl Config {
             &self.wasm.attachments,
             "wasm.attachments",
             &plugins,
+            self.wasm.default_admission,
         )?;
         for attachment in &self.wasm.attachments {
             let Some(vhost) = self
@@ -275,6 +276,13 @@ impl Config {
                     reason: "attachment references an unknown route",
                 });
             }
+            let plugin = plugins.get(attachment.plugin.as_str()).ok_or_else(|| {
+                ConfigError::UnknownWasmPlugin {
+                    scope: "wasm.attachments".to_owned(),
+                    plugin: attachment.plugin.clone(),
+                }
+            })?;
+            attachment.validate_upgrade_policy(vhost, plugin)?;
         }
         Ok(())
     }

@@ -1,0 +1,15 @@
+# Same-host/same-network-namespace example. Provision both referenced files.
+# This is not the disposable integration harness's two-job configuration.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 30s
+rule_files:
+  - /etc/prometheus/fluxheim-alerts.yml
+scrape_configs:
+  - job_name: fluxheim
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/fluxheim-metrics-token
+    static_configs:
+      - targets: ['127.0.0.1:9091']

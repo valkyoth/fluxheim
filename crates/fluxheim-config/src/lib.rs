@@ -77,6 +77,8 @@ pub mod config_server;
 mod config_server_defaults;
 pub mod config_stream;
 mod config_stream_defaults;
+#[cfg(all(test, feature = "stream-proxy"))]
+mod config_stream_example_tests;
 pub mod config_stream_slots;
 #[cfg(all(test, feature = "stream-proxy"))]
 mod config_stream_tests;
@@ -84,6 +86,8 @@ pub mod config_stream_tls;
 pub mod config_tls;
 pub mod config_types;
 pub mod config_udp;
+#[cfg(test)]
+mod config_udp_example_tests;
 #[cfg(test)]
 mod config_udp_tests;
 pub mod config_vhost;

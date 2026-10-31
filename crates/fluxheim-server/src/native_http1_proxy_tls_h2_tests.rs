@@ -6,6 +6,9 @@ use tokio_rustls::TlsAcceptor;
 use crate::native_http1_proxy_tls_tests::{downstream_get, native_tls_fixture, proxy_with_native};
 use crate::{DownstreamHttp1Policy, NativeHttp1Proxy};
 
+#[path = "native_proxy_transport_contract_tests.rs"]
+mod transport_contract_tests;
+
 async fn tls_h2_upstream(chain_pem: String, key_pem: String) -> std::net::SocketAddr {
     use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 

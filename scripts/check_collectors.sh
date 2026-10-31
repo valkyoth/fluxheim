@@ -9,6 +9,12 @@ prometheus=$(python3 -c 'import json; print(json.load(open("examples/observabili
 "$runtime" run --rm --network none --entrypoint /bin/promtool \
     --volume "$PWD/examples/observability:/proof:ro,Z" --workdir /proof \
     "$prometheus" test rules alerts-test.yml
+"$runtime" run --rm --network none --entrypoint /bin/promtool \
+    --volume "$PWD/examples/observability:/proof:ro,Z" --workdir /proof \
+    "$prometheus" test rules alerts-contract-test.yml
+"$runtime" run --rm --network none --entrypoint /bin/promtool \
+    --volume "$PWD/examples/observability:/proof:ro,Z" --workdir /proof \
+    "$prometheus" check config --syntax-only prometheus.yml
 tmp=$(mktemp -d)
 trap 'rm -rf -- "$tmp"' EXIT
 trap 'exit 130' INT

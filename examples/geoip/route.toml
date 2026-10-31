@@ -1,0 +1,15 @@
+# Append this route to local.toml. The vhost policy still applies first.
+[[vhosts.routes]]
+name = "restricted"
+path_prefix = "/restricted/"
+
+[vhosts.routes.web]
+root = "site"
+index_files = ["index.html"]
+
+[vhosts.routes.access]
+enabled = true
+allow_countries = ["US"]
+allow_asns = []
+deny_countries = []
+deny_asns = [13335]

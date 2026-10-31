@@ -178,7 +178,9 @@ assume the new observer's 16 KiB/50 ms bounds apply to them.
 
 For existing mutations and their authorization/recovery behavior see
 [snapshots and admin API](config-snapshots.md), [cache](cache-backends.md) and
-[load balancing](load-balancer-migration.md). This checkpoint adds no mutations or roles.
+[load balancing](load-balancer-migration.md). For the complete operation inventory,
+transport and role boundaries, see the [admin guide](admin.md). The observer
+credential is not a general read-only admin role.
 
 ## Verify
 

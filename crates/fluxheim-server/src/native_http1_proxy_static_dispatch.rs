@@ -251,7 +251,7 @@ impl NativeHttp1Proxy {
                 NativePeerFillDecision::Hit(response) => {
                     return self.finish_response(
                         &request,
-                        response,
+                        *response,
                         Some((&cache.config, "PEER-HIT", None, None)),
                         #[cfg(any(
                             feature = "compression-brotli",

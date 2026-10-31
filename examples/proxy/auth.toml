@@ -1,0 +1,35 @@
+# Local demonstration; the auth service must validate real credentials itself.
+[server]
+listen = ["127.0.0.1:8080"]
+trusted_proxies = []
+[server.host_routing]
+strict = true
+[server.process]
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+[cache]
+enabled = false
+
+[[vhosts]]
+name = "app"
+hosts = ["app.example.test"]
+[[vhosts.routes]]
+name = "protected"
+path_prefix = "/"
+# This route header stage runs before auth. Strip every identity the app trusts.
+[vhosts.routes.headers.request]
+remove = ["x-auth-request-user"]
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:9001"]
+websocket = false
+[vhosts.routes.proxy.auth_request]
+enabled = true
+url = "http://127.0.0.1:9002/check"
+forward_headers = ["authorization", "cookie", "x-original-uri", "x-forwarded-host", "x-forwarded-proto"]
+allow_response_headers = ["x-auth-request-user"]
+connect_timeout_secs = 1
+read_timeout_secs = 2
+max_response_bytes = "1KiB"
+max_in_flight = 8

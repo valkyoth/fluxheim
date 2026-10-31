@@ -1,0 +1,71 @@
+# Custom profile-privacy binary; paths are relative to this configuration.
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "private-static"
+trusted_proxies = []
+
+[server.process]
+threads = 1
+pid_file = "fluxheim.pid"
+upgrade_sock = "upgrade.sock"
+certificate_reload_sock = "reload.sock"
+grace_period_seconds = 1
+graceful_shutdown_timeout_seconds = 2
+
+[logging]
+level = "info"
+format = "json"
+target = "stderr"
+
+[logging.access]
+enabled = false
+request_id = false
+
+[logging.file]
+enabled = false
+
+[admin]
+enabled = false
+
+[metrics]
+enabled = false
+
+[tracing]
+enabled = false
+
+[cache]
+enabled = false
+
+[headers.request]
+enabled = true
+strip_inbound_client_ip_headers = true
+x_forwarded_for = "off"
+x_real_ip = false
+x_forwarded_host = false
+x_forwarded_proto = false
+forwarded = false
+
+[headers.response]
+enabled = true
+referrer_policy = "no-referrer"
+x_content_type_options = "nosniff"
+
+[[vhosts]]
+name = "private-static"
+hosts = ["private.example.test"]
+
+[vhosts.web]
+root = "public"
+index_files = ["index.html"]
+deny_dotfiles = true
+cache_control = "no-store"
+
+[vhosts.web.directory_listing]
+enabled = false
+
+[[vhosts]]
+name = "private-proxy"
+hosts = ["app.example.test"]
+
+[vhosts.proxy]
+upstream = "127.0.0.1:3000"
