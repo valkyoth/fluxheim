@@ -40,7 +40,8 @@ jobs:
 
   collectors:
     name: Required real collector workflows
-    runs-on: ubuntu-latest
+    # Keep the OS aligned with the locked Playwright browser/dependency support.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -82,6 +83,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: python3 -m pip install PyYAML==6.0.3
       - run: python3 scripts/test_container_refresh.py
+      - run: python3 scripts/test_collector_ci.py
       - run: python3 scripts/test_core_dump_policy.py
       - run: python3 scripts/test_development_scope.py
       - run: python3 scripts/test_documentation_layout.py

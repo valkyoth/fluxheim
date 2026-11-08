@@ -64,3 +64,24 @@ This records the tested image, not an independent provenance attestation.
   VM, signing material or public deployment was modified.
 - Outstanding correction planning and machine-specific logs remain local and
   are not part of this record.
+
+## CI Runner Compatibility Follow-Up
+
+The collector job in run `42461692825` failed before starting Fluxheim:
+`ubuntu-latest` selected Ubuntu 26.04, which the locked Playwright 1.60.0
+does not support for Chromium dependency installation. The collector job now
+uses `ubuntu-24.04`; the browser version, lockfile and required collector checks
+are unchanged. Other jobs retain their existing runner selection.
+
+The new workflow regression failed before the runner correction and passes
+afterward. It checks the qualified OS, locked installation commands and matching
+Playwright package versions. Validation also passed for 46 collector fixture
+tests, three guide tests, eight browser-input tests, 35 container-refresh tests,
+and generated dashboard consistency.
+
+A fresh Ubuntu 24.04 container successfully ran `npm ci --ignore-scripts`,
+`playwright install --with-deps chromium`, and a headless page/title assertion
+with the checked-in package lock. No host browser dependencies were installed.
+This validates the failed installation boundary; the complete collector
+workflow must still pass on GitHub after the fix is pushed. No Rust source or
+production dependency changed in this follow-up.
