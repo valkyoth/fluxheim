@@ -1,6 +1,62 @@
 use super::super::*;
 
 #[test]
+fn health_check_port_override_keeps_protocol_and_range_validation() {
+    use crate::config_load_balance_health::{
+        LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckProtocol as Protocol,
+    };
+    for protocol in [Protocol::Tcp, Protocol::Http, Protocol::Grpc] {
+        for port in [1, 9100, u16::MAX] {
+            let config = LoadBalanceHealthCheckConfig {
+                protocol,
+                port_override: Some(port),
+                ..LoadBalanceHealthCheckConfig::default()
+            };
+            config.validate().unwrap();
+        }
+        let invalid = LoadBalanceHealthCheckConfig {
+            protocol,
+            port_override: Some(0),
+            ..LoadBalanceHealthCheckConfig::default()
+        };
+        assert_eq!(
+            invalid.validate(),
+            Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.port_override",
+            })
+        );
+    }
+    for protocol in [
+        Protocol::Exec,
+        Protocol::Redis,
+        Protocol::Mysql,
+        Protocol::Postgres,
+    ] {
+        let mut config = LoadBalanceHealthCheckConfig {
+            protocol,
+            ..LoadBalanceHealthCheckConfig::default()
+        };
+        if protocol == Protocol::Exec {
+            let command = std::env::current_exe()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned();
+            config.exec_command = Some(command.clone());
+            config.exec_allowed_commands = vec![command];
+        }
+        config.validate().unwrap();
+        config.port_override = Some(9100);
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.protocol",
+            })
+        );
+    }
+}
+
+#[test]
 fn rejects_invalid_load_balance_health_check() {
     let config: Config = toml::from_str(
         r#"

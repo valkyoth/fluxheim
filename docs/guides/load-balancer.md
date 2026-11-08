@@ -224,10 +224,40 @@ make a slow probe finish sooner.
 bounded by `health_weight_min_percent`. It does not bypass failed readiness
 checks. Only let trusted application instances supply this signal.
 
+### Separate Readiness Port
+
+TCP, HTTP and gRPC monitors accept `port_override`. It changes only the probe
+port: each member retains its own IP address and application port for customer
+traffic, discovery, health state and administrative controls. For example,
+members at `10.0.0.10:9001` and `10.0.0.11:9001` can expose readiness at port 9100:
+
+```toml
+[proxy.load_balance.health_check]
+enabled = true
+protocol = "tcp"
+port_override = 9100
+interval_secs = 1
+consecutive_success = 1
+consecutive_failure = 1
+connect_timeout_secs = 1
+```
+
+The probes connect to `10.0.0.10:9100` and `10.0.0.11:9100`; application requests
+still go to port 9001. See the [copyable TCP recipe](../../examples/load-balancer/tcp-health.toml).
+Omit `port_override` to probe each member's application port. The override is
+one common port per pool, not a separate destination address. Readiness failure
+removes the original member from selection and recovery returns that member.
+
+With `upstream_tls = true`, TCP probes still perform a verified TLS handshake
+using the configured upstream SNI and the health client's trusted CA roots.
+The readiness port must therefore speak TLS with an appropriately trusted
+certificate for that name; changing the port does not disable verification.
+A successful TCP/TLS probe does not prove HTTP application readiness. Choose
+an HTTP or gRPC monitor when that is required. Exec and database monitors do
+not accept `port_override`.
+
 `reuse_connection = true` is accepted but does not currently reuse connections
-in the native health client. `port_override` is applied by HTTP/gRPC monitors,
-not the TCP monitor. Use a genuinely separate HTTP readiness port only with the
-appropriate monitor type.
+in the native health client.
 
 Exec helpers run as the Fluxheim service identity, without a shell and with a
 restricted environment. They receive backend address/host/port through

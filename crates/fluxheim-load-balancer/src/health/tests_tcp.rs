@@ -86,6 +86,7 @@ async fn tcp_tls_health_check_times_out_stalled_handshake() {
         consecutive_success: 1,
         consecutive_failure: 1,
         connect_timeout: Duration::from_millis(50),
+        port_override: None,
         tls: Some(tls),
     };
     let backend = Backend::new(&upstream.to_string()).unwrap();

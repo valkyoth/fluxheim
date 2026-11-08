@@ -12,14 +12,14 @@ use crate::key::backend_key;
 use fluxheim_common::{FluxError, FluxResult};
 
 struct TestDiscovery {
-    backends: Mutex<FluxBackendSet>,
+    backends: Arc<Mutex<FluxBackendSet>>,
     fail: Arc<Mutex<bool>>,
 }
 
 impl TestDiscovery {
     fn new(backends: FluxBackendSet) -> Self {
         Self {
-            backends: Mutex::new(backends),
+            backends: Arc::new(Mutex::new(backends)),
             fail: Arc::new(Mutex::new(false)),
         }
     }
@@ -82,6 +82,74 @@ async fn runtime_retarget_starts_with_fresh_health_state() {
     assert!(snapshot.backends.contains(&updated));
     assert!(!snapshot.health.contains_key(&current_key));
     assert!(snapshot.health.get(&updated_key).unwrap().ready());
+}
+
+#[tokio::test]
+async fn tcp_port_override_tracks_discovery_and_runtime_retarget_without_rekeying() {
+    use crate::health::configured_health_check;
+    use crate::policy::HealthDerivedWeights;
+    use fluxheim_config::{LoadBalanceConfig, LoadBalanceHealthCheckConfig, ProxyConfig};
+
+    let readiness = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = readiness.local_addr().unwrap().port();
+    // Both application ports are closed: only the explicit readiness port can succeed.
+    let first = FluxBackend::new("127.0.0.1:1").unwrap();
+    let second = FluxBackend::new("127.0.0.1:2").unwrap();
+    let third = FluxBackend::new("[::1]:3").unwrap();
+    let unavailable = tokio::net::TcpSocket::new_v6().unwrap();
+    unavailable
+        .bind((std::net::Ipv6Addr::LOCALHOST, port).into())
+        .unwrap();
+    let mut set = FluxBackendSet::default();
+    set.insert(first.clone());
+    let discovery = TestDiscovery::new(set);
+    let discovered = discovery.backends.clone();
+    let mut runtime = FluxLoadBalancerRuntime::new(Box::new(discovery));
+    runtime.set_health_check(
+        configured_health_check(
+            &ProxyConfig {
+                load_balance: LoadBalanceConfig {
+                    health_check: LoadBalanceHealthCheckConfig {
+                        port_override: Some(port),
+                        consecutive_success: 1,
+                        consecutive_failure: 1,
+                        connect_timeout_secs: Some(1),
+                        ..LoadBalanceHealthCheckConfig::default()
+                    },
+                    ..LoadBalanceConfig::default()
+                },
+                ..ProxyConfig::default()
+            },
+            Arc::new(HealthDerivedWeights::default()),
+        )
+        .unwrap(),
+    );
+    runtime.update().await.unwrap();
+    runtime.run_health_check(false).await;
+    assert!(runtime.snapshot.load().health[&backend_key(&first)].ready());
+    let mut replacement = FluxBackendSet::default();
+    replacement.insert(second.clone());
+    *discovered.lock().unwrap() = replacement;
+    runtime.update().await.unwrap();
+    runtime.run_health_check(false).await;
+    assert!(
+        !runtime
+            .snapshot
+            .load()
+            .health
+            .contains_key(&backend_key(&first))
+    );
+    assert!(runtime.snapshot.load().health[&backend_key(&second)].ready());
+    runtime
+        .update_runtime_backend(&second, third.clone())
+        .unwrap();
+    runtime.run_health_check(false).await;
+    // Retargeting changes the member IP, not just its application port. There is
+    // no readiness listener on ::1, even though the original IPv4 probe is up.
+    let snapshot = runtime.snapshot.load();
+    assert_eq!(snapshot.health.len(), 1);
+    assert!(snapshot.backends.contains(&third));
+    assert!(!snapshot.health[&backend_key(&third)].ready());
 }
 
 #[tokio::test]

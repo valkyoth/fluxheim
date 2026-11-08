@@ -1,0 +1,10 @@
+# Append to a proxy pool with application upstreams such as 10.0.0.10:9001.
+# Every member must expose readiness on its own IP at port 9100.
+[proxy.load_balance.health_check]
+enabled = true
+protocol = "tcp"
+port_override = 9100
+interval_secs = 1
+consecutive_success = 1
+consecutive_failure = 1
+connect_timeout_secs = 1

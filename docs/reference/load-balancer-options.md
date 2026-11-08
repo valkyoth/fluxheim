@@ -127,7 +127,7 @@ rather than relying on them to be ignored.
 | `expected_body_json` | `[]` | Up to 8 `{ path, equals }` scalar matches; unique dotted paths at most 256 bytes, comparison strings at most 1024 bytes |
 | `health_weight_min_percent` | `25` | 1-100; lower bound for HTTP `X-Health-Weight` reduction |
 | `reuse_connection` | `false` | Accepted compatibility setting; native HTTP/gRPC probes open fresh connections even if true |
-| `port_override` | Omitted | 1-65535; HTTP/gRPC alternate probe port; not applied by the TCP monitor |
+| `port_override` | Omitted | 1-65535; TCP/HTTP/gRPC alternate probe port on each member IP; application destinations and TLS verification remain unchanged. Rejected for exec/database monitors |
 | `connect_timeout_secs` | Omitted | 1-86400 if set; otherwise inherit proxy timeout or native default (1 second) |
 | `read_timeout_secs` | Omitted | 1-86400 if set; otherwise inherit proxy timeout or native default (1 second) |
 | `exec_command` | Omitted | Required absolute command path for exec mode, at most 512 bytes, no traversal/control characters |

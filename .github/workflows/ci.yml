@@ -94,6 +94,7 @@ jobs:
       - run: python3 scripts/test_cache_examples.py
       - run: python3 scripts/test_routing_examples.py
       - run: python3 scripts/test_load_balancer_retry_examples.py
+      - run: python3 scripts/test_load_balancer_tcp_health.py
       - run: python3 scripts/test_proxy_hooks.py
       - run: python3 scripts/test_proxy_transport.py
       - run: python3 scripts/test_protocol_examples.py
@@ -256,6 +257,9 @@ jobs:
           cargo test --locked -p fluxheim --lib --no-default-features --features profile-privacy admin::tests::events
           cargo test --locked -p fluxheim --lib --no-default-features --features profile-privacy admin::tests::audit_admission
           cargo test --locked -p fluxheim-server --lib --features wasm,php-fpm,tls-rustls,load-balancer
+          cargo test --locked -p fluxheim-load-balancer --features tls-rustls-backend
+          cargo test --locked -p fluxheim-load-balancer --features tls-openssl-backend
+          python3 scripts/test_load_balancer_tcp_health.py
           cargo build --locked --no-default-features --features profile-observability --bin fluxheim
           python3 scripts/smoke_operational_events.py --binary target/debug/fluxheim
           python3 scripts/smoke_logging_examples.py --binary target/debug/fluxheim
@@ -533,6 +537,8 @@ jobs:
 
       - name: Test macOS load-balancer retry and latency policy
         run: |
+          cargo test --locked -p fluxheim-load-balancer --features tls-rustls-backend
+          python3 scripts/test_load_balancer_tcp_health.py
           cargo test --locked -p fluxheim-server --lib --features wasm,php-fpm,load-balancer,tls-rustls
           cargo build --locked --no-default-features --features profile-load-balancer-edge,acme-client --bin fluxheim
           mkdir -p "$HOME/.fluxheim-lb-smoke"
@@ -651,6 +657,10 @@ jobs:
       - name: Test Windows load-balancer retry and latency policy
         shell: pwsh
         run: |
+          cargo test --locked -p fluxheim-load-balancer --features tls-rustls-backend
+          if ($LASTEXITCODE -ne 0) { throw 'load-balancer health tests failed' }
+          python scripts/test_load_balancer_tcp_health.py
+          if ($LASTEXITCODE -ne 0) { throw 'TCP health fixture tests failed' }
           cargo test --locked -p fluxheim-server --lib --features wasm,php-fpm,load-balancer,tls-rustls
           if ($LASTEXITCODE -ne 0) { throw 'combined server tests failed' }
           cargo build --locked --no-default-features --features profile-load-balancer-edge,acme-client --bin fluxheim

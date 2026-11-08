@@ -75,6 +75,7 @@ pub(super) fn configured_health_check(
                 consecutive_success,
                 consecutive_failure,
                 connect_timeout,
+                port_override: config.load_balance.health_check.port_override,
                 tls,
             }))
         }
@@ -108,3 +109,5 @@ mod tests_grpc;
 mod tests_http;
 #[cfg(test)]
 mod tests_tcp;
+#[cfg(test)]
+mod tests_tcp_port;

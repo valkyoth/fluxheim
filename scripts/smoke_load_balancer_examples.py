@@ -371,6 +371,8 @@ def main():
         run_retry_case(parent, enabled)
     for mode in ("selection", "passive", "disabled", "body"):
         run_latency_case(parent, mode)
+    from smoke_load_balancer_tcp_health import run_case as run_tcp_health_case
+    run_tcp_health_case(parent)
 
 
 if __name__ == "__main__":

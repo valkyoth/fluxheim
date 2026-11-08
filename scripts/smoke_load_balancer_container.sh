@@ -362,3 +362,4 @@ if grep -E 'pingora[-_a-z]* v[0-9]' "$TMP_DIR/fluxheim-load-balancer-cargo-tree.
 fi
 
 echo "load-balancer container smoke passed"
+python3 "$ROOT_DIR/scripts/smoke_load_balancer_tcp_health.py" "$TMP_ROOT" --container

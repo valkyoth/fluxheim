@@ -18,6 +18,13 @@ impl<T> HealthIo for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
 
 pub(super) type BoxedHealthIo = Box<dyn HealthIo>;
 
+#[cfg(all(
+    test,
+    any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")
+))]
+#[path = "tests_tcp_tls_port.rs"]
+mod tests_tcp_tls_port;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum HealthTlsAlpn {
     None,
@@ -29,6 +36,7 @@ pub(super) struct FluxTcpHealthCheck {
     pub(super) consecutive_success: usize,
     pub(super) consecutive_failure: usize,
     pub(super) connect_timeout: Duration,
+    pub(super) port_override: Option<u16>,
     pub(super) tls: Option<FluxTcpHealthCheckTls>,
 }
 
@@ -50,10 +58,13 @@ pub(super) struct FluxTcpHealthCheckTls;
 #[async_trait]
 impl FluxHealthCheck for FluxTcpHealthCheck {
     async fn check(&self, target: &Backend) -> FluxResult<()> {
-        let authority = target.addr.to_string();
+        let mut address = target.addr;
+        if let Some(port) = self.port_override {
+            address.set_port(port);
+        }
         let stream = tokio::time::timeout(
             self.connect_timeout,
-            tokio::net::TcpStream::connect(authority.as_str()),
+            tokio::net::TcpStream::connect(address),
         )
         .await
         .map_err(|_| {
