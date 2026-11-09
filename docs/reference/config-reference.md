@@ -3159,10 +3159,14 @@ serve stale solely because the upstream failed. `stale_if_error_on` optionally
 narrows which upstream error classes may use that stale-on-error window. Valid
 values are `connect`, `timeout`, `read`, `write`, `connection-closed`,
 `http-status`, `protocol`, `tls`, and `other`. The default includes all
-classes. The native classifier currently never emits `read`, `write` or `tls`;
-it maps generic I/O kinds instead of retaining transport phase. This is a tracked
-runtime gap, not a working phase-specific
-policy. See [cache options](cache-options.md#freshness-and-stale-responses).
+classes. Native HTTP/1 and HTTP/2 retain typed transport phases: timeouts take
+precedence over TLS, closure and protocol failures, which in turn precede
+remaining connect/read/write failures. `read` does not include read timeouts;
+`write` does not include broken pipes. `tls` permits previously cached content,
+not an unverified TLS connection. Older policies relying on generic `other` or
+`protocol` classification may need an explicit category update. See
+[cache options](cache-options.md#freshness-and-stale-responses) and
+[failure precedence](../guides/cache.md#choose-the-failure-categories).
 `stale_if_error_statuses` optionally narrows HTTP-status stale serving
 to selected 5xx origin statuses; when it is empty, any upstream 5xx status that
 Fluxheim marks stale-if-error eligible is allowed. Stored responses carrying

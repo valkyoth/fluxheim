@@ -67,8 +67,33 @@ pub(crate) fn native_cache_stale_event_for_error(
 }
 
 fn native_cache_stale_error_kind(error: &crate::NativeHttp1Error) -> CacheStaleErrorKind {
+    use crate::native_upstream_error::{UpstreamPhase, upstream_error_kind, upstream_phase};
+    if let crate::NativeHttp1Error::Io(error) = error {
+        if upstream_error_kind(error) == std::io::ErrorKind::TimedOut {
+            return CacheStaleErrorKind::Timeout;
+        }
+        if upstream_phase(error) == Some(UpstreamPhase::Tls) {
+            return CacheStaleErrorKind::Tls;
+        }
+        if !matches!(
+            upstream_error_kind(error),
+            std::io::ErrorKind::ConnectionAborted
+                | std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::BrokenPipe
+                | std::io::ErrorKind::UnexpectedEof
+                | std::io::ErrorKind::InvalidData
+                | std::io::ErrorKind::PermissionDenied
+        ) {
+            match upstream_phase(error) {
+                Some(UpstreamPhase::Connect) => return CacheStaleErrorKind::Connect,
+                Some(UpstreamPhase::Read) => return CacheStaleErrorKind::Read,
+                Some(UpstreamPhase::Write) => return CacheStaleErrorKind::Write,
+                _ => {}
+            }
+        }
+    }
     match error {
-        crate::NativeHttp1Error::Io(error) => match error.kind() {
+        crate::NativeHttp1Error::Io(error) => match upstream_error_kind(error) {
             std::io::ErrorKind::TimedOut => CacheStaleErrorKind::Timeout,
             std::io::ErrorKind::ConnectionRefused
             | std::io::ErrorKind::NotConnected
@@ -118,9 +143,7 @@ mod tests {
     use std::io::{Error, ErrorKind};
 
     #[test]
-    fn native_stale_error_policy_currently_loses_transport_phase() {
-        // documented contract: characterize the current gap; the follow-up must replace
-        // this with phase-aware tests at the actual upstream failure sites.
+    fn untagged_stale_errors_keep_legacy_classification() {
         for (kind, expected) in [
             (ErrorKind::TimedOut, CacheStaleErrorKind::Timeout),
             (ErrorKind::ConnectionRefused, CacheStaleErrorKind::Connect),
@@ -135,6 +158,121 @@ mod tests {
             for phase in ["read", "write", "tls"] {
                 let error = crate::NativeHttp1Error::Io(Error::new(kind, phase));
                 assert_eq!(native_cache_stale_error_kind(&error), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn stale_error_phase_and_reason_precedence() {
+        use crate::native_upstream_error::UpstreamPhase as Phase;
+        for (phase, fallback) in [
+            (Phase::Read, CacheStaleErrorKind::Read),
+            (Phase::Write, CacheStaleErrorKind::Write),
+            (Phase::Connect, CacheStaleErrorKind::Connect),
+            (Phase::Tls, CacheStaleErrorKind::Tls),
+        ] {
+            for (kind, reason) in [
+                (ErrorKind::Other, fallback),
+                (ErrorKind::TimedOut, CacheStaleErrorKind::Timeout),
+                (
+                    ErrorKind::ConnectionReset,
+                    CacheStaleErrorKind::ConnectionClosed,
+                ),
+                (ErrorKind::BrokenPipe, CacheStaleErrorKind::ConnectionClosed),
+                (
+                    ErrorKind::UnexpectedEof,
+                    CacheStaleErrorKind::ConnectionClosed,
+                ),
+                (ErrorKind::InvalidData, CacheStaleErrorKind::Protocol),
+                (ErrorKind::PermissionDenied, CacheStaleErrorKind::Other),
+            ] {
+                let error = crate::NativeHttp1Error::Io(Error::new(kind, "secret-canary"))
+                    .with_upstream_phase(phase);
+                let expected = if phase == Phase::Tls && kind != ErrorKind::TimedOut {
+                    CacheStaleErrorKind::Tls
+                } else {
+                    reason
+                };
+                assert_eq!(native_cache_stale_error_kind(&error), expected);
+                assert!(!error.to_string().contains("secret-canary"));
+                let crate::NativeHttp1Error::Io(io) = error else {
+                    panic!("wrong variant")
+                };
+                assert_eq!(io.kind(), kind, "transport retry kind must not change");
+            }
+        }
+    }
+
+    #[test]
+    fn stale_phase_metadata_is_not_overwritten_and_h2_reason_is_preserved() {
+        use crate::native_upstream_error::UpstreamPhase;
+        let tls = crate::NativeHttp1Error::Io(Error::other("opaque"))
+            .with_upstream_phase(UpstreamPhase::Tls)
+            .with_upstream_phase(UpstreamPhase::Read);
+        assert_eq!(
+            native_cache_stale_error_kind(&tls),
+            CacheStaleErrorKind::Tls
+        );
+        let h2 = crate::NativeHttp1Error::Io(Error::other("opaque"))
+            .with_upstream_failure(UpstreamPhase::Read, ErrorKind::InvalidData);
+        assert_eq!(
+            native_cache_stale_error_kind(&h2),
+            CacheStaleErrorKind::Protocol
+        );
+        let crate::NativeHttp1Error::Io(io) = h2 else {
+            panic!("wrong variant")
+        };
+        assert_eq!(io.kind(), ErrorKind::Other);
+    }
+
+    #[test]
+    fn phase_classification_does_not_broaden_stale_allowlists() {
+        use crate::native_upstream_error::UpstreamPhase;
+        use CacheStaleErrorKind as Kind;
+        use fluxheim_cache::{StoredCachePolicy, cache_should_serve_stale};
+        let all = [
+            Kind::Connect,
+            Kind::Timeout,
+            Kind::Read,
+            Kind::Write,
+            Kind::ConnectionClosed,
+            Kind::HttpStatus,
+            Kind::Protocol,
+            Kind::Tls,
+            Kind::Other,
+        ];
+        for (phase, expected) in [
+            (UpstreamPhase::Connect, Kind::Connect),
+            (UpstreamPhase::Read, Kind::Read),
+            (UpstreamPhase::Write, Kind::Write),
+            (UpstreamPhase::Tls, Kind::Tls),
+        ] {
+            let event = native_cache_stale_event_for_error(
+                &crate::NativeHttp1Error::Io(Error::other("opaque")).with_upstream_phase(phase),
+            );
+            for allowed in all {
+                let mut cache = fluxheim_config::CacheConfig {
+                    stale_if_error_secs: Some(60),
+                    stale_if_error_on: vec![allowed],
+                    ..Default::default()
+                };
+                assert_eq!(
+                    cache_should_serve_stale(&cache, event, StoredCachePolicy::default()),
+                    allowed == expected
+                );
+                assert!(!cache_should_serve_stale(
+                    &cache,
+                    event,
+                    StoredCachePolicy {
+                        stale_reuse_forbidden: true
+                    }
+                ));
+                cache.stale_if_error_secs = None;
+                assert!(!cache_should_serve_stale(
+                    &cache,
+                    event,
+                    StoredCachePolicy::default()
+                ));
             }
         }
     }

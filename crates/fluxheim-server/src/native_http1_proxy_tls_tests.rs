@@ -8,6 +8,10 @@ use crate::{
     serve_native_http1_listener,
 };
 
+#[cfg(feature = "tls-rustls-backend")]
+#[path = "native_http1_proxy_tls_stale_tests.rs"]
+mod stale;
+
 pub(crate) struct NativeTlsFixture {
     pub(crate) ca_path: std::path::PathBuf,
     pub(crate) client_cert_path: std::path::PathBuf,

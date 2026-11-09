@@ -1,3 +1,4 @@
+use crate::native_upstream_error::UpstreamPhase;
 use std::time::Instant;
 
 use fluxheim_config::UpstreamProxyProtocol;
@@ -98,7 +99,8 @@ impl NativeHttp1Upstream {
             fluxheim_observability::operational::failure(
                 fluxheim_observability::event::FailureReason::UpstreamProtocol,
             )
-        })?;
+        })
+        .map_err(|error| error.with_upstream_phase(UpstreamPhase::Write))?;
         read_upstream_response(
             &mut stream,
             self.read_timeout,
@@ -107,6 +109,7 @@ impl NativeHttp1Upstream {
             &request.method,
         )
         .await
+        .map_err(|error| error.with_upstream_phase(UpstreamPhase::Read))
     }
 
     pub(crate) async fn websocket_tunnel(
@@ -207,7 +210,8 @@ impl NativeHttp1Upstream {
             fluxheim_observability::operational::failure(
                 fluxheim_observability::event::FailureReason::UpstreamProtocol,
             )
-        })?;
+        })
+        .map_err(|error| error.with_upstream_phase(UpstreamPhase::Write))?;
         read_upstream_response_for_pool(
             stream,
             self.read_timeout,
@@ -216,6 +220,7 @@ impl NativeHttp1Upstream {
             &request.method,
         )
         .await
+        .map_err(|error| error.with_upstream_phase(UpstreamPhase::Read))
     }
 
     async fn connection(
@@ -304,7 +309,8 @@ impl NativeHttp1Upstream {
                 "native HTTP/1 upstream connect timeout",
                 fluxheim_observability::event::FailureReason::ConnectionTimeout,
             )
-        })??;
+        })?
+        .map_err(|error| error.with_upstream_phase(UpstreamPhase::Connect))?;
         self.write_proxy_protocol_header(&mut stream, request)
             .await?;
         #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -319,7 +325,8 @@ impl NativeHttp1Upstream {
                     "native HTTP/1 upstream TLS handshake timeout",
                     fluxheim_observability::event::FailureReason::ConnectionTimeout,
                 )
-            })?;
+            })?
+            .map_err(|error| error.with_upstream_phase(UpstreamPhase::Tls));
         }
         Ok((
             Box::new(stream) as NativeHttp1Stream,
@@ -362,6 +369,7 @@ impl NativeHttp1Upstream {
                 fluxheim_observability::event::FailureReason::ConnectionTimeout,
             )
         })?
+        .map_err(|error| error.with_upstream_phase(UpstreamPhase::Connect))
     }
 
     async fn finish_connect_stream(
@@ -377,7 +385,8 @@ impl NativeHttp1Upstream {
                         "native HTTP/1 upstream TLS handshake timeout",
                         fluxheim_observability::event::FailureReason::ConnectionTimeout,
                     )
-                })?;
+                })?
+                .map_err(|error| error.with_upstream_phase(UpstreamPhase::Tls));
         }
         Ok(Box::new(stream) as NativeHttp1Stream)
     }
@@ -413,6 +422,7 @@ impl NativeHttp1Upstream {
                     format!("write native upstream PROXY protocol header: {error}"),
                 ))
             })
+            .map_err(|error| error.with_upstream_phase(UpstreamPhase::Write))
     }
 
     pub(super) const fn cleartext_upstream(&self) -> bool {

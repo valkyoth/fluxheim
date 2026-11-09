@@ -1,3 +1,4 @@
+use crate::native_upstream_error::UpstreamPhase;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -380,7 +381,9 @@ impl NativeHttp1Upstream {
                     fluxheim_observability::event::FailureReason::WriteTimeout,
                 )
             })?
-            .map_err(NativeHttp1Error::Io)?;
+            .map_err(|error| {
+                NativeHttp1Error::Io(error).with_upstream_phase(UpstreamPhase::Write)
+            })?;
         let response_head = timeout(
             self.read_timeout,
             read_upstream_response_head(&mut stream, h2c_upgrade_response_head_limits()),
@@ -391,7 +394,8 @@ impl NativeHttp1Upstream {
                 "native h2c upgrade response timeout",
                 fluxheim_observability::event::FailureReason::ReadTimeout,
             )
-        })??;
+        })?
+        .map_err(|error| error.with_upstream_phase(UpstreamPhase::Read))?;
         validate_h2c_upgrade_response(&response_head, h2c_upgrade_response_head_limits())?;
         Ok(stream)
     }

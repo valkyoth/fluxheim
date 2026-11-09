@@ -177,6 +177,39 @@ pub(super) fn record_native_http2_failure(error: &NativeHttp2StackError) {
 
 pub(super) fn native_http2_error(error: NativeHttp2StackError) -> NativeHttp1Error {
     record_native_http2_failure(&error);
+    use crate::native_upstream_error::UpstreamPhase;
+    let transport_kind = match &error {
+        NativeHttp2StackError::Handshake(error)
+        | NativeHttp2StackError::RequestReady(error)
+        | NativeHttp2StackError::SendRequest(error)
+        | NativeHttp2StackError::Stream(error)
+        | NativeHttp2StackError::BodyData(error)
+        | NativeHttp2StackError::BodyTrailers(error)
+        | NativeHttp2StackError::SendResponse(error) => Some(if let Some(io) = error.get_io() {
+            io.kind()
+        } else if error.is_reset() || error.is_go_away() {
+            std::io::ErrorKind::ConnectionReset
+        } else {
+            std::io::ErrorKind::InvalidData
+        }),
+        _ => None,
+    };
+    let phase = match &error {
+        NativeHttp2StackError::Handshake(_)
+        | NativeHttp2StackError::HandshakeTimeout
+        | NativeHttp2StackError::RequestReady(_)
+        | NativeHttp2StackError::RequestReadyTimeout => Some(UpstreamPhase::Connect),
+        NativeHttp2StackError::SendRequest(_)
+        | NativeHttp2StackError::SendResponse(_)
+        | NativeHttp2StackError::ResponseWriteTimeout
+        | NativeHttp2StackError::ResponseCapacityClosed => Some(UpstreamPhase::Write),
+        NativeHttp2StackError::BodyData(_)
+        | NativeHttp2StackError::BodyTrailers(_)
+        | NativeHttp2StackError::Stream(_)
+        | NativeHttp2StackError::BodyReadTimeout
+        | NativeHttp2StackError::HandlerTimeout => Some(UpstreamPhase::Read),
+        _ => None,
+    };
     let kind = match error {
         NativeHttp2StackError::BodyReadTimeout
         | NativeHttp2StackError::HandshakeTimeout
@@ -200,7 +233,11 @@ pub(super) fn native_http2_error(error: NativeHttp2StackError) -> NativeHttp1Err
         | NativeHttp2StackError::SendResponse(_)
         | NativeHttp2StackError::StreamTaskJoin(_) => std::io::ErrorKind::Other,
     };
-    NativeHttp1Error::Io(std::io::Error::new(kind, error.to_string()))
+    let error = NativeHttp1Error::Io(std::io::Error::new(kind, error.to_string()));
+    match phase {
+        Some(phase) => error.with_upstream_failure(phase, transport_kind.unwrap_or(kind)),
+        None => error,
+    }
 }
 
 pub(super) fn native_http2_error_retry_safe(error: &NativeHttp2StackError) -> bool {

@@ -16,8 +16,13 @@ mod cache_config_tests;
 mod cache_control_tests;
 #[path = "native_http1_route_proxy_tests/cache_documented_contract.rs"]
 mod cache_documented_contract;
+#[path = "native_http1_route_proxy_tests/cache_error_phase.rs"]
+mod cache_error_phase;
 #[path = "native_http1_route_proxy_tests/cache_freshness.rs"]
 mod cache_freshness_tests;
+#[cfg(feature = "load-balancer")]
+#[path = "native_http1_route_proxy_tests/cache_h2_error.rs"]
+mod cache_h2_error;
 #[path = "native_http1_route_proxy_tests/cache_lifecycle_contract.rs"]
 mod cache_lifecycle_contract;
 #[path = "native_http1_route_proxy_tests/cache_peer.rs"]

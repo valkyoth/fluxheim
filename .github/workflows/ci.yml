@@ -94,6 +94,7 @@ jobs:
       - run: python3 scripts/test_metrics_examples.py
       - run: python3 scripts/test_tracing_examples.py
       - run: python3 scripts/test_cache_examples.py
+      - run: python3 scripts/test_cache_error_phase.py
       - run: python3 scripts/test_routing_examples.py
       - run: python3 scripts/test_load_balancer_retry_examples.py
       - run: python3 scripts/test_load_balancer_tcp_health.py
@@ -425,6 +426,7 @@ jobs:
           sh scripts/smoke_stream_proxy.sh
           sh scripts/smoke_load_balancer.sh
           sh scripts/smoke_proxy_cache.sh
+          python3 scripts/smoke_cache_error_phase.py target
           sh scripts/smoke_storage_bin_cache.sh
           sh scripts/smoke_cache_encryption_local.sh
           sh scripts/smoke_peer_fill_cache.sh
@@ -548,6 +550,12 @@ jobs:
           chmod 700 "$HOME/.fluxheim-lb-smoke"
           python3 scripts/smoke_load_balancer_examples.py "$HOME/.fluxheim-lb-smoke"
 
+      - name: Test macOS stale-cache failure policy
+        run: |
+          cargo build --locked --no-default-features --features profile-load-balancer,acme-client --bin fluxheim
+          python3 scripts/test_cache_error_phase.py
+          python3 scripts/smoke_cache_error_phase.py "$HOME/.fluxheim-lb-smoke"
+
       - name: Test macOS live request and trace correlation
         run: |
           python3 -m venv target/correlation-venv
@@ -670,6 +678,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'load-balancer build failed' }
           python scripts/smoke_load_balancer_examples.py $env:TEMP
           if ($LASTEXITCODE -ne 0) { throw 'load-balancer smoke failed' }
+
+      - name: Test Windows stale-cache failure policy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          cargo build --locked --no-default-features --features profile-load-balancer,acme-client --bin fluxheim
+          python scripts/test_cache_error_phase.py
+          python scripts/smoke_cache_error_phase.py $env:TEMP
 
       - name: Test Windows live request and trace correlation
         run: |

@@ -12,6 +12,87 @@ use crate::{
     NativeHttp2UpstreamResponse,
 };
 
+#[tokio::test]
+async fn h2_transport_error_metadata_preserves_phase_and_retry_kind() {
+    use crate::native_upstream_error::{UpstreamPhase, upstream_error_kind, upstream_phase};
+    use std::io::ErrorKind;
+    type ErrorConstructor = fn(h2::Error) -> NativeHttp2StackError;
+    let constructors: [(ErrorConstructor, UpstreamPhase); 6] = [
+        (NativeHttp2StackError::Handshake, UpstreamPhase::Connect),
+        (NativeHttp2StackError::RequestReady, UpstreamPhase::Connect),
+        (NativeHttp2StackError::SendRequest, UpstreamPhase::Write),
+        (NativeHttp2StackError::Stream, UpstreamPhase::Read),
+        (NativeHttp2StackError::BodyData, UpstreamPhase::Read),
+        (NativeHttp2StackError::BodyTrailers, UpstreamPhase::Read),
+    ];
+    for (construct, phase) in constructors {
+        for kind in [
+            ErrorKind::Other,
+            ErrorKind::TimedOut,
+            ErrorKind::BrokenPipe,
+            ErrorKind::InvalidData,
+        ] {
+            let transport = H2FaultIo(kind);
+            let h2_error = match h2::client::handshake(transport).await {
+                Err(error) => error,
+                Ok(_) => panic!("faulty transport unexpectedly completed handshake"),
+            };
+            let error = native_http2_error(construct(h2_error));
+            assert!(!error.to_string().contains("secret-canary"));
+            let NativeHttp1Error::Io(error) = error else {
+                panic!("wrong error")
+            };
+            assert_eq!(
+                error.kind(),
+                ErrorKind::Other,
+                "do not change transport retry policy"
+            );
+            assert_eq!(upstream_error_kind(&error), kind);
+            assert_eq!(upstream_phase(&error), Some(phase));
+        }
+        let NativeHttp1Error::Io(error) =
+            native_http2_error(construct(h2::Reason::PROTOCOL_ERROR.into()))
+        else {
+            panic!("wrong error")
+        };
+        assert_eq!(upstream_error_kind(&error), ErrorKind::InvalidData);
+    }
+}
+
+struct H2FaultIo(std::io::ErrorKind);
+
+impl tokio::io::AsyncRead for H2FaultIo {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+        _: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Err(std::io::Error::new(self.0, "secret-canary")))
+    }
+}
+
+impl tokio::io::AsyncWrite for H2FaultIo {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+        _: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::task::Poll::Ready(Err(std::io::Error::new(self.0, "secret-canary")))
+    }
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+}
+
 #[test]
 fn http2_retry_failure_and_final_failure_each_emit_once() {
     let capture = fluxheim_observability::event_test_support::Capture::start();

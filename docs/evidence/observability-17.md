@@ -2,7 +2,8 @@
 
 Local qualification: 2026-11-09. Commit 17 follows
 `e15a61c01148ca245f5df0fa52ed9aaa078a53cc`. Independent pentesting and
-exact-commit GitHub acceptance remain pending.
+exact-commit GitHub acceptance were subsequently confirmed by the owner through
+`8159ae69`, authorizing Commit 18.
 
 ## Delivered
 

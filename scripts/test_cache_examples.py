@@ -3,6 +3,8 @@
 
 import tomllib
 import unittest
+import tempfile
+from unittest.mock import mock_open, patch
 from pathlib import Path
 
 import smoke_cache_examples as smoke
@@ -10,6 +12,23 @@ import smoke_cache_operations as operations
 
 
 class CacheGuideTests(unittest.TestCase):
+    def test_storage_checkpoint_retries_transient_sharing_denial(self):
+        reader = mock_open(read_data=b"/asset.css".hex().encode("ascii"))
+        with patch.object(Path, "open", side_effect=[PermissionError("sharing"), reader.return_value]), \
+                patch.object(smoke.time, "sleep"):
+            smoke.wait_for_storage_index(Path("fixture"))
+
+    def test_storage_checkpoint_wait_requires_the_asset_and_is_bounded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            index = root / ".fluxheim-storage-bin-index-v1"
+            index.write_bytes(b"/asset.css".hex().encode("ascii"))
+            smoke.wait_for_storage_index(root)
+            index.write_bytes(b"/different.css".hex().encode("ascii"))
+            with patch.object(smoke.time, "monotonic", side_effect=[0, 0, 11]), \
+                    patch.object(smoke.time, "sleep"), self.assertRaises(AssertionError):
+                smoke.wait_for_storage_index(root)
+
     def test_backend_reference_separates_native_storage_and_history(self):
         root = Path(__file__).resolve().parents[1]
         guide = (root / "docs/guides/cache-backends.md").read_text()

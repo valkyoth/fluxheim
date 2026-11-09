@@ -215,14 +215,51 @@ the example's 200 override if you replace the entire `status_ttls` map. Configur
 both entries explicitly if that is your intention. Origin cache restrictions
 such as mandatory revalidation can still forbid stale reuse.
 
-Current limitation, tracked as `the documented limitation` / the local follow-up: `read`, `write` and
-`tls` are accepted `stale_if_error_on` values, but the native error classifier
-does not produce them. It maps I/O error kinds to `connect`, `timeout`,
-`connection-closed`, `protocol` or `other`; HTTP-status handling is separate.
-A policy containing only `tls` therefore does not mean TLS failures are handled
-as requested. Do not broaden the allowlist to `other`/`protocol` as a workaround
-for a strict security policy. Leave stale-on-error off where precise phase
-classification is required until the correction is implemented and tested.
+### Choose The Failure Categories
+
+`stale_if_error_on` selects exact categories, not every error that happened
+during that phase. The native HTTP/1 and HTTP/2 clients preserve typed transport
+information; classification does not search error-message text.
+
+| Category | When it applies |
+| --- | --- |
+| `timeout` | A timeout in any phase, including TLS, reading or writing |
+| `tls` | A non-timeout TLS handshake or certificate-verification failure |
+| `connection-closed` | A reset, aborted connection, broken pipe or premature EOF outside the TLS handshake; also an HTTP/2 reset or GOAWAY failure |
+| `protocol` | Malformed HTTP, framing/header validation errors or other HTTP/2 protocol failures outside TLS |
+| `connect` | Remaining connection-setup failures, including refusal |
+| `read` | Remaining transport failures while receiving the origin response |
+| `write` | Remaining transport failures while sending the origin request |
+| `http-status` | Eligible upstream 5xx responses, additionally filtered by `stale_if_error_statuses` |
+| `other` | Unclassified failures; permission errors outside TLS remain here |
+
+The table is ordered by precedence for overlapping transport errors. For
+example, a read timeout requires `timeout`, not `read`; a broken pipe while
+writing requires `connection-closed`, not `write`.
+
+For public content where an origin outage may be covered by a previously
+cached response, merge these settings into the applicable cache table:
+
+```toml
+[cache]
+stale_if_error_secs = 60
+stale_if_error_on = ["connect", "timeout", "connection-closed", "http-status"]
+stale_if_error_statuses = [502, 503, 504]
+```
+
+This example deliberately excludes `tls` and `protocol`. Add `tls` only when
+serving previously trusted content during a certificate failure is acceptable.
+It does **not** disable certificate verification, accept the failed connection,
+or cache data from it. No stale object, an expired stale window, or an origin
+mandatory-revalidation directive still prevents reuse. Successful recovery can
+replace the stale object normally.
+
+**Compatibility:** older builds did not emit `read`, `write` or `tls` and lost
+HTTP/2 transport reasons. Policies that used `other` or `protocol` to cover
+those failures must now name the actual category. In particular, TLS failures
+require `tls`, while HTTP/2 resets require `connection-closed`. Do not expand
+the allowlist indiscriminately. Retry decisions and normal successful responses
+are unchanged; stale selection does not create an additional origin retry.
 
 ## Protect The Origin
 

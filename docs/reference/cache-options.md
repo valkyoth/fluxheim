@@ -109,11 +109,14 @@ a TTL. Non-200 storage requires an explicit status/fallback TTL. These controls
 do not make every status or zero-length response cacheable.
 
 Accepted categories are `connect`, `timeout`, `read`, `write`,
-`connection-closed`, `http-status`, `protocol`, `tls`, `other`. **Native limitation:**
-the current I/O classifier never emits `read`, `write` or `tls`; it uses generic
-I/O kinds instead of transport phase. the local follow-up  must resolve
-this before the guide can promise phase-specific behavior. See the
-[guide warning](../guides/cache.md#freshness-and-origin-failures).
+`connection-closed`, `http-status`, `protocol`, `tls`, `other`. Native transport
+classification retains the failure phase. Timeout takes precedence, followed
+by TLS handshake failure, connection closure/reset and HTTP protocol errors;
+remaining connection/read/write failures retain their phase. Permission errors
+outside TLS and unclassified errors remain `other`. HTTP statuses use a
+separate 5xx gate. See [category examples and compatibility](../guides/cache.md#choose-the-failure-categories).
+Allowing `tls` permits only reuse of an eligible previously cached response;
+certificate verification remains mandatory under the configured TLS policy.
 
 ## Memory, Disk And Storage Bins
 

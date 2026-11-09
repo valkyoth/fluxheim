@@ -12,6 +12,8 @@ import tempfile
 import threading
 import time
 
+from smoke_log_file_rotation import private_fixture, protect_directory
+
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples/cache"
@@ -140,8 +142,13 @@ def check_cli_operations(config, public, count, backend, disk_only, operations):
 def running(config, port):
     with tempfile.TemporaryFile() as log:
         command = [str(ROOT / "target/debug/fluxheim"), "--config", str(config)]
-        subprocess.run(command + ["--validate-config"], check=True, timeout=20,
-                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log)
+        try:
+            subprocess.run(command + ["--validate-config"], check=True, timeout=20,
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log)
+        except subprocess.CalledProcessError:
+            log.seek(0)
+            print(log.read(8192).decode("utf-8", errors="replace"))
+            raise
         process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
                                    stdout=subprocess.DEVNULL, stderr=log)
         try:
@@ -171,12 +178,32 @@ def running(config, port):
                     process.wait(timeout=5)
 
 
+def wait_for_storage_index(root):
+    # Windows terminate() does not run Rust destructors. Observe the normal
+    # debounced checkpoint before stopping the fixture for a restart test.
+    index = root / ".fluxheim-storage-bin-index-v1"
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            with index.open("rb") as handle:
+                contents = handle.read(1024 * 1024)
+            if b"/asset.css".hex().encode("ascii") in contents:
+                return
+        except (FileNotFoundError, PermissionError):
+            # An atomic Windows index replacement temporarily denies sharing.
+            # Persistent ACL errors still fail at the bounded deadline.
+            pass
+        time.sleep(0.05)
+    raise AssertionError("storage-bin asset checkpoint did not become visible")
+
+
 def run_case(parent, backend=None, disk_only=False, static=False, operations=False):
-    with origin_server() as (origin, count), tempfile.TemporaryDirectory(
-            prefix="cache-guide-", dir=parent) as directory:
+    with origin_server() as (origin, count), private_fixture(parent) as directory:
         root = Path(directory)
-        (root / "state/cache").mkdir(parents=True, mode=0o700)
-        (root / "site").mkdir(mode=0o700)
+        for relative in ("state", "state/cache", "site"):
+            directory = root / relative
+            directory.mkdir()
+            protect_directory(directory)
         (root / "site/asset.css").write_bytes(BODY)
         with socket.socket() as reservation:
             reservation.bind(("127.0.0.1", 0))
@@ -208,6 +235,8 @@ def run_case(parent, backend=None, disk_only=False, static=False, operations=Fal
                         assert request(public, path) != "HIT"
                     assert count(path) == 2
                 check_cli_operations(config, public, count, backend, disk_only, operations)
+            if backend == "storage-bin":
+                wait_for_storage_index(root / "state/cache")
         before_restart = count("/asset.css")
         with running(config, public):
             assert request(public) == ("HIT" if backend else "MISS")
@@ -220,9 +249,10 @@ def run_case(parent, backend=None, disk_only=False, static=False, operations=Fal
 
 
 def run_migration(parent):
-    with origin_server() as (origin, count), tempfile.TemporaryDirectory(
-            prefix="cache-migration-", dir=parent) as directory:
+    with origin_server() as (origin, count), private_fixture(parent) as directory:
         root = Path(directory)
+        (root / "state").mkdir()
+        protect_directory(root / "state")
         with socket.socket() as reservation:
             reservation.bind(("127.0.0.1", 0))
             public = reservation.getsockname()[1]
@@ -235,7 +265,8 @@ def run_migration(parent):
         )
         for expected_fills, (backend, relative, resize) in enumerate(generations, start=1):
             cache_root = root / relative
-            cache_root.mkdir(parents=True, mode=0o700)
+            cache_root.mkdir()
+            protect_directory(cache_root)
             source = replace_once(prepare(public, origin, backend, disk_only=True),
                                   'path = "state/cache"', f'path = "{relative}"')
             if resize:
@@ -246,6 +277,8 @@ def run_migration(parent):
                 assert request(public) == "MISS"
                 assert request(public) == "HIT"
                 assert count("/asset.css") == expected_fills
+                if backend == "storage-bin":
+                    wait_for_storage_index(cache_root)
             # Stop/start is deliberate: never bypass a live allocator's lease.
             with running(config, public):
                 assert request(public) == "HIT"
