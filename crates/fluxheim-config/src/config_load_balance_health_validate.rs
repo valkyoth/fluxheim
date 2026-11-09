@@ -38,6 +38,11 @@ impl LoadBalanceHealthCheckConfig {
         }
         self.validate_exec()?;
         self.validate_protocol_probe()?;
+        if self.reuse_connection && self.protocol == LoadBalanceHealthCheckProtocol::Tcp {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.reuse_connection",
+            });
+        }
         if !valid_health_check_path(&self.path) {
             return Err(ConfigError::InvalidLoadBalanceHealthCheck {
                 field: "proxy.load_balance.health_check.path",
@@ -68,7 +73,9 @@ impl LoadBalanceHealthCheckConfig {
         }
         let mut seen_request_headers = HashSet::new();
         for header in &self.request_headers {
-            if !valid_health_check_request_header(&header.name, &header.value) {
+            if !valid_health_check_request_header(&header.name, &header.value)
+                || (self.reuse_connection && header.name.eq_ignore_ascii_case("content-length"))
+            {
                 return Err(ConfigError::InvalidLoadBalanceHealthCheck {
                     field: "proxy.load_balance.health_check.request_headers",
                 });

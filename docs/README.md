@@ -183,6 +183,7 @@ qualification are different checks; see each guide's limitations and evidence.
 - [Commit 12 refreshed candidate and operator qualification](evidence/observability-12.md)
 - [Documentation and native balancing checkpoint](evidence/observability-13-15.md)
 - [TCP readiness port qualification](evidence/observability-16.md)
+- [Health-check connection reuse qualification](evidence/observability-17.md)
 - [Commit 12 native archive identities and checksums](evidence/observability-12-archives.json)
 - [Commit 12 local performance measurements](evidence/observability-12-performance.json)
 - [Commit 12 ARM performance measurements](evidence/observability-12-performance-arm.json)

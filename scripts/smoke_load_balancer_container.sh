@@ -363,3 +363,4 @@ fi
 
 echo "load-balancer container smoke passed"
 python3 "$ROOT_DIR/scripts/smoke_load_balancer_tcp_health.py" "$TMP_ROOT" --container
+python3 "$ROOT_DIR/scripts/smoke_load_balancer_reuse.py" "$TMP_ROOT" --container

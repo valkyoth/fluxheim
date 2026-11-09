@@ -2,7 +2,6 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use serde_json::Value;
@@ -13,18 +12,21 @@ use fluxheim_config::{
     LoadBalanceHealthCheckExpectedStatusRange, LoadBalanceHealthCheckProtocol, ProxyConfig,
 };
 
-use crate::backend::{FluxHealthCheck, RuntimeBackend as Backend};
-use crate::key::backend_key;
 use crate::policy::HealthDerivedWeights;
 
-use super::grpc::{
-    execute_grpc_health_check, grpc_health_request_body, validate_grpc_health_response_body,
-    validate_grpc_health_response_header,
-};
-use super::http1::execute_http1_health_check;
-use super::transport::{
-    FluxTcpHealthCheckTls, HealthTlsAlpn, configured_tcp_health_check_tls, connect_health_stream,
-};
+use super::grpc::grpc_health_request_body;
+use super::reuse_pool::Pool;
+use super::transport::{FluxTcpHealthCheckTls, HealthTlsAlpn, configured_tcp_health_check_tls};
+
+#[path = "http_check.rs"]
+mod check;
+
+#[cfg(all(
+    test,
+    any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")
+))]
+#[path = "tests_reuse_tls.rs"]
+mod tests_reuse_tls;
 
 pub(super) const HTTP_HEALTH_CHECK_MAX_BODY_BYTES: usize = 64 * 1024;
 pub(super) const HTTP_HEALTH_CHECK_MAX_HEADER_BYTES: usize = 8 * 1024;
@@ -63,66 +65,7 @@ pub(super) struct FluxHttpHealthCheck {
     pub(super) expected_body_json: Arc<[LoadBalanceHealthCheckExpectedJson]>,
     health_weight_min_percent: u8,
     health_weights: Arc<HealthDerivedWeights>,
-}
-
-#[async_trait]
-impl FluxHealthCheck for FluxHttpHealthCheck {
-    fn health_threshold(&self, success: bool) -> usize {
-        if success {
-            self.consecutive_success
-        } else {
-            self.consecutive_failure
-        }
-    }
-
-    async fn check(&self, target: &Backend) -> FluxResult<()> {
-        let mut address = target.addr;
-        if let Some(port) = self.port_override {
-            address.set_port(port);
-        }
-        let stream = connect_health_stream(
-            address,
-            self.upstream_tls,
-            self.tls.as_ref(),
-            self.connection_timeout,
-        )
-        .await?;
-
-        let (response, body) = if self.req.grpc {
-            execute_grpc_health_check(stream, &self.req, self.read_timeout).await?
-        } else {
-            execute_http1_health_check(stream, &self.req, self.read_timeout).await?
-        };
-        validate_http_health_response(
-            &response,
-            &self.expected_statuses,
-            &self.expected_status_ranges,
-            &self.expected_headers,
-        )
-        .map_err(HttpHealthCheckError::into_flux)?;
-        record_health_weight(
-            &response,
-            backend_key(target),
-            self.health_weight_min_percent,
-            &self.health_weights,
-        )
-        .map_err(HttpHealthCheckError::into_flux)?;
-
-        if self.req.grpc {
-            validate_grpc_health_response_header(&response)
-                .map_err(HttpHealthCheckError::into_flux)?;
-            validate_grpc_health_response_body(&body).map_err(HttpHealthCheckError::into_flux)?;
-        } else if self.expected_body_contains.is_empty() && self.expected_body_json.is_empty() {
-            let _ = body;
-        } else {
-            validate_http_health_response_body(&body, &self.expected_body_contains)
-                .map_err(HttpHealthCheckError::into_flux)?;
-            validate_http_health_response_body_json(&body, &self.expected_body_json)
-                .map_err(HttpHealthCheckError::into_flux)?;
-        }
-
-        Ok(())
-    }
+    pool: Option<Pool>,
 }
 
 pub(super) fn configured_http_health_check(
@@ -166,6 +109,23 @@ pub(super) fn configured_http_health_check(
                 io::Error::other(error.to_string()),
             )
         })?;
+        if config.load_balance.health_check.reuse_connection
+            && matches!(
+                name.as_str(),
+                "connection"
+                    | "content-length"
+                    | "host"
+                    | "keep-alive"
+                    | "te"
+                    | "trailer"
+                    | "transfer-encoding"
+                    | "upgrade"
+            )
+        {
+            return Err(super::reuse_connection::failure(
+                "reserved health request header",
+            ));
+        }
         let value = HeaderValue::from_str(&header.value).map_err(|error| {
             FluxError::io(
                 "append HTTP health check request header",
@@ -180,13 +140,6 @@ pub(super) fn configured_http_health_check(
             HeaderValue::from_static("application/grpc"),
         );
         headers.insert("te", HeaderValue::from_static("trailers"));
-    }
-    if config.load_balance.health_check.reuse_connection {
-        log::warn!(
-            target: "fluxheim::load_balancer",
-            "load-balancer health_check.reuse_connection is accepted for compatibility but not \
-             implemented by the native health-check client yet; checks will open a fresh connection"
-        );
     }
 
     let mut connection_timeout = Some(Duration::from_secs(1));
@@ -204,6 +157,11 @@ pub(super) fn configured_http_health_check(
     )?;
 
     Ok(Box::new(FluxHttpHealthCheck {
+        pool: config
+            .load_balance
+            .health_check
+            .reuse_connection
+            .then(Pool::default),
         consecutive_success: config.load_balance.health_check.consecutive_success,
         consecutive_failure: config.load_balance.health_check.consecutive_failure,
         upstream_tls: config.upstream_tls,

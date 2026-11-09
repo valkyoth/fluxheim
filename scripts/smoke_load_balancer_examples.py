@@ -373,6 +373,9 @@ def main():
         run_latency_case(parent, mode)
     from smoke_load_balancer_tcp_health import run_case as run_tcp_health_case
     run_tcp_health_case(parent)
+    from smoke_load_balancer_reuse import run_case as run_reuse_case
+    for reuse in (False, True):
+        run_reuse_case(parent, reuse)
 
 
 if __name__ == "__main__":

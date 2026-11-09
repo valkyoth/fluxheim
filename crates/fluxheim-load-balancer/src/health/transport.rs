@@ -25,6 +25,13 @@ pub(super) type BoxedHealthIo = Box<dyn HealthIo>;
 #[path = "tests_tcp_tls_port.rs"]
 mod tests_tcp_tls_port;
 
+#[cfg(all(
+    test,
+    any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")
+))]
+#[path = "tests_tls_roots.rs"]
+mod tests_tls_roots;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum HealthTlsAlpn {
     None,

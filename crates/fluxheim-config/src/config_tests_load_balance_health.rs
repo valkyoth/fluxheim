@@ -1,6 +1,39 @@
 use super::super::*;
 
 #[test]
+fn health_connection_reuse_requires_http_or_grpc() {
+    use crate::config_load_balance_health::{
+        LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckProtocol as Protocol,
+    };
+    for protocol in [Protocol::Tcp, Protocol::Http, Protocol::Grpc] {
+        for reuse in [false, true] {
+            let config = LoadBalanceHealthCheckConfig {
+                protocol,
+                reuse_connection: reuse,
+                ..Default::default()
+            };
+            assert_eq!(
+                config.validate().is_ok(),
+                !reuse || protocol != Protocol::Tcp
+            );
+        }
+    }
+    for protocol in [
+        Protocol::Exec,
+        Protocol::Redis,
+        Protocol::Mysql,
+        Protocol::Postgres,
+    ] {
+        let config = LoadBalanceHealthCheckConfig {
+            protocol,
+            reuse_connection: true,
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+}
+
+#[test]
 fn health_check_port_override_keeps_protocol_and_range_validation() {
     use crate::config_load_balance_health::{
         LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckProtocol as Protocol,

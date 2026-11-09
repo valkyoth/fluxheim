@@ -2195,10 +2195,13 @@ health-check body for this validation.
 `host` overrides the health-check `Host` header and TLS SNI fallback. It must
 not contain CR/LF or userinfo (`@`). `port_override` sends checks to a
 different port on the same backend address.
-Omit `port_override` to check the backend's normal port. `reuse_connection` is
-accepted for configuration compatibility with older releases, but the native
-HTTP/gRPC health-check client introduced in 1.6.17 opens a fresh bounded
-connection per probe. `connect_timeout_secs` and `read_timeout_secs` are
+Omit `port_override` to check the backend's normal port. `reuse_connection = true`
+enables bounded HTTP/1.1 or gRPC HTTP/2 connection reuse, isolated per backend and
+monitor configuration. The default `false` opens a fresh connection per probe.
+Other monitor protocols reject `true`. See the
+[reuse lifecycle and failure policy](../guides/load-balancer.md#reuse-http-and-grpc-probe-connections)
+for idle expiry, capacity, validation and cancellation behavior.
+`connect_timeout_secs` and `read_timeout_secs` are
 optional active-check overrides; when omitted, checks inherit the proxy
 upstream timeout where applicable and otherwise use Fluxheim's native
 health-check defaults.

@@ -112,7 +112,7 @@ pub(super) async fn execute_grpc_health_check(
     Ok((HealthHttpResponse { status, headers }, body))
 }
 
-async fn read_h2_health_body(
+pub(super) async fn read_h2_health_body(
     mut body: h2::RecvStream,
     read_timeout: Duration,
 ) -> FluxResult<Vec<u8>> {

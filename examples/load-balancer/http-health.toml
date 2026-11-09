@@ -16,6 +16,6 @@ expected_headers = [{ name = "x-health-state", value = "ready" }]
 expected_body_contains = ["ready"]
 expected_body_json = [{ path = "checks.database", equals = "true" }]
 health_weight_min_percent = 25
-reuse_connection = false # true is accepted but does not reuse native connections.
+reuse_connection = false # Set true for bounded HTTP/1.1 keep-alive probes.
 connect_timeout_secs = 1
 read_timeout_secs = 2

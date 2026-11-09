@@ -27,6 +27,9 @@ futures = "0.3.34"
 getrandom = "0.4.3"
 h2 = "0.4.20"
 http = "1.5.0"
+http-body-util = "0.1.5"
+hyper = { version = "1.12.0", default-features = false, features = ["client", "http1"] }
+hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
 log = "0.4.34"
 openssl = { version = "0.10.81", optional = true }
 ring = "0.17.14"

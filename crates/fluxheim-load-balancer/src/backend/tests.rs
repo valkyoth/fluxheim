@@ -11,6 +11,9 @@ use super::{
 use crate::key::backend_key;
 use fluxheim_common::{FluxError, FluxResult};
 
+#[path = "tests_health_lifecycle.rs"]
+mod health_lifecycle;
+
 struct TestDiscovery {
     backends: Arc<Mutex<FluxBackendSet>>,
     fail: Arc<Mutex<bool>>,

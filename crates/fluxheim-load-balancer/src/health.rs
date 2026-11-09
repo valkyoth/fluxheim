@@ -17,6 +17,8 @@ mod exec;
 mod grpc;
 mod http;
 mod http1;
+mod reuse_connection;
+mod reuse_pool;
 mod transport;
 
 #[cfg(test)]
@@ -56,6 +58,18 @@ pub(super) fn configured_health_check(
 ) -> io::Result<Box<dyn FluxHealthCheck>> {
     #[cfg(test)]
     crate::install_test_crypto_provider();
+
+    if config.load_balance.health_check.reuse_connection
+        && !matches!(
+            config.load_balance.health_check.protocol,
+            LoadBalanceHealthCheckProtocol::Http | LoadBalanceHealthCheckProtocol::Grpc
+        )
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "health-check connection reuse requires HTTP or gRPC",
+        ));
+    }
 
     match config.load_balance.health_check.protocol {
         LoadBalanceHealthCheckProtocol::Tcp => {
@@ -107,6 +121,10 @@ mod tests_exec;
 mod tests_grpc;
 #[cfg(test)]
 mod tests_http;
+#[cfg(test)]
+mod tests_reuse;
+#[cfg(test)]
+mod tests_reuse_fixture;
 #[cfg(test)]
 mod tests_tcp;
 #[cfg(test)]

@@ -256,15 +256,64 @@ A successful TCP/TLS probe does not prove HTTP application readiness. Choose
 an HTTP or gRPC monitor when that is required. Exec and database monitors do
 not accept `port_override`.
 
-`reuse_connection = true` is accepted but does not currently reuse connections
-in the native health client.
-
 Exec helpers run as the Fluxheim service identity, without a shell and with a
 restricted environment. They receive backend address/host/port through
 `FLUXHEIM_HEALTH_BACKEND_ADDR`, `FLUXHEIM_HEALTH_BACKEND_HOST` and
 `FLUXHEIM_HEALTH_BACKEND_PORT`. They are trusted local programs, **not sandboxed
 plugins**. Keep secrets out of arguments; helpers should read protected files.
 Do not depend on timeout handling to contain arbitrary helper descendants.
+
+### Reuse HTTP And gRPC Probe Connections
+
+By default, every health probe opens a fresh connection. To reuse connections,
+add this to an HTTP or gRPC health-check table:
+
+```toml
+[proxy.load_balance.health_check]
+enabled = true
+protocol = "http" # Or "grpc" for the standard gRPC Health service.
+path = "/healthz"
+interval_secs = 5
+consecutive_success = 2
+consecutive_failure = 3
+reuse_connection = true
+connect_timeout_secs = 1
+read_timeout_secs = 2
+```
+
+HTTP uses HTTP/1.1 keep-alive; gRPC uses successive streams on one HTTP/2
+connection. TLS certificate and hostname verification remain enabled when the
+upstream uses TLS. Reuse is not supported for TCP, exec or database probes;
+those protocols reject `reuse_connection = true`.
+
+Each pool keeps at most one connection or in-flight probe per backend, with a
+maximum of 256 slots. Different backends, pools and TLS configurations do not
+share connections, even when a `port_override` points them at the same readiness
+listener. Concurrent probes for the same backend fail admission instead of
+opening extra sockets or accumulating waiters. `parallel = true` can still probe
+different members concurrently.
+
+Idle connections expire after 30 seconds; connections older than five minutes
+are retired before reuse. Idle cleanup runs once per second. A long probe
+interval may therefore prevent reuse. The connection is returned only after the
+complete bounded response, including trailers and configured health matchers,
+passes validation. HTTP HEAD responses do not require a body. Response bodies
+are limited to 64 KiB and response header/trailer parsing is bounded.
+Do not set `Content-Length` in `request_headers` with reuse enabled; the client
+owns request framing and rejects that override.
+
+A timeout, malformed/incomplete response, failed health result, cancellation or
+server-requested closure discards the connection. Removed/retargeted members
+lose their cached connections; replacing the monitor configuration creates a
+separate pool, and shutdown closes the pool. Reusable exchanges have one
+`read_timeout_secs` deadline covering request write, response and trailers,
+rather than restarting that deadline for every body fragment.
+
+There is no automatic resend after an exchange fails. An idle peer close or
+HTTP/2 GOAWAY can therefore cause one failed scheduled probe before a subsequent
+probe reconnects. Use suitable consecutive-failure thresholds rather than
+assuming every transport interruption should immediately remove a member.
+Setting `reuse_connection = false` preserves fresh-per-probe behavior.
 
 ## Passive Health, Slow Start And Queueing
 

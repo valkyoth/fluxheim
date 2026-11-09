@@ -39,6 +39,10 @@ pub(super) trait FluxHealthCheck: Send + Sync + 'static {
 
     fn health_threshold(&self, success: bool) -> usize;
 
+    fn update_backends(&self, _backends: &std::collections::BTreeSet<RuntimeBackend>) {}
+
+    fn close_connections(&self) {}
+
     async fn health_status_change(&self, _target: &RuntimeBackend, _healthy: bool) {}
 
     fn backend_summary(&self, target: &RuntimeBackend) -> String {
@@ -56,6 +60,16 @@ pub struct FluxLoadBalancerRuntime {
     update_frequency: Option<Duration>,
     health_check_frequency: Option<Duration>,
     parallel_health_check: bool,
+}
+
+struct CloseHealthConnections<'a>(&'a Option<Arc<dyn FluxHealthCheck>>);
+
+impl Drop for CloseHealthConnections<'_> {
+    fn drop(&mut self) {
+        if let Some(check) = self.0 {
+            check.close_connections();
+        }
+    }
 }
 
 impl FluxLoadBalancerRuntime {
@@ -114,10 +128,10 @@ impl FluxLoadBalancerRuntime {
                 }
                 next_health.insert(key, backend_health);
             }
-            self.snapshot.store(Arc::new(FluxBackendSnapshot {
+            self.publish_snapshot(FluxBackendSnapshot {
                 backends: Arc::new(new_backends),
                 health: Arc::new(next_health),
-            }));
+            });
         } else {
             for (key, enabled) in enablement {
                 if let Some(backend_health) = snapshot.health.get(&key) {
@@ -126,6 +140,13 @@ impl FluxLoadBalancerRuntime {
             }
         }
         Ok(())
+    }
+
+    fn publish_snapshot(&self, snapshot: FluxBackendSnapshot) {
+        if let Some(check) = &self.health_check {
+            check.update_backends(&snapshot.backends);
+        }
+        self.snapshot.store(Arc::new(snapshot));
     }
 
     fn record_discovery_result(&self, result: &FluxResult<()>) {
@@ -228,10 +249,10 @@ impl FluxLoadBalancerRuntime {
         let mut next_health = (*snapshot.health).clone();
         next_health.entry(key).or_default();
         let backend_count = next_backends.len();
-        self.snapshot.store(Arc::new(FluxBackendSnapshot {
+        self.publish_snapshot(FluxBackendSnapshot {
             backends: Arc::new(next_backends),
             health: Arc::new(next_health),
-        }));
+        });
         Ok(backend_count)
     }
 
@@ -270,10 +291,10 @@ impl FluxLoadBalancerRuntime {
         let mut next_health = (*snapshot.health).clone();
         next_health.remove(&key);
         let backend_count = next_backends.len();
-        self.snapshot.store(Arc::new(FluxBackendSnapshot {
+        self.publish_snapshot(FluxBackendSnapshot {
             backends: Arc::new(next_backends),
             health: Arc::new(next_health),
-        }));
+        });
         Ok(backend_count)
     }
 
@@ -328,10 +349,10 @@ impl FluxLoadBalancerRuntime {
             next_health.entry(updated_key).or_default();
         }
         let backend_count = next_backends.len();
-        self.snapshot.store(Arc::new(FluxBackendSnapshot {
+        self.publish_snapshot(FluxBackendSnapshot {
             backends: Arc::new(next_backends),
             health: Arc::new(next_health),
-        }));
+        });
         Ok(backend_count)
     }
 
@@ -340,6 +361,7 @@ impl FluxLoadBalancerRuntime {
         mut shutdown: crate::background::FluxShutdown,
         mut ready: crate::background::FluxBackgroundReady,
     ) {
+        let _close_connections = CloseHealthConnections(&self.health_check);
         const NEVER: Duration = Duration::from_secs(u32::MAX as u64);
         let mut now = Instant::now();
         let mut next_update = now;
@@ -360,7 +382,11 @@ impl FluxLoadBalancerRuntime {
             ready.notify_ready();
 
             if next_health_check <= now {
-                self.run_health_check(self.parallel_health_check).await;
+                tokio::select! {
+                    biased;
+                    _ = shutdown.wait_for_shutdown() => return,
+                    _ = self.run_health_check(self.parallel_health_check) => {}
+                }
                 next_health_check =
                     checked_next_wake(now, self.health_check_frequency.unwrap_or(NEVER));
             }
@@ -414,11 +440,7 @@ impl FluxLoadBalancerRuntime {
         let snapshot = self.snapshot.load_full();
         if parallel {
             let jobs = snapshot.backends.iter().cloned().map(|backend| {
-                tokio::spawn(check_one(
-                    backend,
-                    health_check.clone(),
-                    Arc::clone(&snapshot.health),
-                ))
+                check_one(backend, health_check.clone(), Arc::clone(&snapshot.health))
             });
             let _ = future::join_all(jobs).await;
         } else {

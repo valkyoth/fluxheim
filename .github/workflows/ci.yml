@@ -97,6 +97,7 @@ jobs:
       - run: python3 scripts/test_routing_examples.py
       - run: python3 scripts/test_load_balancer_retry_examples.py
       - run: python3 scripts/test_load_balancer_tcp_health.py
+      - run: python3 scripts/test_load_balancer_reuse.py
       - run: python3 scripts/test_proxy_hooks.py
       - run: python3 scripts/test_proxy_transport.py
       - run: python3 scripts/test_protocol_examples.py
