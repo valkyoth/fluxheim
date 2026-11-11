@@ -3,8 +3,9 @@ use tokio::net::TcpListener;
 use crate::NativeHttp1RouteProxy;
 
 use super::{
-    downstream_get, native_proxy_disk_cache_config, native_proxy_tiered_cache_config, proxy_for,
-    response_header, route_proxy_listener, upstream_cacheable_once_with_max_age,
+    downstream_get, downstream_request, native_proxy_disk_cache_config,
+    native_proxy_tiered_cache_config, proxy_for, response_header, route_proxy_listener,
+    upstream_cacheable_once_with_max_age,
 };
 
 const DISK_CACHE_SATURATION_CHILD: &str = "FLUXHEIM_DISK_CACHE_SATURATION_CHILD";
@@ -30,6 +31,21 @@ async fn disk_cache_saturation_child_process() {
     assert_eq!(
         response_header(&response, "x-cache-status").as_deref(),
         Some("BYPASS")
+    );
+    let mut slice_config = cache.clone();
+    slice_config.range.enabled = true;
+    slice_config.range.slice.enabled = true;
+    slice_config.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(4);
+    let slice_listener = route_proxy_listener(NativeHttp1RouteProxy::new(
+        Vec::new(),
+        Some(proxy_for(unavailable_origin).with_proxy_cache_config(&slice_config)),
+    ))
+    .await;
+    let response = downstream_request(slice_listener, "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nRange: bytes=0-3\r\nConnection: close\r\n\r\n").await;
+    assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert_eq!(
+        response_header(&response, "x-cache-reason").as_deref(),
+        Some("disk-cache-saturated")
     );
     drop(permits);
 

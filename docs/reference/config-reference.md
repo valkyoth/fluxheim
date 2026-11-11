@@ -2708,8 +2708,9 @@ to avoid poisoning complete-object entries. Without slice caching,
 `cache.max_object_bytes`.
 
 See [range caching](../guides/cache-ranges.md) before enabling slices: native
-slice storage is memory-only and fills currently bypass load-balancer selection
-. Use one fixed origin for the documented recipe.
+slices use the configured memory/filesystem/storage-bin tiers, including disk
+encryption. Fills still bypass load-balancer selection; use one fixed origin
+for the documented recipe.
 `[cache.range.slice]` enables the fixed-slice range cache. Fluxheim
 normalizes client ranges into fixed-size slices, stores each slice under a
 slice-specific key, and can compose fresh compatible slices into single-range,

@@ -56,15 +56,8 @@ struct NativeDiskCachePurgeTarget {
 impl NativeDiskCache {
     fn purge_primary(&self, primary_key: &str, combined_key: &str) -> bool {
         let mut purged = self.remove_combined(combined_key);
-        let variant_keys = self.with_state(|state| {
-            state
-                .variants
-                .get(primary_key)
-                .into_iter()
-                .flatten()
-                .map(|variant| variant.key.clone())
-                .collect::<Vec<_>>()
-        });
+        let variant_keys =
+            self.with_state(|state| state.purge_index.combined_keys_for_primary(primary_key));
         for variant_key in variant_keys {
             purged |= self.remove_combined(&variant_key);
         }

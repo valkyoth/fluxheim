@@ -11,7 +11,7 @@ small images or CSS files.
 | Mode | What the native proxy does | Current limitation |
 | --- | --- | --- |
 | Full-object cache plus bounded Range | Can serve a single `bytes=start-end` window from an already-cached full body | An uncached range request bypasses normal cache fill (`range-miss`); do not expect automatic partial-object warming |
-| Fixed-slice cache | Fetches normalized ranges, validates them, then assembles the requested bytes | Slices are memory-only today, even when the general policy also enables disk |
+| Fixed-slice cache | Fetches normalized ranges, validates them, then assembles the requested bytes | Uses configured memory/filesystem/storage-bin tiers; assembly still buffers bytes in process memory |
 | Local static files | Applies the file server's conditional/range behavior | Separate from proxy slices; see the local-static guide |
 
 The normal proxy full-body path and fixed-slice path are not interchangeable.
@@ -21,7 +21,8 @@ entries are warm. Tests should issue the actual Range requests used by clients.
 ## Configure A Slice Route
 
 The complete [slice example](../../examples/cache-slice-range.toml) uses one
-fixed loopback origin, a 512 MiB memory tier, a 2 MiB maximum object, and:
+fixed loopback origin, a 512 MiB memory tier plus filesystem disk, a 2 MiB
+maximum object, and:
 
 ```toml
 [vhosts.cache.range]
@@ -48,6 +49,7 @@ For example, serve an immutable `demo.bin` through another Fluxheim static-file
 listener, or use an existing tested HTTP range origin. Then run:
 
 ```sh
+install -d -m 0700 state/slices
 fluxheim --config examples/cache-slice-range.toml --validate-config
 fluxheim --config examples/cache-slice-range.toml
 curl -i -H 'Host: slice-cache.example.test' -H 'Range: bytes=0-1023' http://127.0.0.1:8080/demo.bin
@@ -96,30 +98,58 @@ protection also applies. `fill_missing = false` allows use of existing slices
 but prevents this path from obtaining missing ones; a cold cache therefore
 cannot be populated by slice requests. It does not block ordinary origin proxying.
 
-## Current Runtime Gaps
+## Storage And Recovery
 
-- **Current limitation:** slice lookup/store uses the in-memory object map,
-  not either disk backend. Tiered slices go cold after restart; disk-only mode
-  cannot retain them because its memory budget is zero. Enabling disk encryption
-  does not make in-memory slices encrypted or persistent. The example therefore
-  uses memory only until persistent slice storage is implemented and qualified.
+Slices use the same bounded storage backends, encryption and recovery rules as
+complete proxy objects. To retain slices without a memory cache, change the
+example's memory table to `enabled = false`; disk must remain enabled. Disk-only
+means no retained memory entries, not zero working memory for responses.
+
+For storage bins, replace the example's disk backend with `"storage-bin"` and
+use a fresh directory with a compatible [storage-bin layout](cache-backends.md).
+[Disk encryption](cache-encryption.md) protects persisted slices using the same
+provider as other objects. The local-key provider is covered by slice-specific
+native restart tests; OpenBao uses the shared encryption implementation and its
+separate provider tests, not a slice-specific live OpenBao qualification.
+
+Each range/variant has its own key and contributes to the disk capacity and purge
+index. Exact-object and scoped path/tag purges include slices. Slices cannot be
+returned as a complete object. Tiered fills write both eligible tiers; disk hits
+are read through without retaining another memory copy. A slice too large for
+the memory budget can still fit on disk. A full disk or rejected store can serve
+the validated current origin response without retaining it for the next request.
+
+Restart retains only successfully persisted, still-fresh slices. Filesystem
+recovery discovers accepted object files; storage bins require the persisted
+index and compatible layout. Abrupt shutdown can lose recent uncheckpointed bin
+entries. Missing/corrupt entries are cache misses, not partial hits. A saturated
+disk-worker admission limit returns `503` rather than starting unbounded work.
+See [recovery](cache-recovery.md) for operational limits.
+
+## Upstream Selection Limit
+
 - **Current limitation:** slice origin fetches use the static upstream-slot
   loop, not load-balancer selection/admission. Do not combine slice fills with
   health/drain/persistence/queue policies and assume those policies govern them.
   Discovery-only pools have no configured static origin and are not supported
   by this slice path. Use a single fixed origin until the integration is repaired.
 
-These are pending runtime corrections, not promises fulfilled by parsing the
-configuration. Neither issue is fixed by this documentation batch.
+Persistent storage does not change this separate upstream-selection limitation.
 
 ## Verification And Diagnosis
 
 `sh scripts/smoke_proxy_cache.sh` exercises a real range origin and native
 Fluxheim, including range hits, slice composition and limits. Native server
 range tests cover inconsistent identity, variance, collapsed fills and timeout
-handling. The documentation characterization test demonstrates the current
-filesystem and storage-bin slice restart gap rather than claiming persistence.
+handling. The cross-platform persistence smoke starts a real counted range
+origin, fills two language variants, restarts Fluxheim, and checks exact bodies
+and unchanged origin counts on both disk backends with and without memory:
+
+```sh
+cargo build --locked --no-default-features --features profile-load-balancer,acme-client --bin fluxheim
+python3 scripts/smoke_slice_storage.py target
+```
 
 When a slice misses repeatedly, inspect `x-cache-reason`, origin `Content-Range`,
-body length, identity encoding, freshness, Vary coverage and available memory.
+body length, identity encoding, freshness, Vary coverage and tier capacity.
 A 206 by itself proves only partial HTTP delivery, not cache admission.

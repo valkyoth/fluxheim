@@ -101,14 +101,13 @@ async fn peer_fill_does_not_store_missing_custom_variant() {
 }
 
 #[tokio::test]
-async fn documented_tiered_slices_currently_do_not_survive_cache_restart() {
+async fn tiered_slices_survive_cache_restart() {
     for backend in [
         fluxheim_config::CacheDiskBackend::Filesystem,
         fluxheim_config::CacheDiskBackend::StorageBin,
     ] {
         let root = tempfile::tempdir().unwrap();
         let origin = upstream_slice_response_sequence(&[
-            ("/asset.png", "bytes=0-3", "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\ncontent-range: bytes 0-3/8\r\netag: \"one\"\r\ncontent-length: 4\r\n\r\n0123"),
             ("/asset.png", "bytes=0-3", "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\ncontent-range: bytes 0-3/8\r\netag: \"one\"\r\ncontent-length: 4\r\n\r\n0123"),
         ])
         .await;
@@ -119,14 +118,14 @@ async fn documented_tiered_slices_currently_do_not_survive_cache_restart() {
         cache.range.slice.enabled = true;
         cache.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(4);
         let request = "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nRange: bytes=0-3\r\nConnection: close\r\n\r\n";
-        for _ in 0..2 {
+        for restart in 0..2 {
             let (listener, shutdown, task) =
                 route_proxy_listener_with_shutdown(NativeHttp1RouteProxy::new(
                     Vec::new(),
                     Some(proxy_for(origin).with_proxy_cache_config(&cache)),
                 ))
                 .await;
-            for expected in ["MISS", "HIT"] {
+            for expected in [if restart == 0 { "MISS" } else { "HIT" }, "HIT"] {
                 let response = tokio::time::timeout(
                     Duration::from_secs(5),
                     downstream_request(listener, request),

@@ -2,13 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::native_http1_cache::{
-    NativeMemoryCacheEntry, lock_native_memory_cache, native_cache_entry_weight, native_cache_ttl,
-    native_response_header_map, prune_native_memory_cache, remove_native_memory_cache_entry,
+    NativeMemoryCacheEntry, native_cache_entry_weight, native_cache_ttl, native_response_header_map,
 };
 use crate::native_http1_proxy::NativeHttp1Proxy;
-use crate::native_http1_proxy_cache_fill::{
-    NativeCacheFillGate, NativeCacheFillWaitBudget, NativeCacheFillWaitTimeout,
-};
+use crate::native_http1_proxy_cache_fill::{NativeCacheFillGate, NativeCacheFillWaitBudget};
 use crate::native_http1_proxy_cache_headers::{
     cached_proxy_headers, native_response_cache_tags, native_vary_cache_key,
 };
@@ -29,13 +26,17 @@ use fluxheim_cache::{
 
 use super::NativeProxyMemoryCache;
 
+#[cfg(test)]
+#[path = "slice_storage_tests.rs"]
+mod storage_tests;
+
 impl NativeProxyMemoryCache {
     pub(crate) async fn slice_response(
         &self,
         request: &NativeHttp1Request,
         proxy: &NativeHttp1Proxy,
         #[cfg(feature = "wasm")] key_components: &[super::NativeProxyCacheKeyComponent],
-    ) -> Result<Option<NativeCacheSliceResponse>, NativeCacheFillWaitTimeout> {
+    ) -> Result<Option<NativeCacheSliceResponse>, &'static str> {
         if !self.config.range.enabled || !self.config.range.slice.enabled {
             return Ok(None);
         }
@@ -135,7 +136,7 @@ impl NativeProxyMemoryCache {
         request: &NativeHttp1Request,
         proxy: &NativeHttp1Proxy,
         slice_size: u64,
-    ) -> Result<Option<(u64, NativeCacheSliceObject, bool)>, NativeCacheFillWaitTimeout> {
+    ) -> Result<Option<(u64, NativeCacheSliceObject, bool)>, &'static str> {
         let first_bounds = CacheSliceBounds {
             start: 0,
             end: slice_size.saturating_sub(1),
@@ -156,9 +157,9 @@ impl NativeProxyMemoryCache {
         request: &NativeHttp1Request,
         proxy: &NativeHttp1Proxy,
         bounds: CacheSliceBounds,
-    ) -> Result<Option<(NativeCacheSliceObject, bool)>, NativeCacheFillWaitTimeout> {
+    ) -> Result<Option<(NativeCacheSliceObject, bool)>, &'static str> {
         let key = native_slice_cache_key(base_key, bounds.range_request());
-        if let Some(slice) = self.lookup_cached_slice(&key) {
+        if let Some(slice) = self.lookup_cached_slice(&key, bounds).await? {
             return Ok(Some((slice, false)));
         }
         if !self.config.range.slice.fill_missing {
@@ -171,9 +172,9 @@ impl NativeProxyMemoryCache {
                 NativeCacheFillGate::Writer(permit) => break Some(permit),
                 NativeCacheFillGate::Waiter(waiter) => {
                     if !wait_budget.wait(waiter).await {
-                        return Err(NativeCacheFillWaitTimeout);
+                        return Err("lock-wait-timeout");
                     }
-                    if let Some(slice) = self.lookup_cached_slice(&key) {
+                    if let Some(slice) = self.lookup_cached_slice(&key, bounds).await? {
                         return Ok(Some((slice, false)));
                     }
                 }
@@ -182,35 +183,22 @@ impl NativeProxyMemoryCache {
         let Some(_origin_permit) = self.acquire_origin_fill_permit() else {
             return Ok(None);
         };
-        if let Some(slice) = self.lookup_cached_slice(&key) {
+        if let Some(slice) = self.lookup_cached_slice(&key, bounds).await? {
             return Ok(Some((slice, false)));
         }
         let Some(response) = proxy.fetch_origin_slice(request, bounds).await else {
             return Ok(None);
         };
-        let Some(slice) = self.store_origin_slice(primary_key, &key, request, bounds, &response)
+        let Some(slice) = self
+            .store_origin_slice(primary_key, &key, request, bounds, &response)
+            .await
         else {
             return Ok(None);
         };
         Ok(Some((slice, true)))
     }
 
-    fn lookup_cached_slice(&self, key: &str) -> Option<NativeCacheSliceObject> {
-        let now = std::time::Instant::now();
-        let mut state = lock_native_memory_cache(&self.state, "proxy");
-        match state.objects.get(key) {
-            Some(entry) if entry.expires_at > now => native_slice_object_from_entry(entry.clone()),
-            Some(entry) => {
-                let weight = entry.weight;
-                remove_native_memory_cache_entry(&mut state, key);
-                state.bytes = state.bytes.saturating_sub(weight);
-                None
-            }
-            None => None,
-        }
-    }
-
-    fn store_origin_slice(
+    async fn store_origin_slice(
         &self,
         primary_key: &str,
         key: &str,
@@ -251,10 +239,12 @@ impl NativeProxyMemoryCache {
         let (expires_at, stale_while_revalidate_until, stale_if_error_until) =
             native_cache_expiry_times(now, ttl, stale_while_revalidate_secs, stale_if_error_secs)?;
         let body_len = response.body().len() as u64;
-        if body_len > self.config.range.slice.size_bytes.as_u64() || body_len > self.max_bytes {
+        if body_len > self.config.range.slice.size_bytes.as_u64()
+            || body_len > self.config.max_object_bytes.as_u64()
+        {
             return None;
         }
-        let mut entry = NativeMemoryCacheEntry {
+        let entry = NativeMemoryCacheEntry {
             status: response.status(),
             reason: response.reason().to_owned(),
             headers: cached_proxy_headers(response, &self.config),
@@ -271,28 +261,9 @@ impl NativeProxyMemoryCache {
             weight: native_cache_entry_weight(key, response, body_len),
         };
         let slice = native_slice_object_from_entry(entry.clone())?;
-        entry.weight = native_cache_entry_weight(key, response, body_len);
         let cache_tags = native_response_cache_tags(response, &self.config);
-        let needs_prune = {
-            let mut state = lock_native_memory_cache(&self.state, "proxy");
-            if let Some(previous) = remove_native_memory_cache_entry(&mut state, key) {
-                state.bytes = state.bytes.saturating_sub(previous.weight);
-            }
-            state.bytes = state.bytes.saturating_add(entry.weight);
-            state.purge_index.insert_with_path_and_tags(
-                key.to_owned(),
-                primary_key.to_owned(),
-                self.user_tag(),
-                Some(request.path().to_owned()),
-                cache_tags,
-            );
-            state.objects.insert(key.to_owned(), entry);
-            state.bytes > self.max_bytes
-        };
-        if needs_prune {
-            let mut state = lock_native_memory_cache(&self.state, "proxy");
-            prune_native_memory_cache(&mut state, self.max_bytes);
-        }
+        self.store_slice_entry(primary_key, key, request.path(), cache_tags, entry)
+            .await;
         Some(slice)
     }
 }

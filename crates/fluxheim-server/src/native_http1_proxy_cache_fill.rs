@@ -45,9 +45,6 @@ pub(crate) struct NativeCacheFillWaitBudget {
     deadline: Option<tokio::time::Instant>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct NativeCacheFillWaitTimeout;
-
 #[derive(Debug)]
 pub(crate) struct NativeCacheFillPermit {
     state: Arc<Mutex<NativeMemoryCacheState>>,

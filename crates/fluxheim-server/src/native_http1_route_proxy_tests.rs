@@ -33,6 +33,8 @@ mod cache_peer_variants;
 mod cache_range_tests;
 #[path = "native_http1_route_proxy_tests/cache_saturation.rs"]
 mod cache_saturation_tests;
+#[path = "native_http1_route_proxy_tests/cache_slice_storage.rs"]
+mod cache_slice_storage;
 #[path = "native_http1_route_proxy_tests/cache_storage.rs"]
 mod cache_storage_tests;
 #[path = "native_http1_route_proxy_tests/compression_response.rs"]

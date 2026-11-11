@@ -339,9 +339,9 @@ impl NativeDiskCache {
                         accessed_at: SystemTime::now(),
                     },
                 );
-                if key.vary_fields.is_empty() {
+                if key.vary_fields.is_empty() && key.combined == key.primary {
                     state.variants.remove(&key.primary);
-                } else {
+                } else if !key.vary_fields.is_empty() {
                     let variants = state.variants.entry(key.primary).or_default();
                     variants.retain(|variant| variant.key != key.combined);
                     variants.push(NativeMemoryCacheVariant {
@@ -423,7 +423,7 @@ impl NativeDiskCache {
         }
     }
 
-    fn get_combined(&self, combined_key: &str) -> Option<NativeMemoryCacheEntry> {
+    pub(crate) fn get_combined(&self, combined_key: &str) -> Option<NativeMemoryCacheEntry> {
         let record = self.with_state(|state| state.objects.get(combined_key).cloned())?;
         let object = match self.read_record(&record) {
             Ok(object) => object,

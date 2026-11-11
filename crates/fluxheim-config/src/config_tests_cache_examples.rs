@@ -131,7 +131,15 @@ fn cache_guide_advanced_checked_in_examples_validate() {
                 .unwrap_or_else(|error| panic!("{name}: {error}"));
         }
         if name == "slice" {
-            assert!(config.vhosts[0].cache.memory.enabled && !config.vhosts[0].cache.disk.enabled);
+            assert!(config.vhosts[0].cache.memory.enabled && config.vhosts[0].cache.disk.enabled);
+            assert_eq!(
+                config.vhosts[0].cache.disk.backend,
+                crate::CacheDiskBackend::Filesystem
+            );
+            assert_eq!(
+                config.vhosts[0].cache.disk.path.as_deref(),
+                Some(root.as_path())
+            );
             assert_eq!(config.vhosts[0].proxy.upstreams.len(), 1);
         }
         fs::remove_dir_all(root).unwrap();

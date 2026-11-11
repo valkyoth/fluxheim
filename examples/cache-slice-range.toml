@@ -1,5 +1,5 @@
-# Native slices currently live in memory only. Use one fixed origin until the
-# documented slice storage and load-balancer integration gaps are corrected.
+# Persistent slices with one fixed origin. Create state/slices as a private
+# service-owned directory. See docs/guides/cache-ranges.md for tier alternatives.
 [server]
 listen = ["127.0.0.1:8080"]
 default_vhost = "slice-cache.example.test"
@@ -41,7 +41,10 @@ enabled = true
 max_size_bytes = "512MiB"
 
 [vhosts.cache.disk]
-enabled = false
+enabled = true
+backend = "filesystem"
+path = "state/slices"
+max_size_bytes = "2GiB"
 
 [vhosts.cache.lock]
 enabled = true

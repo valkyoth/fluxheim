@@ -34,6 +34,7 @@ mod disk;
 mod lookup;
 mod peer_fill;
 mod slice;
+mod slice_storage;
 mod store;
 
 static NATIVE_PROXY_CACHE_ID: AtomicUsize = AtomicUsize::new(0);

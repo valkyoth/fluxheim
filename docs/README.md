@@ -186,6 +186,7 @@ qualification are different checks; see each guide's limitations and evidence.
 - [Health-check connection reuse qualification](evidence/observability-17.md)
 - [Stale-cache error classification qualification](evidence/observability-18.md)
 - [Peer cache variant qualification](evidence/observability-19.md)
+- [Persistent range slice qualification](evidence/observability-20.md)
 - [Commit 12 native archive identities and checksums](evidence/observability-12-archives.json)
 - [Commit 12 local performance measurements](evidence/observability-12-performance.json)
 - [Commit 12 ARM performance measurements](evidence/observability-12-performance-arm.json)

@@ -171,7 +171,7 @@ rate limiter or a guarantee of end-user latency.
 | `range.slice.fill_missing` | `true` | Permit origin fetches for missing slices |
 
 See the [range guide](../guides/cache-ranges.md) for validator/variance rules
-and current memory-only slice storage and upstream-selection limitations
+and persistent slice storage, memory use and upstream-selection limitations
 . Peer settings live under `peer_fill`; the
 [peer guide](../guides/cache-peer-fill.md) covers every field, supported public
 variant selectors and the version-2 coordinated-upgrade requirement. Encryption options and key

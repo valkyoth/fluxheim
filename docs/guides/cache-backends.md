@@ -21,15 +21,14 @@ commands and [recovery](cache-recovery.md) for stop/start and layout changes.
 | Memory plus disk | Both tiers enabled, either disk backend | Hot copies in memory, persistent copies on disk | Memory starts cold; eligible disk hits can repopulate it |
 
 Native local/static caching requires memory enabled and disk disabled.
-Fixed-slice proxy caching is also currently memory-only, even when the ordinary
-object policy has a disk tier. Slice fills have separate upstream-selection
-limits. See [range caching](cache-ranges.md), the documented limitation; selecting a disk
-backend does not resolve them.
+Fixed-slice proxy caching supports memory, disk-only and tiered policies with
+either disk backend, including disk encryption. Slice fills still have separate
+upstream-selection limits; see [range caching](cache-ranges.md).
 
 Cache state is local to a runtime policy/process, not a shared distributed
 database. [Peer fill](cache-peer-fill.md) fetches responses from peers; it does
-not replicate allocator state or provide cluster-wide purge. Its variant-context
-limitation remains the documented limitation.
+not replicate allocator state or provide cluster-wide purge. Review the explicit
+variant selection and version-2 compatibility rules in that guide.
 
 ### Try Each Backend
 

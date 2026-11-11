@@ -128,11 +128,18 @@ impl NativeHttp1Proxy {
                         );
                     }
                     Ok(None) => {}
-                    Err(_) => {
+                    Err(reason) => {
                         cache.record_policy_activity("error");
-                        return self.finish_cache_fill_wait_timeout(
+                        return self.finish_response(
                             &request,
-                            &cache.config,
+                            NativeHttp1Response::new(
+                                503,
+                                "Service Unavailable",
+                                b"slice cache unavailable\n",
+                            )
+                            .with_retry_after_secs(1)
+                            .close_connection(),
+                            Some((&cache.config, "BYPASS", Some(reason), None)),
                             #[cfg(any(
                                 feature = "compression-brotli",
                                 feature = "compression-gzip",

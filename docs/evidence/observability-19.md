@@ -1,9 +1,9 @@
 # Peer Cache Variant Qualification
 
 Local qualification: 2026-11-11. Commit 19 follows
-`a6edc73aa69136998f957d83eecfafc5c8c5c246`. Implementation and local tests are
-complete; independent pentest and exact-commit GitHub acceptance remain pending.
-This is not final release qualification.
+`a6edc73aa69136998f957d83eecfafc5c8c5c246`. The owner supplied a clean
+pentest through `ea7108f5`, reported GitHub green and authorized Commit 20.
+This is acceptance for progression, not final release qualification.
 
 ## Delivered
 

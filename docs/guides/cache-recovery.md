@@ -38,7 +38,7 @@ or removing an allocator lock to force startup. See the
 | Layout contract | Existing safe directory and compatible object format | `.fluxheim-storage-bin-v1` must match configured layout |
 | Index persistence | Native runtime does not use `.fluxheim-disk-index-v1` | Debounced index writes, normally no more than once per second per root; final flush is best-effort |
 | Memory entries and in-flight fills | Not durable | Not durable |
-| Fixed slices | Currently memory-only | Currently memory-only |
+| Fixed slices | Recover fresh validated slice objects from encoded files | Recover fresh validated slices referenced by the persisted index |
 
 Healthy disk recovery rebuilds object, variant and purge metadata from accepted
 records and prunes tracked objects over budget. A returned HIT after restart

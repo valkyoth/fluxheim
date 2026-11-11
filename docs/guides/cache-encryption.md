@@ -31,8 +31,8 @@ memory-plus-disk cache, memory hits stay fast and the persisted disk copy is
 encrypted at rest.
 
 This applies to native reverse-proxy disk objects. Native local/static caching
-is memory-only and cannot use this encrypted disk tier. Fixed slices also have
-a pending persistent-storage gap; see [range caching](cache-ranges.md).
+is memory-only and cannot use this encrypted disk tier. Fixed proxy slices use
+the same encrypted disk backends; see [range caching](cache-ranges.md).
 
 Native runtime status: the native HTTP/1 proxy cache supports local-key and
 OpenBao Transit encrypted `backend = "filesystem"` and `backend =

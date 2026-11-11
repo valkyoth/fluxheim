@@ -35,11 +35,12 @@ class CacheGuideTests(unittest.TestCase):
         current, history = guide.split("## Historical Memory Cache Evaluation", 1)
         prose = " ".join(current.replace("**", "").split())
         for boundary in ("not a precise measurement", "not the disk backend's access-time LRU",
-                         "not a filesystem quota", "not enforced", "currently memory-only",
+                         "not a filesystem quota", "not enforced", "local/static caching requires memory enabled and disk disabled",
                          "not proof that its configured disk tier initialized",
                          "not guaranteed read-only",
                          "instead of treating a header as a storage receipt"):
             self.assertTrue(boundary in prose, f"missing backend boundary: {boundary}")
+        self.assertIn("Fixed-slice proxy caching supports memory, disk-only and tiered policies", prose)
         for name in ("HttpCacheDigest", "ForcedFreshness", "CachePut"):
             self.assertNotIn(name, current)
             self.assertIn(name, history)

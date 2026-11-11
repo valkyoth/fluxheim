@@ -452,6 +452,12 @@ fn purge_native_memory_state_primary(
     combined_key: &str,
 ) -> bool {
     let mut purged = false;
+    for key in state.purge_index.combined_keys_for_primary(primary_key) {
+        if let Some(entry) = remove_native_memory_cache_entry(state, &key) {
+            state.bytes = state.bytes.saturating_sub(entry.weight);
+            purged = true;
+        }
+    }
     if let Some(entry) = remove_native_memory_cache_entry(state, combined_key) {
         state.bytes = state.bytes.saturating_sub(entry.weight);
         purged = true;
