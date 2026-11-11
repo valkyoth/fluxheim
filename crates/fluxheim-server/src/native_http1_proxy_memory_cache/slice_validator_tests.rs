@@ -1,5 +1,57 @@
 use super::*;
 
+#[tokio::test]
+async fn slice_backoff_is_variant_specific_and_strong_full_response_clears_it() {
+    let root = tempfile::tempdir().unwrap();
+    let config = config(root.path(), CacheDiskBackend::Filesystem, false, false);
+    let scope = root.path().display().to_string();
+    let cache = NativeProxyMemoryCache::from_config_with_metrics(&config, &scope, None).unwrap();
+    let mut en = request("en");
+    en.headers.retain(|(name, _)| name != "range");
+    let primary = cache.key_with_components(&en, &[]).unwrap();
+    let en_key = native_vary_cache_key(&primary, &cache.config.vary_request_headers, &en).unwrap();
+    let sv_key =
+        native_vary_cache_key(&primary, &cache.config.vary_request_headers, &request("sv"))
+            .unwrap();
+    lock_native_memory_cache(&cache.state, "test")
+        .slice_backoff
+        .record(&primary, &en_key, std::time::Instant::now());
+    assert!(cache.slice_probe_suppressed(&en_key));
+    assert!(!cache.slice_probe_suppressed(&sv_key));
+    crate::purge_native_memory_cache_stale(&scope, None, &scope, 100, true);
+    assert!(cache.slice_probe_suppressed(&en_key));
+    crate::purge_native_memory_cache_stale(&scope, None, &scope, 100, false);
+    assert!(!cache.slice_probe_suppressed(&en_key));
+    lock_native_memory_cache(&cache.state, "test")
+        .slice_backoff
+        .record(&primary, &en_key, std::time::Instant::now());
+    let mut full = NativeHttp1Response::new(200, "OK", b"abcdefgh".to_vec())
+        .with_header("content-type", "image/png")
+        .with_header("cache-control", "max-age=120")
+        .with_header("vary", "Accept-Language");
+    cache.store(&primary, &en, &full).await.unwrap();
+    assert!(
+        cache.slice_probe_suppressed(&en_key),
+        "unproven full response must not reset the mark"
+    );
+    full.push_header("etag", "\"new\"");
+    lock_native_memory_cache(&cache.state, "test")
+        .slice_backoff
+        .record(&primary, &sv_key, std::time::Instant::now());
+    cache.store(&primary, &en, &full).await.unwrap();
+    assert!(!cache.slice_probe_suppressed(&en_key));
+    assert!(
+        cache.slice_probe_suppressed(&sv_key),
+        "another representation must keep its backoff"
+    );
+    lock_native_memory_cache(&cache.state, "test")
+        .slice_backoff
+        .record(&primary, &en_key, std::time::Instant::now());
+    cache.store_revalidated(&primary, &en, &full).await.unwrap();
+    assert!(!cache.slice_probe_suppressed(&en_key));
+    assert!(cache.slice_probe_suppressed(&sv_key));
+}
+
 fn invalid_etags() -> Vec<Vec<&'static str>> {
     vec![
         vec![],

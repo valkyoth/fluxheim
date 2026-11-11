@@ -245,6 +245,9 @@ pub fn purge_native_memory_cache_stale(
     dry_run: bool,
 ) -> CacheStalePurgeResult {
     purge_native_memory_cache_stale_indexed(vhost, route, |state| {
+        if !dry_run {
+            state.slice_backoff.clear();
+        }
         let entries = state.purge_index.entries_for_user_tag(user_tag, limit);
         purge_native_memory_stale_entries(state, entries, dry_run)
     })
@@ -280,6 +283,9 @@ fn purge_native_memory_cache_indexed(
         }
         let mut state = lock_native_memory_cache(&state, "proxy purge");
         let scoped = purge(&mut state);
+        // Negative slice marks have no object/tag index. Any scoped mutating
+        // purge resets this small policy hint; response purge counts stay exact.
+        state.slice_backoff.clear();
         result.matched = result.matched.saturating_add(scoped.matched);
         result.purged = result.purged.saturating_add(scoped.purged);
         result.truncated |= scoped.truncated;
@@ -451,6 +457,7 @@ fn purge_native_memory_state_primary(
     primary_key: &str,
     combined_key: &str,
 ) -> bool {
+    state.slice_backoff.clear_primary(primary_key);
     let mut purged = false;
     for key in state.purge_index.combined_keys_for_primary(primary_key) {
         if let Some(entry) = remove_native_memory_cache_entry(state, &key) {

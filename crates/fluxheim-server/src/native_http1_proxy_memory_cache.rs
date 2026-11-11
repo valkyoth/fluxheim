@@ -150,7 +150,7 @@ impl NativeProxyMemoryCache {
         let state = Arc::new(Mutex::new(NativeMemoryCacheState::default()));
         let metrics_vhost = Arc::<str>::from(vhost);
         let metrics_route = route.map(Arc::<str>::from);
-        if config.memory.enabled {
+        if config.memory.enabled || config.range.slice.enabled {
             register_native_memory_cache_purge_handle(
                 metrics_vhost.clone(),
                 metrics_route.clone(),

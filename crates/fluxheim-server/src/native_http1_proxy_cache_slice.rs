@@ -70,7 +70,7 @@ pub(crate) fn native_if_range_matches_slice_identity(
     identity.etag == if_range || identity.last_modified.as_deref() == Some(if_range)
 }
 
-fn native_slice_strong_etag(headers: &[(String, String)]) -> Option<&str> {
+pub(crate) fn native_slice_strong_etag(headers: &[(String, String)]) -> Option<&str> {
     let mut values = headers
         .iter()
         .filter(|(name, _)| name.eq_ignore_ascii_case("etag"));

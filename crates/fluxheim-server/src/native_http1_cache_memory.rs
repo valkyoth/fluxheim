@@ -35,6 +35,7 @@ pub(crate) struct NativeMemoryCacheState {
     pub(crate) purge_index: CachePurgeIndex,
     pub(crate) min_uses: HashMap<String, NativeMemoryCacheCounter>,
     pub(crate) cache_pass: HashMap<String, NativeMemoryCacheCounter>,
+    pub(crate) slice_backoff: crate::native_http1_slice_backoff::NativeSliceBackoff,
     pub(crate) revalidating: HashSet<String>,
     pub(crate) filling: HashMap<String, NativeMemoryCacheFill>,
     pub(crate) bytes: u64,

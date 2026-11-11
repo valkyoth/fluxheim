@@ -14,7 +14,7 @@ use crate::native_http1_proxy_cache_slice::{
     NativeCacheSliceObject, NativeCacheSliceResponse, native_compose_slice_response,
     native_if_range_matches_slice_identity, native_response_has_non_identity_encoding,
     native_slice_cache_key, native_slice_identity, native_slice_not_satisfiable_response,
-    native_slice_object_from_entry, native_slice_request_within_policy,
+    native_slice_object_from_entry, native_slice_request_within_policy, native_slice_strong_etag,
 };
 use crate::{NativeHttp1Request, NativeHttp1Response};
 use fluxheim_cache::{
@@ -68,6 +68,7 @@ impl NativeProxyMemoryCache {
         };
         if request_cache_bypass_reason(request, &self.config).is_some()
             || self.cache_pass_should_bypass(&primary_key)
+            || self.slice_probe_suppressed(&base_key)
         {
             return Ok(None);
         }
@@ -165,6 +166,9 @@ impl NativeProxyMemoryCache {
         proxy: &NativeHttp1Proxy,
         bounds: CacheSliceBounds,
     ) -> Result<Option<(NativeCacheSliceObject, bool)>, &'static str> {
+        if self.slice_probe_suppressed(base_key) {
+            return Ok(None);
+        }
         let key = native_slice_cache_key(base_key, bounds.range_request());
         if let Some(slice) = self.lookup_cached_slice(&key, bounds).await? {
             return Ok(Some((slice, false)));
@@ -174,6 +178,9 @@ impl NativeProxyMemoryCache {
         }
         let mut wait_budget = NativeCacheFillWaitBudget::new();
         let _fill_permit = loop {
+            if self.slice_probe_suppressed(base_key) {
+                return Ok(None);
+            }
             match self.cache_fill_gate(&key) {
                 NativeCacheFillGate::Disabled => break None,
                 NativeCacheFillGate::Writer(permit) => break Some(permit),
@@ -193,9 +200,18 @@ impl NativeProxyMemoryCache {
         if let Some(slice) = self.lookup_cached_slice(&key, bounds).await? {
             return Ok(Some((slice, false)));
         }
+        if self.slice_probe_suppressed(base_key) {
+            return Ok(None);
+        }
         let Some(response) = proxy.fetch_origin_slice(request, bounds).await else {
             return Ok(None);
         };
+        if response.status() == 206 && native_slice_strong_etag(response.headers()).is_none() {
+            crate::native_http1_cache::lock_native_memory_cache(&self.state, "slice backoff")
+                .slice_backoff
+                .record(primary_key, base_key, std::time::Instant::now());
+            return Ok(None);
+        }
         let Some(slice) = self
             .store_origin_slice(primary_key, &key, request, bounds, &response)
             .await
@@ -203,6 +219,12 @@ impl NativeProxyMemoryCache {
             return Ok(None);
         };
         Ok(Some((slice, true)))
+    }
+
+    fn slice_probe_suppressed(&self, base_key: &str) -> bool {
+        crate::native_http1_cache::lock_native_memory_cache(&self.state, "slice backoff")
+            .slice_backoff
+            .contains(base_key, std::time::Instant::now())
     }
 
     async fn store_origin_slice(

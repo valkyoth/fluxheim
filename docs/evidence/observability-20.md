@@ -142,3 +142,44 @@ Follow-up verification:
   cargo-deny advisories, bans, licenses and sources passed.
 
 Independent retest and exact-commit GitHub acceptance remain pending.
+
+## Discovery Probe Backoff
+
+The availability follow-up to `904660f3` suppresses repeated slice discovery
+after an origin `206` lacks a valid strong ETag. The hint is independent of the
+ordinary cache-pass predictor: it affects only slice handling, not full-object
+cache admission or forwarding of the original request.
+
+Hints expire five seconds after recording and cannot be extended by reads or
+repeated failures. Each cache-policy instance retains at most 1,024 entries,
+using fixed-size SHA-256 digests for configured variant and primary identity.
+Hints are memory-only even for disk-only policies. Saturation skips insertion
+instead of growing the map. Configured variants remain independent.
+
+Fill-lock waiters recheck the hint before becoming another origin writer.
+Exact primary purge clears its hints, other scoped mutating purges reset the
+policy's hints, and stale-purge dry runs leave them intact. A cacheable full
+`200` with a strong validator, including revalidation, clears only the matching
+configured variant's hint. Response purge counts and memory-body statistics
+do not include these policy hints.
+
+Linux verification passed:
+
+- Full locked workspace tests and the 724-test combined Wasm/PHP/load-balancer
+  server suite.
+- 28 focused slice tests, including 100,000-key capacity churn, deterministic
+  expiry, non-extension, variant isolation, recovery and purge behavior.
+- Real TCP request-sequence checks across memory, filesystem and storage-bin
+  policies: repeated requests skip discovery until purge resets it.
+- A 32-request concurrent test with the ordinary cache-pass predictor disabled:
+  one failed discovery probe followed by 32 intact original-range responses.
+- Five live standalone slice restart cases, strict Clippy, minimal compilation,
+  14 Python fixture tests, documentation checks, formatting and modularity.
+- RustSec and cargo-deny, with no dependency or manifest changes.
+
+This follow-up was not rerun on native Windows/macOS or in a fresh container;
+their preceding strong-validator qualification is recorded above. Native CI
+acceptance and independent retest remain required. This is a short-lived
+availability optimization, not a process-wide origin request limit: initial
+probes, key churn, capacity pressure and already-running unlocked fills can
+still generate additional origin traffic.

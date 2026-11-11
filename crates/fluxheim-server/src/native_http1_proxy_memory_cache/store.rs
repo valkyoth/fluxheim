@@ -265,6 +265,22 @@ impl NativeProxyMemoryCache {
             return Err("ttl-zero");
         }
         self.record_cacheable(key);
+        if self.config.range.slice.enabled
+            && response.status() == 200
+            && crate::native_http1_proxy_cache_slice::native_slice_strong_etag(response.headers())
+                .is_some()
+        {
+            let variant = if self.config.vary_request_headers.is_empty() {
+                Some(key.to_owned())
+            } else {
+                native_vary_cache_key(key, &self.config.vary_request_headers, request)
+            };
+            if let Some(variant) = variant {
+                lock_native_memory_cache(&self.state, "slice recovery")
+                    .slice_backoff
+                    .clear_variant(&variant);
+            }
+        }
         if mode == NativeCacheStoreMode::Origin && !self.min_uses_allows_store(key) {
             return Err("cache-min-uses");
         }

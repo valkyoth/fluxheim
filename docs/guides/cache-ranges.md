@@ -83,6 +83,22 @@ cache format keeps the validator in its cached headers, so removing it would
 lose the identity needed for safe composition. Serve immutable/versioned URLs
 with stable strong validators; equal length alone never establishes identity.
 
+After an origin returns a discovery/fill `206` without a valid strong ETag,
+Fluxheim skips slice probes for that configured request variant for five seconds.
+Requests still use ordinary proxy/cache handling; the first rejected probe can
+therefore add one origin request before fallback. Reads and concurrent failures
+do not extend this deadline. A cache policy retains at most 1,024 hashed variant
+keys, including in disk-only mode; these short-lived hints are not persisted.
+At capacity, new hints are not retained. This is not a global origin rate limit:
+key churn and already-running fills can still cause additional probes.
+
+Exact primary-key purge clears its hints. Other mutating purges reset all hints
+in the matching virtual-host/route policy without changing object purge counts;
+stale-purge dry runs do not reset them. A successfully admitted full-object `200`
+with a strong ETag (including a revalidated response) clears that variant's hint,
+and expiry allows discovery to try again automatically. Configured variants
+remain independent, and unrelated full-object caching is not disabled.
+
 Fluxheim requests `Accept-Encoding: identity` for origin slices. Do not combine
 byte offsets for compressed and uncompressed representations. A range miss
 must never be stored under an ordinary un-ranged full-object key.
