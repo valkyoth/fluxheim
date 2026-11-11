@@ -23,7 +23,9 @@ def origin():
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            language = self.headers.get("Accept-Language", "en")
+            # This origin has exactly two fixture representations. Never reflect
+            # request header text (including obsolete line folding) into ETags.
+            language = "en" if self.headers.get("Accept-Language", "en") == "en" else "sv"
             body = b"01234567" if language == "en" else b"abcdefgh"
             requested = self.headers.get("Range")
             with lock:
@@ -34,7 +36,7 @@ def origin():
             self.send_response(206 if requested else 200)
             self.send_header("Content-Type", "text/css")
             self.send_header("Cache-Control", "max-age=120")
-            self.send_header("ETag", f'"{language}-v1"')
+            self.send_header("ETag", '"en-v1"' if language == "en" else '"sv-v1"')
             self.send_header("Vary", "Accept-Language")
             if requested:
                 self.send_header("Content-Range", f"bytes {start}-{end}/{len(body)}")

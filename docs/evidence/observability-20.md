@@ -183,3 +183,33 @@ acceptance and independent retest remain required. This is a short-lived
 availability optimization, not a process-wide origin request limit: initial
 probes, key churn, capacity pressure and already-running unlocked fills can
 still generate additional origin traffic.
+
+## Test Fixture Code Scanning Review
+
+Four CodeQL alerts on `0782b82a` were reviewed. None targets production Rust
+request handling or changes the accepted slice-integrity/backoff contract.
+
+- Alert 455: the loopback Python origin reflected `Accept-Language` into its
+  ETag. It now maps requests to two fixed representations and emits literal
+  strong ETags. New real-HTTP regression tests cover valid languages, unknown
+  and quoted values, oversized fixture input, and obsolete folded header text.
+  Response headers must contain no injected field or embedded line break.
+- Alerts 456 and 457: directory iteration in the corruption test starts from
+  its own newly created private temporary directory and only inspects cache
+  files written by that test. It takes no external archive, request path or
+  operator-supplied directory. These are test-only false positives under the
+  trusted test-workspace boundary, not a production path traversal finding.
+- Alert 458: the concurrency regression re-executes the current test binary
+  with a literal test name, fixed arguments and no shell. Process isolation is
+  necessary to test the full disk-worker budget without contention from other
+  parallel tests. The binary and test workspace belong to the trusted developer
+  or CI environment; replacing them already permits same-identity code execution.
+  This is a test-only false positive, not command injection through Fluxheim.
+
+No Rust test is disabled or weakened and no scanner rule is suppressed. GitHub
+dismissal of the three false positives requires maintainer approval. Alert 455
+requires reanalysis of the pushed correction before GitHub can mark it fixed.
+
+Verification: all five slice Python fixture tests, eleven cache example tests,
+28 focused Rust slice tests, five standalone live restart cases, Python syntax
+and diff checks passed. No production Rust or dependency file changed.
