@@ -206,9 +206,11 @@ request handling or changes the accepted slice-integrity/backoff contract.
   or CI environment; replacing them already permits same-identity code execution.
   This is a test-only false positive, not command injection through Fluxheim.
 
-No Rust test is disabled or weakened and no scanner rule is suppressed. GitHub
-dismissal of the three false positives requires maintainer approval. Alert 455
-requires reanalysis of the pushed correction before GitHub can mark it fixed.
+No Rust test is disabled or weakened and no scanner rule is suppressed. With
+explicit maintainer approval, alerts 456, 457 and 458 were dismissed on GitHub as
+false positives, each with a rationale linking to this evidence. Alert 455 was
+not dismissed: it requires reanalysis of the pushed correction before GitHub
+can mark it fixed.
 
 Verification: all five slice Python fixture tests, eleven cache example tests,
 28 focused Rust slice tests, five standalone live restart cases, Python syntax
