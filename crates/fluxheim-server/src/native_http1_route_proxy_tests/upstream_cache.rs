@@ -353,8 +353,12 @@ pub(super) async fn upstream_raw_response_sequence(
 }
 
 pub(super) async fn upstream_slice_response_sequence(
-    responses: &'static [(&'static str, &'static str, &'static str)],
+    responses: &[(&str, &str, &str)],
 ) -> std::net::SocketAddr {
+    let responses = responses
+        .iter()
+        .map(|(path, range, body)| (path.to_string(), range.to_string(), body.to_string()))
+        .collect::<Vec<_>>();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {

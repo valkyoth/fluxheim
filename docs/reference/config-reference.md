@@ -2719,6 +2719,10 @@ filled from origin with bounded single-slice `Range` requests when
 `fill_missing = true`; concurrent fills for the same slice key are collapsed.
 Slice fill rejects responses unless `206`, `Content-Range`, `Content-Length`,
 content type, object length, validators, and cache variance are compatible.
+Each slice requires exactly one valid strong ETag; weak, missing, duplicate or
+malformed ETags and Last-Modified alone cannot establish slice identity. This
+also applies to recovered entries. Hiding `etag` through
+`hide_response_headers` bypasses slice caching and uses normal proxy handling.
 Configured `vary_request_headers` values partition fixed-slice keys exactly as
 they partition complete objects. Because an origin-only `Vary` field is not
 known before a slice lookup, Fluxheim admits that slice only when every response

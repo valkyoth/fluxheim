@@ -6,6 +6,9 @@ use fluxheim_config::{ByteSize, CacheConfig, CacheDiskBackend};
 #[path = "slice_recovery_tests.rs"]
 mod recovery;
 
+#[path = "slice_validator_tests.rs"]
+mod validators;
+
 fn config(
     root: &std::path::Path,
     backend: CacheDiskBackend,

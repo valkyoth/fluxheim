@@ -70,10 +70,18 @@ subject to limits. Missing or malformed policies/headers can bypass the slice
 path; unsatisfiable or over-budget resolved ranges can produce `416`. Do not
 design clients to interpret every fallback as a slice hit.
 
-`If-Range` is compared against the slice identity. Slices must agree on total
-length, ETag and Last-Modified when present; mismatches are not composed into
-one cached response. Serve immutable/versioned URLs with stable validators.
-Matching length alone cannot establish that validator-less content is unchanged.
+`If-Range` is compared against the slice identity. Every slice must contain
+exactly one syntactically valid strong ETag (for example, `"revision-42"`).
+Missing, weak (`W/"revision-42"`), duplicate or malformed ETags bypass slice
+caching; Last-Modified alone is insufficient. Slices must agree on total length,
+strong ETag and Last-Modified when present; mismatches are not composed into one
+cached response. Recovered disk entries are checked by the same rule.
+
+If `cache.hide_response_headers` contains `etag`, slice caching is bypassed,
+including existing entries, and ordinary proxy handling applies. The current
+cache format keeps the validator in its cached headers, so removing it would
+lose the identity needed for safe composition. Serve immutable/versioned URLs
+with stable strong validators; equal length alone never establishes identity.
 
 Fluxheim requests `Accept-Encoding: identity` for origin slices. Do not combine
 byte offsets for compressed and uncompressed representations. A range miss

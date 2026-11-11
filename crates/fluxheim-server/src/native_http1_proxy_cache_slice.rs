@@ -13,12 +13,13 @@ pub(crate) struct NativeCacheSliceObject {
     pub(crate) entry: NativeMemoryCacheEntry,
     pub(crate) bounds: CacheSliceBounds,
     pub(crate) total: u64,
+    strong_etag: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct NativeCacheSliceIdentity {
     total: u64,
-    etag: Option<String>,
+    etag: String,
     last_modified: Option<String>,
 }
 
@@ -35,6 +36,9 @@ pub(crate) fn native_slice_cache_key(base_key: &str, range: CacheRangeRequest) -
 pub(crate) fn native_slice_object_from_entry(
     entry: NativeMemoryCacheEntry,
 ) -> Option<NativeCacheSliceObject> {
+    // Apply the same identity requirement to origin admissions and recovered
+    // entries, including records written by older versions.
+    let strong_etag = native_slice_strong_etag(&entry.headers)?.to_owned();
     let content_range = native_entry_first_header(&entry, "content-range")
         .and_then(|value| parse_cache_content_range(&value))?;
     let total = content_range.total?;
@@ -46,13 +50,14 @@ pub(crate) fn native_slice_object_from_entry(
         entry,
         bounds,
         total,
+        strong_etag,
     })
 }
 
 pub(crate) fn native_slice_identity(slice: &NativeCacheSliceObject) -> NativeCacheSliceIdentity {
     NativeCacheSliceIdentity {
         total: slice.total,
-        etag: native_entry_first_header(&slice.entry, "etag"),
+        etag: slice.strong_etag.clone(),
         last_modified: native_entry_first_header(&slice.entry, "last-modified"),
     }
 }
@@ -62,8 +67,24 @@ pub(crate) fn native_if_range_matches_slice_identity(
     identity: &NativeCacheSliceIdentity,
 ) -> bool {
     let if_range = if_range.trim();
-    identity.etag.as_deref() == Some(if_range)
-        || identity.last_modified.as_deref() == Some(if_range)
+    identity.etag == if_range || identity.last_modified.as_deref() == Some(if_range)
+}
+
+fn native_slice_strong_etag(headers: &[(String, String)]) -> Option<&str> {
+    let mut values = headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("etag"));
+    let value = values.next()?.1.trim_matches([' ', '\t']);
+    if values.next().is_some() {
+        return None;
+    }
+    let opaque = value.strip_prefix('"')?.strip_suffix('"')?;
+    // RFC entity-tag grammar: no weak prefix, embedded quotes, whitespace,
+    // controls or lists. A comma inside the quoted opaque tag is legal.
+    opaque
+        .bytes()
+        .all(|byte| byte == 0x21 || (0x23..=0x7e).contains(&byte) || byte >= 0x80)
+        .then_some(value)
 }
 
 pub(crate) fn native_slice_request_within_policy(

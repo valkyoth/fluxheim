@@ -99,3 +99,46 @@ This identifies the local runtime test image, not independent artifact provenanc
 - No public server, shared-project VM or system certificate store was modified.
 - Machine-specific logs and unresolved correction planning remain local.
 - Local qualification does not replace the independent pentest and CI gates.
+
+## Strong Validator Correction
+
+The follow-up review of `075ed84e` identified that optional validators did not
+establish byte identity across slices. The correction requires exactly one
+syntactically valid strong ETag before constructing a slice object. Missing,
+weak, duplicate, list-valued and malformed ETags are rejected; Last-Modified
+alone is not sufficient. The same constructor validates memory hits and
+recovered disk records, so older invalid entries become misses and are removed.
+Composition still requires equal total length and representation identity.
+
+When configuration hides ETag, slice handling bypasses both existing entries
+and new admission. This deliberately uses ordinary proxy handling rather than
+removing the validator required for composition. The cache serialization format
+and dependencies are unchanged. Origins remain responsible for changing their
+strong ETag whenever the representation bytes change.
+
+Regression coverage includes admission syntax, hidden-header policy, legacy
+memory and disk records with both plain and encrypted backends, and real TCP
+requests that must return the intact fallback body instead of combining a valid
+first slice with an unproven second slice. Those requests run before and after
+restart across memory, filesystem and storage-bin policies. The multipart
+success fixture now provides a strong ETag; date-only rejection is tested
+separately rather than retaining the unsafe expectation.
+
+Follow-up verification:
+
+- Full locked Linux workspace suite passed.
+- Linux server suites: 617 Rustls/load-balancer, 613 OpenSSL/load-balancer,
+  and 718 combined Wasm/PHP/load-balancer tests passed.
+- Native macOS: 616 server tests, strict Clippy, five live slice restart cases
+  and existing cache-guide/migration checks passed.
+- Native Windows: 614 server tests, five live slice restart cases and existing
+  cache-guide/migration checks passed.
+- Linux live slice restart checks and the five fresh non-root Wolfi container
+  cases passed. Image identity:
+  `sha256:cc07f293fdbd9b5d3e4f1ebe8ac6d9e3f5d1c8f47284ab24269c9fbe2d890a4c`.
+- Strict Linux Clippy, minimal server compilation, 14 Python fixture tests,
+  28 documentation-layout tests, links, formatting and modularity checks passed.
+- Fresh RustSec scan: 449 dependencies, zero known vulnerabilities;
+  cargo-deny advisories, bans, licenses and sources passed.
+
+Independent retest and exact-commit GitHub acceptance remain pending.

@@ -353,12 +353,12 @@ async fn native_route_proxy_slice_cache_composes_multipart_memory_response() {
         (
             "/asset.png",
             "bytes=0-3",
-            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\nlast-modified: Wed, 21 Oct 2015 07:28:00 GMT\r\ncontent-range: bytes 0-3/10\r\ncontent-length: 4\r\n\r\n0123",
+            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\netag: \"v1\"\r\nlast-modified: Wed, 21 Oct 2015 07:28:00 GMT\r\ncontent-range: bytes 0-3/10\r\ncontent-length: 4\r\n\r\n0123",
         ),
         (
             "/asset.png",
             "bytes=4-7",
-            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\nlast-modified: Wed, 21 Oct 2015 07:28:00 GMT\r\ncontent-range: bytes 4-7/10\r\ncontent-length: 4\r\n\r\n4567",
+            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\netag: \"v1\"\r\nlast-modified: Wed, 21 Oct 2015 07:28:00 GMT\r\ncontent-range: bytes 4-7/10\r\ncontent-length: 4\r\n\r\n4567",
         ),
     ])
     .await;

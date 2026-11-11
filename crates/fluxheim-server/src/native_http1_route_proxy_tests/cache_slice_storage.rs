@@ -1,6 +1,9 @@
 use super::*;
 use fluxheim_config::{ByteSize, CacheDiskBackend};
 
+#[path = "cache_slice_validators.rs"]
+mod validators;
+
 fn policy(root: &std::path::Path, backend: CacheDiskBackend) -> fluxheim_config::CacheConfig {
     let mut cache = native_proxy_disk_cache_config(root.to_path_buf());
     cache.disk.backend = backend;

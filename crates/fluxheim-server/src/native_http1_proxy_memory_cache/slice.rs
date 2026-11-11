@@ -37,7 +37,14 @@ impl NativeProxyMemoryCache {
         proxy: &NativeHttp1Proxy,
         #[cfg(feature = "wasm")] key_components: &[super::NativeProxyCacheKeyComponent],
     ) -> Result<Option<NativeCacheSliceResponse>, &'static str> {
-        if !self.config.range.enabled || !self.config.range.slice.enabled {
+        if !self.config.range.enabled
+            || !self.config.range.slice.enabled
+            || self
+                .config
+                .hide_response_headers
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case("etag"))
+        {
             return Ok(None);
         }
         let Some(primary_key) = self.key_with_components(
@@ -206,7 +213,13 @@ impl NativeProxyMemoryCache {
         bounds: CacheSliceBounds,
         response: &NativeHttp1Response,
     ) -> Option<NativeCacheSliceObject> {
-        if response.status() == 416 {
+        if response.status() == 416
+            || self
+                .config
+                .hide_response_headers
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case("etag"))
+        {
             return None;
         }
         let headers = native_response_header_map(response);
