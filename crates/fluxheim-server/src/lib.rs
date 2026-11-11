@@ -44,6 +44,7 @@ mod native_http1_proxy_memory_cache;
 mod native_http1_proxy_metrics;
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 mod native_http1_proxy_mirror;
+mod native_http1_proxy_peer_context;
 mod native_http1_proxy_peer_fill;
 mod native_http1_proxy_peer_fill_auth;
 mod native_http1_proxy_request;

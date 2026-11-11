@@ -1,8 +1,9 @@
 # Stale-Cache Error Classification Qualification
 
 Local qualification: 2026-11-09. Commit 18 follows
-`8159ae69b899da8a0c1d82ebd8b205477c9f27cd`. Independent pentesting and
-exact-commit GitHub acceptance remain pending.
+`8159ae69b899da8a0c1d82ebd8b205477c9f27cd`. The owner supplied a clean
+pentest through `a6edc73a`, reported GitHub green and authorized Commit 19.
+This is acceptance for progression, not final release qualification.
 
 ## Delivered
 

@@ -81,7 +81,7 @@ async fn native_route_proxy_only_if_cached_miss_does_not_contact_origin() {
 
     let response = downstream_request(
         listener,
-        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nCache-Control: only-if-cached\r\nX-Fluxheim-Peer-Fill: 1\r\nConnection: close\r\n\r\n",
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nCache-Control: only-if-cached\r\nX-Fluxheim-Peer-Fill: 1\r\nx-fluxheim-peer-fill-version: 2\r\nx-fluxheim-peer-fill-context: accept,accept-encoding,accept-language\r\nConnection: close\r\n\r\n",
     )
     .await;
 

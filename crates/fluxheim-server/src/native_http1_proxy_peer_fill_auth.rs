@@ -5,6 +5,7 @@ use std::sync::Arc;
 use sanitization::SecretVec;
 use sanitization::ct::ConstantTimeEq;
 
+use crate::native_http1_proxy_peer_context as peer_context;
 use crate::{NativeHttp1Request, NativeHttp1Response};
 use fluxheim_config::CacheConfig;
 
@@ -123,14 +124,13 @@ pub(crate) fn native_peer_fill_request_signature(
     headers: &[(String, String)],
     nonce: &str,
 ) -> String {
-    let host = headers
-        .iter()
-        .find_map(|(name, value)| name.eq_ignore_ascii_case("host").then_some(value.as_str()))
-        .unwrap_or_default();
-    let mut context = native_peer_fill_hmac_context(auth, b"fluxheim-peer-fill-request-v1");
+    let Some(variant) = peer_context::canonical_context(headers) else {
+        return String::new();
+    };
+    let mut context = native_peer_fill_hmac_context(auth, b"fluxheim-peer-fill-request-v2");
     native_peer_fill_hmac_field(&mut context, b"GET");
     native_peer_fill_hmac_field(&mut context, target.as_bytes());
-    native_peer_fill_hmac_field(&mut context, host.as_bytes());
+    native_peer_fill_hmac_field(&mut context, &variant);
     native_peer_fill_hmac_field(&mut context, nonce.as_bytes());
     native_peer_fill_hmac_hex(context.sign().as_ref())
 }
@@ -148,15 +148,13 @@ pub(crate) fn native_peer_fill_request_signature_matches(
     else {
         return false;
     };
-    let mut context = native_peer_fill_hmac_context(auth, b"fluxheim-peer-fill-request-v1");
+    let Some(variant) = peer_context::canonical_context(&request.headers) else {
+        return false;
+    };
+    let mut context = native_peer_fill_hmac_context(auth, b"fluxheim-peer-fill-request-v2");
     native_peer_fill_hmac_field(&mut context, request.method.as_bytes());
     native_peer_fill_hmac_field(&mut context, request.target.as_bytes());
-    native_peer_fill_hmac_field(
-        &mut context,
-        native_request_header(request, "host")
-            .unwrap_or_default()
-            .as_bytes(),
-    );
+    native_peer_fill_hmac_field(&mut context, &variant);
     native_peer_fill_hmac_field(&mut context, nonce.as_bytes());
     native_peer_fill_signature_matches(
         candidate,
@@ -188,6 +186,9 @@ pub(crate) fn native_peer_fill_response_signature_matches(
     request: &NativeHttp1Request,
     response: &NativeHttp1Response,
 ) -> bool {
+    if peer_context::canonical_context(&request.headers).is_none() {
+        return false;
+    }
     let Some(request_nonce) =
         native_request_single_header_value(request, NATIVE_PEER_FILL_NONCE_HEADER)
     else {
@@ -224,15 +225,11 @@ fn native_peer_fill_response_signature(
     body_hash.update(response.body());
     let body_digest = body_hash.finalize();
 
-    let mut context = native_peer_fill_hmac_context(auth, b"fluxheim-peer-fill-response-v1");
+    let mut context = native_peer_fill_hmac_context(auth, b"fluxheim-peer-fill-response-v2");
     native_peer_fill_hmac_field(&mut context, request.method.as_bytes());
     native_peer_fill_hmac_field(&mut context, request.target.as_bytes());
-    native_peer_fill_hmac_field(
-        &mut context,
-        native_request_header(request, "host")
-            .unwrap_or_default()
-            .as_bytes(),
-    );
+    let variant = peer_context::canonical_context(&request.headers).unwrap_or_default();
+    native_peer_fill_hmac_field(&mut context, &variant);
     native_peer_fill_hmac_field(&mut context, nonce.as_bytes());
     native_peer_fill_hmac_field(&mut context, response.status().to_string().as_bytes());
     for (name, value) in native_peer_fill_canonical_response_headers(response) {
@@ -252,6 +249,11 @@ fn native_peer_fill_canonical_response_headers(
         .filter(|(name, _)| {
             !name.eq_ignore_ascii_case(NATIVE_PEER_FILL_NONCE_HEADER)
                 && !name.eq_ignore_ascii_case(NATIVE_PEER_FILL_RESPONSE_SIGNATURE_HEADER)
+                // The writer generates these fields. Body hashing binds its
+                // length; the envelope carries the authenticated cache date.
+                && !name.eq_ignore_ascii_case("content-length")
+                && !name.eq_ignore_ascii_case("connection")
+                && !name.eq_ignore_ascii_case("date")
         })
         .map(|(name, value)| (name.to_ascii_lowercase(), value.clone()))
         .collect::<Vec<_>>();
@@ -293,14 +295,6 @@ fn native_peer_fill_signature_matches(candidate: &str, expected: &str) -> bool {
         .declassify("native peer-fill HMAC match result is public")
 }
 
-fn native_request_header<'a>(request: &'a NativeHttp1Request, name: &str) -> Option<&'a str> {
-    request
-        .headers
-        .iter()
-        .find_map(|(header_name, value)| header_name.eq_ignore_ascii_case(name).then_some(value))
-        .map(String::as_str)
-}
-
 fn native_request_single_header_value<'a>(
     request: &'a NativeHttp1Request,
     name: &str,
@@ -329,8 +323,18 @@ pub(crate) fn native_peer_fill_response_without_cache_status(
     mut response: NativeHttp1Response,
     cache: &CacheConfig,
 ) -> NativeHttp1Response {
+    let date =
+        native_response_single_header_value(&response, peer_context::DATE).map(str::to_owned);
+    response.remove_header("date");
+    if let Some(date) = date {
+        response.push_header("date", date);
+    }
+    response.remove_header(peer_context::DATE);
     response.remove_header(NATIVE_PEER_FILL_NONCE_HEADER);
     response.remove_header(NATIVE_PEER_FILL_RESPONSE_SIGNATURE_HEADER);
+    response.remove_header(peer_context::VERSION);
+    response.remove_header(peer_context::VARIANTS);
+    response.remove_header(peer_context::CONTEXT);
     if let Some(header) = cache.status_header.as_deref() {
         response.remove_header(header);
     }

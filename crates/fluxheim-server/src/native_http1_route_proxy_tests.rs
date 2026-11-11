@@ -27,6 +27,8 @@ mod cache_h2_error;
 mod cache_lifecycle_contract;
 #[path = "native_http1_route_proxy_tests/cache_peer.rs"]
 mod cache_peer_tests;
+#[path = "native_http1_route_proxy_tests/cache_peer_variants.rs"]
+mod cache_peer_variants;
 #[path = "native_http1_route_proxy_tests/cache_range.rs"]
 mod cache_range_tests;
 #[path = "native_http1_route_proxy_tests/cache_saturation.rs"]

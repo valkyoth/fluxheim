@@ -185,6 +185,7 @@ qualification are different checks; see each guide's limitations and evidence.
 - [TCP readiness port qualification](evidence/observability-16.md)
 - [Health-check connection reuse qualification](evidence/observability-17.md)
 - [Stale-cache error classification qualification](evidence/observability-18.md)
+- [Peer cache variant qualification](evidence/observability-19.md)
 - [Commit 12 native archive identities and checksums](evidence/observability-12-archives.json)
 - [Commit 12 local performance measurements](evidence/observability-12-performance.json)
 - [Commit 12 ARM performance measurements](evidence/observability-12-performance-arm.json)

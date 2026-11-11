@@ -172,6 +172,10 @@ fn upstream_request_filter_strips_peer_fill_internal_headers_only_for_normal_req
         "x-fluxheim-peer-fill-nonce",
         "x-fluxheim-peer-fill-request-signature",
         "x-fluxheim-peer-fill-response-signature",
+        "x-fluxheim-peer-fill-version",
+        "x-fluxheim-peer-fill-context",
+        "x-fluxheim-peer-fill-vary",
+        "x-fluxheim-peer-fill-date",
     ] {
         assert!(upstream_owned_header_for_request(name, &normal));
         assert!(!upstream_owned_header_for_request(name, &peer_fill));

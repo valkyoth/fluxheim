@@ -212,8 +212,10 @@ from a backup or delete hidden key/counter files. Follow the guide's cold-root
 rotation and migration rules, including when data is merely a disposable cache.
 
 Peer fill is a separate HTTP trust boundary, not encrypted disk replication.
-Neither at-rest encryption nor a shared peer secret fixes negotiation-context
-limitations. See [peer fill](cache-peer-fill.md) before enabling it.
+Its version-2 protocol preserves explicitly selected public variants and binds
+their context into optional HMACs. At-rest encryption does not encrypt peer
+traffic; use verified HTTPS on untrusted links. See [peer fill](cache-peer-fill.md)
+for supported selectors and coordinated-upgrade requirements.
 
 ## Inspect The Correct State
 

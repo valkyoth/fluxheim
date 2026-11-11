@@ -173,8 +173,8 @@ rate limiter or a guarantee of end-user latency.
 See the [range guide](../guides/cache-ranges.md) for validator/variance rules
 and current memory-only slice storage and upstream-selection limitations
 . Peer settings live under `peer_fill`; the
-[peer guide](../guides/cache-peer-fill.md) covers every field and the confirmed
-variant-context integrity gap. Encryption options and key
+[peer guide](../guides/cache-peer-fill.md) covers every field, supported public
+variant selectors and the version-2 coordinated-upgrade requirement. Encryption options and key
 lifecycle are covered in [cache encryption](../guides/cache-encryption.md).
 
 The separate global `[cache_purger]` table provides bounded stale cleanup:

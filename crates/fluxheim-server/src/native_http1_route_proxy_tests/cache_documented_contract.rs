@@ -10,7 +10,7 @@ use super::{
 };
 
 #[test]
-fn documented_peer_signature_currently_does_not_bind_negotiation_headers() {
+fn peer_signature_rejects_negotiation_substitution() {
     use crate::native_http1_proxy_peer_fill_auth::*;
     use sanitization::SecretVec;
     use std::sync::Arc;
@@ -19,6 +19,17 @@ fn documented_peer_signature_currently_does_not_bind_negotiation_headers() {
         secret: Arc::new(SecretVec::from_vec(vec![42; 32])),
     };
     let mut request = super::route_test_request("/asset.png");
+    request
+        .headers
+        .push(("cache-control".to_owned(), "only-if-cached".to_owned()));
+    request.headers.push((
+        crate::native_http1_proxy_peer_context::VERSION.to_owned(),
+        "2".to_owned(),
+    ));
+    request.headers.push((
+        crate::native_http1_proxy_peer_context::CONTEXT.to_owned(),
+        "accept,accept-encoding,accept-language".to_owned(),
+    ));
     request
         .headers
         .push(("accept-language".to_owned(), "en".to_owned()));
@@ -38,20 +49,18 @@ fn documented_peer_signature_currently_does_not_bind_negotiation_headers() {
             *value = "sv".to_owned();
         }
     }
-    assert!(native_peer_fill_request_signature_matches(&auth, &request));
+    assert!(!native_peer_fill_request_signature_matches(&auth, &request));
     let mut response = crate::NativeHttp1Response::new(200, "OK", b"swedish-variant".to_vec())
         .with_header("vary", "Accept-Language")
         .with_header("content-type", "image/png");
     native_peer_fill_sign_response(&auth, &request, &mut response);
-    assert!(native_peer_fill_response_signature_matches(
+    assert!(!native_peer_fill_response_signature_matches(
         &auth, &original, &response
     ));
 }
 
-// Characterization, not desired behavior: the planned corrections must replace
-// these assertions with the repaired contract and retain their failure fixtures.
 #[tokio::test]
-async fn documented_peer_fill_currently_stores_missing_custom_variant() {
+async fn peer_fill_does_not_store_missing_custom_variant() {
     let origin = upstream_raw_response_sequence(&[(
         "/asset.png",
         "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\nvary: X-Edition\r\ncontent-length: 7\r\n\r\ndefault",
@@ -81,16 +90,13 @@ async fn documented_peer_fill_currently_stores_missing_custom_variant() {
     ))
     .await;
     let request = "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nX-Edition: special\r\nConnection: close\r\n\r\n";
-    for expected in ["PEER-HIT", "HIT"] {
+    for _ in 0..2 {
         let response =
             tokio::time::timeout(Duration::from_secs(5), downstream_request(front, request))
                 .await
                 .unwrap();
-        assert!(response.ends_with("default"), "{response}");
-        assert_eq!(
-            response_header(&response, "x-cache-status").as_deref(),
-            Some(expected)
-        );
+        assert!(response.starts_with("HTTP/1.1 504"), "{response}");
+        assert!(!response.ends_with("default"), "{response}");
     }
 }
 

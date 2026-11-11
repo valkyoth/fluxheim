@@ -156,6 +156,10 @@ fn native_peer_fill_internal_header(name: &str) -> bool {
         || name.eq_ignore_ascii_case("x-fluxheim-peer-fill-nonce")
         || name.eq_ignore_ascii_case("x-fluxheim-peer-fill-request-signature")
         || name.eq_ignore_ascii_case("x-fluxheim-peer-fill-response-signature")
+        || name.eq_ignore_ascii_case("x-fluxheim-peer-fill-version")
+        || name.eq_ignore_ascii_case("x-fluxheim-peer-fill-context")
+        || name.eq_ignore_ascii_case("x-fluxheim-peer-fill-vary")
+        || name.eq_ignore_ascii_case("x-fluxheim-peer-fill-date")
 }
 
 fn native_client_request_is_peer_fill(request: &NativeHttp1Request) -> bool {

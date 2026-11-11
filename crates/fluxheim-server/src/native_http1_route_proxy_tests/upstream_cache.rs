@@ -55,7 +55,11 @@ pub(super) async fn peer_fill_cacheable_once(body: &'static str) -> std::net::So
 pub(super) async fn peer_fill_response_once(response: impl Into<String>) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let response = response.into();
+    let response = response.into().replacen(
+        "\r\n",
+        "\r\nx-fluxheim-peer-fill-version: 2\r\nx-fluxheim-peer-fill-vary: \r\n",
+        1,
+    );
     tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
         let mut request = Vec::new();
@@ -84,6 +88,21 @@ pub(super) async fn peer_fill_response_once(response: impl Into<String>) -> std:
             request.contains("x-fluxheim-peer-fill: 1\r\n")
                 || request.contains("X-Fluxheim-Peer-Fill: 1\r\n"),
             "peer-fill request missing loop marker: {request:?}"
+        );
+        let headers = request
+            .lines()
+            .skip(1)
+            .filter_map(|line| line.split_once(':'))
+            .map(|(name, value)| (name.to_owned(), value.trim().to_owned()))
+            .collect::<Vec<_>>();
+        let context = crate::native_http1_proxy_peer_context::canonical_context(&headers).unwrap();
+        use sha2::Digest;
+        let digest =
+            base64_ng::URL_SAFE_NO_PAD.encode_string_infallible(&sha2::Sha256::digest(context));
+        let response = response.replacen(
+            "\r\n",
+            &format!("\r\nx-fluxheim-peer-fill-context: {digest}\r\nx-fluxheim-peer-fill-date: Wed, 11 Nov 2026 00:00:00 GMT\r\n"),
+            1,
         );
         stream.write_all(response.as_bytes()).await.unwrap();
     });

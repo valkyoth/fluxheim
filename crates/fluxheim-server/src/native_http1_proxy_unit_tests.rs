@@ -93,6 +93,14 @@ fn native_peer_fill_auth_binds_response_body_and_headers() {
             ("host".to_owned(), "cache.test".to_owned()),
             (NATIVE_PEER_FILL_MARKER_HEADER.to_owned(), "1".to_owned()),
             ("cache-control".to_owned(), "only-if-cached".to_owned()),
+            (
+                crate::native_http1_proxy_peer_context::VERSION.to_owned(),
+                "2".to_owned(),
+            ),
+            (
+                crate::native_http1_proxy_peer_context::CONTEXT.to_owned(),
+                "accept,accept-encoding,accept-language".to_owned(),
+            ),
             (NATIVE_PEER_FILL_NONCE_HEADER.to_owned(), nonce.clone()),
         ],
         body: crate::NativeHttp1RequestBody::empty(),

@@ -4,6 +4,7 @@ use http::Uri;
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 use crate::NativeHttp1UpstreamTls;
+use crate::native_http1_proxy_peer_context as context;
 use crate::native_http1_proxy_peer_fill_auth::{
     NATIVE_PEER_FILL_NONCE_HEADER, NATIVE_PEER_FILL_REQUEST_SIGNATURE_HEADER, NativePeerFillAuth,
     native_peer_fill_nonce, native_peer_fill_request_signature,
@@ -13,6 +14,10 @@ use crate::{NativeHttp1Request, NativeHttp1Response, NativeHttp1Upstream};
 use fluxheim_config::CacheConfig;
 
 pub(crate) const NATIVE_PEER_FILL_MARKER_HEADER: &str = "x-fluxheim-peer-fill";
+
+#[cfg(test)]
+#[path = "native_http1_proxy_peer_request_tests.rs"]
+mod request_tests;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct NativePeerFillPeer {
@@ -158,7 +163,7 @@ pub(crate) async fn native_peer_fill_fetch(
     request: &NativeHttp1Request,
     max_body_bytes: u64,
 ) -> Result<Option<NativeHttp1Response>, crate::NativeHttp1Error> {
-    let Some(mut peer_request) = native_peer_fill_request(peer, request, auth) else {
+    let Some(mut peer_request) = native_peer_fill_request(peer, cache, request, auth) else {
         return Ok(None);
     };
     let max_body_bytes = usize::try_from(max_body_bytes.saturating_add(1)).unwrap_or(usize::MAX);
@@ -188,6 +193,9 @@ pub(crate) async fn native_peer_fill_fetch(
         );
         return Ok(None);
     }
+    if !context::response_context_matches(&peer_request, &response, cache) {
+        return Ok(None);
+    }
     Ok(Some(native_peer_fill_response_without_cache_status(
         response, cache,
     )))
@@ -195,6 +203,7 @@ pub(crate) async fn native_peer_fill_fetch(
 
 fn native_peer_fill_request(
     peer: &NativePeerFillPeer,
+    cache: &CacheConfig,
     request: &NativeHttp1Request,
     auth: Option<&NativePeerFillAuth>,
 ) -> Option<NativeHttp1Request> {
@@ -210,15 +219,39 @@ fn native_peer_fill_request(
         return None;
     }
     let mut headers = Vec::new();
+    if native_request_header_values(request, "host").count() != 1 {
+        return None;
+    }
     if let Some(host) = native_request_header(request, "host") {
+        if host.len() > 1024 {
+            return None;
+        }
         headers.push(("host".to_owned(), host.to_owned()));
     }
-    for name in ["accept", "accept-encoding", "accept-language"] {
+    let fields = context::selected_fields(cache)?;
+    let mut variant_bytes = 0usize;
+    for name in &fields {
+        // A connection-nominated field must never be forwarded as end-to-end data.
+        if native_request_header_values(request, "connection")
+            .flat_map(|value| value.split(','))
+            .any(|token| token.trim().eq_ignore_ascii_case(name))
+        {
+            return None;
+        }
         for value in native_request_header_values(request, name) {
+            variant_bytes = variant_bytes
+                .saturating_add(value.len())
+                .saturating_add(name.len() + 8);
+            if variant_bytes > 8192 {
+                return None;
+            }
             headers.push((name.to_owned(), value.to_owned()));
         }
     }
+    headers.push((context::VERSION.to_owned(), "2".to_owned()));
+    headers.push((context::CONTEXT.to_owned(), fields.join(",")));
     headers.push(("cache-control".to_owned(), "only-if-cached".to_owned()));
+    context::canonical_context(&headers)?;
     headers.push((NATIVE_PEER_FILL_MARKER_HEADER.to_owned(), "1".to_owned()));
     if let Some(auth) = auth {
         let nonce = native_peer_fill_nonce();

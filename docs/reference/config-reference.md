@@ -2900,17 +2900,18 @@ route/vhost-level budget across distinct cache keys. Metrics builds expose
 records `origin_protected` when the budget rejects a fill.
 
 `[cache.peer_fill]`, `[vhosts.cache.peer_fill]`, and route-scoped
-`peer_fill` configure the distributed-cache peer-fill contract used by the
-`1.2.4` line. Peer fill is disabled by default and currently requires the
+`peer_fill` configure peer-assisted cache retrieval. Peer fill is disabled by default and requires the
 owning cache policy to be enabled. The configuration is intentionally strict so
 runtime peer retrieval can stay bounded:
 
-**Current integrity warning:** the documented limitation is not fixed. Custom negotiation
-headers are omitted from peer requests, which can store the wrong representation
-under the caller's variant key. HMAC signatures also do not bind negotiation
-request headers. Disable affected peer policies and use verified HTTPS or an
-independently authenticated encrypted transport for untrusted links; a shared
-secret alone is insufficient. See the [peer guide](../guides/cache-peer-fill.md).
+Peer protocol version 2 preserves bounded negotiation context and binds it into
+request and response HMACs. Only the standard negotiation fields and explicitly
+configured public `vary_request_headers` are forwarded. Unpreserved variants
+and incompatible peer versions are rejected, following `fail_open`; there is
+no downgrade to the old authentication contract. Upgrade peers together and
+continue using verified HTTPS on untrusted links: HMAC is not encryption. See
+the [peer guide](../guides/cache-peer-fill.md#variant-safety-and-upgrades) for
+examples, bounds and missing/empty/repeated-header behavior.
 
 ```toml
 [cache.peer_fill]

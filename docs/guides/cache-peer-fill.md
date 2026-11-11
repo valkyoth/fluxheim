@@ -5,26 +5,62 @@ object before fetching from origin. It is not cache replication, consensus,
 distributed locking, or automatic cluster-wide invalidation. Each node owns its
 cache and its lifetime. See [caching](cache.md) for admission and storage basics.
 
-## Current Safety Boundary
+## Variant Safety And Upgrades
 
-**Current limitation:** Two related
-variant-context gaps are reproduced by tests:
+Peer fills use version 2 of the internal protocol. Both nodes must support this
+version, including when no shared secret is configured. Older responses are
+discarded; there is no automatic downgrade. Upgrade peers together or temporarily
+disable peer fill. During a mixed rollout, `fail_open = true` permits normal
+origin fallback; `false` returns a peer-fill failure when no compatible peer hits.
 
-- Outbound peer requests forward only `Accept`, `Accept-Encoding` and
-  `Accept-Language` plus Host. A custom variant such as `X-Edition` is not
-  forwarded, yet the returned default variant can be stored under the original
-  request's custom variant key. Do not enable peer fill on such routes.
-- Shared-secret HMAC authenticates request method/target/Host/nonce and response
-  content, but does not bind the negotiated request headers. An on-path actor on
-  plaintext transport can change negotiation and obtain a legitimately signed
-  different variant. A shared secret alone is not sufficient protection for
-  a hostile network, even though altered response bodies/signatures are rejected.
+`Accept`, `Accept-Encoding` and `Accept-Language` are preserved automatically.
+For a custom **public, non-secret** representation selector, name it explicitly
+in `vary_request_headers` on the requesting node:
+
+```toml
+[vhosts.cache]
+enabled = true
+vary_request_headers = ["x-edition"]
+
+[vhosts.cache.peer_fill]
+enabled = true
+fail_open = true
+
+[[vhosts.cache.peer_fill.peers]]
+name = "cache-a"
+base_url = "http://127.0.0.1:18081"
+```
+
+Merge these tables into an otherwise complete cache/vhost configuration. The
+peer must either configure the same selector or have stored an origin response
+with `Vary: X-Edition`. With `X-Edition: special`, a peer's default edition is
+never stored as the special edition. A response varying on an unpreserved field
+is rejected, even if that field was absent from this particular client request.
+Origin-declared custom fields therefore still need explicit configuration on
+the requesting node; Fluxheim does not forward all client headers speculatively.
+
+Header names are case-insensitive. Missing, present-but-empty and repeated
+values remain distinct; the order of repeated values is preserved. The context
+is limited to 19 unique fields (three defaults plus at most 16 configured
+fields), 128-byte names, 64 occurrences per field and 8 KiB of encoded context.
+Unsupported or over-limit contexts skip the peer attempt, following `fail_open`.
+Credentials, cookies, hop-by-hop fields, connection-nominated fields, forwarding
+identities, conditional/range controls and internal peer headers are not forwarded.
+Reserved authentication/secret-related names are rejected as selectors. Operators
+must still ensure their explicitly configured custom selectors contain only
+public representation metadata, never application credentials or personal data.
+
+HMAC version 2 binds method, target, Host, nonce and the same bounded variant
+context in both directions. The response also authenticates status, body and
+end-to-end headers, including `Age`, variant metadata and an internal cache-date
+field. That date is restored after verification because the HTTP/1 writer
+generates its own wire `Date`. Generated framing fields are not signed; the body
+digest binds the delivered bytes. Internal response metadata is removed before
+ordinary client delivery and local cache storage.
 
 Use verified HTTPS or an independently authenticated encrypted transport on any
-untrusted network. This protects transport integrity, but does not fix omitted
-custom variant headers. Keep peer fill disabled where these restrictions cannot
-be met. The example below is numeric-loopback development, not a production
-security template. This warning does not claim the runtime has been corrected.
+untrusted network. HMAC provides integrity, not confidentiality or an independent
+trust domain. Numeric-loopback HTTP examples are local development fixtures.
 
 ## How A Fill Works
 
@@ -90,7 +126,15 @@ sh scripts/smoke_peer_fill_cache.sh
 ```
 
 It covers peer/local hits, Accept-Language variants, fail-open/fail-closed
-behavior and metrics. It does not prove arbitrary custom-header variance safe.
+behavior and metrics. The cross-platform variant smoke additionally starts two
+real peers and a counted origin, checking exact bodies and origin counts for
+missing, empty and repeated custom values across memory, filesystem disk and
+storage-bin caches:
+
+```sh
+cargo build --locked --no-default-features --features profile-load-balancer,acme-client --bin fluxheim
+python3 scripts/smoke_peer_variants.py target
+```
 
 ## All Peer Options
 
@@ -124,8 +168,8 @@ absolute. Use a private regular file, restrictive service-readable permissions,
 trusted parent directories and private distribution. A password or public
 example string is not a suitable secret. Do not place it in a URL or Git.
 
-The HMAC layer detects unsigned/modified responses and binds a fresh nonce, but
-does not repair the variant-context gaps above. Peers sharing the key are one
+The HMAC layer detects unsigned/modified responses and binds a fresh nonce and
+variant context. Peers sharing the key are one
 trust domain: a compromised trusted peer is not made safe by its valid signature.
 Rotate keys as a coordinated rollout; mismatched keys cause misses/failures.
 

@@ -54,9 +54,16 @@ impl NativeHttp1Proxy {
         self.response_headers
             .apply_digests_for_method(&request.method, &mut response);
         if let Some(cache) = &self.cache
-            && let Some(auth) = cache.peer_fill_auth.as_deref()
+            && crate::native_http1_proxy_peer_context::canonical_context(&request.headers).is_some()
         {
-            native_peer_fill_sign_response(auth, request, &mut response);
+            crate::native_http1_proxy_peer_context::prepare_response(
+                request,
+                &mut response,
+                &cache.config,
+            );
+            if let Some(auth) = cache.peer_fill_auth.as_deref() {
+                native_peer_fill_sign_response(auth, request, &mut response);
+            }
         }
         response
     }
@@ -97,6 +104,16 @@ impl NativeHttp1Proxy {
         let Some(cache) = &self.cache else {
             return false;
         };
+        if cache.peer_fill_auth.is_none()
+            && !crate::native_http1_proxy_cache_headers::native_request_cache_only_if_cached(
+                request,
+            )
+        {
+            return false;
+        }
+        if crate::native_http1_proxy_peer_context::canonical_context(&request.headers).is_none() {
+            return true;
+        }
         let Some(auth) = cache.peer_fill_auth.as_deref() else {
             return false;
         };
