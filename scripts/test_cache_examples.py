@@ -4,6 +4,7 @@
 import tomllib
 import unittest
 import tempfile
+from contextlib import nullcontext
 from unittest.mock import mock_open, patch
 from pathlib import Path
 
@@ -12,11 +13,54 @@ import smoke_cache_operations as operations
 
 
 class CacheGuideTests(unittest.TestCase):
+    def test_admin_fixture_uses_platform_private_directory_before_writing(self):
+        with patch.object(operations, "private_fixture", side_effect=RuntimeError("ACL setup failed")) as private, \
+                patch.object(operations, "origin_server") as origin, self.assertRaisesRegex(RuntimeError, "ACL setup failed"):
+            operations.run_case(Path("fixture"), "memory")
+        private.assert_called_once_with(Path("fixture"))
+        origin.assert_not_called()
+
+    def test_admin_fixture_protects_each_cache_parent_before_creating_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(operations, "private_fixture", return_value=nullcontext(directory)), \
+                    patch.object(operations, "origin_server", return_value=nullcontext((12345, None))), \
+                    patch.object(operations, "protect_directory", side_effect=[None, RuntimeError("child ACL")]) as protect, \
+                    self.assertRaisesRegex(RuntimeError, "child ACL"):
+                operations.run_case(root, "filesystem")
+            self.assertEqual([call.args[0] for call in protect.call_args_list],
+                             [root / "state", root / "state/cache"])
+            self.assertFalse((root / "control-token").exists())
+
+    def test_inspection_matrix_keeps_cache_scopes_and_encryption_explicit(self):
+        for named in (False, True):
+            for backend in ("filesystem", "storage-bin"):
+                for disk_only in (False, True):
+                    source = smoke.inspection_configuration(smoke.prepare(12345, 12346, backend, disk_only), named, True)
+                    config = tomllib.loads(source)
+                    scope = config["vhosts"][0] if named else config
+                    self.assertEqual(scope["cache"]["memory"]["enabled"], not disk_only)
+                    self.assertEqual(scope["cache"]["disk"]["backend"], backend)
+                    self.assertEqual(scope["cache"]["disk"]["encryption"]["key_file"], "cache-key")
+                    self.assertEqual(scope["proxy"]["upstreams"], ["127.0.0.1:12346"])
+                    if named:
+                        self.assertNotIn("cache", config)
+
     def test_storage_checkpoint_retries_transient_sharing_denial(self):
         reader = mock_open(read_data=b"/asset.css".hex().encode("ascii"))
         with patch.object(Path, "open", side_effect=[PermissionError("sharing"), reader.return_value]), \
                 patch.object(smoke.time, "sleep"):
             smoke.wait_for_storage_index(Path("fixture"))
+
+    def test_encrypted_checkpoint_requires_all_six_warmed_entries(self):
+        header = b"FLUXHEIM-STORAGE-BIN-INDEX-v1\n"
+        entry = b"012345\t0\t0\t10\t1\n"
+        with patch.object(Path, "open", mock_open(read_data=header + entry * 6)):
+            smoke.wait_for_storage_index(Path("fixture"), encrypted=True)
+        with patch.object(Path, "open", mock_open(read_data=header + entry * 5)), \
+                patch.object(smoke.time, "monotonic", side_effect=[0, 0, 11]), \
+                patch.object(smoke.time, "sleep"), self.assertRaises(AssertionError):
+            smoke.wait_for_storage_index(Path("fixture"), encrypted=True)
 
     def test_storage_checkpoint_wait_requires_the_asset_and_is_bounded(self):
         with tempfile.TemporaryDirectory() as directory:

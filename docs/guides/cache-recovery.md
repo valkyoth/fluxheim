@@ -114,10 +114,11 @@ Separate roots are the predictable deployment model for either backend.
 
 Standalone `cache-lookup` can rebuild a filesystem cache view but cannot inspect
 another process's RAM. It also cannot construct an independent storage-bin
-allocator: bin inspection requires a registered cache in the same process.
-Thus an empty CLI bin lookup is not evidence that the running server has no
-cached object. Use live responses and protected status for running bins. The
-inspection follow-up in the local follow-up must preserve this single-owner boundary.
+allocator: the CLI returns an explicit unsupported error for eligible bin
+lookups without acquiring a lease, even with the server stopped. This is not
+evidence that the server has no cached object. Use live responses and protected
+status for running bins. Root policy preview is supported without weakening
+this single-owner boundary.
 
 ## Change Backend Or Layout Safely
 

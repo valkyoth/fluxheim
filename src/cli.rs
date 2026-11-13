@@ -242,7 +242,7 @@ pub enum CliCommand {
         expect_cache_status_sequence: Vec<String>,
     },
 
-    /// Preview the cache key selected for one request without contacting upstream.
+    /// Preview a root/vhost/route proxy cache key without contacting upstream.
     CacheKey {
         /// Host header to route and key with. Defaults to the configured default vhost host.
         #[arg(long)]
@@ -326,7 +326,7 @@ pub enum CliCommand {
         #[arg(long = "expect-storage-tiers", value_name = "COUNT")]
         expect_storage_tiers: Option<u8>,
 
-        /// Required selected cache policy scope: vhost or route.
+        /// Required selected cache policy scope: root, vhost or route.
         #[arg(long = "expect-scope", value_name = "SCOPE")]
         expect_scope: Option<String>,
 
@@ -351,7 +351,8 @@ pub enum CliCommand {
         expect_user_tag: Option<String>,
     },
 
-    /// Inspect cached object metadata for one request without dumping response bodies.
+    /// Inspect filesystem cache metadata without fetching upstream or dumping bodies.
+    /// Standalone storage-bin inspection is unsupported; live RAM is not inspected.
     CacheLookup {
         /// Host header to route and key with. Defaults to the configured default vhost host.
         #[arg(long)]
@@ -475,7 +476,7 @@ pub enum CliCommand {
         #[arg(long = "expect-storage-tiers", value_name = "COUNT")]
         expect_storage_tiers: Option<u8>,
 
-        /// Required selected cache policy scope: vhost or route.
+        /// Required selected cache policy scope: root, vhost or route.
         #[arg(long = "expect-scope", value_name = "SCOPE")]
         expect_scope: Option<String>,
 

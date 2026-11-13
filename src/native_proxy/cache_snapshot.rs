@@ -1,8 +1,8 @@
 use std::io;
 
 use fluxheim_cache::{
-    CacheKeyPreview, CacheKeyPreviewScope, CacheObjectHeaderValue, CacheObjectLookup,
-    CacheObjectMetadata, CacheObjectTier,
+    CacheKeyPreview, CacheObjectHeaderValue, CacheObjectLookup, CacheObjectMetadata,
+    CacheObjectTier,
 };
 
 #[derive(Clone, Debug)]
@@ -20,32 +20,13 @@ impl NativeProxySnapshot {
             .get(http::header::HOST)
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default();
-        let selected = self
-            .config
-            .vhosts
-            .iter()
-            .find(|vhost| super::native_vhost_matches_host(vhost, host))
-            .or_else(|| {
-                self.config
-                    .server
-                    .default_vhost
-                    .as_deref()
-                    .and_then(|name| self.config.vhosts.iter().find(|vhost| vhost.name == name))
-            })
-            .or_else(|| self.config.vhosts.first());
-        let vhost_name = selected
-            .map(|vhost| vhost.name.clone())
-            .unwrap_or_else(|| host.to_owned());
-        let selected_route = selected.and_then(|vhost| {
-            super::native_cache_preview_route(
-                &vhost.routes,
-                request.method.as_str(),
-                request.uri.path(),
-            )
-        });
-        let route_cache = selected_route.and_then(|route| route.cache.as_ref());
-        let cache_config = route_cache.or_else(|| selected.map(|vhost| &vhost.cache));
-        let cache_config = cache_config.unwrap_or(&self.config.cache);
+        let selection = super::cache_selection::PreviewSelection::new(&self.config, request);
+        let vhost_name = selection.vhost.map_or_else(String::new, |v| v.name.clone());
+        let disabled = crate::config::CacheConfig {
+            enabled: false,
+            ..Default::default()
+        };
+        let cache_config = selection.cache.unwrap_or(&disabled);
         let memory_tier_enabled = cache_config.memory.enabled;
         let disk_tier_enabled = cache_config.disk.enabled;
         let method_cacheable = cache_config
@@ -59,11 +40,27 @@ impl NativeProxySnapshot {
             .path_and_query()
             .map(|path| fluxheim_common::path_safety::safe_forward_path_and_query(path.as_str()))
             .unwrap_or(false);
-        let eligible = selected.is_some()
+        let bypass = fluxheim_cache::request_cache_bypass_reason(request, cache_config);
+        let supported = selection.proxy.is_some_and(|proxy| {
+            proxy.has_configured_upstream()
+                && fluxheim_server::NativeHttp1Proxy::proxy_cache_supported_for_proxy(
+                    cache_config,
+                    proxy,
+                )
+        });
+        let rewritten = selection.route.is_some_and(|route| {
+            route.strip_prefix.is_some()
+                || route.rewrite_prefix.is_some()
+                || route.rewrite_template.is_some()
+        });
+        let eligible = (selection.root || selection.vhost.is_some())
             && cache_config.enabled
             && !method_temporarily_bypassed
             && method_cacheable
-            && safe_path;
+            && safe_path
+            && supported
+            && !rewritten
+            && bypass.is_none();
         let cache_request = fluxheim_cache::CacheRequest {
             method: request.method.as_str(),
             host: Some(host),
@@ -73,7 +70,7 @@ impl NativeProxySnapshot {
         let key = eligible
             .then(|| fluxheim_cache::image_cache_key(cache_config, &cache_request))
             .flatten();
-        let reason = if selected.is_none() {
+        let reason = if !selection.root && selection.vhost.is_none() {
             Some("no matching vhost".to_owned())
         } else if !cache_config.enabled {
             Some("cache disabled".to_owned())
@@ -86,6 +83,12 @@ impl NativeProxySnapshot {
             Some(format!("method {} is not cacheable", request.method))
         } else if !safe_path {
             Some("request path is not safe for cache lookup".to_owned())
+        } else if !supported {
+            Some("selected action has no supported proxy cache".to_owned())
+        } else if rewritten {
+            Some("offline preview does not support rewritten routes".to_owned())
+        } else if let Some(reason) = bypass {
+            Some(reason.to_owned())
         } else if key.is_none() {
             Some("path or query is not admitted by selected image cache policy".to_owned())
         } else {
@@ -93,12 +96,8 @@ impl NativeProxySnapshot {
         };
         CacheKeyPreview {
             vhost: vhost_name.clone(),
-            route: route_cache.and_then(|_| selected_route.map(|route| route.name.clone())),
-            scope: if route_cache.is_some() {
-                CacheKeyPreviewScope::Route
-            } else {
-                CacheKeyPreviewScope::Vhost
-            },
+            route: selection.route.map(|route| route.name.clone()),
+            scope: selection.scope(),
             eligible: key.is_some(),
             cache_lock_enabled: cache_config.lock.enabled,
             cache_lock_wait_timeout_secs: cache_config.lock.wait_timeout_secs,
@@ -125,11 +124,10 @@ impl NativeProxySnapshot {
             variance_hash: None,
             combined_hash: key.as_ref().map(|key| key.as_str().to_owned()),
             user_tag: key.as_ref().map(|_| {
-                route_cache
-                    .and_then(|_| {
-                        selected_route.map(|route| format!("{vhost_name}:route:{}", route.name))
-                    })
-                    .unwrap_or(vhost_name)
+                selection
+                    .route
+                    .map(|route| format!("{vhost_name}:route:{}", route.name))
+                    .unwrap_or_else(|| selection.runtime_identity().to_owned())
             }),
         }
     }
@@ -139,33 +137,26 @@ impl NativeProxySnapshot {
         request: &fluxheim_cache::NativeCachePreviewRequest,
     ) -> io::Result<CacheObjectLookup> {
         let preview = self.native_image_cache_key_preview_for_request(request);
+        let selection = super::cache_selection::PreviewSelection::new(&self.config, request);
         let mut objects = Vec::new();
         if let Some(primary_key) = preview.primary_key.as_deref()
-            && let Some(vhost) = self
-                .config
-                .vhosts
-                .iter()
-                .find(|vhost| vhost.name == preview.vhost)
-            && let Some(cache_config) = preview
-                .route
-                .as_deref()
-                .and_then(|route_name| {
-                    vhost
-                        .routes
-                        .iter()
-                        .find(|route| route.name == route_name)
-                        .and_then(|route| route.cache.as_ref())
-                })
-                .or(Some(&vhost.cache))
-            && let Some(metadata) = fluxheim_server::inspect_native_disk_cache_object(
-                &vhost.name,
+            && let Some(cache_config) = selection.cache.filter(|cache| cache.disk.enabled)
+        {
+            if cache_config.disk.backend == crate::config::CacheDiskBackend::StorageBin {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "standalone storage-bin lookup is unsupported; it cannot share the serving process's allocator",
+                ));
+            }
+            if let Some(metadata) = fluxheim_server::inspect_native_disk_cache_object(
+                selection.runtime_identity(),
                 preview.route.as_deref(),
                 cache_config,
                 primary_key,
                 &native_cache_lookup_request_headers(request),
-            )
-        {
-            objects.push(native_cache_object_metadata(metadata));
+            ) {
+                objects.push(native_cache_object_metadata(metadata));
+            }
         }
         Ok(CacheObjectLookup { preview, objects })
     }

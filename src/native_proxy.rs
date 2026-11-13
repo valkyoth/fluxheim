@@ -4,7 +4,11 @@ use std::sync::{Arc, Mutex, MutexGuard};
 #[cfg(feature = "cache")]
 mod cache_purge;
 #[cfg(feature = "cache")]
+mod cache_selection;
+#[cfg(feature = "cache")]
 mod cache_snapshot;
+#[cfg(all(test, feature = "cache"))]
+mod cache_snapshot_tests;
 #[cfg(feature = "cache")]
 mod cache_stats;
 #[cfg(feature = "load-balancer")]

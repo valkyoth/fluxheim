@@ -49,12 +49,25 @@ permissions. `cache-keygen` generates a secret, not a cache identity; see
 
 ## Inspect Before Warming
 
-**Current limitation:** root-only proxy caching works
-over HTTP, but offline preview requires a named vhost. Without one, `cache-key`
-reports `no matching vhost` and `cache-lookup` cannot inspect the root cache.
-This is a pending diagnostic correction, not proof that HTTP caching is off.
+For a configuration without `[[vhosts]]`, inspection uses the root proxy/cache
+policy and reports `scope: root`, an empty vhost name and the runtime user tag
+`root`. Supply `--host` explicitly; it remains part of the configured cache key.
+No synthetic vhost is added to your configuration:
 
-For the supported workflow, combine the [loopback example](../../examples/cache/local.toml)
+```sh
+fluxheim --config examples/cache/local.toml cache-key \
+  --host cache.test --path /asset.css --expect-eligible --expect-scope root
+```
+
+When vhosts exist, root policies are not a fallback inspection scope. Exact
+hosts take precedence over wildcard hosts, the longest wildcard suffix wins,
+and strict host routing rejects unmatched hosts. Non-strict routing uses the
+configured default vhost (or first vhost), just as serving does. Route matching
+uses exact, longest prefix, first regex, then fallback precedence and honors
+method restrictions. A matching route without a cache does not inherit the
+vhost fallback cache.
+
+For named-vhost inspection, combine the [loopback example](../../examples/cache/local.toml)
 with the [explicit-vhost fragment](../../examples/cache/operations.toml). Run
 from the repository root; the generated file is local test configuration:
 
@@ -74,6 +87,14 @@ Supply variant headers with repeated `--header 'Name: value'`. `--host` selects
 the configured virtual host; its name and its HTTP hostname can differ. Route
 selection follows the configuration rather than a CLI route override.
 
+Preview applies configured request bypass rules, including credential, cookie
+and no-store bypass. It is not a simulation of authorization, rewrites, Wasm,
+response admission or live cache-pass state. Rewritten routes and non-proxy
+actions return an explicit ineligible reason rather than a guessed proxy key.
+The key shown is the primary key; stored response `Vary` fields are resolved
+during filesystem lookup using the supplied headers. Repeated header values
+are preserved. Use live HTTP tests for transformations and dynamic decisions.
+
 The fragment explicitly enables a vhost-owned memory/filesystem cache; it does
 not inherit the root cache policy. Prepare its service-owned private
 `examples/cache/state/cache` directory as described in the caching guide, start
@@ -90,11 +111,19 @@ the command cannot inspect another process's RAM. It does not fetch an origin
 to repair a miss. Encrypted storage needs the configured key/provider access.
 Use the same host/query/variant inputs as the original request.
 
-Standalone storage-bin lookup cannot construct an independent allocator; bin
-inspection requires a cache registered in the same process. An empty CLI result
-therefore does not prove that the running bin cache is empty. Use live responses
+Standalone storage-bin lookup returns an explicit unsupported error for an
+eligible request, even when the server is stopped. It never constructs a second
+allocator or takes the serving process's lease. `cache-key` still previews bin
+policies. An unsupported lookup is not an empty-cache result. Use live responses
 and protected status instead. The [recovery guide](cache-recovery.md) explains
 the single-owner rule, reload limitations and safe layout changes.
+
+Admin scope compatibility is unchanged: scoped purge targets are configured
+vhosts and routes, not a new `root` alias. A configured vhost literally named
+`root` remains that vhost. Root-only policies have no vhost detail in the current
+status API; process-wide activity totals can still include their traffic. Use
+named vhosts when scoped admin management is required. This CLI correction does
+not add an unauthenticated or in-process object inspection endpoint.
 
 For automation, both commands expose policy expectations such as scope, vhost,
 route, namespace, lock, predictor, origin protection, peer fill and tier counts.

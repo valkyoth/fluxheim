@@ -38,7 +38,9 @@ pub(super) fn cache_key_command_request(
         return Err("cache-key accepts at most 32 --header values".into());
     }
     for (name, value) in parse_cache_cli_headers("cache-key", &options.headers)? {
-        request.insert_header(name, value)?;
+        request
+            .headers
+            .append(name.parse::<http::HeaderName>()?, value.parse()?);
     }
     Ok((config, request))
 }
@@ -280,11 +282,13 @@ pub(super) fn parse_cache_key_preview_scope(
         return Ok(None);
     };
     match scope.trim().to_ascii_lowercase().as_str() {
+        "root" => Ok(Some("root".to_owned())),
         "vhost" => Ok(Some("vhost".to_owned())),
         "route" => Ok(Some("route".to_owned())),
-        other => {
-            Err(format!("{command} --expect-scope must be vhost or route; got {other:?}").into())
-        }
+        other => Err(format!(
+            "{command} --expect-scope must be root, vhost or route; got {other:?}"
+        )
+        .into()),
     }
 }
 

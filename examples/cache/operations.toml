@@ -1,4 +1,4 @@
-# Append to local.toml for the currently supported CLI inspection scope.
+# Append to local.toml for named-vhost inspection and scoped admin operations.
 # Vhost policies are independent: explicitly configure this vhost's cache.
 [[vhosts]]
 name = "assets"

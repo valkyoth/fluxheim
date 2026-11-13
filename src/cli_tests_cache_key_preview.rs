@@ -111,6 +111,12 @@ fn cache_key_preview_expectations_validate_policy_layout() {
     );
 
     assert_eq!(
+        super::super::parse_cache_key_preview_scope("cache-key", Some(&" Root ".to_owned()))
+            .unwrap()
+            .as_deref(),
+        Some("root")
+    );
+    assert_eq!(
         super::super::parse_cache_key_preview_scope("cache-key", Some(&" Route ".to_owned()))
             .unwrap()
             .as_deref(),

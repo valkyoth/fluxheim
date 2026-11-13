@@ -188,6 +188,7 @@ qualification are different checks; see each guide's limitations and evidence.
 - [Peer cache variant qualification](evidence/observability-19.md)
 - [Persistent range slice qualification](evidence/observability-20.md)
 - [Slice upstream policy qualification](evidence/observability-21.md)
+- [Root cache inspection qualification](evidence/observability-22.md)
 - [Commit 12 native archive identities and checksums](evidence/observability-12-archives.json)
 - [Commit 12 local performance measurements](evidence/observability-12-performance.json)
 - [Commit 12 ARM performance measurements](evidence/observability-12-performance-arm.json)

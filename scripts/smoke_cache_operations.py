@@ -7,10 +7,10 @@ import json
 from pathlib import Path
 import secrets
 import socket
-import tempfile
 import time
 
 from smoke_cache_examples import origin_server, prepare, replace_once, request, running
+from smoke_log_file_rotation import private_fixture, protect_directory
 
 
 def configuration(public, origin, admin, backend):
@@ -56,10 +56,13 @@ def api(port, method, path, token=None, headers=None, expected=200):
 
 
 def run_case(parent, backend):
-    with tempfile.TemporaryDirectory(prefix="cache-admin-", dir=parent) as directory, \
+    with private_fixture(parent) as directory, \
             origin_server() as (origin, count):
         root = Path(directory)
-        (root / "state/cache").mkdir(parents=True, mode=0o700)
+        for relative in ("state", "state/cache"):
+            path = root / relative
+            path.mkdir()
+            protect_directory(path)
         control, observer = secrets.token_hex(32), secrets.token_hex(32)
         for name, token in (("control-token", control), ("observer-token", observer)):
             path = root / name

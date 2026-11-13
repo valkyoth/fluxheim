@@ -45,6 +45,7 @@ pub struct CacheKeyPreview {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum CacheKeyPreviewScope {
+    Root,
     Vhost,
     Route,
 }
@@ -52,6 +53,7 @@ pub enum CacheKeyPreviewScope {
 impl CacheKeyPreviewScope {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Root => "root",
             Self::Vhost => "vhost",
             Self::Route => "route",
         }

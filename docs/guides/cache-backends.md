@@ -220,7 +220,7 @@ for supported selectors and coordinated-upgrade requirements.
 
 | Interface | Useful output | Important limit |
 | --- | --- | --- |
-| `cache-key` | Scope, vhost/route, key/namespace, eligibility, lock/predictor/origin/peer policy and tier selection | Config-derived; root-only proxy lookup has the documented limitation; no proof of a running hit |
+| `cache-key` | Root/vhost/route scope, key/namespace, eligibility, lock/predictor/origin/peer policy and tier selection | Config-derived; no proof of a running hit; transformed routes and non-proxy actions are explicitly unsupported |
 | `cache-lookup` | Matching tier, status, body length, freshness timestamps/state, stale eligibility, tags and header names | Separate process cannot inspect live RAM or acquire another bin allocator; filesystem recovery can mutate state |
 | `cache-warm` | Actual HTTP statuses and cache-status transitions | Real traffic; cannot infer disk success from a memory HIT |
 | Admin cache status | Live activity, tracked occupancy, tier/policy coverage and bin allocation/free-space summaries | Not every file/block or a cluster-wide inventory |

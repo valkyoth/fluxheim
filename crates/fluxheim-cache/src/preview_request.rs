@@ -7,6 +7,32 @@ pub struct NativeCachePreviewRequest {
     pub headers: http::HeaderMap,
 }
 
+impl crate::CacheRequestView for NativeCachePreviewRequest {
+    fn method(&self) -> &str {
+        self.method.as_str()
+    }
+
+    fn path(&self) -> &str {
+        self.uri.path()
+    }
+
+    fn query(&self) -> Option<&str> {
+        self.uri.query()
+    }
+
+    fn contains_header(&self, name: &str) -> bool {
+        self.headers.contains_key(name)
+    }
+
+    fn visit_header_values(&self, name: &str, visitor: &mut dyn FnMut(&str)) {
+        for value in self.headers.get_all(name) {
+            if let Ok(value) = value.to_str() {
+                visitor(value);
+            }
+        }
+    }
+}
+
 impl NativeCachePreviewRequest {
     pub fn build(
         method: &str,
