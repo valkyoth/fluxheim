@@ -11,8 +11,9 @@ changing an encrypted root or its keys.
 - **Required disk tiers:** initialization failure rejects startup or a candidate
   reload, including tiered configurations. It does not disable the disk tier
   and continue with memory alone. Same-process unencrypted caches may be reused
-  with the same scope and cache policy, except for status-header presentation
-  changes. Incompatible policies and encrypted-root reloads require stop/start
+  with the same representation identity, scope and cache policy, except for
+  status-header presentation changes. Incompatible policies, changed origin
+  context and encrypted-root reloads require stop/start
   or a fresh independent root; the old router remains active after rejection.
 - **Current limitation:** native filesystem recovery skips corrupt or
   unindexable objects and abandoned temporary files. They can remain on disk
@@ -103,7 +104,10 @@ Within a process, give each root/vhost/route disk policy its own directory for
 either backend. Different scopes or policies cannot initialize the same root
 simultaneously, even with different key namespaces. This also applies at initial
 startup, not only during reload. Compatible generations of one unencrypted
-policy can share the same disk state.
+policy can share the same disk state only when their representation identity
+also matches. Origin, header, rewrite and authorization changes cannot reuse
+the active root. A new independent root allows the old generation's pinned
+requests to finish without writing into the new generation's cache.
 
 Give every storage-bin policy and replica its own canonical root. The allocator
 holds `.fluxheim-storage-bin.lock` while alive. An incompatible or competing
@@ -167,11 +171,18 @@ succeed. Compatible unencrypted caches share the existing disk state and, for
 bins, the same exclusive allocator lease. Old requests can finish safely. Final
 teardown closes the index task and finishes its best-effort synchronous flush
 before releasing the lease; retained background tasks cannot write afterward.
-Other cache-policy changes on a live root, scope changes and encrypted-root
-reloads are rejected before reinitializing that root. This includes unchanged
+Other cache-policy changes on a live root, scope/representation changes and
+encrypted-root reloads are rejected before reinitializing that root. This includes unchanged
 encrypted policies, because loading keys can initiate a migration. Use the
 stop/start workflow above for these changes, or select a fresh independent
 root. Never migrate a directory still used by an old generation.
+
+Persisted proxy keys bind the configuration-derived representation identity as
+well as your explicit namespace. Restarting with a different origin or routing
+context cannot recover an old-context HIT. Older unbound keys also start cold;
+retained bytes still count toward disk occupancy. Identical context preserves
+normal restart hits. See [scope and variants](cache.md#scope-and-variants) for
+the deliberately conservative identity and external-state limitations.
 
 The admin reload endpoint returns an error (currently HTTP 500 for candidate
 construction failure), without publishing the candidate router or updating

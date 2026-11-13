@@ -36,7 +36,12 @@ fn root_preview_has_explicit_scope_without_a_fictitious_vhost() {
     assert_eq!(preview.route, None);
     assert_eq!(preview.user_tag.as_deref(), Some("root"));
     let expected = fluxheim_cache::image_cache_key(
-        &snapshot.config.cache,
+        &fluxheim_server::native_representation_cache_config(
+            &snapshot.config.cache,
+            &fluxheim_server::native_cache_representation(&snapshot.config).unwrap(),
+            "root",
+            None,
+        ),
         &fluxheim_cache::CacheRequest {
             method: "GET",
             host: Some("cache.test"),
@@ -59,6 +64,18 @@ fn root_preview_has_explicit_scope_without_a_fictitious_vhost() {
             .objects
             .is_empty()
     );
+}
+
+#[test]
+fn preview_binds_origin_identity_without_exposing_the_internal_namespace() {
+    let first = snapshot(ROOT);
+    let second = snapshot(&ROOT.replace("127.0.0.1:9", "127.0.0.1:10"));
+    let request = request("cache.test", "/asset.css");
+    let first = first.native_image_cache_key_preview_for_request(&request);
+    let second = second.native_image_cache_key_preview_for_request(&request);
+    assert!(first.eligible && second.eligible);
+    assert_eq!(first.key_namespace, second.key_namespace);
+    assert_ne!(first.primary_key, second.primary_key);
 }
 
 #[test]

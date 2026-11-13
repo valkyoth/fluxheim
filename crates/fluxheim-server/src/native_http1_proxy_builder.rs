@@ -256,7 +256,12 @@ impl NativeHttp1Proxy {
         let native = native
             .map(|proxy| {
                 if Self::proxy_cache_supported_for_proxy(&config.cache, &config.proxy) {
-                    proxy.with_proxy_cache_config_for(&config.cache, "root", None)
+                    proxy.with_proxy_cache_representation(
+                        &config.cache,
+                        "root",
+                        None,
+                        &crate::native_cache_representation(config)?,
+                    )
                 } else {
                     Ok(proxy)
                 }

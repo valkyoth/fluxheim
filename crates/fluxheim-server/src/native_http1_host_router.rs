@@ -246,6 +246,11 @@ impl NativeHttp1HostRouter {
             .map(|router| (router, load_balancer_services, load_balancer_admin_pools));
         }
         let trusted_sources = trusted_sources_from_config(config)?;
+        let cache_representation = crate::native_cache_representation(config).map_err(|error| {
+            NativeHttp1HostRouterConfigError::RouteProxy(NativeHttp1RouteProxyConfigError::Proxy(
+                error,
+            ))
+        })?;
         #[cfg(feature = "wasm")]
         let wasm_registry = NativeWasmHookRegistry::from_config(config).map_err(|_| {
             NativeHttp1HostRouterConfigError::RouteProxy(NativeHttp1RouteProxyConfigError::Wasm)
@@ -255,13 +260,14 @@ impl NativeHttp1HostRouter {
         let mut wildcard_hosts = Vec::new();
 
         for vhost in &config.vhosts {
-            let context = NativeRouteProxyBuildContext::new(
+            let mut context = NativeRouteProxyBuildContext::new(
                 &config.headers,
                 Some(&config.compression),
                 policy,
                 pool_max_idle,
                 &trusted_sources,
             );
+            context.cache_representation = Some(cache_representation);
             #[cfg(feature = "wasm")]
             let context = context.with_wasm_registry(wasm_registry.as_ref());
             let proxy = Arc::new(route_proxy_from_config(

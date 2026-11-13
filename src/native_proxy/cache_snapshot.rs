@@ -67,8 +67,21 @@ impl NativeProxySnapshot {
             path: request.uri.path(),
             query: request.uri.query(),
         };
+        let representation = fluxheim_server::native_cache_representation(&self.config).ok();
+        let scoped_cache = representation.as_ref().map(|identity| {
+            fluxheim_server::native_representation_cache_config(
+                cache_config,
+                identity,
+                selection.runtime_identity(),
+                selection.route.map(|route| route.name.as_str()),
+            )
+        });
         let key = eligible
-            .then(|| fluxheim_cache::image_cache_key(cache_config, &cache_request))
+            .then(|| {
+                scoped_cache
+                    .as_ref()
+                    .and_then(|cache| fluxheim_cache::image_cache_key(cache, &cache_request))
+            })
             .flatten();
         let reason = if !selection.root && selection.vhost.is_none() {
             Some("no matching vhost".to_owned())
@@ -89,6 +102,8 @@ impl NativeProxySnapshot {
             Some("offline preview does not support rewritten routes".to_owned())
         } else if let Some(reason) = bypass {
             Some(reason.to_owned())
+        } else if representation.is_none() {
+            Some("cache representation identity could not be established".to_owned())
         } else if key.is_none() {
             Some("path or query is not admitted by selected image cache policy".to_owned())
         } else {

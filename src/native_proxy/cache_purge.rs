@@ -10,6 +10,7 @@ use fluxheim_cache::{
 use super::FluxProxy;
 
 pub(super) struct CacheConfigSelection {
+    representation: [u8; 32],
     pub(super) vhost_name: String,
     pub(super) route_name: Option<String>,
     pub(super) cache: crate::config::CacheConfig,
@@ -23,6 +24,8 @@ impl FluxProxy {
         host: &str,
     ) -> io::Result<CacheConfigSelection> {
         let config = self.lock_config("cache config selection")?;
+        let representation =
+            fluxheim_server::native_cache_representation(&config).map_err(io::Error::other)?;
         let vhost = if let Some(vhost_name) = requested_vhost {
             config
                 .vhosts
@@ -67,12 +70,14 @@ impl FluxProxy {
                 )
             })?;
             Ok(CacheConfigSelection {
+                representation,
                 vhost_name: vhost.name.clone(),
                 route_name: Some(route.name.clone()),
                 cache: cache.clone(),
             })
         } else {
             Ok(CacheConfigSelection {
+                representation,
                 vhost_name: vhost.name.clone(),
                 route_name: None,
                 cache: vhost.cache.clone(),
@@ -136,8 +141,14 @@ impl FluxProxy {
             path: request.path,
             query: request.query,
         };
-        let cache_key = fluxheim_cache::image_cache_key(&selection.cache, &cache_request)
-            .ok_or_else(|| {
+        let scoped_cache = fluxheim_server::native_representation_cache_config(
+            &selection.cache,
+            &selection.representation,
+            &selection.vhost_name,
+            selection.route_name.as_deref(),
+        );
+        let cache_key =
+            fluxheim_cache::image_cache_key(&scoped_cache, &cache_request).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     if selection.route_name.is_some() {

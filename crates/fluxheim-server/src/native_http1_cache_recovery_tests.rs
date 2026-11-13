@@ -23,7 +23,7 @@ fn documented_filesystem_recovery_currently_leaves_unindexed_files() {
     file.set_modified(SystemTime::UNIX_EPOCH).unwrap();
     drop(file);
 
-    let recovered = NativeDiskCache::from_config(&config).unwrap();
+    let recovered = NativeDiskCache::try_from_config(&config).unwrap().unwrap();
     assert_eq!(recovered.stats().entries, 1);
     assert!(recovered.get("valid", |_| None).is_some());
     // documented contract: these files remain outside tracked occupancy/eviction.
@@ -44,7 +44,7 @@ fn documented_storage_bin_missing_index_is_cold_without_object_salvage() {
     let index = directory.path().join(".fluxheim-storage-bin-index-v1");
     assert!(index.exists());
     std::fs::remove_file(index).unwrap();
-    let recovered = NativeDiskCache::from_config(&config).unwrap();
+    let recovered = NativeDiskCache::try_from_config(&config).unwrap().unwrap();
     assert_eq!(recovered.stats().entries, 0);
     assert!(recovered.get("valid", |_| None).is_none());
     recovered

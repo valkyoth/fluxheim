@@ -47,6 +47,7 @@ pub struct NativeHttp1RouteProxy {
 
 #[derive(Clone)]
 pub(crate) struct NativeRouteProxyBuildContext<'a> {
+    pub(crate) cache_representation: Option<[u8; 32]>,
     pub(crate) base_headers: &'a HeaderPolicyConfig,
     pub(crate) inherited_compression: Option<&'a fluxheim_config::CompressionConfig>,
     pub(crate) policy: DownstreamHttp1Policy,
@@ -66,6 +67,7 @@ impl<'a> NativeRouteProxyBuildContext<'a> {
         trusted_sources: &'a [ProxyProtocolTrustedSource],
     ) -> Self {
         Self {
+            cache_representation: None,
             base_headers,
             inherited_compression,
             policy,

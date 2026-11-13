@@ -11,6 +11,124 @@ use super::{
 
 const ORIGIN_RESPONSE: &str = "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=120\r\ncontent-length: 4\r\n\r\nbody";
 
+#[tokio::test]
+async fn origin_cutover_isolates_warm_entries_late_fills_and_restart() {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    for backend in [
+        fluxheim_config::CacheDiskBackend::Filesystem,
+        fluxheim_config::CacheDiskBackend::StorageBin,
+    ] {
+        for memory in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let old_root = root.path().canonicalize().unwrap().join("old");
+            let fresh_root = root.path().canonicalize().unwrap().join("new");
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let origin_a = listener.local_addr().unwrap();
+            let (entered, ready) = tokio::sync::oneshot::channel();
+            let (release, resume) = tokio::sync::oneshot::channel();
+            let origin_task = tokio::spawn(async move {
+                let mut entered = Some(entered);
+                let mut resume = Some(resume);
+                for delayed in [false, true] {
+                    let (mut stream, _) =
+                        tokio::time::timeout(Duration::from_secs(5), listener.accept())
+                            .await
+                            .unwrap()
+                            .unwrap();
+                    let mut head = Vec::new();
+                    while !head.ends_with(b"\r\n\r\n") {
+                        assert!(head.len() < 16 * 1024);
+                        head.push(
+                            tokio::time::timeout(Duration::from_secs(5), stream.read_u8())
+                                .await
+                                .unwrap()
+                                .unwrap(),
+                        );
+                    }
+                    if delayed {
+                        entered.take().unwrap().send(()).unwrap();
+                        tokio::time::timeout(Duration::from_secs(5), resume.take().unwrap())
+                            .await
+                            .unwrap()
+                            .unwrap();
+                    }
+                    stream.write_all(ORIGIN_RESPONSE.as_bytes()).await.unwrap();
+                }
+            });
+            const NEW_RESPONSE: &str = "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=120\r\ncontent-length: 4\r\n\r\nnew!";
+            let origin_b = upstream_raw_response_sequence(&[
+                ("/asset.png", NEW_RESPONSE),
+                ("/late.png", NEW_RESPONSE),
+                ("/asset.png", NEW_RESPONSE),
+                ("/late.png", NEW_RESPONSE),
+            ])
+            .await;
+            let mut baseline = config(&old_root, origin_a);
+            baseline.cache.disk.backend = backend;
+            baseline.cache.memory.enabled = memory;
+            let initial =
+                NativeHttp1HostRouter::from_config(&baseline, DownstreamHttp1Policy::default(), 0)
+                    .unwrap();
+            let (router, reloader) = NativeHttp1ReloadableRouter::new(
+                initial,
+                DownstreamHttp1Policy::default(),
+                0,
+                false,
+                NativeRequestBodyBudget::new(1024 * 1024),
+            );
+            assert_eq!(cache_status(&get(&router).await), Some("MISS"));
+            assert_eq!(cache_status(&get(&router).await), Some("HIT"));
+            let pinned = router.pin_request_handler().unwrap();
+            let pending =
+                tokio::spawn(async move { pinned.handle(route_test_request("/late.png")).await });
+            tokio::time::timeout(Duration::from_secs(5), ready)
+                .await
+                .unwrap()
+                .unwrap();
+            let mut candidate = baseline.clone();
+            candidate.proxy.upstream = Some(origin_b.to_string());
+            assert!(reloader.reload_from_config(&candidate).is_err());
+            assert_eq!(cache_status(&get(&router).await), Some("HIT"));
+            candidate.cache.disk.path = Some(fresh_root);
+            reloader.reload_from_config(&candidate).unwrap();
+            release.send(()).unwrap();
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(5), pending)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .body(),
+                b"body"
+            );
+            origin_task.await.unwrap();
+            for path in ["/asset.png", "/late.png"] {
+                let response = router.handle(route_test_request(path)).await;
+                assert_eq!(response.body(), b"new!");
+                assert_eq!(cache_status(&response), Some("MISS"));
+                assert_eq!(
+                    cache_status(&router.handle(route_test_request(path)).await),
+                    Some("HIT")
+                );
+            }
+            drop(reloader);
+            drop(router);
+            candidate.cache.disk.path = Some(old_root);
+            let restarted =
+                NativeHttp1HostRouter::from_config(&candidate, DownstreamHttp1Policy::default(), 0)
+                    .unwrap();
+            for path in ["/asset.png", "/late.png"] {
+                let response = restarted.handle(route_test_request(path)).await;
+                assert_eq!(response.body(), b"new!");
+                assert_eq!(cache_status(&response), Some("MISS"));
+                assert_eq!(
+                    cache_status(&restarted.handle(route_test_request(path)).await),
+                    Some("HIT")
+                );
+            }
+        }
+    }
+}
+
 fn config(root: &std::path::Path, upstream: std::net::SocketAddr) -> fluxheim_config::Config {
     let mut config = fluxheim_config::Config::default();
     config.proxy.upstream = Some(upstream.to_string());

@@ -100,6 +100,12 @@ def run_case(parent, backend, memory, encrypted):
             action(admin, token, "reload", expected=500 if encrypted else 200)
             assert request(public) == "HIT"
             before = action(admin, token, "status", method="GET")["runtime_snapshot"]
+            context_change = source + '\n[vhosts.headers.request]\nenabled = true\n[vhosts.headers.request.set]\nx-tenant = "new-tenant"\n'
+            (root / "context.toml").write_text(context_change, encoding="utf-8")
+            publish(root, "context.toml")
+            action(admin, token, "reload", expected=500)
+            assert action(admin, token, "status", method="GET")["runtime_snapshot"] == before
+            assert request(public) == "HIT"
             bad = replace_once(candidate, 'max_size_bytes = "32MiB"', 'max_size_bytes = "33MiB"')
             (root / "bad.toml").write_text(bad, encoding="utf-8")
             publish(root, "bad.toml")
@@ -132,6 +138,15 @@ def run_case(parent, backend, memory, encrypted):
         with running(config, public):
             assert request(public) == "HIT"
             assert count("/asset.css") == 1
+        with origin_server() as (replacement, replacement_count):
+            changed = source.replace(f"127.0.0.1:{origin}", f"127.0.0.1:{replacement}")
+            assert changed != source, "replacement origin was not configured"
+            config.write_text(changed, encoding="utf-8")
+            with running(config, public):
+                assert request(public) == "MISS", "old-origin object survived context change"
+                assert request(public) == "HIT"
+                assert replacement_count("/asset.css") == 1
+                assert count("/asset.css") == 1
         print(f"required cache lifecycle {backend} memory={memory} encrypted={encrypted}: ok")
 
 

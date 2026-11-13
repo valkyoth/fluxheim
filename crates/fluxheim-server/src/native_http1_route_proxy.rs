@@ -118,7 +118,12 @@ impl NativeHttp1RouteProxy {
         .map(|proxy| {
             let proxy = proxy.with_header_policy(&config.headers);
             if NativeHttp1Proxy::proxy_cache_supported_for_proxy(&config.cache, &config.proxy) {
-                proxy.with_proxy_cache_config_for(&config.cache, "root", None)
+                proxy.with_proxy_cache_representation(
+                    &config.cache,
+                    "root",
+                    None,
+                    &crate::native_cache_representation(config)?,
+                )
             } else {
                 Ok(proxy)
             }
@@ -220,9 +225,31 @@ impl NativeHttp1RouteProxy {
     pub(crate) fn from_config_with_build_context(
         config: &Config,
         vhost: &fluxheim_config::VhostConfig,
-        context: NativeRouteProxyBuildContext<'_>,
+        mut context: NativeRouteProxyBuildContext<'_>,
         #[cfg(feature = "load-balancer")] collectors: NativeLoadBalancerCollectors<'_>,
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
+        if context.cache_representation.is_none() {
+            let mut effective = config.clone();
+            effective.headers = context.base_headers.clone();
+            effective.vhosts = vec![vhost.clone()];
+            effective.server.trusted_proxies = context
+                .trusted_sources
+                .iter()
+                .map(|source| match source {
+                    ProxyProtocolTrustedSource::Ip(ip) => ip.to_string(),
+                    ProxyProtocolTrustedSource::Cidr { network, prefix } => {
+                        format!("{network}/{prefix}")
+                    }
+                })
+                .collect();
+            if let Some(compression) = context.inherited_compression {
+                effective.compression = compression.clone();
+            }
+            context.cache_representation = Some(
+                crate::native_cache_representation(&effective)
+                    .map_err(NativeHttp1RouteProxyConfigError::Proxy)?,
+            );
+        }
         let mut proxy = Self::from_vhost_config_with_build_context(
             vhost,
             context.clone(),
@@ -308,6 +335,31 @@ impl NativeHttp1RouteProxy {
             ));
         }
         let headers = context.base_headers.with_vhost_overlay(&vhost.headers);
+        let representation = match context.cache_representation {
+            Some(identity) => identity,
+            None => {
+                let mut effective = fluxheim_config::Config {
+                    headers: context.base_headers.clone(),
+                    vhosts: vec![vhost.clone()],
+                    ..Default::default()
+                };
+                effective.server.trusted_proxies = context
+                    .trusted_sources
+                    .iter()
+                    .map(|source| match source {
+                        ProxyProtocolTrustedSource::Ip(ip) => ip.to_string(),
+                        ProxyProtocolTrustedSource::Cidr { network, prefix } => {
+                            format!("{network}/{prefix}")
+                        }
+                    })
+                    .collect();
+                if let Some(compression) = context.inherited_compression {
+                    effective.compression = compression.clone();
+                }
+                crate::native_cache_representation(&effective)
+                    .map_err(NativeHttp1RouteProxyConfigError::Proxy)?
+            }
+        };
         let inherited_compression = vhost.compression.as_ref().or(context.inherited_compression);
         let fallback_web = if vhost.web.enabled() {
             let cache = NativeHttp1StaticWeb::cache_supported(&vhost.cache).then_some(&vhost.cache);
@@ -348,7 +400,12 @@ impl NativeHttp1RouteProxy {
             .map(|proxy| {
                 let proxy = proxy.with_header_policy(&headers);
                 if NativeHttp1Proxy::proxy_cache_supported_for_proxy(&vhost.cache, &vhost.proxy) {
-                    proxy.with_proxy_cache_config_for(&vhost.cache, &vhost.name, None)
+                    proxy.with_proxy_cache_representation(
+                        &vhost.cache,
+                        &vhost.name,
+                        None,
+                        &representation,
+                    )
                 } else {
                     Ok(proxy)
                 }
@@ -398,7 +455,12 @@ impl NativeHttp1RouteProxy {
                         if let Some(cache) = route.cache.as_ref().filter(|cache| {
                             NativeHttp1Proxy::proxy_cache_supported_for_proxy(cache, proxy_config)
                         }) {
-                            proxy.with_proxy_cache_config_for(cache, &vhost.name, Some(&route.name))
+                            proxy.with_proxy_cache_representation(
+                                cache,
+                                &vhost.name,
+                                Some(&route.name),
+                                &representation,
+                            )
                         } else {
                             Ok(proxy)
                         }

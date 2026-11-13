@@ -319,6 +319,13 @@ permit fail-open configuration; use it only when missing the policy is
 acceptable. If a lookup hook is used to deny access, fail-open is inappropriate
 even though configuration permits it.
 
+When caching and Wasm are both enabled, runtime router construction additionally
+requires a valid `sha256` pin for every configured plugin, including header and
+lookup hooks. These pins participate in the proxy cache representation identity:
+changing code must not silently reuse entries produced under an older policy.
+Changing a pin on a live disk root requires a fresh root or controlled restart,
+as described in [cache recovery](cache-recovery.md).
+
 In fail-closed mode a policy denial produces 403 and operational failures may
 produce a fixed error response such as 503. Do not make applications depend on
 arbitrary guest exception text. Test trap, overload and timeout paths as well

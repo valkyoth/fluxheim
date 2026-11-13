@@ -18,20 +18,34 @@ impl NativeHttp1Proxy {
         Self::proxy_cache_supported(cache) && native_slice_cache_supported_for_proxy(cache, proxy)
     }
 
-    pub fn with_proxy_cache_config(
+    #[cfg(test)]
+    pub(crate) fn with_proxy_cache_config(
         self,
         cache: &CacheConfig,
     ) -> Result<Self, crate::NativeHttp1ProxyConfigError> {
         self.with_proxy_cache_config_for(cache, "native", None)
     }
 
-    pub fn with_proxy_cache_config_for(
+    #[cfg(test)]
+    pub(crate) fn with_proxy_cache_config_for(
         mut self,
         cache: &CacheConfig,
         vhost: &str,
         route: Option<&str>,
     ) -> Result<Self, crate::NativeHttp1ProxyConfigError> {
         self.cache = NativeProxyMemoryCache::try_from_config_with_metrics(cache, vhost, route)?;
+        Ok(self)
+    }
+
+    pub(crate) fn with_proxy_cache_representation(
+        mut self,
+        cache: &CacheConfig,
+        vhost: &str,
+        route: Option<&str>,
+        representation: &[u8; 32],
+    ) -> Result<Self, crate::NativeHttp1ProxyConfigError> {
+        let cache = crate::native_representation_cache_config(cache, representation, vhost, route);
+        self.cache = NativeProxyMemoryCache::try_from_config_with_metrics(&cache, vhost, route)?;
         Ok(self)
     }
 }

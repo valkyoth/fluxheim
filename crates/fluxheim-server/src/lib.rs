@@ -12,11 +12,15 @@ mod control;
 mod http1;
 mod http2;
 mod listener;
+mod native_cache_representation;
 mod native_http1;
 #[cfg(feature = "acme")]
 mod native_http1_acme;
 mod native_http1_cache;
 mod native_http1_cache_lifecycle;
+pub use native_cache_representation::{
+    native_cache_representation, native_representation_cache_config,
+};
 mod native_http1_client;
 mod native_http1_cors;
 mod native_http1_forwarded;

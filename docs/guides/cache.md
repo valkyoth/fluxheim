@@ -187,6 +187,28 @@ without changing public URLs. It is not a purge: old disk objects can still
 occupy space until expiry/eviction/purge. Use different namespaces when changing
 what a route serves or how it varies.
 
+Proxy keys also include a versioned digest of the effective router
+configuration and the root/vhost/route scope. Origin destinations, injected
+headers, rewrites, authorization policy and configured Wasm content pins bind
+this identity. An old generation's delayed fill cannot become a new origin's
+cache hit, including after restart. Legacy keys without this identity start
+cold; their files are not automatically deleted.
+
+The identity deliberately covers the whole router: unrelated routing changes
+can also invalidate entries. Admin/metrics listener settings, server listen and
+process settings, and cache storage/presentation settings are excluded. The
+configured `key_namespace` is an additional input, not a replacement for the
+internal identity. Key preview reports your configured namespace while its
+computed keys include the internal context.
+
+This is configuration identity, not continuous origin attestation. Dynamic
+discovery membership, an external authorization service and files changed in
+place do not automatically become new identities. For an external trust-domain
+change, rotate `key_namespace` and use a fresh root or stop/start; invalidate
+old entries as part of incident response. With caching and Wasm enabled, every
+configured plugin must have a valid `sha256` content pin. See
+[cache recovery](cache-recovery.md) before changing a live disk root.
+
 Origin `Vary` is handled with bounded, hashed variant keys. If an origin varies
 on a safe header but forgets to emit `Vary`, configure it explicitly, for example
 `vary_request_headers = ["accept-language"]`. All requests for a stored variant
