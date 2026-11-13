@@ -94,3 +94,17 @@ Native release archives, ARM64 and byte reproducibility were not requalified
 for this CLI correction; they remain final release gates. Independent pentest
 and exact-commit GitHub acceptance are pending. This is not release approval or
 an absence-of-vulnerabilities claim.
+
+## CodeQL Follow-up
+
+Alert #461 identified direct reflection of Accept-Language into Content-Language
+in the loopback Python test origin. The fixture now emits only literal `en`,
+`sv` or `none` values, with `none` used for missing, unsupported, duplicated or
+folded input. No production server code or dependency changed.
+
+Raw-socket regression coverage exercises eight header cases, including CRLF
+and LF folding, and checks the response headers and body. The cache fixture
+suite passes all 16 tests. The full Linux live cache matrix, including encrypted
+variants, backend/layout migration and route isolation, also passes. Python
+compilation and diff validation pass. Exact-commit CodeQL confirmation remains
+pending.

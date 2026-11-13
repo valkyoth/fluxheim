@@ -64,7 +64,13 @@ def origin_server():
             self.send_header("Surrogate-Key", "guide")
             if self.path == "/variant.css":
                 self.send_header("Vary", "Accept-Language")
-                self.send_header("Content-Language", self.headers.get("Accept-Language", "none"))
+                languages = self.headers.get_all("Accept-Language", [])
+                if languages == ["en"]:
+                    self.send_header("Content-Language", "en")
+                elif languages == ["sv"]:
+                    self.send_header("Content-Language", "sv")
+                else:
+                    self.send_header("Content-Language", "none")
             # Like the guide's Python file server, ordinary assets have no TTL.
             # The checked-in status_ttls setting must supply their freshness.
             if self.path == "/private.css":

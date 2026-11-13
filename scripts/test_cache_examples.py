@@ -2,6 +2,7 @@
 """Keep runnable cache guide templates aligned with the live harness."""
 
 import tomllib
+import socket
 import unittest
 import tempfile
 from contextlib import nullcontext
@@ -13,6 +14,37 @@ import smoke_cache_operations as operations
 
 
 class CacheGuideTests(unittest.TestCase):
+    def test_origin_language_header_uses_only_fixed_fixture_values(self):
+        cases = (
+            (b"", b"none"),
+            (b"Accept-Language: en\r\n", b"en"),
+            (b"Accept-Language: sv\r\n", b"sv"),
+            (b"Accept-Language: unrecognized\r\n", b"none"),
+            (b"Accept-Language: en, sv\r\n", b"none"),
+            (b"Accept-Language: en\r\nAccept-Language: sv\r\n", b"none"),
+            (b"Accept-Language: en\r\n X-Injected: marker\r\n", b"none"),
+            (b"Accept-Language: en\n\tX-Injected: marker\r\n", b"none"),
+        )
+        with smoke.origin_server() as (port, count):
+            for headers, expected in cases:
+                with self.subTest(headers=headers):
+                    with socket.create_connection(("127.0.0.1", port), timeout=3) as connection:
+                        connection.sendall(b"GET /variant.css HTTP/1.0\r\nHost: cache.test\r\n"
+                                           + headers + b"\r\n")
+                        response = bytearray()
+                        while chunk := connection.recv(4096):
+                            response.extend(chunk)
+                            self.assertLessEqual(len(response), 16384)
+                    head, body = bytes(response).split(b"\r\n\r\n", 1)
+                    self.assertTrue(head.startswith(b"HTTP/1.0 200 "))
+                    self.assertIn(b"Vary: Accept-Language", head.split(b"\r\n"))
+                    language = [line for line in head.split(b"\r\n")
+                                if line.startswith(b"Content-Language:")]
+                    self.assertEqual(language, [b"Content-Language: " + expected])
+                    self.assertNotIn(b"X-Injected", head)
+                    self.assertEqual(body, smoke.BODY)
+            self.assertEqual(count("/variant.css"), len(cases))
+
     def test_admin_fixture_uses_platform_private_directory_before_writing(self):
         with patch.object(operations, "private_fixture", side_effect=RuntimeError("ACL setup failed")) as private, \
                 patch.object(operations, "origin_server") as origin, self.assertRaisesRegex(RuntimeError, "ACL setup failed"):
