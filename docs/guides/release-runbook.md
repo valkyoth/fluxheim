@@ -143,6 +143,42 @@ an earlier runtime revision is not release approval. Documentation-only final
 edits may reference the preceding identical-runtime candidate's native test
 evidence, but the final commit still needs its own CI run before tagging.
 
+### Development And Full CI Qualification
+
+Ordinary pushes and pull requests retain formatting, Clippy, dependency/security
+checks, feature compilation, native Linux/macOS/Windows tests and live smoke
+checks. CodeQL remains a separate, unchanged required security check. Collector
+and ACME container checks also continue on every commit.
+
+The expensive optimized release matrix, extracted archives for all three native
+platforms, SBOM generation and reproducibility build are deferred unless:
+
+- A version tag is pushed.
+- Rust CI is started manually (always a full run).
+- The change includes Cargo manifests/lockfiles, build scripts, Rust toolchain,
+  Cargo configuration, packaging/container definitions or release/archive tools.
+- The comparison history is missing or cannot be inspected safely.
+
+The exact path policy is in `scripts/ci_qualification.py`. A routine CI wiring
+or runtime-source change alone does not force archive qualification. Native
+tests still run; deferred jobs/steps are explicitly skipped, not passed.
+
+Run a full checkpoint after a substantial group of related corrections and
+**require one for the final candidate before tagging**. In Actions, select
+**Rust CI -> Run workflow** on the candidate branch, or run:
+
+```bash
+gh workflow run ci.yml --ref main
+```
+
+Use the actual maintenance branch instead of `main` when appropriate. Check the
+run's full commit SHA against the candidate; do not accept an older successful
+run or a newer branch tip by accident. Require successful Linux/macOS/Windows
+archive steps and their `native-archives-*` evidence, the optimized core matrix,
+SBOM and reproducibility checks, not merely an overall green development run.
+The automatic full run on the signed tag must also pass before publication.
+Native ARM64 Linux and other release-specific gates remain required separately.
+
 ## 3. Create And Push The Signed Tag
 
 Create a signed tag:

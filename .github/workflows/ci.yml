@@ -1,6 +1,7 @@
 name: Rust CI
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -20,6 +21,18 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  qualification-scope:
+    name: Select development or full qualification
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: scope
+        run: python3 scripts/ci_qualification.py
+
   acme-operation-scope:
     name: Packaged ACME renewal and server feature parity
     runs-on: ubuntu-latest
@@ -84,6 +97,7 @@ jobs:
       - run: python3 -m pip install PyYAML==6.0.3
       - run: python3 scripts/test_container_refresh.py
       - run: python3 scripts/test_collector_ci.py
+      - run: python3 scripts/test_ci_qualification.py
       - run: python3 scripts/test_core_dump_policy.py
       - run: python3 scripts/test_development_scope.py
       - run: python3 scripts/test_documentation_layout.py
@@ -124,6 +138,7 @@ jobs:
 
   checks:
     name: Format, lint, test, and audit
+    needs: qualification-scope
     runs-on: ubuntu-latest
     timeout-minutes: 75
 
@@ -140,6 +155,7 @@ jobs:
           cargo install --locked cargo-audit --version 0.22.2
 
       - name: Install SBOM tool
+        if: needs.qualification-scope.outputs.full == 'true'
         run: cargo install --locked cargo-sbom --version 0.10.0
 
       - name: Check formatting
@@ -329,6 +345,7 @@ jobs:
         run: scripts/validate-1-0-fixtures.sh
 
       - name: Build 1.0 core release matrix
+        if: needs.qualification-scope.outputs.full == 'true'
         run: scripts/validate-1-0-core.sh release
 
       - name: Run incubator feature build tests
@@ -432,6 +449,7 @@ jobs:
           python3 scripts/smoke_cache_error_phase.py target
           python3 scripts/smoke_peer_variants.py target
           python3 scripts/smoke_slice_storage.py target
+          cargo build --locked --no-default-features --features profile-load-balancer,acme-client --bin fluxheim
           python3 scripts/smoke_slice_upstreams.py target
           sh scripts/smoke_storage_bin_cache.sh
           sh scripts/smoke_cache_encryption_local.sh
@@ -445,13 +463,17 @@ jobs:
         run: cargo audit
 
       - name: Generate SBOM
+        if: needs.qualification-scope.outputs.full == 'true'
         run: scripts/generate-sbom.sh
 
       - name: Verify reproducible release build
+        if: needs.qualification-scope.outputs.full == 'true'
         run: scripts/reproducible_build_check.sh
 
   linux-native-archives:
     name: Linux x86_64 extracted release profiles
+    needs: qualification-scope
+    if: needs.qualification-scope.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -476,6 +498,7 @@ jobs:
 
   macos-portable:
     name: macOS Apple Silicon portable gate
+    needs: qualification-scope
     runs-on: macos-15
     timeout-minutes: 90
 
@@ -589,6 +612,7 @@ jobs:
           cargo test --locked --lib --no-default-features --features proxy,web operational_
 
       - name: Build all macOS portable archives
+        if: needs.qualification-scope.outputs.full == 'true'
         run: |
           version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | sed -n '1p')"
           export FLUXHEIM_BUILD_ID="qualification-g$(git rev-parse --short=8 HEAD)"
@@ -600,6 +624,7 @@ jobs:
           FLUXHEIM_BIN="$(pwd)/dist/fluxheim-${version}-wasm-aarch64-macos/fluxheim" \
             scripts/smoke_wasm_policy_examples_binary.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: needs.qualification-scope.outputs.full == 'true'
         with:
           name: native-archives-macos-aarch64
           path: native-archives.json
@@ -608,6 +633,7 @@ jobs:
 
   windows-x86_64-portable:
     name: Windows x86_64 portable compile gate
+    needs: qualification-scope
     runs-on: windows-2025
     timeout-minutes: 90
     env:
@@ -732,6 +758,7 @@ jobs:
           target/correlation-venv/Scripts/python.exe scripts/smoke_operational_status.py --binary target/debug/fluxheim.exe --reduced
 
       - name: Build and test Windows portable archives
+        if: needs.qualification-scope.outputs.full == 'true'
         shell: pwsh
         run: |
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value
@@ -745,6 +772,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'native archive qualification failed' }
           scripts/smoke_windows_wasm_archive.ps1 -Version $version -Architecture x86_64
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: needs.qualification-scope.outputs.full == 'true'
         with:
           name: native-archives-windows-x86_64
           path: native-archives.json

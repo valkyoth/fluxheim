@@ -107,8 +107,11 @@ Confirm GitHub CodeQL default setup is enabled for `main`. Do not also enable an
 advanced CodeQL workflow for the same repository; GitHub rejects advanced SARIF
 uploads when default setup is active.
 
-Confirm the Rust CI workflow still runs the core feature matrix in both check
-and release modes, plus the `scripts/smoke_1_0_core.sh` localhost smoke.
+Confirm the Rust CI development run passes the core check matrix and
+`scripts/smoke_1_0_core.sh` localhost smoke. Require an exact-candidate **full**
+Rust CI run before tagging, including the release matrix, native archives, SBOM
+and reproducibility checks. A green development run with those steps skipped is
+not release approval. See the [CI qualification procedure](release-runbook.md#development-and-full-ci-qualification).
 
 ## TLS And Certificate Storage
 

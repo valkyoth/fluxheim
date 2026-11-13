@@ -76,3 +76,33 @@ attempts can finish on a member removed during the exchange. Every composed
 slice still requires matching strong ETag, total and optional Last-Modified.
 Initial fill attempts and ordinary fallback are not charged as retries; operators
 must size slice, concurrency, rate and per-pool retry limits together.
+
+## CI Follow-up
+
+The owner supplied a clean Critical/High-threshold pentest for `68febd91`.
+CodeQL and the native Windows/macOS and Linux archive jobs also passed at that
+commit. Rust CI run `43394232442` failed in the Linux localhost sequence:
+`smoke_proxy_cache.sh` rebuilt the shared debug binary without load-balancer
+support, then the slice-upstream fixture correctly rejected that binary. The
+workflow now explicitly builds the load-balancer/ACME profile immediately before
+running the slice-upstream fixture. No runtime or fixture assertion is weakened.
+
+With owner approval, optimized release matrices, archive builds/tests, SBOM and
+reproducibility work now run on tags, manual full checkpoints and relevant
+packaging/dependency/toolchain changes. Diff/history uncertainty selects full
+qualification. Native code tests, live checks, audits and the separate CodeQL
+workflow remain on every commit. Skipped qualification is not release approval;
+the runbook requires a full exact-candidate run before tagging and successful
+tag qualification before publication.
+
+Follow-up verification: the old cache-profile/slice sequence reproduced the
+reported failure locally; rebuilding the explicit profile passed all four live
+slice scenarios. The unchanged broad cache smoke passed on rerun after one
+initial disk-lookup assertion failure; no cache assertion was relaxed. Ten new
+CI policy/workflow tests passed on Python 3.13 and 3.14, along with collector CI
+(2), container-refresh policy (35), development scope (7), documentation layout
+(28), build-guide (9), archive regression (20), slice fixture (3), and operational
+contract/workflow tests (9, using the hash-locked Python environment). Python
+compilation, documentation links and diff validation passed. No Rust source,
+Cargo manifest or lockfile changed in this follow-up. GitHub execution of the
+new gating logic remains required after push.
