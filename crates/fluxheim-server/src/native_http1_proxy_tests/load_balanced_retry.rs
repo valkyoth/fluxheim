@@ -11,6 +11,8 @@ mod downstream_h2_tests;
 mod latency_tests;
 #[path = "load_balanced_retry_lifecycle.rs"]
 mod lifecycle_tests;
+#[path = "load_balanced_slices.rs"]
+mod slice_tests;
 
 #[tokio::test]
 async fn native_load_balanced_retry_zero_budget_never_amplifies_programmatic_requests() {

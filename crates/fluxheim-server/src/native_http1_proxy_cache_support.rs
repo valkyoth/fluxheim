@@ -42,5 +42,29 @@ fn native_slice_cache_supported_for_proxy(
     cache: &CacheConfig,
     proxy: &fluxheim_config::ProxyConfig,
 ) -> bool {
-    !cache.range.slice.enabled || proxy.configured_primary_upstream().is_some()
+    !cache.range.slice.enabled
+        || proxy.configured_primary_upstream().is_some()
+        || (cfg!(feature = "load-balancer")
+            && crate::native_http1_proxy_config::proxy_uses_dynamic_upstream_discovery(proxy))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn slice_discovery_requires_compiled_load_balancer() {
+        let mut cache = fluxheim_config::CacheConfig::default();
+        cache.range.slice.enabled = true;
+        for http in [false, true] {
+            let proxy = fluxheim_config::ProxyConfig {
+                upstream: None,
+                upstreams_file: (!http).then(|| "members.txt".into()),
+                upstreams_http_url: http.then(|| "http://127.0.0.1:9000/members".into()),
+                ..Default::default()
+            };
+            assert_eq!(
+                super::native_slice_cache_supported_for_proxy(&cache, &proxy),
+                cfg!(feature = "load-balancer")
+            );
+        }
+    }
 }

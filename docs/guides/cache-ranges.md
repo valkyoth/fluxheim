@@ -150,15 +150,72 @@ entries. Missing/corrupt entries are cache misses, not partial hits. A saturated
 disk-worker admission limit returns `503` rather than starting unbounded work.
 See [recovery](cache-recovery.md) for operational limits.
 
-## Upstream Selection Limit
+## Multiple Origins And Discovery
 
-- **Current limitation:** slice origin fetches use the static upstream-slot
-  loop, not load-balancer selection/admission. Do not combine slice fills with
-  health/drain/persistence/queue policies and assume those policies govern them.
-  Discovery-only pools have no configured static origin and are not supported
-  by this slice path. Use a single fixed origin until the integration is repaired.
+With the load-balancer feature, each missing slice uses the same pool selection,
+health/drain state, backup policy, admission limits and bounded retry policy as
+ordinary buffered requests. Failed selection does not fall through to static
+members. Attempts update upstream status/latency and release admission on
+completion, error or cancellation. Cached slices require no origin selection.
 
-Persistent storage does not change this separate upstream-selection limitation.
+For two replicas, replace the example's proxy table with this configuration:
+
+```toml
+[vhosts.proxy]
+upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
+upstream_max_in_flight = [16, 16]
+
+[vhosts.proxy.load_balance]
+selection = "least-time"
+all_down_status = 503
+
+[vhosts.proxy.load_balance.health_check]
+enabled = true
+protocol = "http"
+path = "/healthz"
+interval_secs = 5
+
+[vhosts.proxy.load_balance.retry]
+enabled = true
+max_retries = 1
+budget_per_window = 20
+budget_window_secs = 1
+```
+
+Both replicas must serve the same representation with the same strong ETag,
+length and Last-Modified value. Each slice may reach a different replica;
+conflicting identities cause ordinary request fallback, never mixed cached
+bytes. A strong ETag is the origin's promise of identical bytes, not a digest
+verified by Fluxheim. Keep origins trusted and use authenticated TLS where needed.
+
+File, HTTP and DNS discovery use the same selection path. For example, replace
+the entire proxy table and its children with the following local HTTP-discovery
+recipe; the service must return at least two valid members:
+
+```toml
+[vhosts.proxy]
+upstreams_http_url = "http://127.0.0.1:9005/members"
+upstreams_http_refresh_secs = 5
+upstreams_http_allow_private_backends = true
+
+[vhosts.proxy.load_balance]
+selection = "round-robin"
+```
+
+Numeric-loopback HTTP is a local exception; use HTTPS for a remote discovery
+service. See [load balancing](load-balancer.md) for file/DNS discovery configuration,
+trust requirements and supported per-member settings. Membership changes govern
+new fills, but do not purge fresh cached slices or cancel an already selected
+attempt. Pool initialization loads membership before use; background refreshes
+continue to apply the discovery policy. File and DNS initialization inherit
+the platform's filesystem/resolver behavior.
+
+Retries share the pool budget with normal requests and revalidation, rather than
+receiving a fresh retry allowance for every slice. This budget counts **retries**,
+not initial attempts: a cold range can require discovery plus several fills,
+and a rejected slice may still be followed by ordinary proxy fallback. Keep
+`max_slices`, fill locking, origin concurrency and route rate limits bounded.
+Budgets remain per pool, not a process-wide or cluster-wide traffic ceiling.
 
 ## Verification And Diagnosis
 
@@ -172,7 +229,13 @@ and unchanged origin counts on both disk backends with and without memory:
 ```sh
 cargo build --locked --no-default-features --features profile-load-balancer,acme-client --bin fluxheim
 python3 scripts/smoke_slice_storage.py target
+python3 scripts/smoke_slice_upstreams.py target
 ```
+
+The upstream smoke checks actual origin counts during drain, health failure and
+recovery, HTTP/file discovery replacement, concurrent fills and conflicting
+replica validators. Its `--container` mode uses the locally built non-root
+slice smoke image and exercises HTTP discovery (file discovery runs natively).
 
 When a slice misses repeatedly, inspect `x-cache-reason`, origin `Content-Range`,
 body length, identity encoding, freshness, Vary coverage and tier capacity.

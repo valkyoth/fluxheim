@@ -48,11 +48,7 @@ pub(super) fn configured_load_balancer(
     } else if let Some(refresh_secs) = config.upstream_dns_refresh_secs {
         load_balancer.set_update_frequency(Some(Duration::from_secs(refresh_secs.clamp(1, 300))));
     }
-    load_balancer
-        .update()
-        .now_or_never()
-        .ok_or_else(|| io::Error::other("static load balancer update blocked unexpectedly"))?
-        .map_err(FluxError::into_io)?;
+    initialize_membership(&load_balancer, config)?;
     apply_disabled_backend_enablement(&load_balancer, config);
     if config.load_balance.health_check.enabled {
         let health_check = configured_health_check(config, backend_policy.health_weights())?;
@@ -64,6 +60,36 @@ pub(super) fn configured_load_balancer(
     }
 
     Ok(Some(load_balancer))
+}
+
+fn initialize_membership(
+    runtime: &FluxLoadBalancerRuntime,
+    config: &ProxyConfig,
+) -> io::Result<()> {
+    let update = || {
+        runtime
+            .update()
+            .now_or_never()
+            .ok_or_else(|| io::Error::other("initial load balancer update yielded unexpectedly"))?
+            .map_err(FluxError::into_io)
+    };
+    let dynamic = config.upstreams_file.is_some()
+        || config.upstreams_http_url.is_some()
+        || config.upstream_dns_refresh_secs.is_some();
+    if dynamic && tokio::runtime::Handle::try_current().is_ok() {
+        // This constructor is synchronous, including when called by native
+        // startup inside Tokio. Bootstrap outside that reactor so discovery uses
+        // its synchronous implementation; subsequent refreshes remain async.
+        std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .name("fluxheim-discovery-init".into())
+                .spawn_scoped(scope, update)?
+                .join()
+                .map_err(|_| io::Error::other("initial load balancer update failed"))?
+        })
+    } else {
+        update()
+    }
 }
 
 fn apply_disabled_backend_enablement(

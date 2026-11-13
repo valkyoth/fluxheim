@@ -2709,8 +2709,11 @@ to avoid poisoning complete-object entries. Without slice caching,
 
 See [range caching](../guides/cache-ranges.md) before enabling slices: native
 slices use the configured memory/filesystem/storage-bin tiers, including disk
-encryption. Fills still bypass load-balancer selection; use one fixed origin
-for the documented recipe.
+encryption. Load-balanced fills use pool selection, health/drain, admission and
+the shared retry budget, including discovery-only pools. Replicas must agree on
+strong validators; mismatching slices are not combined. Membership changes do
+not invalidate otherwise-fresh cached objects. See the guide for limits on
+initial fill traffic and ordinary fallback.
 `[cache.range.slice]` enables the fixed-slice range cache. Fluxheim
 normalizes client ranges into fixed-size slices, stores each slice under a
 slice-specific key, and can compose fresh compatible slices into single-range,

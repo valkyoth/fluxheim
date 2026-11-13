@@ -30,6 +30,56 @@ use super::{
 use fluxheim_common::test_support::{safe_child_path, unique_temp_path};
 
 #[test]
+fn discovery_bootstrap_inside_both_tokio_flavors_is_complete_or_fails_closed() {
+    install_test_crypto_provider();
+    let root = unique_temp_path("discovery-runtime-bootstrap");
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("members.txt");
+    std::fs::write(&path, "127.0.0.1:3000\n127.0.0.1:3001\n").unwrap();
+    for threaded in [false, true] {
+        let runtime = if threaded {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .unwrap()
+        } else {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+        };
+        runtime.block_on(async {
+            for dns in [false, true] {
+                let mut config = ProxyConfig {
+                    upstream: None,
+                    upstreams_file: (!dns).then(|| path.clone()),
+                    upstreams: if dns {
+                        vec!["127.0.0.1:3000".into(), "127.0.0.1:3001".into()]
+                    } else {
+                        Vec::new()
+                    },
+                    upstream_dns_refresh_secs: dns.then_some(1),
+                    upstream_dns_allow_private_backends: dns,
+                    ..Default::default()
+                };
+                config.load_balance.health_check.enabled = false;
+                let pool = UpstreamLoadBalancer::from_proxy_config(&config)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(pool.backend_count(), 2);
+                assert!(pool.select(&request(), None).is_some());
+                config.upstreams_file = Some(root.join("missing.txt"));
+                config.upstreams.clear();
+                config.upstream_dns_refresh_secs = None;
+                assert!(UpstreamLoadBalancer::from_proxy_config(&config).is_err());
+            }
+        });
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn builds_round_robin_from_proxy_upstreams() {
     install_test_crypto_provider();
     let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
