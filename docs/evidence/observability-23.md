@@ -125,8 +125,10 @@ retain or log a serialized copy of injected credentials.
 The whole-router identity includes configured upstreams, headers, rewrites,
 authorization, access policy, trusted sources and Wasm configuration. It
 excludes admin/metrics configuration, operational logging settings (but retains
-access/correlation settings), server listen/process settings and cache policies;
-cache policies remain independently checked by the reuse registry. This is
+access/correlation settings), server listen/process settings and selected cache
+operational controls. Cache admission, stored output, freshness, variation,
+bypass and peer-source policies participate; the full cache policy also remains
+independently checked by the reuse registry. This is
 deliberately conservative and can invalidate unaffected routes. Configured Wasm
 plugins require valid content pins when caching is enabled. Origin file content,
 dynamic discovery changes and external authorization state are not continuously
@@ -180,3 +182,53 @@ passed on rerun. These observations are retained rather than attributed to a
 proven cause. No timeout or runtime enforcement was relaxed.
 
 Independent retesting and exact-commit GitHub acceptance remain pending.
+
+## Retest Follow-Up: Persistent Cache Policy
+
+Base: `5256be321e07729bc4dab12e013e23928568e248`.
+
+Retesting identified that clearing the entire cache policy before hashing left
+restart keys unchanged after security-sensitive policy changes. The correction
+preserves cache fields by default and excludes only status-header presentation,
+memory/disk storage, fill-lock, predictor and origin-concurrency controls. Peer
+configuration is retained because it selects content sources. The representation
+and namespace domains advance to v2; v1 objects are cold, not migrated or deleted.
+
+Tests bind 22 policy changes at root, vhost and route scope. Real loopback-origin
+restart tests cover seven changes across filesystem/storage-bin and disk-only/
+tiered modes, asserting fresh origin bodies instead of old hits, hidden cached
+headers, no-store behavior and new-policy hits. The live eight-case matrix adds
+header-policy cutover and unchanged-policy restart checks, including encryption.
+
+The external-state finding remains an explicitly accepted operational boundary:
+`key_namespace` is the non-secret generation control for in-place discovery,
+certificate/trust-file, external authorization and other external trust-domain
+changes. Operators must rotate it, use fresh roots and retire/purge old roots
+and affected peers. A mandatory second epoch field would not detect forgotten
+rotation or changing external behavior; none is introduced or claimed here.
+
+Final checks on 2026-11-13 passed:
+
+- Full locked Linux workspace; existing privileged ACME test remains ignored.
+- Linux Wasm/load-balancer server: 686 tests; native macOS server: 615; native
+  Windows server: 616. Native application libraries: macOS 284, Windows 260.
+- Updated eight-case lifecycle and existing guide matrix on Linux, macOS,
+  Windows and non-root, network-none Podman. Final runtime image:
+  `sha256:e40e3206ba449c73cf720c5cdefd1127aabcbe2fd16e8a538d80052a2e5740f2`.
+- Full Linux proxy-cache/storage-bin smokes, peer-fill and six peer-variant
+  cases, including inspection and exact purge compatibility.
+- Strict Linux all-feature server/application Clippy and native macOS server
+  Clippy; minimal-server and cache-free privacy builds. Windows Clippy remains
+  unavailable in the read-only toolchain.
+- 28 cache Python tests, four peer fixture tests, documentation/layout checks,
+  formatting, Python compilation and diff validation.
+- RustSec: 449 dependencies and 1,509 advisories, no findings; cargo-deny passed.
+  No dependency manifests or lockfiles changed.
+
+The first Windows live run caught a new fixture timing error: termination skips
+Rust destructors, so the second policy's bin entry had not necessarily reached
+the normal debounced index. The fixture now waits for the two-entry checkpoint
+before termination, with version/shape checks and bounded polling. A regression
+rejects a missing, old one-entry or malformed checkpoint. The final Windows
+live matrix passed without changing runtime flush/durability behavior or
+relaxing HIT/header assertions. Independent pentest and GitHub remain pending.

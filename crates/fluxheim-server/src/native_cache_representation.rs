@@ -46,7 +46,7 @@ pub fn native_cache_representation(
         }
     }
     let mut writer = DigestWriter(Sha256::new());
-    writer.0.update(b"fluxheim-representation-v1\0");
+    writer.0.update(b"fluxheim-representation-v2\0");
     // Configuration maps are ordered. Stream into the digest instead of keeping
     // a serialized copy of injected credentials in another allocation.
     serde_json::to_writer(&mut writer, &normalized)
@@ -55,9 +55,15 @@ pub fn native_cache_representation(
 }
 
 fn normalize_cache(cache: &mut CacheConfig) {
-    // Storage location, peer topology and admission tuning do not identify the
-    // representation. The caller's explicit namespace is bound separately.
-    *cache = CacheConfig::default();
+    // Exclude only operational controls. New fields participate by default:
+    // admission, output filtering, freshness and content sources survive restart.
+    cache.status_header = None;
+    cache.status_reason_header = None;
+    cache.memory = Default::default();
+    cache.disk = Default::default();
+    cache.lock = Default::default();
+    cache.predictor = Default::default();
+    cache.origin_protection = Default::default();
 }
 
 /// Apply the same identity to serving, offline inspection and exact purge keys.
@@ -68,7 +74,7 @@ pub fn native_representation_cache_config(
     route: Option<&str>,
 ) -> CacheConfig {
     let mut hash = Sha256::new();
-    hash.update(b"fluxheim-cache-context-v1\0");
+    hash.update(b"fluxheim-cache-context-v2\0");
     hash.update(representation);
     for value in [Some(vhost), route, cache.key_namespace.as_deref()] {
         hash.update([u8::from(value.is_some())]);
@@ -82,7 +88,7 @@ pub fn native_representation_cache_config(
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    scoped.key_namespace = Some(format!("context-v1-{hex}"));
+    scoped.key_namespace = Some(format!("context-v2-{hex}"));
     scoped
 }
 
@@ -176,6 +182,51 @@ mod tests {
         let roundtrip: Config =
             serde_json::from_slice(&serde_json::to_vec(&original).unwrap()).unwrap();
         assert_eq!(identity, native_cache_representation(&roundtrip).unwrap());
+    }
+
+    #[test]
+    fn cache_security_policies_bind_every_scope() {
+        for patch in [
+            serde_json::json!({"hide_response_headers": ["x-internal-token"]}),
+            serde_json::json!({"no_store_response_headers": ["x-private"]}),
+            serde_json::json!({"no_store_response_header_values": {"x-policy": "private"}}),
+            serde_json::json!({"bypass_path_prefixes": ["/private/"]}),
+            serde_json::json!({"bypass_path_exact": ["/private.png"]}),
+            serde_json::json!({"bypass_request_headers": ["x-private"]}),
+            serde_json::json!({"bypass_request_header_values": {"x-private": "yes"}}),
+            serde_json::json!({"bypass_cookie_names": ["session"]}),
+            serde_json::json!({"bypass_cookie_name_prefixes": ["session_"]}),
+            serde_json::json!({"bypass_cookie_values": {"private": "yes"}}),
+            serde_json::json!({"bypass_query_params": ["private"]}),
+            serde_json::json!({"bypass_query_values": {"private": "yes"}}),
+            serde_json::json!({"bypass_query": true}),
+            serde_json::json!({"vary_request_headers": ["accept-language"]}),
+            serde_json::json!({"ignore_origin_cache_headers": true}),
+            serde_json::json!({"default_status_ttl_secs": 1}),
+            serde_json::json!({"status_ttls": {"200": 1}}),
+            serde_json::json!({"stale_if_error_secs": 1}),
+            serde_json::json!({"stale_while_revalidate_secs": 1}),
+            serde_json::json!({"range": {"enabled": true}}),
+            serde_json::json!({"peer_fill": {"peers": [{"name": "new", "base_url": "http://127.0.0.1:9002"}]}}),
+            serde_json::json!({"key_namespace": "external-policy-epoch-2"}),
+        ] {
+            for scope in 0..3 {
+                let mut original = fixture();
+                original.vhosts[0].routes[0].cache = Some(CacheConfig::default());
+                let before = native_cache_representation(&original).unwrap();
+                let cache: CacheConfig = serde_json::from_value(patch.clone()).unwrap();
+                match scope {
+                    0 => original.cache = cache,
+                    1 => original.vhosts[0].cache = cache,
+                    _ => original.vhosts[0].routes[0].cache = Some(cache),
+                }
+                assert_ne!(
+                    before,
+                    native_cache_representation(&original).unwrap(),
+                    "scope {scope}, patch {patch}"
+                );
+            }
+        }
     }
 
     #[test]

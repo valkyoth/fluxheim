@@ -2,6 +2,7 @@
 """Qualify required disk cache startup and authenticated reload on loopback."""
 
 import argparse
+import http.client
 import json
 from pathlib import Path
 import re
@@ -10,7 +11,7 @@ import subprocess
 import time
 
 from smoke_admin_examples import request as admin_request
-from smoke_cache_examples import ROOT, origin_server, replace_once, request, running, wait_for_storage_index
+from smoke_cache_examples import BODY, ROOT, origin_server, replace_once, request, running, wait_for_storage_index
 from smoke_cache_operations import configuration
 from smoke_log_file_rotation import private_fixture, protect_directory
 from smoke_operational_events import port
@@ -55,6 +56,29 @@ def rejected_start(config):
                             capture_output=True, timeout=20, check=False)
     assert result.returncode != 0, "required disk cache initialization unexpectedly succeeded"
     assert b"cache initialization failed" in result.stderr, "unexpected startup error"
+
+
+def cached_content_type(public):
+    connection = http.client.HTTPConnection("127.0.0.1", public, timeout=3)
+    try:
+        connection.request("GET", "/asset.css", headers={"Host": "cache.test"})
+        response = connection.getresponse()
+        assert response.status == 200 and response.read(4097) == BODY
+        assert response.getheader("x-cache-status") == "HIT"
+        return response.getheader("content-type")
+    finally:
+        connection.close()
+
+
+def policy_checkpoint_ready(index):
+    try:
+        with index.open("rb") as handle:
+            lines = handle.read(8193).splitlines()
+    except (FileNotFoundError, PermissionError):
+        return False
+    return (lines[:1] == [b"FLUXHEIM-STORAGE-BIN-INDEX-v1"]
+            and len(lines) == 3
+            and all(len(line.split(b"\t")) == 5 for line in lines[1:]))
 
 
 def run_case(parent, backend, memory, encrypted):
@@ -138,6 +162,23 @@ def run_case(parent, backend, memory, encrypted):
         with running(config, public):
             assert request(public) == "HIT"
             assert count("/asset.css") == 1
+            assert cached_content_type(public) == "text/css"
+        source = replace_once(source, '[vhosts.cache]\n',
+                              '[vhosts.cache]\nhide_response_headers = ["content-type"]\n')
+        config.write_text(source, encoding="utf-8")
+        with running(config, public):
+            assert request(public) == "MISS", "old object survived output-policy change"
+            assert cached_content_type(public) is None
+            assert count("/asset.css") == 2
+            if backend == "storage-bin":
+                # Windows termination skips destructors. Both policy generations
+                # must reach the normal checkpoint before testing persisted reuse.
+                from smoke_log_file_rotation import wait_for
+                wait_for(lambda: policy_checkpoint_ready(
+                    root / "state/cache/.fluxheim-storage-bin-index-v1"))
+        with running(config, public):
+            assert cached_content_type(public) is None
+            assert count("/asset.css") == 2
         with origin_server() as (replacement, replacement_count):
             changed = source.replace(f"127.0.0.1:{origin}", f"127.0.0.1:{replacement}")
             assert changed != source, "replacement origin was not configured"
@@ -146,7 +187,7 @@ def run_case(parent, backend, memory, encrypted):
                 assert request(public) == "MISS", "old-origin object survived context change"
                 assert request(public) == "HIT"
                 assert replacement_count("/asset.css") == 1
-                assert count("/asset.css") == 1
+                assert count("/asset.css") == 2
         print(f"required cache lifecycle {backend} memory={memory} encrypted={encrypted}: ok")
 
 

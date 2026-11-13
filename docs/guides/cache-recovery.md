@@ -178,11 +178,15 @@ stop/start workflow above for these changes, or select a fresh independent
 root. Never migrate a directory still used by an old generation.
 
 Persisted proxy keys bind the configuration-derived representation identity as
-well as your explicit namespace. Restarting with a different origin or routing
-context cannot recover an old-context HIT. Older unbound keys also start cold;
+well as your explicit namespace. Restarting with a different origin, routing
+context or security-relevant cache policy cannot recover an old-context HIT.
+This includes hidden headers, no-store/bypass/variation rules, TTL/stale/range
+rules and peer content sources. Earlier `context-v1` and unbound keys start cold;
 retained bytes still count toward disk occupancy. Identical context preserves
 normal restart hits. See [scope and variants](cache.md#scope-and-variants) for
-the deliberately conservative identity and external-state limitations.
+the deliberately conservative identity and external-state limitations. For
+an external trust-domain change, stop/start alone is insufficient: rotate the
+namespace, choose a fresh root and retire/purge old roots and affected peers.
 
 The admin reload endpoint returns an error (currently HTTP 500 for candidate
 construction failure), without publishing the candidate router or updating

@@ -194,9 +194,19 @@ this identity. An old generation's delayed fill cannot become a new origin's
 cache hit, including after restart. Legacy keys without this identity start
 cold; their files are not automatically deleted.
 
+The identity also binds cache admission, stored-header filtering, bypass and
+variation rules, origin cache-header handling, TTL/stale/range rules and peer
+sources. Tightening those settings makes previous entries cold after restart;
+for example, an object stored before adding `hide_response_headers` cannot be
+returned as a HIT under the new policy. This filters cached headers, not every
+fresh origin response; use the response-header policy for that broader purpose.
+The `context-v2` format deliberately does not reuse earlier `context-v1` keys.
+
 The identity deliberately covers the whole router: unrelated routing changes
 can also invalidate entries. Admin/metrics listener settings, server listen and
-process settings, and cache storage/presentation settings are excluded. The
+process settings, cache status-header names, memory/disk controls, fill locks,
+predictor and origin-concurrency controls are excluded. Other cache fields are
+retained by default, including peer configuration and the user namespace. The
 configured `key_namespace` is an additional input, not a replacement for the
 internal identity. Key preview reports your configured namespace while its
 computed keys include the internal context.
@@ -204,8 +214,13 @@ computed keys include the internal context.
 This is configuration identity, not continuous origin attestation. Dynamic
 discovery membership, an external authorization service and files changed in
 place do not automatically become new identities. For an external trust-domain
-change, rotate `key_namespace` and use a fresh root or stop/start; invalidate
-old entries as part of incident response. With caching and Wasm enabled, every
+change, rotate `key_namespace` on every affected policy, use a fresh cache root,
+and retire or purge previous roots and affected peers as part of incident
+response. A stop/start alone does not detect external changes. The namespace
+can be a non-secret deployment epoch such as `tenant-policy-2026-11-14`; it must
+be updated by your deployment process, not supplied by a client. No mandatory
+epoch setting or automatic certificate/discovery-content hashing is claimed.
+With caching and Wasm enabled, every
 configured plugin must have a valid `sha256` content pin. See
 [cache recovery](cache-recovery.md) before changing a live disk root.
 

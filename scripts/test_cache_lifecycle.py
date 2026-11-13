@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import subprocess
+import tempfile
 import tomllib
 import unittest
 from unittest.mock import patch
@@ -11,6 +12,20 @@ import smoke_cache_lifecycle as smoke
 
 
 class CacheLifecycleTests(unittest.TestCase):
+    def test_policy_restart_requires_both_checkpoint_entries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            index = Path(directory) / "index"
+            self.assertFalse(smoke.policy_checkpoint_ready(index))
+            entry = b"identity\t0\t0\t100\t1\n"
+            for contents, expected in (
+                (b"FLUXHEIM-STORAGE-BIN-INDEX-v1\n" + entry, False),
+                (b"FLUXHEIM-STORAGE-BIN-INDEX-v1\n" + entry * 2, True),
+                (b"wrong-version\n" + entry * 2, False),
+                (b"FLUXHEIM-STORAGE-BIN-INDEX-v1\ninvalid\ninvalid\n", False),
+            ):
+                index.write_bytes(contents)
+                self.assertEqual(smoke.policy_checkpoint_ready(index), expected)
+
     def test_matrix_requires_disk_and_private_authenticated_admin(self):
         for backend in ("filesystem", "storage-bin"):
             for memory in (False, True):
