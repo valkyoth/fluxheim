@@ -159,8 +159,9 @@ platforms, SBOM generation and reproducibility build are deferred unless:
   Cargo configuration, packaging/container definitions or release/archive tools.
 - The comparison history is missing or cannot be inspected safely.
 
-The exact path policy is in `scripts/ci_qualification.py`. A routine CI wiring
-or runtime-source change alone does not force archive qualification. Native
+The exact path policy is in `scripts/ci_qualification.py`. Changes to that policy,
+the Rust CI workflow or the shared archive generator force full qualification
+too. A runtime-source change alone does not force archive qualification. Native
 tests still run; deferred jobs/steps are explicitly skipped, not passed.
 
 Run a full checkpoint after a substantial group of related corrections and

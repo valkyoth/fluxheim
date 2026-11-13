@@ -30,9 +30,20 @@ class QualificationTests(unittest.TestCase):
                      "containers/Containerfile.wolfi", "scripts/build_release_assets.ps1",
                      "scripts/reproducible_build_check.sh", "scripts/native_archive.py",
                      "scripts/portable_release_plan.py", "scripts/smoke_windows_archive_profiles.ps1",
-                     "scripts/test_native_archives.py", "scripts/generate-sbom.sh"):
+                     "scripts/test_native_archives.py", "scripts/generate-sbom.sh",
+                     ".github/workflows/ci.yml", "scripts/ci_qualification.py",
+                     "scripts/create_release_archives.py"):
             with self.subTest(path=path):
                 self.assertTrue(policy.release_paths_changed([path]))
+
+    def test_archive_generator_and_gate_changes_force_full_on_push_and_pr(self):
+        for path in ("scripts/create_release_archives.py", "scripts/ci_qualification.py",
+                     ".github/workflows/ci.yml"):
+            for name, event in (("push", {"before": BASE}),
+                                ("pull_request", {"pull_request": {"base": {"sha": BASE}}})):
+                with self.subTest(path=path, event=name):
+                    self.assertTrue(policy.full_qualification(name, "", event, HEAD,
+                                                             Mock(return_value=[path])))
 
     def test_tags_and_manual_runs_cannot_skip_full_qualification(self):
         changes = Mock(side_effect=AssertionError("must not inspect a diff"))

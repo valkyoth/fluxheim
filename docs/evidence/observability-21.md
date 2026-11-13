@@ -106,3 +106,19 @@ contract/workflow tests (9, using the hash-locked Python environment). Python
 compilation, documentation links and diff validation passed. No Rust source,
 Cargo manifest or lockfile changed in this follow-up. GitHub execution of the
 new gating logic remains required after push.
+
+### Qualification Trigger Correction
+
+Retest of `68febd91..e9bb4b6e` identified a Medium policy omission: the shared
+archive generator, qualification selector and Rust CI workflow did not trigger
+full qualification when changed. All three exact paths are now included.
+Regression cases reproduced the omissions before the correction and pass for
+both push and pull-request comparisons afterward. Runtime-only changes still
+select development checks; tags, manual dispatch and uncertain history still
+force full qualification. This policy correction itself requires a full run.
+
+Verification: 11 qualification tests, 2 collector-CI tests, 3 slice fixture tests,
+20 archive regressions and 28 documentation-layout tests passed, along with
+Python compilation, documentation links and diff checks. No Rust, Cargo or
+CodeQL configuration changed. GitHub qualification and independent retest of
+this correction remain pending.

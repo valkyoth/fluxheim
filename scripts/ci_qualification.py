@@ -11,6 +11,8 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_PATHS = (
+    ".github/workflows/ci.yml", "scripts/ci_qualification.py",
+    "scripts/create_release_archives.py",
     "Cargo.toml", "Cargo.lock", "**/Cargo.toml", "**/Cargo.lock",
     "build.rs", "**/build.rs", "rust-toolchain*", ".cargo/*", ".gitattributes",
     "packaging/*", "containers/*", ".github/workflows/images.yml",
