@@ -11,6 +11,12 @@ from pathlib import Path
 
 import smoke_cache_examples as smoke
 import smoke_cache_operations as operations
+import test_cache_lifecycle
+
+
+def load_tests(loader, tests, _pattern):
+    tests.addTests(loader.loadTestsFromModule(test_cache_lifecycle))
+    return tests
 
 
 class CacheGuideTests(unittest.TestCase):
@@ -112,7 +118,7 @@ class CacheGuideTests(unittest.TestCase):
         prose = " ".join(current.replace("**", "").split())
         for boundary in ("not a precise measurement", "not the disk backend's access-time LRU",
                          "not a filesystem quota", "not enforced", "local/static caching requires memory enabled and disk disabled",
-                         "not proof that its configured disk tier initialized",
+                         "not proof of disk initialization",
                          "not guaranteed read-only",
                          "instead of treating a header as a storage receipt"):
             self.assertTrue(boundary in prose, f"missing backend boundary: {boundary}")

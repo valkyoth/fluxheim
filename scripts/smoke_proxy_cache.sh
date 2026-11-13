@@ -450,7 +450,7 @@ max_size_bytes = "16MiB"
 
 [cache.disk]
 enabled = true
-path = "$TMP_DIR/cache"
+path = "$TMP_DIR/cache-root"
 max_size_bytes = "32MiB"
 
 [web]
@@ -485,7 +485,7 @@ max_size_bytes = "16MiB"
 
 [vhosts.cache.disk]
 enabled = true
-path = "$TMP_DIR/cache"
+path = "$TMP_DIR/cache-vhost"
 max_size_bytes = "32MiB"
 
 [vhosts.cache.predictor]
@@ -522,7 +522,7 @@ max_size_bytes = "16MiB"
 
 [vhosts.routes.cache.disk]
 enabled = true
-path = "$TMP_DIR/cache"
+path = "$TMP_DIR/cache-partial-range"
 max_size_bytes = "32MiB"
 
 [[vhosts.routes]]
@@ -562,7 +562,7 @@ max_size_bytes = "16MiB"
 
 [vhosts.routes.cache.disk]
 enabled = true
-path = "$TMP_DIR/cache"
+path = "$TMP_DIR/cache-slice-range"
 max_size_bytes = "32MiB"
 
 [[vhosts.routes]]
@@ -588,7 +588,7 @@ max_size_bytes = "16MiB"
 
 [vhosts.routes.cache.disk]
 enabled = true
-path = "$TMP_DIR/cache"
+path = "$TMP_DIR/cache-swr"
 max_size_bytes = "32MiB"
 
 [vhosts.routes.cache.predictor]
@@ -2487,4 +2487,5 @@ fi
 
 python3 "$ROOT_DIR/scripts/smoke_cache_examples.py" "$TMP_DIR"
 python3 "$ROOT_DIR/scripts/smoke_cache_operations.py" "$TMP_DIR"
+python3 "$ROOT_DIR/scripts/smoke_cache_lifecycle.py" "$TMP_DIR"
 echo "proxy cache smoke: ok"

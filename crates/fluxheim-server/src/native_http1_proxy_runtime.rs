@@ -64,11 +64,16 @@ pub fn native_cache_runtime_totals() -> NativeCacheRuntimeTotals {
             );
         }
     };
+    totals_from_handles(&mut registry)
+}
+
+fn totals_from_handles(registry: &mut Vec<NativeCacheStatsHandle>) -> NativeCacheRuntimeTotals {
     let mut totals = NativeCacheRuntimeTotals::default();
+    let mut counted_disks = Vec::new();
     registry.retain(|handle| {
         let memory_state = handle.memory_state.upgrade();
         let disk = handle.disk.as_ref().and_then(Weak::upgrade);
-        if memory_state.is_none() && disk.is_none() {
+        if memory_state.is_none() {
             return false;
         }
         if handle.memory_enabled
@@ -89,8 +94,13 @@ pub fn native_cache_runtime_totals() -> NativeCacheRuntimeTotals {
                 .memory_purge_index_entries
                 .saturating_add(state.purge_index.len() as u64);
         }
-        if let Some(disk) = disk {
+        if let Some(disk) = disk
+            && !counted_disks
+                .iter()
+                .any(|previous| Arc::ptr_eq(previous, &disk))
+        {
             totals.add_disk(disk.stats());
+            counted_disks.push(disk);
         }
         true
     });
@@ -485,4 +495,40 @@ fn purge_native_memory_state_primary(
         state.filling.remove(combined_key);
     }
     purged
+}
+
+#[cfg(test)]
+mod lifecycle_stats_tests {
+    use super::*;
+
+    #[test]
+    fn shared_disk_is_counted_once_and_retired_generation_is_removed() {
+        let root = tempfile::tempdir().unwrap();
+        let mut policy = fluxheim_config::CacheConfig::default();
+        policy.disk.enabled = true;
+        policy.disk.path = Some(root.path().canonicalize().unwrap());
+        let disk = Arc::new(NativeDiskCache::try_from_config(&policy).unwrap().unwrap());
+        let first = Arc::new(Mutex::new(NativeMemoryCacheState::default()));
+        let second = Arc::new(Mutex::new(NativeMemoryCacheState::default()));
+        let mut handles = [&first, &second]
+            .into_iter()
+            .map(|state| NativeCacheStatsHandle {
+                memory_enabled: true,
+                memory_max_bytes: 1024,
+                memory_state: Arc::downgrade(state),
+                disk: Some(Arc::downgrade(&disk)),
+            })
+            .collect();
+        let totals = totals_from_handles(&mut handles);
+        assert_eq!(totals.disk_tiers, 1);
+        assert_eq!(totals.memory_tiers, 2);
+        drop(first);
+        let totals = totals_from_handles(&mut handles);
+        assert_eq!(totals.disk_tiers, 1);
+        assert_eq!(totals.memory_tiers, 1);
+        assert_eq!(handles.len(), 1);
+        drop(second);
+        assert_eq!(totals_from_handles(&mut handles).disk_tiers, 0);
+        assert!(handles.is_empty());
+    }
 }

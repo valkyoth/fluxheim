@@ -41,7 +41,8 @@ struct NativeStorageBinIndexTask {
     layout: StorageBinLayoutPlan,
     state: Arc<Mutex<NativeDiskCacheState>>,
     dirty: AtomicBool,
-    flush_lock: Mutex<()>,
+    // The final synchronous flush closes the task while holding this lock.
+    flush_lock: Mutex<bool>,
     index_key: Option<Arc<SecretBytes<32>>>,
 }
 
@@ -59,9 +60,15 @@ impl NativeStorageBinIndexFlush {
             layout: storage_bin.layout.clone(),
             state: Arc::clone(state),
             dirty: AtomicBool::new(false),
-            flush_lock: Mutex::new(()),
+            flush_lock: Mutex::new(false),
             index_key,
         });
+        let entries = task
+            .state
+            .lock()
+            .map_err(|_| std::io::Error::other("cache index state is unavailable"))
+            .map(|state| native_storage_bin_index_entries(&state, task.index_key.as_deref()))?;
+        write_storage_bin_index(&task.layout, &entries)?;
         service.register(&task);
         Ok(Some(Self { task }))
     }
@@ -113,13 +120,19 @@ pub(super) fn native_storage_bin_index_worker_count() -> usize {
 
 impl NativeStorageBinIndexTask {
     fn flush(&self, force: bool) {
-        let _flush = self.flush_lock.lock().unwrap_or_else(|error| {
+        let mut closed = self.flush_lock.lock().unwrap_or_else(|error| {
             log::error!(
                 target: "fluxheim::security",
                 "native storage-bin index flush lock poisoned: {error}; aborting"
             );
             fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::StorageBinFlushPoisoned);
         });
+        if *closed {
+            return;
+        }
+        if force {
+            *closed = true;
+        }
         let was_dirty = self.dirty.swap(false, Ordering::AcqRel);
         if !force && !was_dirty {
             return;
@@ -376,6 +389,58 @@ impl NativeDiskCache {
 #[cfg(test)]
 mod confidential_index_tests {
     use super::*;
+
+    #[test]
+    fn final_index_flush_finishes_before_lease_release_and_closes_retained_tasks() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = fluxheim_config::CacheConfig::default();
+        config.disk.enabled = true;
+        config.disk.backend = fluxheim_config::CacheDiskBackend::StorageBin;
+        config.disk.path = Some(root.path().to_path_buf());
+        let cache = NativeDiskCache::try_from_config(&config).unwrap().unwrap();
+        let task = Arc::clone(&cache.index_flush.as_ref().unwrap().task);
+        let guard = task.flush_lock.lock().unwrap();
+        let (started, ready) = std::sync::mpsc::channel();
+        let dropper = std::thread::spawn(move || {
+            started.send(()).unwrap();
+            drop(cache);
+        });
+        ready.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(
+            super::super::native_http1_cache_backend::acquire_native_storage_bin_lease(root.path())
+                .is_err()
+        );
+        drop(guard);
+        dropper.join().unwrap();
+        // Parallel subprocess tests can briefly inherit a Unix lease across fork,
+        // until exec closes CLOEXEC descriptors. A retained worker must not own it.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match super::super::native_http1_cache_backend::acquire_native_storage_bin_lease(
+                root.path(),
+            ) {
+                Ok(lease) => {
+                    drop(lease);
+                    break;
+                }
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::AlreadyExists
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(10))
+                }
+                Err(error) => {
+                    panic!("lease was not released after closing the index task: {error}")
+                }
+            }
+        }
+        let index = root.path().join(".fluxheim-storage-bin-index-v1");
+        std::fs::write(&index, b"new generation").unwrap();
+        task.dirty.store(true, Ordering::Release);
+        task.flush(false);
+        task.flush(true);
+        assert_eq!(std::fs::read(index).unwrap(), b"new generation");
+    }
 
     #[test]
     fn encrypted_index_entries_do_not_persist_combined_keys() {

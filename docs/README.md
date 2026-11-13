@@ -189,6 +189,7 @@ qualification are different checks; see each guide's limitations and evidence.
 - [Persistent range slice qualification](evidence/observability-20.md)
 - [Slice upstream policy qualification](evidence/observability-21.md)
 - [Root cache inspection qualification](evidence/observability-22.md)
+- [Required disk cache lifecycle qualification](evidence/observability-23.md)
 - [Commit 12 native archive identities and checksums](evidence/observability-12-archives.json)
 - [Commit 12 local performance measurements](evidence/observability-12-performance.json)
 - [Commit 12 ARM performance measurements](evidence/observability-12-performance-arm.json)

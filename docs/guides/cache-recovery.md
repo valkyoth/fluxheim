@@ -8,14 +8,12 @@ changing an encrypted root or its keys.
 
 ## Current Operational Warnings
 
-- **Current limitation:** a native router reload can succeed while losing
-  its storage-bin disk cache. The candidate tries to acquire the old router's
-  exclusive root lease before that router releases it. Disk-only caching then
-  disappears; a tiered policy can continue with memory alone. A manifest/layout
-  mismatch can similarly produce a running router without its configured disk
-  tier. These are confirmed pending corrections, not healthy degradation to
-  assume during a rollout. Avoid live reload of affected bin-backed routers;
-  use a controlled stop/start and verify actual caching afterward.
+- **Required disk tiers:** initialization failure rejects startup or a candidate
+  reload, including tiered configurations. It does not disable the disk tier
+  and continue with memory alone. Same-process unencrypted caches may be reused
+  with the same scope and cache policy, except for status-header presentation
+  changes. Incompatible policies and encrypted-root reloads require stop/start
+  or a fresh independent root; the old router remains active after rejection.
 - **Current limitation:** native filesystem recovery skips corrupt or
   unindexable objects and abandoned temporary files. They can remain on disk
   outside tracked occupancy and eviction. The configured cache byte budget is
@@ -101,10 +99,16 @@ cache counters do not include every file/block on the device.
 
 ## One Owner Per Root
 
+Within a process, give each root/vhost/route disk policy its own directory for
+either backend. Different scopes or policies cannot initialize the same root
+simultaneously, even with different key namespaces. This also applies at initial
+startup, not only during reload. Compatible generations of one unencrypted
+policy can share the same disk state.
+
 Give every storage-bin policy and replica its own canonical root. The allocator
 holds `.fluxheim-storage-bin.lock` while alive. An incompatible or competing
-allocator must not gain access, even if the server currently mishandles the
-resulting initialization error. Never delete the lock file to bypass that rule.
+allocator must not gain access; its initialization error rejects the candidate
+router. Never delete the lock file to bypass that rule.
 
 Do not point a rolling replacement process at the previous process's bin root
 while both are alive. Use independent roots for overlapping replicas, or a
@@ -158,10 +162,27 @@ startup-owned services can also prevent live reload. The native reload builds
 a replacement router and lets pinned requests finish on the old generation;
 it does not promise to transfer memory entries or in-flight fills.
 
-Because of the documented limitation, snapshot classification is not enough to establish
-that bin caching survived. Until corrected, use the stop/start workflow above
-for bin-backed routers and verify each required tier. Do not make encryption-key
-or root migrations against a directory still used by an old generation.
+Snapshot classification is not a promise that runtime initialization will
+succeed. Compatible unencrypted caches share the existing disk state and, for
+bins, the same exclusive allocator lease. Old requests can finish safely. Final
+teardown closes the index task and finishes its best-effort synchronous flush
+before releasing the lease; retained background tasks cannot write afterward.
+Other cache-policy changes on a live root, scope changes and encrypted-root
+reloads are rejected before reinitializing that root. This includes unchanged
+encrypted policies, because loading keys can initiate a migration. Use the
+stop/start workflow above for these changes, or select a fresh independent
+root. Never migrate a directory still used by an old generation.
+
+The admin reload endpoint returns an error (currently HTTP 500 for candidate
+construction failure), without publishing the candidate router or updating
+its runtime snapshot identity. Publishing a snapshot has already changed the
+store's current pointer; rejection does not undo that publication. Select a
+known-good snapshot explicitly when necessary. Key files and credentials
+belong to the running generation until it is stopped. A corrupt bin index that
+causes a recovery error is not overwritten with an empty index. A missing index
+still starts cold as described above.
+The initial bin checkpoint must be writable before startup succeeds; later
+write errors remain runtime failures rather than a durable-storage guarantee.
 
 Use protected indexed purges and the background stale purger for normal work.
 The [operations warnings](cache-operations.md#current-invalidation-warnings)
@@ -178,9 +199,11 @@ the root, particularly when encryption state is present.
 
 The repository's real proxy-cache and storage-bin smokes check live admission
 and normal persistence behavior. Dedicated native lifecycle tests additionally
-exercise reload against a real loopback origin, manifest mismatch, missing-index
-cold recovery and retained invalid filesystem objects. These characterization
-tests expose current gaps; passing them does not mean the gaps are fixed.
+exercise compatible reload, rejected candidates, pinned/cancelled requests,
+rollback, manifest mismatch, key/index failure and restart persistence against
+a real loopback origin. Separate characterization tests for missing-index cold
+recovery and retained invalid filesystem objects still describe limitations;
+passing those tests does not mean those limitations are fixed.
 The proxy-cache smoke also runs the guide recipes, migrates disk-only filesystem
 storage to a fresh bin root and changes bin size through another fresh root.
 It checks bodies, origin counts, restart reuse and retained old object/metadata

@@ -228,6 +228,12 @@ pub(crate) fn register_native_disk_cache_purge_handle(
             );
         }
     };
+    registry.retain(|entry| entry.cache.strong_count() > 0);
+    if registry.iter().any(|entry| {
+        entry.vhost == vhost && entry.route == route && entry.cache.ptr_eq(&Arc::downgrade(cache))
+    }) {
+        return;
+    }
     registry.push(NativeDiskCachePurgeHandle {
         vhost,
         route,

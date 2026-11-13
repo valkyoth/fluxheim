@@ -120,32 +120,39 @@ pub(crate) enum NativeCacheFillWaitResult {
 }
 
 impl NativeProxyMemoryCache {
+    #[cfg(test)]
     pub(crate) fn from_config(config: &CacheConfig) -> Option<Self> {
         Self::from_config_with_metrics(config, "native", None)
     }
 
+    #[cfg(test)]
     pub(crate) fn from_config_with_metrics(
         config: &CacheConfig,
         vhost: &str,
         route: Option<&str>,
     ) -> Option<Self> {
+        Self::try_from_config_with_metrics(config, vhost, route)
+            .ok()
+            .flatten()
+    }
+
+    pub(crate) fn try_from_config_with_metrics(
+        config: &CacheConfig,
+        vhost: &str,
+        route: Option<&str>,
+    ) -> Result<Option<Self>, crate::NativeHttp1ProxyConfigError> {
         let id = NATIVE_PROXY_CACHE_ID.fetch_add(1, Ordering::Relaxed);
-        if !NativeHttp1Proxy::proxy_cache_supported(config) {
-            return None;
+        if !config.enabled {
+            return Ok(None);
         }
-        let peer_fill_auth = match native_peer_fill_auth_from_config(config) {
-            Ok(auth) => auth,
-            Err(error) => {
-                log::error!(
-                    target: "fluxheim::security",
-                    "native peer-fill shared secret could not be loaded; disabling native proxy cache for this policy: {error}"
-                );
-                return None;
-            }
-        };
-        let disk = NativeDiskCache::from_config(config).map(Arc::new);
+        if !NativeHttp1Proxy::proxy_cache_supported(config) {
+            return Err(crate::NativeHttp1ProxyConfigError::CachePolicy);
+        }
+        let peer_fill_auth = native_peer_fill_auth_from_config(config)
+            .map_err(|_| crate::NativeHttp1ProxyConfigError::CacheInitialization)?;
+        let disk = crate::native_http1_cache_lifecycle::shared_disk_cache(config, vhost, route)?;
         if !config.memory.enabled && disk.is_none() {
-            return None;
+            return Ok(None);
         }
         let state = Arc::new(Mutex::new(NativeMemoryCacheState::default()));
         let metrics_vhost = Arc::<str>::from(vhost);
@@ -170,7 +177,7 @@ impl NativeProxyMemoryCache {
             &state,
             disk.as_ref(),
         );
-        Some(Self {
+        Ok(Some(Self {
             config: config.clone(),
             max_bytes: if config.memory.enabled {
                 config.memory.max_size_bytes.as_u64()
@@ -185,7 +192,7 @@ impl NativeProxyMemoryCache {
             peer_fill_key: Arc::from(format!("native-proxy-cache:{id}:peer-fill")),
             peer_fill_peers: native_peer_fill_peers(config),
             peer_fill_auth,
-        })
+        }))
     }
 
     pub(crate) fn memory_enabled(&self) -> bool {

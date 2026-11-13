@@ -39,6 +39,7 @@ pub(crate) use native_http1_cache_backend::prepare_native_storage_bin_root_for_l
 use native_http1_cache_backend::{
     NativeDiskCacheBackend, NativeDiskCacheLocation, NativeDiskCacheRecord, NativeDiskCacheState,
 };
+pub(crate) use native_http1_cache_disk_path::prepare_native_disk_cache_root;
 use native_http1_cache_disk_path::{
     native_cache_path_contains_symlink, native_disk_cache_read_limit, read_native_disk_cache_file,
 };
@@ -103,6 +104,13 @@ pub(crate) struct NativeDiskCache {
     index_flush: Option<NativeStorageBinIndexFlush>,
 }
 
+impl Drop for NativeDiskCache {
+    fn drop(&mut self) {
+        // Close background writes and checkpoint while the backend still owns its lease.
+        drop(self.index_flush.take());
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct NativeDiskCacheStats {
     pub(crate) entries: u64,
@@ -125,34 +133,26 @@ impl NativeDiskCache {
     }
 
     pub(crate) fn from_config(config: &CacheConfig) -> Option<Self> {
-        if !config.disk.enabled || !native_disk_cache_supported(config) {
-            return None;
+        Self::try_from_config(config).ok().flatten()
+    }
+
+    pub(crate) fn try_from_config(config: &CacheConfig) -> std::io::Result<Option<Self>> {
+        if !config.disk.enabled {
+            return Ok(None);
         }
-        let (root, backend) = match NativeDiskCacheBackend::from_config(config) {
-            Ok(backend) => backend,
-            Err(error) => {
-                log::error!(
-                    target: "fluxheim::native_http1",
-                    "native disk cache backend: {error}"
-                );
-                return None;
-            }
-        };
-        let encryption =
-            match NativeDiskCacheEncryption::from_config(&config.disk.encryption, &root) {
-                Ok(encryption) => encryption,
-                Err(error) => {
-                    log::error!(
-                        target: "fluxheim::native_http1",
-                        "native disk cache encryption {}: {error}",
-                        root.display()
-                    );
-                    fluxheim_observability::operational::failure(
-                        fluxheim_observability::event::FailureReason::CacheEncryption,
-                    );
-                    return None;
-                }
-            };
+        if !native_disk_cache_supported(config) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "unsupported disk cache policy",
+            ));
+        }
+        let (root, backend) = NativeDiskCacheBackend::from_config(config)?;
+        let encryption = NativeDiskCacheEncryption::from_config(&config.disk.encryption, &root)
+            .inspect_err(|_| {
+                fluxheim_observability::operational::failure(
+                    fluxheim_observability::event::FailureReason::CacheEncryption,
+                )
+            })?;
         let mut cache = Self {
             root,
             max_bytes: config.disk.max_size_bytes.as_u64(),
@@ -175,22 +175,9 @@ impl NativeDiskCache {
                     .ok_or_else(|| std::io::Error::other("cache encryption disappeared"))?
                     .complete_root_migration(&cache.root)
             });
-            if let Err(error) = migration {
-                log::error!(
-                    target: "fluxheim::security",
-                    "native disk cache encryption-root migration {}: {error}",
-                    cache.root.display()
-                );
-                return None;
-            }
+            migration?;
         }
-        if let Err(error) = cache.rebuild_index() {
-            log::warn!(
-                target: "fluxheim::native_http1",
-                "native disk cache index rebuild {}: {error}",
-                cache.root.display()
-            );
-        }
+        cache.rebuild_index()?;
         cache.index_flush = NativeStorageBinIndexFlush::start(
             &cache.backend,
             &cache.state,
@@ -198,13 +185,8 @@ impl NativeDiskCache {
                 .encryption
                 .as_ref()
                 .map(NativeDiskCacheEncryption::index_key),
-        )
-        .inspect_err(|error| {
-            log::error!(target: "fluxheim::native_http1", "cache index service: {error}");
-        })
-        .ok()?;
-        cache.persist_storage_bin_index();
-        Some(cache)
+        )?;
+        Ok(Some(cache))
     }
 
     pub(crate) fn stats(&self) -> NativeDiskCacheStats {

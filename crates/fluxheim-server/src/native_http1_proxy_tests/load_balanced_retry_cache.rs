@@ -33,7 +33,9 @@ async fn native_load_balanced_retry_caches_only_the_final_success() {
     let mut config = config(&origins);
     config.upstream_priority_groups = vec![20, 10];
     config.load_balance.selection = fluxheim_config::LoadBalanceSelection::LeastTime;
-    let proxy = proxy(&config).with_proxy_cache_config(&cache_config());
+    let proxy = proxy(&config)
+        .with_proxy_cache_config(&cache_config())
+        .unwrap();
     let request = native_proxy_test_request_for("/asset.png");
     let first = dispatch(&proxy, request.metadata_snapshot()).await;
     assert_eq!(first.status(), 200);
@@ -82,7 +84,9 @@ async fn native_load_balanced_retry_foreground_and_background_revalidation_obey_
             cache_config.stale_if_error_secs = Some(60);
             cache_config.stale_if_error_statuses = vec![503];
             cache_config.stale_while_revalidate_secs = Some(if background { 60 } else { 0 });
-            let proxy = proxy(&config).with_proxy_cache_config(&cache_config);
+            let proxy = proxy(&config)
+                .with_proxy_cache_config(&cache_config)
+                .unwrap();
             let cache = proxy.cache.as_ref().unwrap();
             let request = native_proxy_test_request_for("/asset.png");
             let NativeProxyCacheLookup::Miss { key, .. } =
@@ -163,7 +167,9 @@ async fn native_load_balanced_retry_slice_fill_shares_budget_with_foreground_dis
     cache_config.range.slice.enabled = true;
     cache_config.range.slice.fill_missing = true;
     cache_config.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(2);
-    let proxy = proxy(&config).with_proxy_cache_config(&cache_config);
+    let proxy = proxy(&config)
+        .with_proxy_cache_config(&cache_config)
+        .unwrap();
     let request = native_proxy_test_request_for("/asset.png");
     let bounds = fluxheim_cache::CacheSliceBounds { start: 0, end: 1 };
     let response = proxy.fetch_origin_slice(&request, bounds).await.unwrap();
@@ -201,7 +207,9 @@ async fn native_load_balanced_retry_slice_fallback_does_not_reset_pool_budget() 
         cache_config.range.slice.enabled = true;
         cache_config.range.slice.fill_missing = true;
         cache_config.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(2);
-        let proxy = proxy(&config).with_proxy_cache_config(&cache_config);
+        let proxy = proxy(&config)
+            .with_proxy_cache_config(&cache_config)
+            .unwrap();
         let mut request = native_proxy_test_request_for("/asset.png");
         request.headers.push(("range".into(), "bytes=0-1".into()));
         assert_eq!(dispatch(&proxy, request).await.status(), 503);
@@ -231,7 +239,9 @@ async fn native_load_balanced_retry_slice_does_not_bypass_disabled_policy_or_bod
         config.load_balance.retry.enabled = enabled;
         let mut cache_config = cache_config();
         cache_config.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(2);
-        let proxy = proxy(&config).with_proxy_cache_config(&cache_config);
+        let proxy = proxy(&config)
+            .with_proxy_cache_config(&cache_config)
+            .unwrap();
         let result = proxy
             .fetch_origin_slice(
                 &native_proxy_test_request_for("/asset.png"),

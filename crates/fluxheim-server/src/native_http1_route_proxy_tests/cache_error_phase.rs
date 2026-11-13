@@ -83,7 +83,11 @@ async fn stale_error_reason_is_explicit_across_memory_disk_and_restart() {
                         .with_read_timeout(Duration::from_millis(100));
                     NativeHttp1RouteProxy::new(
                         Vec::new(),
-                        Some(NativeHttp1Proxy::new(upstream).with_proxy_cache_config(&cache)),
+                        Some(
+                            NativeHttp1Proxy::new(upstream)
+                                .with_proxy_cache_config(&cache)
+                                .unwrap(),
+                        ),
                     )
                 };
                 let (mut listener, mut shutdown, mut task) =

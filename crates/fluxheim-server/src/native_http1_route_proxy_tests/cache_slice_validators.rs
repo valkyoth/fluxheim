@@ -16,7 +16,7 @@ async fn slice_failed_discovery_waiters_do_not_repeat_the_probe() {
         32,
     ));
     let origin = upstream_slice_response_sequence(&sequence).await;
-    let proxy = proxy_for(origin).with_proxy_cache_config(&config);
+    let proxy = proxy_for(origin).with_proxy_cache_config(&config).unwrap();
     let (listener, shutdown, task) =
         route_proxy_listener_with_shutdown(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy)))
             .await;
@@ -62,7 +62,9 @@ async fn slice_failed_discovery_is_suppressed_until_exact_or_scoped_purge() {
         ];
         let origin = upstream_slice_response_sequence(&sequence).await;
         let scope = root.path().display().to_string();
-        let proxy = proxy_for(origin).with_proxy_cache_config_for(&config, &scope, None);
+        let proxy = proxy_for(origin)
+            .with_proxy_cache_config_for(&config, &scope, None)
+            .unwrap();
         let state = proxy.cache.as_ref().unwrap().state.clone();
         let primary = fluxheim_cache::image_cache_key(
             &config,
@@ -150,7 +152,7 @@ async fn slice_unproven_representation_falls_back_without_composing_after_restar
             ]);
             let origin = upstream_slice_response_sequence(&sequence).await;
             for _ in 0..2 {
-                let proxy = proxy_for(origin).with_proxy_cache_config(&config);
+                let proxy = proxy_for(origin).with_proxy_cache_config(&config).unwrap();
                 let (listener, shutdown, task) = route_proxy_listener_with_shutdown(
                     NativeHttp1RouteProxy::new(Vec::new(), Some(proxy)),
                 )

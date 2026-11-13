@@ -20,7 +20,7 @@ async fn native_route_proxy_peer_fills_and_stores_memory_cache_response() {
         name: "local-peer".to_owned(),
         base_url: format!("http://{peer}"),
     }];
-    let proxy = proxy_for(origin).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(origin).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let first = downstream_get(listener, "/asset.png").await;
@@ -53,7 +53,7 @@ async fn native_route_proxy_client_peer_fill_marker_does_not_skip_peer_fill() {
         name: "local-peer".to_owned(),
         base_url: format!("http://{peer}"),
     }];
-    let proxy = proxy_for(origin).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(origin).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let response = downstream_request(
@@ -76,7 +76,7 @@ async fn native_route_proxy_only_if_cached_miss_does_not_contact_origin() {
     let origin = unused_origin_listener.local_addr().unwrap();
     drop(unused_origin_listener);
     let cache = native_proxy_memory_cache_config();
-    let proxy = proxy_for(origin).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(origin).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let response = downstream_request(
@@ -113,7 +113,7 @@ async fn native_route_proxy_peer_fill_subtracts_upstream_age_before_admission() 
         name: "local-peer".to_owned(),
         base_url: format!("http://{peer}"),
     }];
-    let proxy = proxy_for(origin).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(origin).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let response = downstream_get(listener, "/asset.png").await;

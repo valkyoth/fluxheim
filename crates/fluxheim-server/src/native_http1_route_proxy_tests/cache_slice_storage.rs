@@ -35,7 +35,9 @@ async fn slice_disk_concurrent_fills_child() {
     for backend in [CacheDiskBackend::Filesystem, CacheDiskBackend::StorageBin] {
         let root = tempfile::tempdir().unwrap();
         let (origin, calls) = upstream_counted_delayed_slice(Duration::from_millis(100)).await;
-        let proxy = proxy_for(origin).with_proxy_cache_config(&policy(root.path(), backend));
+        let proxy = proxy_for(origin)
+            .with_proxy_cache_config(&policy(root.path(), backend))
+            .unwrap();
         let cache = proxy.cache.clone().unwrap();
         let (listener, shutdown, task) =
             route_proxy_listener_with_shutdown(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy)))
@@ -85,7 +87,9 @@ async fn slice_disk_cancelled_fill_releases_lock_and_stores_only_complete_respon
             }
             second.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Type: image/png\r\nContent-Length: 4\r\nContent-Range: bytes 0-3/8\r\nETag: \"v1\"\r\nCache-Control: max-age=120\r\nConnection: close\r\n\r\n0123").await.unwrap();
         });
-        let proxy = proxy_for(address).with_proxy_cache_config(&policy(root.path(), backend));
+        let proxy = proxy_for(address)
+            .with_proxy_cache_config(&policy(root.path(), backend))
+            .unwrap();
         let mut request = route_test_request("/asset.png");
         request.headers.push(("range".into(), "bytes=0-3".into()));
         let task_proxy = proxy.clone();
@@ -164,7 +168,7 @@ async fn slice_disk_validator_change_never_composes_mixed_representations() {
         let (listener, shutdown, task) =
             route_proxy_listener_with_shutdown(NativeHttp1RouteProxy::new(
                 Vec::new(),
-                Some(proxy_for(origin).with_proxy_cache_config(&cache)),
+                Some(proxy_for(origin).with_proxy_cache_config(&cache).unwrap()),
             ))
             .await;
         let response = downstream_request(listener, "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nAccept-Encoding: identity\r\nRange: bytes=2-5\r\nConnection: close\r\n\r\n").await;

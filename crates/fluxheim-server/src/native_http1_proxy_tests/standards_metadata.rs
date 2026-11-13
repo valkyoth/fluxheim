@@ -254,7 +254,8 @@ async fn native_proxy_emits_rfc_9211_cache_status_from_real_outcomes() {
     };
     let proxy = NativeHttp1Proxy::new(NativeHttp1Upstream::new(upstream.to_string()))
         .with_header_policy(&metadata_headers())
-        .with_proxy_cache_config(&cache);
+        .with_proxy_cache_config(&cache)
+        .unwrap();
     let listener = proxy_listener_for(proxy).await;
 
     let miss = downstream_get(listener, "/cached.png").await;

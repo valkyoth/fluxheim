@@ -1,6 +1,8 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeHttp1ProxyConfigError {
     CachePolicy,
+    CacheInitialization,
+    CacheRestartRequired,
     DynamicUpstreamDiscovery,
     ErrorPages,
     HttpPolicy,
@@ -24,6 +26,8 @@ impl std::fmt::Display for NativeHttp1ProxyConfigError {
             Self::CachePolicy => {
                 formatter.write_str("native HTTP/1 proxy does not yet support cache policy")
             }
+            Self::CacheInitialization => formatter.write_str("configured proxy cache initialization failed; candidate router was not activated"),
+            Self::CacheRestartRequired => formatter.write_str("active disk cache is incompatible with this candidate; stop/start is required"),
             Self::DynamicUpstreamDiscovery => formatter
                 .write_str("native HTTP/1 proxy does not yet support dynamic upstream discovery"),
             Self::ErrorPages => {

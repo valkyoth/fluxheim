@@ -16,7 +16,7 @@ use super::{
 async fn native_route_proxy_never_forwards_or_caches_connection_nominated_headers() {
     let upstream = upstream_cacheable_once_with_hop_header("cache-safe").await;
     let cache = native_proxy_memory_cache_config();
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let miss = downstream_get(listener, "/asset.png").await;
@@ -44,7 +44,7 @@ async fn native_route_proxy_origin_protection_limits_concurrent_cache_fills() {
     cache.lock.enabled = false;
     cache.origin_protection.enabled = true;
     cache.origin_protection.max_concurrent_fills = 1;
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let first = tokio::spawn(async move { downstream_get(listener, "/asset.png").await });
@@ -76,7 +76,7 @@ async fn native_route_proxy_cache_lock_collapses_concurrent_memory_fills() {
     let mut cache = native_proxy_memory_cache_config();
     cache.lock.enabled = true;
     cache.lock.wait_timeout_secs = 5;
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let first = tokio::spawn(async move { downstream_get(listener, "/asset.png").await });
@@ -105,7 +105,7 @@ async fn native_route_proxy_cache_lock_wait_timeout_fails_closed() {
     let mut cache = native_proxy_memory_cache_config();
     cache.lock.enabled = true;
     cache.lock.wait_timeout_secs = 1;
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let first = tokio::spawn(async move { downstream_get(listener, "/asset.png").await });
@@ -137,7 +137,7 @@ async fn native_route_proxy_does_not_cache_authorized_proxy_response() {
     ])
     .await;
     let cache = native_proxy_memory_cache_config();
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let authorized = downstream_request(
@@ -173,7 +173,7 @@ async fn native_route_proxy_does_not_cache_proxy_authorized_response() {
     ])
     .await;
     let cache = native_proxy_memory_cache_config();
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let authorized = downstream_request(
@@ -214,7 +214,7 @@ async fn native_route_proxy_does_not_cache_malformed_freshness() {
     .await;
     let mut cache = native_proxy_memory_cache_config();
     cache.default_status_ttl_secs = Some(300);
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let malformed = downstream_get(listener, "/asset.png").await;
@@ -242,7 +242,9 @@ async fn native_route_proxy_applies_cache_bypass_status_to_upstream_error() {
     let unused_upstream = listener.local_addr().unwrap();
     drop(listener);
     let cache = native_proxy_memory_cache_config();
-    let proxy = proxy_for(unused_upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(unused_upstream)
+        .with_proxy_cache_config(&cache)
+        .unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let response = downstream_request(
@@ -269,7 +271,7 @@ async fn native_route_proxy_replaces_upstream_age_on_cache_hit() {
     )
     .await;
     let cache = native_proxy_memory_cache_config();
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let first = downstream_get(listener, "/asset.png").await;
@@ -295,7 +297,7 @@ async fn native_route_proxy_respects_origin_vary_header_in_memory_cache() {
     ])
     .await;
     let cache = native_proxy_memory_cache_config();
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let english = downstream_request(
@@ -340,7 +342,7 @@ async fn native_route_proxy_configured_vary_headers_isolate_memory_cache() {
     .await;
     let mut cache = native_proxy_memory_cache_config();
     cache.vary_request_headers = vec!["accept-language".to_owned()];
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let english = downstream_request(

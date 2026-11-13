@@ -253,13 +253,15 @@ impl NativeHttp1Proxy {
                     .with_metrics_scope("root", None)
                     .with_header_policy(&config.headers)
             });
-        let native = native.map(|proxy| {
-            if Self::proxy_cache_supported_for_proxy(&config.cache, &config.proxy) {
-                proxy.with_proxy_cache_config_for(&config.cache, "root", None)
-            } else {
-                proxy
-            }
-        });
+        let native = native
+            .map(|proxy| {
+                if Self::proxy_cache_supported_for_proxy(&config.cache, &config.proxy) {
+                    proxy.with_proxy_cache_config_for(&config.cache, "root", None)
+                } else {
+                    Ok(proxy)
+                }
+            })
+            .transpose()?;
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",

@@ -74,7 +74,8 @@ async fn tls_stale_requires_explicit_permission_and_never_trusts_failed_handshak
                 NativeHttp1Proxy::from_proxy_config(&config, DownstreamHttp1Policy::default())
                     .unwrap()
                     .unwrap()
-                    .with_proxy_cache_config(&cache);
+                    .with_proxy_cache_config(&cache)
+                    .unwrap();
             let address = proxy_with_native(proxy).await;
             let first = downstream_get(address, "/asset.png").await;
             assert!(first.ends_with("trusted"), "{first}");

@@ -120,9 +120,11 @@ impl NativeHttp1RouteProxy {
             if NativeHttp1Proxy::proxy_cache_supported_for_proxy(&config.cache, &config.proxy) {
                 proxy.with_proxy_cache_config_for(&config.cache, "root", None)
             } else {
-                proxy
+                Ok(proxy)
             }
-        });
+        })
+        .transpose()
+        .map_err(NativeHttp1RouteProxyConfigError::Proxy)?;
         if fallback_web.is_none() && fallback.is_none() {
             return Err(NativeHttp1RouteProxyConfigError::MissingRouteAction);
         }
@@ -342,14 +344,17 @@ impl NativeHttp1RouteProxy {
             #[cfg(feature = "load-balancer")]
             collectors.reborrow(),
         )?;
-        let fallback = fallback.map(|proxy| {
-            let proxy = proxy.with_header_policy(&headers);
-            if NativeHttp1Proxy::proxy_cache_supported_for_proxy(&vhost.cache, &vhost.proxy) {
-                proxy.with_proxy_cache_config_for(&vhost.cache, &vhost.name, None)
-            } else {
-                proxy
-            }
-        });
+        let fallback = fallback
+            .map(|proxy| {
+                let proxy = proxy.with_header_policy(&headers);
+                if NativeHttp1Proxy::proxy_cache_supported_for_proxy(&vhost.cache, &vhost.proxy) {
+                    proxy.with_proxy_cache_config_for(&vhost.cache, &vhost.name, None)
+                } else {
+                    Ok(proxy)
+                }
+            })
+            .transpose()
+            .map_err(NativeHttp1RouteProxyConfigError::Proxy)?;
         #[cfg(not(feature = "privacy-mode"))]
         let fallback = fallback.map(|proxy| proxy.with_trusted_sources(context.trusted_sources));
         #[cfg(any(
@@ -388,15 +393,18 @@ impl NativeHttp1RouteProxy {
                 )?;
                 #[cfg(not(feature = "privacy-mode"))]
                 let proxy = proxy.map(|proxy| proxy.with_trusted_sources(context.trusted_sources));
-                proxy.map(|proxy| {
-                    if let Some(cache) = route.cache.as_ref().filter(|cache| {
-                        NativeHttp1Proxy::proxy_cache_supported_for_proxy(cache, proxy_config)
-                    }) {
-                        proxy.with_proxy_cache_config_for(cache, &vhost.name, Some(&route.name))
-                    } else {
-                        proxy
-                    }
-                })
+                proxy
+                    .map(|proxy| {
+                        if let Some(cache) = route.cache.as_ref().filter(|cache| {
+                            NativeHttp1Proxy::proxy_cache_supported_for_proxy(cache, proxy_config)
+                        }) {
+                            proxy.with_proxy_cache_config_for(cache, &vhost.name, Some(&route.name))
+                        } else {
+                            Ok(proxy)
+                        }
+                    })
+                    .transpose()
+                    .map_err(NativeHttp1RouteProxyConfigError::Proxy)?
             } else {
                 None
             };

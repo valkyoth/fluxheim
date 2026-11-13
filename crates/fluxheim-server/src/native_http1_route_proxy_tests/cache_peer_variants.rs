@@ -67,7 +67,7 @@ fn proxy(
     config: &fluxheim_config::CacheConfig,
     key: Option<u8>,
 ) -> crate::NativeHttp1Proxy {
-    let mut proxy = proxy_for(origin).with_proxy_cache_config(config);
+    let mut proxy = proxy_for(origin).with_proxy_cache_config(config).unwrap();
     proxy.cache.as_mut().unwrap().peer_fill_auth = key.map(|key| {
         Arc::new(NativePeerFillAuth {
             secret: Arc::new(SecretVec::from_vec(vec![key; 32])),

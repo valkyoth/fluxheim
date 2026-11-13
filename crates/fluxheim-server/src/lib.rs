@@ -16,6 +16,7 @@ mod native_http1;
 #[cfg(feature = "acme")]
 mod native_http1_acme;
 mod native_http1_cache;
+mod native_http1_cache_lifecycle;
 mod native_http1_client;
 mod native_http1_cors;
 mod native_http1_forwarded;

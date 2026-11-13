@@ -70,7 +70,7 @@ async fn peer_fill_does_not_store_missing_custom_variant() {
     cache.vary_request_headers = vec!["x-edition".to_owned()];
     let peer = route_proxy_listener(NativeHttp1RouteProxy::new(
         Vec::new(),
-        Some(proxy_for(origin).with_proxy_cache_config(&cache)),
+        Some(proxy_for(origin).with_proxy_cache_config(&cache).unwrap()),
     ))
     .await;
     assert!(
@@ -86,7 +86,7 @@ async fn peer_fill_does_not_store_missing_custom_variant() {
     }];
     let front = route_proxy_listener(NativeHttp1RouteProxy::new(
         Vec::new(),
-        Some(proxy_for(origin).with_proxy_cache_config(&cache)),
+        Some(proxy_for(origin).with_proxy_cache_config(&cache).unwrap()),
     ))
     .await;
     let request = "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nX-Edition: special\r\nConnection: close\r\n\r\n";
@@ -122,7 +122,7 @@ async fn tiered_slices_survive_cache_restart() {
             let (listener, shutdown, task) =
                 route_proxy_listener_with_shutdown(NativeHttp1RouteProxy::new(
                     Vec::new(),
-                    Some(proxy_for(origin).with_proxy_cache_config(&cache)),
+                    Some(proxy_for(origin).with_proxy_cache_config(&cache).unwrap()),
                 ))
                 .await;
             for expected in [if restart == 0 { "MISS" } else { "HIT" }, "HIT"] {

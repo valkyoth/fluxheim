@@ -16,7 +16,7 @@ use super::{
 async fn native_route_proxy_caches_proxy_response_in_memory() {
     let upstream = upstream_cacheable_once("origin-one").await;
     let cache = native_proxy_memory_cache_config();
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let first = downstream_get(listener, "/asset.png").await;
@@ -44,7 +44,7 @@ async fn native_route_proxy_caches_proxy_response_on_disk() {
     let root = tempfile::tempdir().unwrap();
     let upstream = upstream_cacheable_once("disk-origin").await;
     let cache = native_proxy_disk_cache_config(root.path().to_path_buf());
-    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let first_listener =
         route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(first_proxy))).await;
 
@@ -59,7 +59,9 @@ async fn native_route_proxy_caches_proxy_response_on_disk() {
     let unused_origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let unavailable_origin = unused_origin_listener.local_addr().unwrap();
     drop(unused_origin_listener);
-    let second_proxy = proxy_for(unavailable_origin).with_proxy_cache_config(&cache);
+    let second_proxy = proxy_for(unavailable_origin)
+        .with_proxy_cache_config(&cache)
+        .unwrap();
     let second_listener =
         route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(second_proxy))).await;
 
@@ -93,13 +95,15 @@ async fn native_route_proxy_caches_proxy_response_on_encrypted_disk() {
     std::fs::write(&legacy_object, b"FLUXHEIM-CACHE-ENC-v1\nlegacy metadata").unwrap();
     let upstream = upstream_cacheable_once("encrypted-disk-origin").await;
     let cache = native_proxy_encrypted_disk_cache_config(cache_root.clone(), key_file);
-    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     assert!(
         first_proxy.cache.is_some(),
         "encrypted disk cache failed to initialize"
     );
-    let first_listener =
-        route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(first_proxy))).await;
+    let (first_listener, first_shutdown, first_task) = route_proxy_listener_with_shutdown(
+        NativeHttp1RouteProxy::new(Vec::new(), Some(first_proxy)),
+    )
+    .await;
 
     let first = downstream_get(first_listener, "/asset.png").await;
     assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
@@ -122,11 +126,15 @@ async fn native_route_proxy_caches_proxy_response_on_encrypted_disk() {
             .windows("encrypted-disk-origin".len())
             .any(|window| window == "encrypted-disk-origin".as_bytes())
     }));
+    first_shutdown.send(()).unwrap();
+    first_task.await.unwrap();
 
     let unused_origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let unavailable_origin = unused_origin_listener.local_addr().unwrap();
     drop(unused_origin_listener);
-    let second_proxy = proxy_for(unavailable_origin).with_proxy_cache_config(&cache);
+    let second_proxy = proxy_for(unavailable_origin)
+        .with_proxy_cache_config(&cache)
+        .unwrap();
     let second_listener =
         route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(second_proxy))).await;
 
@@ -144,7 +152,7 @@ async fn native_route_proxy_caches_proxy_response_on_storage_bin_disk() {
     let root = tempfile::tempdir().unwrap();
     let upstream = upstream_cacheable_once("storage-bin-origin").await;
     let cache = native_proxy_storage_bin_cache_config(root.path().to_path_buf());
-    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let (first_listener, first_shutdown, first_task) = route_proxy_listener_with_shutdown(
         NativeHttp1RouteProxy::new(Vec::new(), Some(first_proxy)),
     )
@@ -167,7 +175,9 @@ async fn native_route_proxy_caches_proxy_response_on_storage_bin_disk() {
     let unused_origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let unavailable_origin = unused_origin_listener.local_addr().unwrap();
     drop(unused_origin_listener);
-    let second_proxy = proxy_for(unavailable_origin).with_proxy_cache_config(&cache);
+    let second_proxy = proxy_for(unavailable_origin)
+        .with_proxy_cache_config(&cache)
+        .unwrap();
     let second_listener =
         route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(second_proxy))).await;
 
@@ -191,7 +201,7 @@ async fn native_route_proxy_caches_proxy_response_on_encrypted_storage_bin_disk(
     let cache_root = root.path().join("objects");
     let upstream = upstream_cacheable_once("encrypted-storage-bin-origin").await;
     let cache = native_proxy_encrypted_storage_bin_cache_config(cache_root.clone(), key_file);
-    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let (first_listener, first_shutdown, first_task) = route_proxy_listener_with_shutdown(
         NativeHttp1RouteProxy::new(Vec::new(), Some(first_proxy)),
     )
@@ -218,7 +228,9 @@ async fn native_route_proxy_caches_proxy_response_on_encrypted_storage_bin_disk(
     let unused_origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let unavailable_origin = unused_origin_listener.local_addr().unwrap();
     drop(unused_origin_listener);
-    let second_proxy = proxy_for(unavailable_origin).with_proxy_cache_config(&cache);
+    let second_proxy = proxy_for(unavailable_origin)
+        .with_proxy_cache_config(&cache)
+        .unwrap();
     let second_listener =
         route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(second_proxy))).await;
 
@@ -245,7 +257,7 @@ async fn native_route_proxy_caches_proxy_response_on_openbao_storage_bin_disk() 
         openbao.address.clone(),
         token_file,
     );
-    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let (first_listener, first_shutdown, first_task) = route_proxy_listener_with_shutdown(
         NativeHttp1RouteProxy::new(Vec::new(), Some(first_proxy)),
     )
@@ -277,7 +289,9 @@ async fn native_route_proxy_caches_proxy_response_on_openbao_storage_bin_disk() 
     let unused_origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let unavailable_origin = unused_origin_listener.local_addr().unwrap();
     drop(unused_origin_listener);
-    let second_proxy = proxy_for(unavailable_origin).with_proxy_cache_config(&cache);
+    let second_proxy = proxy_for(unavailable_origin)
+        .with_proxy_cache_config(&cache)
+        .unwrap();
     let second_listener =
         route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(second_proxy))).await;
 
@@ -316,7 +330,7 @@ async fn native_route_proxy_tiered_cache_refills_memory_from_disk() {
     let root = tempfile::tempdir().unwrap();
     let upstream = upstream_cacheable_once("tiered-origin").await;
     let cache = native_proxy_tiered_cache_config(root.path().to_path_buf());
-    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let first_listener =
         route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(first_proxy))).await;
 
@@ -330,7 +344,9 @@ async fn native_route_proxy_tiered_cache_refills_memory_from_disk() {
     let unused_origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let unavailable_origin = unused_origin_listener.local_addr().unwrap();
     drop(unused_origin_listener);
-    let second_proxy = proxy_for(unavailable_origin).with_proxy_cache_config(&cache);
+    let second_proxy = proxy_for(unavailable_origin)
+        .with_proxy_cache_config(&cache)
+        .unwrap();
     let second_listener =
         route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(second_proxy))).await;
 

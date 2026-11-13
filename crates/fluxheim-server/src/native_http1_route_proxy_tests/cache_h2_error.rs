@@ -77,10 +77,12 @@ async fn stale_h2_reset_policy_survives_static_and_balanced_dispatch() {
             } else {
                 CacheStaleErrorKind::Read
             }];
-            let (address, shutdown, task) = route_proxy_listener_with_shutdown(
-                NativeHttp1RouteProxy::new(Vec::new(), Some(proxy.with_proxy_cache_config(&cache))),
-            )
-            .await;
+            let (address, shutdown, task) =
+                route_proxy_listener_with_shutdown(NativeHttp1RouteProxy::new(
+                    Vec::new(),
+                    Some(proxy.with_proxy_cache_config(&cache).unwrap()),
+                ))
+                .await;
             let first = downstream_get(address, "/asset.png").await;
             assert!(first.ends_with("trusted"), "{first}");
             tokio::time::sleep(Duration::from_millis(1100)).await;

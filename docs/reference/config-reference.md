@@ -2762,7 +2762,12 @@ one bin, so leave headroom beyond the maximum body size. `preallocate` extends
 new files to bin size; actual physical reservation is filesystem-dependent.
 `max_open_bins` is validated and manifest-bound but does not currently enforce
 a concurrent-open cap. The [maintenance guide](../guides/cache-recovery.md)
-covers layout changes, index durability and pending initialization/reload fixes.
+covers layout changes, index durability and required disk initialization.
+An enabled disk tier must initialize successfully before its router can serve;
+failure rejects startup or reload rather than silently disabling disk caching.
+Compatible unencrypted policies may share disk state across router generations.
+Changed policies/scopes on an active root and encrypted-root reloads require
+stop/start or a fresh independent root.
 
 The storage-bin backend holds a root-local advisory lock before creating or
 validating persistent layout metadata. Cross-node exclusion therefore depends

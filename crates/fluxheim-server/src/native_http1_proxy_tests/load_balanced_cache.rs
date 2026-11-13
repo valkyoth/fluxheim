@@ -138,7 +138,7 @@ async fn native_proxy_caches_load_balanced_response_in_memory() {
         },
         ..Default::default()
     };
-    let proxy = proxy_listener_for(proxy.with_proxy_cache_config(&cache)).await;
+    let proxy = proxy_listener_for(proxy.with_proxy_cache_config(&cache).unwrap()).await;
 
     let first_response = downstream_get(proxy, "/asset.png").await;
     let second_response = downstream_get(proxy, "/asset.png").await;
@@ -184,7 +184,7 @@ async fn native_load_balanced_cache_lock_wait_timeout_fails_closed() {
         },
         ..Default::default()
     };
-    let proxy = proxy_listener_for(proxy.with_proxy_cache_config(&cache)).await;
+    let proxy = proxy_listener_for(proxy.with_proxy_cache_config(&cache).unwrap()).await;
 
     let first_response = tokio::spawn(async move { downstream_get(proxy, "/asset.png").await });
     tokio::time::timeout(Duration::from_secs(1), async {

@@ -15,7 +15,7 @@ async fn native_route_proxy_serves_bounded_range_from_memory_cache_hit() {
     let upstream = upstream_cacheable_once("0123456789").await;
     let mut cache = native_proxy_memory_cache_config();
     cache.range.enabled = true;
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let first = downstream_get(listener, "/asset.png").await;
@@ -51,7 +51,7 @@ async fn native_route_proxy_serves_range_not_satisfiable_from_memory_cache_hit()
     let upstream = upstream_cacheable_once("0123456789").await;
     let mut cache = native_proxy_memory_cache_config();
     cache.range.enabled = true;
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let first = downstream_get(listener, "/asset.png").await;
@@ -89,7 +89,7 @@ async fn native_route_proxy_bypasses_cache_fill_on_range_miss() {
     .await;
     let mut cache = native_proxy_memory_cache_config();
     cache.range.enabled = true;
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let range = downstream_request(
@@ -138,7 +138,7 @@ async fn native_route_proxy_slice_cache_fills_and_composes_memory_range() {
     cache.range.slice.fill_missing = true;
     cache.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(4);
     cache.range.slice.max_slices = 4;
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let first = downstream_request(
@@ -192,7 +192,7 @@ async fn native_route_proxy_slice_cache_collapses_concurrent_same_slice_fills() 
     cache.range.slice.fill_missing = true;
     cache.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(4);
     cache.range.slice.max_slices = 4;
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
     let barrier = Arc::new(tokio::sync::Barrier::new(REQUESTS + 1));
     let mut requests = Vec::with_capacity(REQUESTS);
@@ -229,7 +229,7 @@ async fn native_route_proxy_slice_cache_lock_wait_timeout_fails_closed() {
     cache.range.slice.fill_missing = true;
     cache.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(4);
     cache.range.slice.max_slices = 4;
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let first = tokio::spawn(async move {
@@ -305,7 +305,7 @@ async fn native_route_proxy_slice_cache_isolates_configured_vary_headers() {
     cache.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(4);
     cache.range.slice.max_slices = 4;
     cache.vary_request_headers = vec!["accept-language".to_owned()];
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let english = downstream_request(
@@ -368,7 +368,7 @@ async fn native_route_proxy_slice_cache_composes_multipart_memory_response() {
     cache.range.slice.fill_missing = true;
     cache.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(4);
     cache.range.slice.max_slices = 4;
-    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache).unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
 
     let response = downstream_request(

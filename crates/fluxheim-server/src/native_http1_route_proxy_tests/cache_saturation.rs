@@ -20,7 +20,9 @@ async fn disk_cache_saturation_child_process() {
     let unavailable_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let unavailable_origin = unavailable_listener.local_addr().unwrap();
     drop(unavailable_listener);
-    let proxy = proxy_for(unavailable_origin).with_proxy_cache_config(&cache);
+    let proxy = proxy_for(unavailable_origin)
+        .with_proxy_cache_config(&cache)
+        .unwrap();
     let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
     let permits = crate::blocking_work::exhaust_disk_cache_blocking_work_for_test();
 
@@ -33,12 +35,18 @@ async fn disk_cache_saturation_child_process() {
         Some("BYPASS")
     );
     let mut slice_config = cache.clone();
+    let slice_root = tempfile::tempdir().unwrap();
+    slice_config.disk.path = Some(slice_root.path().to_path_buf());
     slice_config.range.enabled = true;
     slice_config.range.slice.enabled = true;
     slice_config.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(4);
     let slice_listener = route_proxy_listener(NativeHttp1RouteProxy::new(
         Vec::new(),
-        Some(proxy_for(unavailable_origin).with_proxy_cache_config(&slice_config)),
+        Some(
+            proxy_for(unavailable_origin)
+                .with_proxy_cache_config(&slice_config)
+                .unwrap(),
+        ),
     ))
     .await;
     let response = downstream_request(slice_listener, "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nRange: bytes=0-3\r\nConnection: close\r\n\r\n").await;
@@ -53,7 +61,9 @@ async fn disk_cache_saturation_child_process() {
     let upstream = upstream_cacheable_once_with_max_age("stale-memory", 1).await;
     let mut stale_cache = native_proxy_tiered_cache_config(stale_root.path().to_path_buf());
     stale_cache.stale_while_revalidate_secs = Some(60);
-    let stale_proxy = proxy_for(upstream).with_proxy_cache_config(&stale_cache);
+    let stale_proxy = proxy_for(upstream)
+        .with_proxy_cache_config(&stale_cache)
+        .unwrap();
     let stale_listener =
         route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(stale_proxy))).await;
     let first = downstream_get(stale_listener, "/asset.png").await;

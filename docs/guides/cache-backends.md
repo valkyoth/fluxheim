@@ -170,15 +170,23 @@ Independent roots are required for overlapping replicas or rolling replacements.
 
 ## Startup, Reload And Operations Limits
 
-**A running listener is not proof that its configured disk tier initialized.**
-The native construction path can log a backend, encryption or index-service
-failure and omit the disk tier. It does not deliberately downgrade encrypted
-objects to plaintext storage, but a memory tier or ordinary origin requests can
-mask the unavailable disk cache.
+Configured proxy disk tiers are required at construction. Backend, encryption,
+index recovery and index-service initialization errors reject startup or the
+candidate router; a tiered policy does not silently downgrade to memory alone.
+A running listener is still not proof of disk initialization for a different
+process or generation: verify the selected policy, cache status and actual HITs.
+
+Within one process, an unchanged unencrypted disk cache can be reused across
+router generations in the same vhost/route scope. Only `status_header` and
+`status_reason_header` may differ; other cache policy changes on a live root
+require stop/start or a fresh root. Existing requests retain their generation.
+Memory entries and in-flight fills are not transferred. Encrypted roots always
+require stop/start before another generation initializes them: candidate
+preparation must not rotate keys or migrate data still used by the old router.
+The process tracks at most 4,096 simultaneously live shared disk caches.
 
 | Finding | Operator consequence | Required correction |
 | --- | --- | --- |
-| the documented limitation | Candidate reload can contend with the old bin allocator; layout errors can also leave the router running without configured disk caching | the local follow-up; until fixed, controlled stop/start and explicit disk verification |
 | the documented limitation | Invalid/unindexed files and abandoned temporaries remain outside tracked occupancy | the local follow-up; monitor actual filesystem usage and use offline maintenance guidance |
 | the documented limitation | Configured max-open-bins is not a handle cap | the local follow-up; provision OS descriptor limits without relying on this value |
 | the documented limitation | Bounded indexed purge may report no continuation while objects remain | the local follow-up; verify remaining scope, do not assume a false completion flag proves emptiness |

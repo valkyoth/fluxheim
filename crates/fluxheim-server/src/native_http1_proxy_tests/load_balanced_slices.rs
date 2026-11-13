@@ -56,7 +56,9 @@ async fn native_slice_load_balancer_excludes_unavailable_members_and_recovers() 
         config.upstream_priority_groups = vec![20, 10];
         config.backup_upstreams = vec![origins[1].address.to_string()];
         config.load_balance.selection = fluxheim_config::LoadBalanceSelection::LeastTime;
-        let proxy = proxy(&config).with_proxy_cache_config(&slice_cache());
+        let proxy = proxy(&config)
+            .with_proxy_cache_config(&slice_cache())
+            .unwrap();
         let pool = proxy.load_balancer.as_ref().unwrap();
         let first = origins[0].address.to_string();
         pool.set_runtime_backend_state(&first, state).unwrap();
@@ -90,7 +92,9 @@ async fn native_slice_load_balancer_queue_rejection_never_uses_static_fallback()
     config.load_balance.queue.max_waiting = 1;
     config.load_balance.queue.timeout_ms = 25;
     config.load_balance.queue.retry_interval_ms = 5;
-    let proxy = proxy(&config).with_proxy_cache_config(&slice_cache());
+    let proxy = proxy(&config)
+        .with_proxy_cache_config(&slice_cache())
+        .unwrap();
     let pool = proxy.load_balancer.as_ref().unwrap();
     let first = pool.select(&native_proxy_test_request(), None).unwrap();
     let second = pool.select(&native_proxy_test_request(), None).unwrap();
@@ -117,7 +121,9 @@ async fn native_slice_load_balancer_cancellation_releases_capacity() {
         ..Default::default()
     };
     config.load_balance.health_check.enabled = false;
-    let proxy = proxy(&config).with_proxy_cache_config(&slice_cache());
+    let proxy = proxy(&config)
+        .with_proxy_cache_config(&slice_cache())
+        .unwrap();
     let pool = proxy.load_balancer.clone().unwrap();
     let task = tokio::spawn(async move { fill(&proxy).await });
     let (mut stream, _) = tokio::time::timeout(Duration::from_secs(3), first.accept())

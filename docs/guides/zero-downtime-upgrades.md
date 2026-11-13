@@ -111,8 +111,8 @@ ready only after all startup-blocking work succeeds, including:
 - complete configuration validation and `conf.d` merge;
 - route and vhost construction;
 - TLS certificate/key loading and SNI resolver construction;
-- cache policy construction (not proof of successful persistent storage;
-  [the documented limitation](cache.md) tracks initialization/reload gaps);
+- cache policy and required disk-tier initialization (not a guarantee of later
+  write durability; follow the [root ownership and reload rules](cache-recovery.md));
 - load-balancer pool construction;
 - required Wasm module validation and compilation;
 - binding or adopting every required listener;

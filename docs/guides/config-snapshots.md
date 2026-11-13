@@ -523,12 +523,13 @@ metrics service, or startup-owned load-balancer service changes. Existing
 requests keep their old runtime snapshot; new requests use the freshly swapped
 proxy snapshot.
 
-**Current limitation:** the replacement router can fail
-to acquire the old router's exclusive cache-root lease while reload still
-reports success. Disk caching can disappear or a tiered policy can retain only
-memory. Until the planned correction, use a controlled stop/start for bin-backed
-routers and verify real disk reuse, not just reload status. See
-[cache recovery](cache-recovery.md) for the current limitation and procedure.
+**Disk cache initialization:** a required disk-tier failure rejects the
+candidate (currently HTTP 500) and leaves the active router and runtime snapshot
+unchanged. Compatible unencrypted policies reuse disk state and the bin lease.
+Changed cache policies/scopes on an active root and all encrypted-root reloads
+require stop/start or a fresh independent root. A rejected reload does not undo
+prior snapshot publication. See [cache recovery](cache-recovery.md) for the
+compatibility rules and procedure.
 
 Load-balancer service changes include adding or removing vhost/route pools and
 changing static pool members, file/DNS/HTTP discovery sources, discovery refresh

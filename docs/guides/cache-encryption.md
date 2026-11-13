@@ -353,10 +353,11 @@ at that bound. Preserve `.fluxheim-encryption-*`, `.fluxheim-gcm-*`, and
 an established root is never allowed to reuse an AES key with a reset counter:
 missing active-key or counter state rejects disk-cache initialization, while a
 missing root identity creates a new effective key and requires a cold purge.
-That is an encryption boundary, not a guarantee that the server exits: native
-router construction can currently continue without a failed disk tier
-. Inspect errors and verify actual disk caching. See
-[recovery and reload limitations](cache-recovery.md); do not repair this by
+Failure to initialize an enabled disk tier rejects startup or the candidate
+router; it does not silently fall back to memory. Reloading an active encrypted
+root requires stop/start, even with unchanged configuration, because loading
+keys can initiate migration. The old router remains active after rejection. See
+[recovery and reload](cache-recovery.md); do not repair this by
 removing cryptographic state files.
 
 The first `1.7.12` startup against an older encrypted root creates root-bound

@@ -6,7 +6,7 @@ use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
 const NATIVE_DISK_CACHE_READ_OVERHEAD_BYTES: u64 = 1024 * 1024;
 
-pub(super) fn prepare_native_disk_cache_root(root: &Path) -> std::io::Result<PathBuf> {
+pub(crate) fn prepare_native_disk_cache_root(root: &Path) -> std::io::Result<PathBuf> {
     if native_configured_cache_path_contains_symlink(root)? {
         return Err(unsafe_path_error(
             "native disk cache root must not cross reparse points",
