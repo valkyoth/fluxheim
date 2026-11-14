@@ -1175,10 +1175,21 @@ mod tests {
         assert!(NativeDiskCacheEncryption::from_existing_config(&config, &root).is_err());
         encryption.complete_root_migration(&root).unwrap();
         let ciphertext = encryption.encrypt("object", b"preserved").unwrap();
-        let before = std::fs::read_dir(&root)
-            .unwrap()
-            .map(|e| {
-                let path = e.unwrap().path();
+        let counter = encryption.local_nonce_counter_path.as_ref().unwrap();
+        // Assert the complete expected inventory, rather than reading paths
+        // supplied by directory entries in a fixture meant to prove no mutation.
+        let paths = [
+            root.join(NATIVE_CACHE_ROOT_ID_FILE),
+            root.join(NATIVE_CACHE_ROOT_ID_LOCK_FILE),
+            root.join(NATIVE_CACHE_ACTIVE_KEY_FILE),
+            root.join(NATIVE_CACHE_ACTIVE_KEY_LOCK_FILE),
+            counter.clone(),
+            counter.with_extension("counter.lock"),
+        ];
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), paths.len());
+        let before = paths
+            .into_iter()
+            .map(|path| {
                 let bytes = std::fs::read(&path).unwrap();
                 (path, bytes)
             })

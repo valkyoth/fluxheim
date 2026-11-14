@@ -163,3 +163,30 @@ link-creation cases because the build identity lacks that privilege. Rustfmt,
 documentation links/layout, CI qualification policy and the Windows release
 validator passed. No dependency or manifest changed. Independent retest and
 exact-commit GitHub acceptance remain pending.
+
+## CodeQL Follow-Up
+
+The four alerts on `784f8b55` were reviewed without weakening the recovery or
+admission controls:
+
+- Rust alert 462 flags a directory-entry-derived path in the encryption
+  no-mutation regression, not deployed code. The test now names the expected
+  root identity, key marker, nonce counter and their lock files explicitly,
+  asserts the complete six-file inventory, and preserves all before/after byte
+  comparisons, wrong-key rejection and successful decryption checks. It no
+  longer reads filenames supplied by enumeration.
+- Python alerts 463, 464 and 465 flag `resolve`, `lstat` and `scandir` on the
+  offline capacity checker's operator-supplied root. Selecting that root is the
+  intended CLI interface. There is no HTTP/API caller, privilege elevation,
+  payload read, filesystem mutation or filename output. Enumeration runs under
+  the caller's existing permissions, with alias/reparse and entry/time checks.
+  The owner approved dismissing these three verified false positives. A fixed
+  path allowlist would break legitimate platform/deployment paths rather than
+  repair an authorization boundary. Read-only, link, budget and fixed-diagnostic
+  tests remain enabled.
+
+Only a test and this evidence changed; no production runtime, dependency or
+CodeQL policy changed. Linux encryption tests (10), Python cache/preflight tests
+(29), all-feature/all-target server Clippy, formatting and diff checks passed.
+Native Windows and macOS encryption suites also passed (10 each). Exact-commit
+CodeQL confirmation remains pending; alert 462 was not manually dismissed.
