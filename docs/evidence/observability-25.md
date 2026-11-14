@@ -184,3 +184,84 @@ It uses the same non-root, no-host-mount, no-external-network isolation describe
 above. No dependencies, persisted formats, ACL policy, TLS policy or CI gates
 changed. Native archives, ARM64, reproducibility, independent pentest and
 exact-commit GitHub acceptance remain separate gates.
+
+## Fragmentation And Lookup Retest
+
+Correction base: `30f11c6bc2f52fd72d962b7e0f82f85bab7954d0`.
+
+The follow-up report confirmed the previous fixes and identified a pre-existing
+fragmentation deadlock plus repeated admission retries during one lookup.
+
+Storage-bin allocation now only attempts allocation. When fragmentation requires
+eviction, the store drops both its incoming key guard and capacity reservation
+before selecting a victim. It then repeats normal admission and allocation.
+Publication and replacement still hold the incoming key's exclusive guard.
+No eviction path nests a second key stripe beneath that guard. The fix does not
+depend on making stripe collisions unpredictable.
+
+Fresh, stale-while-revalidate and revalidation classification now share the same
+disk result. Saturation cannot trigger another disk phase, including a separate
+range-key read. Eligible entries already in memory retain their existing
+behavior, including stale-while-revalidate under disk pressure. A genuine
+complete-object miss may still lead to a distinct range-key lookup; slice
+assembly and later origin-error handling are separate operations. The change
+does not claim one read for an entire multi-slice HTTP response.
+
+### Regression Coverage
+
+- A subprocess constructs two full logical bins with real serialized objects,
+  frees a large range in each, and proves that total free bytes exceed the next
+  object's size while neither hole fits. Distinct request-shaped incoming and
+  victim keys deliberately share the same production lock stripe. The store
+  must finish within 20 seconds; the parent kills and reaps only that test child
+  on failure. The test verifies the victim, surviving object, byte accounting,
+  refunded admission and a real close/reopen of the cache.
+- The allocator-only call must return `None` without evicting anything. This
+  catches accidental reintroduction of eviction inside the allocation helper.
+- A test-only per-cache counter proves exactly one disk read for missing,
+  fresh, stale, revalidatable and fully expired entries, on both backends with
+  and without `Vary` keys. It is absent from deployed builds.
+- The live saturation regression counts attempts for a single HTTP request
+  before its 32-client contention phase. It enforces the existing 11-attempt
+  bound and retains the zero-extra-origin-request and post-contention HIT checks.
+- The existing memory-stale-under-disk-saturation test remains unchanged and
+  passes. A first fail-fast implementation rejected that valid memory response;
+  the final code preserves it without submitting further disk jobs.
+
+### Qualification
+
+Qualification date: 2026-11-14, Rust 1.99.1.
+
+| Check | Result |
+| --- | --- |
+| Linux locked workspace | Passed; existing opt-in tests remain skipped |
+| Linux all-feature server library | 803 passed, one manual capacity test ignored |
+| Native load-balancing server library | macOS 647 and Windows 644 passed; one manual capacity test ignored on each |
+| Cache crate | 76 passed on Linux, macOS and Windows |
+| Strict all-feature/all-target server Clippy | Passed on Linux |
+| Native cache/server Clippy | Passed on macOS; Windows trusted toolchain lacks Clippy |
+| Native lifecycle/recovery smokes | Passed on macOS and Windows |
+| Isolated Podman lifecycle matrix | Eight cases passed |
+| Linux encrypted filesystem/memory restart repeat | Three consecutive runs passed with the unchanged three-second request timeout |
+| Linux storage-bin shell smoke | Passed |
+| Full Linux proxy-cache smoke rerun | Passed, including guide, admin, lifecycle and recovery checks |
+| Python cache fixtures / documentation layout / CI classifier | 30 / 28 / 11 passed; Windows fixtures retain two existing platform/privilege skips |
+| Windows release-script and security-source validators | Passed |
+| RustSec / cargo-deny | 449 dependencies, 1,509 advisories; no findings |
+| Formatting and documentation links | Passed |
+
+An initial broad Linux proxy-cache smoke timed out on an encrypted restart
+request while other qualification builds were running. The three isolated
+repeats above used the same runtime and unchanged timeout, with additional
+debug logging. The subsequent full proxy-cache smoke also passed with unchanged
+runtime and timeouts. The initial timeout's cause was not established; passing
+repeats alone are not proof that it was caused by host load.
+
+Runtime image:
+`sha256:37838a8e4b3dd3edac539fd8ba8fdc48d3ecd5df007067ff265bd289e0a25930`.
+Qualification layer:
+`sha256:2f61d57587f1aeb4363a678a3da621b732830f6b5a4a03a36c1edb8fbb85b182`.
+The container runs under the same restricted conditions described above.
+No Cargo dependency, cache format, authentication policy, filesystem trust
+boundary or CI gate changed. Mutation waits and individual filesystem calls
+remain subject to the previously documented operational limits.

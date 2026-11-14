@@ -340,8 +340,8 @@ impl NativeDiskCache {
             if !self.evict_until_admissible(&key.combined, encoded_len)? {
                 return Ok(());
             }
-            let _mutation = self.lock_key_mutation(&key.combined);
-            let Some(_admission) = self.reserve_admission(&key.combined, encoded_len) else {
+            let mutation = self.lock_key_mutation(&key.combined);
+            let Some(admission) = self.reserve_admission(&key.combined, encoded_len) else {
                 continue;
             };
             self.remove_combined_locked(&key.combined);
@@ -351,7 +351,15 @@ impl NativeDiskCache {
                 return Ok(());
             }
             let Some(location) = self.write_encoded_object(&key.combined, &encoded)? else {
-                return Ok(());
+                // Fragmentation can require eviction even with sufficient
+                // total free bytes. Release this stripe and reservation first:
+                // the victim can share our stripe or be held by another store.
+                drop(admission);
+                drop(mutation);
+                if !self.evict_oldest()? {
+                    return Ok(());
+                }
+                continue;
             };
             self.with_state_mut(|state| {
                 let combined = key.combined.clone();
@@ -448,6 +456,8 @@ impl NativeDiskCache {
         &self,
         combined_key: &str,
     ) -> std::io::Result<Option<NativeMemoryCacheEntry>> {
+        #[cfg(test)]
+        self.with_state_mut(|state| state.lookup_attempts += 1);
         self.get_combined_with_reader(combined_key, |record| self.read_record(record))
     }
 

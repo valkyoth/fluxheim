@@ -181,12 +181,21 @@ async fn disk_cache_key_contention_child_process() {
             assert_eq!(calls.load(Ordering::SeqCst), 1);
             let (ready_tx, ready_rx) = std::sync::mpsc::channel();
             let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let observed_disk = Arc::clone(&disk);
             let writer = std::thread::spawn(move || {
                 let _guard = disk.lock_key_mutation(&key);
                 ready_tx.send(()).unwrap();
                 release_rx.recv_timeout(Duration::from_secs(15)).unwrap();
             });
             ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            let before = observed_disk.with_state(|state| state.lookup_attempts);
+            let response = downstream_request(listener, request).await;
+            assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+            let attempts = observed_disk.with_state(|state| state.lookup_attempts) - before;
+            assert!(
+                (1..=11).contains(&attempts),
+                "one request attempted {attempts} disk reads"
+            );
             let mut requests = tokio::task::JoinSet::new();
             for _ in 0..32 {
                 requests.spawn(async move { downstream_request(listener, request).await });

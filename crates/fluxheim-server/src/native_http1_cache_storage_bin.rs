@@ -228,22 +228,16 @@ impl NativeDiskCache {
         &self,
         len: u64,
     ) -> std::io::Result<Option<StorageBinObjectLocation>> {
-        loop {
-            let allocation = match &self.backend {
-                NativeDiskCacheBackend::StorageBin(storage_bin) => {
-                    let mut free_map = storage_bin.free_map.lock().map_err(|_| {
-                        std::io::Error::other("native storage-bin free map mutex poisoned")
-                    })?;
-                    free_map.allocate(len)?
-                }
-                NativeDiskCacheBackend::Filesystem => return Ok(None),
-            };
-            if allocation.is_some() {
-                return Ok(allocation);
+        // The caller may own a key stripe. Allocation must never acquire a
+        // second stripe through eviction (including a colliding stripe).
+        match &self.backend {
+            NativeDiskCacheBackend::StorageBin(storage_bin) => {
+                let mut free_map = storage_bin.free_map.lock().map_err(|_| {
+                    std::io::Error::other("native storage-bin free map mutex poisoned")
+                })?;
+                free_map.allocate(len)
             }
-            if !self.evict_oldest()? {
-                return Ok(None);
-            }
+            NativeDiskCacheBackend::Filesystem => Ok(None),
         }
     }
 

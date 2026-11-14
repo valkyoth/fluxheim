@@ -44,6 +44,8 @@ impl Drop for NativeStorageBinLease {
 
 #[derive(Debug, Default)]
 pub(crate) struct NativeDiskCacheState {
+    #[cfg(test)]
+    pub(crate) lookup_attempts: usize,
     pub(super) objects: HashMap<String, NativeDiskCacheRecord>,
     pub(super) eviction_order: BTreeSet<(SystemTime, String)>,
     pub(super) variants: HashMap<String, Vec<NativeMemoryCacheVariant>>,

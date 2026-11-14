@@ -199,7 +199,12 @@ genuine cache misses.
 Shared per-key read locks protect allocations without serializing readers.
 Mutation is exclusive; a lookup encountering a writer returns promptly to the
 same bounded async retry path rather than occupying a blocking worker waiting
-for that lock. Corrupt-record cleanup releases its read lock, attempts exclusive
+for that lock. Fresh, stale-while-revalidate and conditional-revalidation
+decisions reuse one disk entry, rather than starting three retry windows.
+After a disk error, only already-available eligible memory entries may satisfy
+the lookup; it does not submit another disk phase. A distinct cached range has
+its own key, but is not read from disk after the complete-object lookup failed.
+Corrupt-record cleanup releases its read lock, attempts exclusive
 ownership without waiting and checks the record's in-memory identity before
 removing it, so a concurrent replacement survives. A bin cannot be removed while
 an admitted operation on that bin is active. Errors, unwinding and completed operations return their
@@ -208,6 +213,14 @@ blocking filesystem call: its slot remains owned until that operation ends.
 Existing blocking-work admission still applies independently and returns 503
 immediately when all workers are occupied. The retry window bounds retries,
 not the duration of an individual filesystem call.
+
+Fragmentation can leave enough free bytes in total without a contiguous range
+large enough for a new object. Allocation itself does not evict: the store
+releases its incoming key lock and admission reservation before selecting and
+locking an eviction victim, then retries admission and allocation. This avoids
+nested key locks, including when different keys share a lock stripe. Existing
+mutation operations may still wait for active readers or filesystem I/O; this
+is not a promise of lock fairness or an OS-operation deadline.
 
 This is not a bound on all OS handles: ancestor-directory validation, allocator
 leases, index checkpoints, manifest and encryption metadata use additional

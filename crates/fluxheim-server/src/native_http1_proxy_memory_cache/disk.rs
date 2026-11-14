@@ -3,10 +3,7 @@ use crate::native_http1_cache::{
     NativeMemoryCacheEntry, NativeMemoryCacheVariant, lock_native_memory_cache,
     native_response_header_map, prune_native_memory_cache,
 };
-use crate::native_http1_proxy_cache_headers::{
-    native_cache_entry_revalidatable, native_vary_cache_key,
-};
-use crate::native_http1_proxy_cache_policy::native_cache_entry_serve_stale_while_revalidate;
+use crate::native_http1_proxy_cache_headers::native_vary_cache_key;
 use fluxheim_cache::{VaryCachePolicy, cache_vary_policy};
 
 use super::NativeProxyMemoryCache;
@@ -148,29 +145,22 @@ impl NativeProxyMemoryCache {
         key: &str,
         request: &NativeHttp1Request,
     ) -> Result<Option<NativeMemoryCacheEntry>, NativeDiskCacheLookupError> {
-        let Some(entry) = self.disk_entry(key, request).await? else {
-            return Ok(None);
-        };
-        Ok((entry.expires_at > std::time::Instant::now()).then(|| {
+        Ok(self.fresh_disk_entry(key, request, self.disk_entry(key, request).await?))
+    }
+
+    pub(super) fn fresh_disk_entry(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+        entry: Option<NativeMemoryCacheEntry>,
+    ) -> Option<NativeMemoryCacheEntry> {
+        let entry = entry?;
+        (entry.expires_at > std::time::Instant::now()).then(|| {
             self.record_activity("disk", "hit");
             self.record_activity_scope("disk", "hit");
             self.promote_disk_entry(key, request, &entry);
             entry
-        }))
-    }
-
-    pub(super) async fn get_disk_stale_while_revalidate(
-        &self,
-        key: &str,
-        request: &NativeHttp1Request,
-    ) -> Result<Option<NativeMemoryCacheEntry>, NativeDiskCacheLookupError> {
-        let Some(entry) = self.disk_entry(key, request).await? else {
-            return Ok(None);
-        };
-        Ok(
-            native_cache_entry_serve_stale_while_revalidate(&entry, std::time::Instant::now())
-                .then_some(entry),
-        )
+        })
     }
 
     pub(super) async fn get_disk_stale_if_error(
@@ -188,18 +178,7 @@ impl NativeProxyMemoryCache {
         .then_some(entry))
     }
 
-    pub(super) async fn get_disk_revalidatable(
-        &self,
-        key: &str,
-        request: &NativeHttp1Request,
-    ) -> Result<Option<NativeMemoryCacheEntry>, NativeDiskCacheLookupError> {
-        let Some(entry) = self.disk_entry(key, request).await? else {
-            return Ok(None);
-        };
-        Ok(native_cache_entry_revalidatable(&entry, std::time::Instant::now()).then_some(entry))
-    }
-
-    async fn disk_entry(
+    pub(super) async fn disk_entry(
         &self,
         key: &str,
         request: &NativeHttp1Request,

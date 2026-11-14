@@ -170,7 +170,7 @@ pub(super) fn native_disk_cache_mutation_locks() -> Box<[RwLock<()>]> {
         .into_boxed_slice()
 }
 
-fn native_disk_cache_mutation_lock_stripe(combined_key: &str) -> usize {
+pub(super) fn native_disk_cache_mutation_lock_stripe(combined_key: &str) -> usize {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for byte in combined_key.as_bytes() {
         hash ^= u64::from(*byte);
