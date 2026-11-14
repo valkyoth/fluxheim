@@ -186,7 +186,7 @@ impl NativeDiskCache {
         let mut stale = 0_usize;
         let mut purged = 0_usize;
         for entry in &entries {
-            let Some(object) = self.get_combined(&entry.combined_key) else {
+            let Ok(Some(object)) = self.lookup_combined(&entry.combined_key) else {
                 self.with_state(|state| {
                     if !state.objects.contains_key(&entry.combined_key) {
                         state.purge_index.remove_combined(&entry.combined_key);

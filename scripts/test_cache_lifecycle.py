@@ -6,12 +6,36 @@ import subprocess
 import tempfile
 import tomllib
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import smoke_cache_lifecycle as smoke
 
 
 class CacheLifecycleTests(unittest.TestCase):
+    def test_pressure_allows_only_verified_hits_or_explicit_saturation(self):
+        for status, body, headers, valid in (
+            (200, smoke.BODY, {"x-cache-status": "HIT"}, True),
+            (503, b"cache temporarily unavailable\n", {"x-cache-reason": "disk-cache-saturated"}, True),
+            (200, smoke.BODY, {"x-cache-status": "MISS"}, False),
+            (200, b"wrong", {"x-cache-status": "HIT"}, False),
+            (503, b"cache temporarily unavailable\n", {}, False),
+            (502, b"bad gateway", {}, False),
+        ):
+            with self.subTest(status=status, headers=headers), patch.object(smoke.http.client, "HTTPConnection") as constructor:
+                response = Mock(status=status)
+                response.read.return_value = body
+                response.getheader.side_effect = headers.get
+                connection = constructor.return_value
+                connection.getresponse.return_value = response
+                if valid:
+                    self.assertEqual(smoke.request_under_bin_pressure(12345, "/asset.css"), status)
+                else:
+                    with self.assertRaises(AssertionError):
+                        smoke.request_under_bin_pressure(12345, "/asset.css")
+                constructor.assert_called_once_with("127.0.0.1", 12345, timeout=3)
+                response.read.assert_called_once_with(4097)
+                connection.close.assert_called_once()
+
     def test_policy_restart_requires_both_checkpoint_entries(self):
         with tempfile.TemporaryDirectory() as directory:
             index = Path(directory) / "index"

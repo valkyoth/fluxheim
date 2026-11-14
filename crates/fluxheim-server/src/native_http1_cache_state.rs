@@ -1,8 +1,9 @@
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 
 use super::native_http1_cache_disk_path::NativeSafeDiskCachePath;
 use super::{
-    NativeDiskCache, NativeDiskCacheBackend, NativeDiskCacheLocation, NativeDiskCacheState,
+    NativeDiskCache, NativeDiskCacheBackend, NativeDiskCacheLocation, NativeDiskCacheRecord,
+    NativeDiskCacheState,
 };
 
 const NATIVE_DISK_CACHE_MUTATION_LOCKS: usize = 128;
@@ -107,9 +108,9 @@ impl NativeDiskCache {
         }
     }
 
-    pub(crate) fn lock_key_mutation(&self, combined_key: &str) -> MutexGuard<'_, ()> {
+    pub(crate) fn lock_key_mutation(&self, combined_key: &str) -> RwLockWriteGuard<'_, ()> {
         let stripe = native_disk_cache_mutation_lock_stripe(combined_key);
-        match self.mutation_locks[stripe].lock() {
+        match self.mutation_locks[stripe].write() {
             Ok(guard) => guard,
             Err(error) => {
                 log::error!(
@@ -122,11 +123,49 @@ impl NativeDiskCache {
             }
         }
     }
+
+    pub(super) fn try_lock_key_read(&self, key: &str) -> std::io::Result<RwLockReadGuard<'_, ()>> {
+        self.mutation_locks[native_disk_cache_mutation_lock_stripe(key)]
+            .try_read()
+            .map_err(key_lock_error)
+    }
+
+    pub(super) fn remove_if_unchanged(
+        &self,
+        key: &str,
+        expected: &NativeDiskCacheRecord,
+    ) -> std::io::Result<bool> {
+        // Do not upgrade a read lock or occupy a blocking worker waiting for a
+        // writer. Identity is process-local and survives LRU timestamp updates.
+        let _write = self.mutation_locks[native_disk_cache_mutation_lock_stripe(key)]
+            .try_write()
+            .map_err(key_lock_error)?;
+        if !self.with_state(|state| {
+            state
+                .objects
+                .get(key)
+                .is_some_and(|record| Arc::ptr_eq(&record.identity, &expected.identity))
+        }) {
+            return Ok(false);
+        }
+        Ok(self.remove_combined_locked(key))
+    }
 }
 
-pub(super) fn native_disk_cache_mutation_locks() -> Box<[Mutex<()>]> {
+fn key_lock_error<T>(error: TryLockError<T>) -> std::io::Error {
+    match error {
+        TryLockError::WouldBlock => {
+            std::io::Error::new(std::io::ErrorKind::WouldBlock, "disk cache key is busy")
+        }
+        TryLockError::Poisoned(_) => {
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::DiskCacheMutationPoisoned)
+        }
+    }
+}
+
+pub(super) fn native_disk_cache_mutation_locks() -> Box<[RwLock<()>]> {
     (0..NATIVE_DISK_CACHE_MUTATION_LOCKS)
-        .map(|_| Mutex::new(()))
+        .map(|_| RwLock::new(()))
         .collect::<Vec<_>>()
         .into_boxed_slice()
 }

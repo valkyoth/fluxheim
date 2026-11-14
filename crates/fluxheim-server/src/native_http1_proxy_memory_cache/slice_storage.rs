@@ -31,24 +31,21 @@ impl NativeProxyMemoryCache {
         let Some(disk) = self.disk.as_ref().cloned() else {
             return Ok(None);
         };
-        let permit = crate::blocking_work::try_acquire_request_blocking_work(
-            crate::blocking_work::NativeBlockingWorkClass::DiskCache,
-        )
-        .map_err(|_| "disk-cache-saturated")?;
         let key = key.to_owned();
-        let slice = tokio::task::spawn_blocking(move || {
-            let _permit = permit;
+        let slice = super::disk::bounded_disk_lookup(move || {
             // The key already includes both the configured variance and slice
             // range. Do not perform complete-object variant lookup/promotion.
-            let entry = disk.get_combined(&key)?;
+            let Some(entry) = disk.lookup_combined(&key)? else {
+                return Ok(None);
+            };
             let slice = fresh_slice(entry, bounds);
             if slice.is_none() {
                 disk.remove_combined(&key);
             }
-            slice
+            Ok(slice)
         })
         .await
-        .map_err(|_| "disk-cache-worker-failed")?;
+        .map_err(|error| error.reason())?;
         if slice.is_some() {
             self.record_activity("disk", "hit");
             self.record_activity_scope("disk", "hit");

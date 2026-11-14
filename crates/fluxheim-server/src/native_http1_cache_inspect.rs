@@ -21,9 +21,11 @@ pub fn inspect_native_disk_cache_object(
             .flatten()
             .map(std::sync::Arc::new)
     })?;
-    let entry = cache.get(primary_key, |fields| {
-        native_inspection_vary_cache_key(primary_key, fields, request_headers)
-    })?;
+    let entry = cache
+        .lookup(primary_key, |fields| {
+            native_inspection_vary_cache_key(primary_key, fields, request_headers)
+        })
+        .ok()??;
     let now = Instant::now();
     let fresh = entry.expires_at > now;
     let serve_stale_while_revalidate = !fresh

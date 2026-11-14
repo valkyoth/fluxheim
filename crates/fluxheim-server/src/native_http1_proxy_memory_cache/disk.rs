@@ -11,6 +11,114 @@ use fluxheim_cache::{VaryCachePolicy, cache_vary_policy};
 
 use super::NativeProxyMemoryCache;
 
+pub(super) async fn bounded_disk_lookup<T: Send + 'static>(
+    lookup: impl Fn() -> std::io::Result<Option<T>> + Send + Sync + 'static,
+) -> Result<Option<T>, NativeDiskCacheLookupError> {
+    let lookup = std::sync::Arc::new(lookup);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(250);
+    for attempt in 0..=10 {
+        if attempt > 0 && tokio::time::Instant::now() >= deadline {
+            return Err(NativeDiskCacheLookupError::Saturated);
+        }
+        let permit = crate::blocking_work::try_acquire_request_blocking_work(
+            crate::blocking_work::NativeBlockingWorkClass::DiskCache,
+        )
+        .map_err(|_| NativeDiskCacheLookupError::Saturated)?;
+        let read = std::sync::Arc::clone(&lookup);
+        let result = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            read()
+        })
+        .await
+        .map_err(|_| NativeDiskCacheLookupError::WorkerFailed)?;
+        match result {
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock && attempt < 10 => {
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    return Err(NativeDiskCacheLookupError::Saturated);
+                }
+                // Neither a bin handle nor a blocking-work permit is retained
+                // during this bounded async delay. Cancellation drops the wait.
+                tokio::time::sleep(remaining.min(std::time::Duration::from_millis(25))).await;
+            }
+            result => return result.map_err(NativeDiskCacheLookupError::from_io),
+        }
+    }
+    Err(NativeDiskCacheLookupError::Saturated)
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    #[tokio::test]
+    async fn transient_busy_retries_and_permanent_busy_is_bounded() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&calls);
+        assert_eq!(
+            bounded_disk_lookup(move || {
+                if observed.fetch_add(1, Ordering::SeqCst) < 2 {
+                    Err(std::io::Error::from(std::io::ErrorKind::WouldBlock))
+                } else {
+                    Ok(Some(42))
+                }
+            })
+            .await,
+            Ok(Some(42))
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        calls.store(0, Ordering::SeqCst);
+        let observed = Arc::clone(&calls);
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            bounded_disk_lookup::<()>(move || {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Err(std::io::Error::from(std::io::ErrorKind::WouldBlock))
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result, Err(NativeDiskCacheLookupError::Saturated));
+        assert!((1..=11).contains(&calls.load(Ordering::SeqCst)));
+    }
+
+    #[tokio::test]
+    async fn cancellation_stops_async_retries_and_other_errors_do_not_retry() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&calls);
+        let task = tokio::spawn(bounded_disk_lookup::<()>(move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Err(std::io::Error::from(std::io::ErrorKind::WouldBlock))
+        }));
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while calls.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        calls.store(0, Ordering::SeqCst);
+        let observed = Arc::clone(&calls);
+        assert_eq!(
+            bounded_disk_lookup::<()>(move || {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Err(std::io::Error::other("fixture"))
+            })
+            .await,
+            Err(NativeDiskCacheLookupError::WorkerFailed)
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum NativeDiskCacheLookupError {
     Saturated,
@@ -18,6 +126,14 @@ pub(crate) enum NativeDiskCacheLookupError {
 }
 
 impl NativeDiskCacheLookupError {
+    pub(super) fn from_io(error: std::io::Error) -> Self {
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            Self::Saturated
+        } else {
+            Self::WorkerFailed
+        }
+    }
+
     pub(crate) fn reason(self) -> &'static str {
         match self {
             Self::Saturated => "disk-cache-saturated",
@@ -93,33 +209,28 @@ impl NativeProxyMemoryCache {
         };
         let key = key.to_owned();
         let request = request.metadata_snapshot();
-        let blocking_permit = crate::blocking_work::try_acquire_request_blocking_work(
-            crate::blocking_work::NativeBlockingWorkClass::DiskCache,
-        )
-        .map_err(|_| {
-            fluxheim_observability::operational::security(
-                fluxheim_observability::event::SecurityReason::AdmissionRejected,
-            );
-            NativeDiskCacheLookupError::Saturated
-        })?;
-        match tokio::task::spawn_blocking(move || {
-            let _blocking_permit = blocking_permit;
-            disk.get(&key, |fields| native_vary_cache_key(&key, fields, &request))
+        let result = bounded_disk_lookup(move || {
+            disk.lookup(&key, |fields| native_vary_cache_key(&key, fields, &request))
         })
-        .await
-        {
-            Ok(entry) => Ok(entry),
-            Err(error) => {
+        .await;
+        match result {
+            Err(NativeDiskCacheLookupError::Saturated) => {
+                fluxheim_observability::operational::security(
+                    fluxheim_observability::event::SecurityReason::AdmissionRejected,
+                );
+            }
+            Err(NativeDiskCacheLookupError::WorkerFailed) => {
                 fluxheim_observability::operational::failure(
                     fluxheim_observability::event::FailureReason::CacheRead,
                 );
                 log::debug!(
                     target: "fluxheim::native_http1",
-                    "native disk cache lookup task failed: {error}"
+                    "native disk cache lookup worker failed"
                 );
-                Err(NativeDiskCacheLookupError::WorkerFailed)
             }
+            Ok(_) => {}
         }
+        result
     }
 
     fn promote_disk_entry(

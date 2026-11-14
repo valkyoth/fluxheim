@@ -74,6 +74,23 @@ def cached_content_type(public):
         connection.close()
 
 
+def request_under_bin_pressure(public, path):
+    connection = http.client.HTTPConnection("127.0.0.1", public, timeout=3)
+    try:
+        connection.request("GET", path, headers={"Host": "cache.test"})
+        response = connection.getresponse()
+        body = response.read(4097)
+        if response.status == 200:
+            assert body == BODY and response.getheader("x-cache-status") == "HIT"
+        else:
+            assert response.status == 503
+            assert body == b"cache temporarily unavailable\n"
+            assert response.getheader("x-cache-reason") == "disk-cache-saturated"
+        return response.status
+    finally:
+        connection.close()
+
+
 def policy_checkpoint_ready(index):
     try:
         with index.open("rb") as handle:
@@ -198,11 +215,15 @@ def run_case(parent, backend, memory, encrypted):
                 assert replacement_count("/asset.css") == 1
                 assert count("/asset.css") == 2
                 if backend == "storage-bin":
-                    # Capacity misses may go to the origin, but every response
-                    # must retain its exact body and subsequent caching must work.
+                    for i in range(8):
+                        request(public, f"/load-{i}.css")
+                        assert request(public, f"/load-{i}.css") == "HIT"
+                    # Saturation is not a miss: none of this warm traffic may
+                    # reach the origin, including distinct-key pressure.
                     with ThreadPoolExecutor(max_workers=8) as workers:
-                        results = list(workers.map(lambda i: request(public, f"/load-{i % 8}.css"), range(64)))
-                    assert all(status in ("MISS", "HIT") for status in results), results
+                        results = list(workers.map(lambda i: request_under_bin_pressure(public, f"/load-{i % 8}.css"), range(64)))
+                    assert all(status in (200, 503) for status in results), results
+                    assert all(replacement_count(f"/load-{i}.css") == 1 for i in range(8))
                     request(public, "/after-load.css")
                     assert request(public, "/after-load.css") == "HIT"
         print(f"required cache lifecycle {backend} memory={memory} encrypted={encrypted}: ok")

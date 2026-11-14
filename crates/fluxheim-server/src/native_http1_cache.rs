@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::SystemTime;
 
 use fluxheim_cache::{
@@ -105,7 +105,7 @@ pub(crate) struct NativeDiskCache {
     backend: NativeDiskCacheBackend,
     encryption: Option<NativeDiskCacheEncryption>,
     state: Arc<Mutex<NativeDiskCacheState>>,
-    mutation_locks: Box<[Mutex<()>]>,
+    mutation_locks: Box<[RwLock<()>]>,
     index_flush: Option<NativeStorageBinIndexFlush>,
     recovery_lease: Option<native_http1_cache_recovery::FilesystemRecoveryLease>,
 }
@@ -257,11 +257,11 @@ impl NativeDiskCache {
         stats
     }
 
-    pub(crate) fn get(
+    pub(crate) fn lookup(
         &self,
         key: &str,
         request_variant_key: impl Fn(&[String]) -> Option<String>,
-    ) -> Option<NativeMemoryCacheEntry> {
+    ) -> std::io::Result<Option<NativeMemoryCacheEntry>> {
         if let Some(variants) = self.with_state(|state| state.variants.get(key).cloned()) {
             for variant in variants {
                 let Some(variant_key) = request_variant_key(&variant.fields) else {
@@ -270,11 +270,27 @@ impl NativeDiskCache {
                 if variant_key != variant.key {
                     continue;
                 }
-                return self.get_combined(&variant.key);
+                return self.lookup_combined(&variant.key);
             }
-            return None;
+            return Ok(None);
         }
-        self.get_combined(key)
+        self.lookup_combined(key)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn get(
+        &self,
+        key: &str,
+        variant: impl Fn(&[String]) -> Option<String>,
+    ) -> Option<NativeMemoryCacheEntry> {
+        self.lookup(key, variant)
+            .expect("test cache lookup must not be saturated")
+    }
+
+    #[cfg(test)]
+    pub(crate) fn get_combined(&self, key: &str) -> Option<NativeMemoryCacheEntry> {
+        self.lookup_combined(key)
+            .expect("test cache lookup must not be saturated")
     }
 
     pub(crate) fn store(
@@ -346,6 +362,7 @@ impl NativeDiskCache {
                 state.insert_object(
                     key.combined.clone(),
                     NativeDiskCacheRecord {
+                        identity: Arc::new(()),
                         location,
                         weight: encoded_len,
                         accessed_at: SystemTime::now(),
@@ -427,7 +444,10 @@ impl NativeDiskCache {
         }
     }
 
-    pub(crate) fn get_combined(&self, combined_key: &str) -> Option<NativeMemoryCacheEntry> {
+    pub(crate) fn lookup_combined(
+        &self,
+        combined_key: &str,
+    ) -> std::io::Result<Option<NativeMemoryCacheEntry>> {
         self.get_combined_with_reader(combined_key, |record| self.read_record(record))
     }
 
@@ -435,14 +455,16 @@ impl NativeDiskCache {
         &self,
         combined_key: &str,
         read: impl FnOnce(&NativeDiskCacheRecord) -> std::io::Result<SerializedCacheObject>,
-    ) -> Option<NativeMemoryCacheEntry> {
+    ) -> std::io::Result<Option<NativeMemoryCacheEntry>> {
         // Keep the allocation owned until reading finishes; purge/replacement
         // must not recycle a range beneath an active storage-bin reader.
-        let _mutation = self.lock_key_mutation(combined_key);
-        let record = self.with_state(|state| state.objects.get(combined_key).cloned())?;
+        let read_guard = self.try_lock_key_read(combined_key)?;
+        let Some(record) = self.with_state(|state| state.objects.get(combined_key).cloned()) else {
+            return Ok(None);
+        };
         let object = match read(&record) {
             Ok(object) => object,
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return None,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Err(error),
             Err(error) => {
                 fluxheim_observability::operational::failure(
                     fluxheim_observability::event::FailureReason::CacheRead,
@@ -452,8 +474,9 @@ impl NativeDiskCache {
                     "native disk cache read {}: {error}",
                     record.location.display()
                 );
-                self.remove_combined_locked(combined_key);
-                return None;
+                drop(read_guard);
+                self.remove_if_unchanged(combined_key, &record)?;
+                return Ok(None);
             }
         };
         if object.combined_key.as_deref() != Some(combined_key) {
@@ -464,21 +487,23 @@ impl NativeDiskCache {
                 target: "fluxheim::security",
                 "native disk cache object identity mismatch; discarding requested cache record"
             );
-            self.remove_combined_locked(combined_key);
-            return None;
+            drop(read_guard);
+            self.remove_if_unchanged(combined_key, &record)?;
+            return Ok(None);
         }
         let entry = match native_memory_entry_from_disk_object(&object) {
             Some(entry) => entry,
             None => {
-                self.remove_combined_locked(combined_key);
-                return None;
+                drop(read_guard);
+                self.remove_if_unchanged(combined_key, &record)?;
+                return Ok(None);
             }
         };
         self.with_state_mut(|state| {
             state.touch_object(combined_key, SystemTime::now());
         });
         self.persist_storage_bin_index();
-        Some(entry)
+        Ok(Some(entry))
     }
 
     fn rebuild_index(&mut self) -> std::io::Result<()> {

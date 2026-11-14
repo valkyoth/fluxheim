@@ -299,6 +299,7 @@ impl NativeDiskCache {
             state.insert_object(
                 combined.clone(),
                 NativeDiskCacheRecord {
+                    identity: Arc::new(()),
                     location: NativeDiskCacheLocation::StorageBin(entry.location),
                     weight: entry.location.len,
                     accessed_at: entry.accessed,
@@ -449,6 +450,7 @@ mod confidential_index_tests {
         state.insert_object(
             combined_key.to_owned(),
             NativeDiskCacheRecord {
+                identity: Arc::new(()),
                 location: NativeDiskCacheLocation::StorageBin(StorageBinObjectLocation {
                     bin_id: 0,
                     offset: 0,

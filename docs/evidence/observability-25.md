@@ -13,13 +13,15 @@ Poisoned bookkeeping rejects new work while owned permits can still release.
 
 There is no idle handle pool or queue waiting for bin capacity. A short
 bookkeeping mutex protects counts, but is never held across filesystem I/O.
-Full admission returns `WouldBlock`. Cache reads treat that result as a miss
-without deleting the object's allocation, accounting or purge metadata. Other
+Full admission returns `WouldBlock`. Following the pentest correction below,
+cache reads propagate that result as saturation: bounded async retries, then
+HTTP 503 without origin contact
+or deleting the object's allocation, accounting or purge metadata. Other
 read failures keep their existing corruption/error handling. Concurrent
 exclusive creation collisions reopen the existing bin through the same safe
 path API, without truncation or a second capacity reservation.
 
-Per-key synchronization prevents purge/replacement from recycling a reader's
+Shared per-key read synchronization prevents purge/replacement from recycling a reader's
 allocation until its record has been read and validated. Deletion cannot race
 an admitted operation on that bin, even when other capacity remains. Compatible
 router generations retain the shared allocator and budget; incompatible live
@@ -31,7 +33,7 @@ all processes or the cluster. Directory traversal, leases, manifest, index and
 encryption metadata use additional handles. Blocking-work admission remains
 independent; cancellation does not forcibly interrupt an OS call. A busy write
 may skip caching, and a busy tail removal can leave an empty bin for later
-reuse. Small limits can increase origin traffic. The
+reuse. Small limits can increase temporary saturation responses. The
 [maintenance guide](../guides/cache-recovery.md#bin-file-concurrency) explains
 these operational boundaries.
 
@@ -63,9 +65,10 @@ The HTTP smoke checks body correctness, progress and recovery, not OS descriptor
 counts; the concurrent low-level tests provide the explicit open-count proof.
 No claim of OS-call cancellation, fairness or immediate disk reclamation is made.
 
-## Qualification
+## Initial Qualification
 
-Qualification date: 2026-11-14, Rust 1.99.1.
+Qualification date: 2026-11-14, Rust 1.99.1. These results describe the initial
+Commit 25 candidate, before the pentest correction below.
 
 | Check | Result |
 | --- | --- |
@@ -103,3 +106,81 @@ smoke already selected by Linux/macOS/Windows CI. No workflow or qualification
 classifier was weakened. Native release archives, ARM64 and reproducibility
 remain final release gates, not rerun for this checkpoint. Independent pentest
 and exact-commit GitHub acceptance remain pending.
+
+## Pentest Correction
+
+Correction base: `8d421e1a7004ca77ad5211e6214297332b7e8497`.
+
+Two findings changed the server-side admission contract:
+
+- Reads now take shared key ownership. A busy writer is reported immediately
+  from the blocking lookup instead of occupying a worker waiting on that key.
+  Corrupt-record cleanup drops read ownership first, tries exclusive ownership
+  without waiting, and compares an allocation-independent record identity.
+  A replacement cannot be deleted by cleanup of the previous record; LRU
+  timestamp updates do not prevent cleanup of the same record.
+- A busy bin or key is a distinct error, never a cache miss. Complete-object
+  and slice lookups retry asynchronously at 25 ms intervals, at most 11 attempts
+  within a 250 ms retry window. No bin handle or blocking-work permit is held
+  between attempts. Persistent saturation returns 503 without origin contact.
+  The global blocking-work ceiling still rejects immediately when exhausted.
+
+The retry window bounds resubmission, not an individual OS operation. Already
+running blocking I/O retains its permit until it finishes even if the caller
+is cancelled. Writes remain best-effort and mutation remains exclusive; these
+changes do not promise writer fairness or cancellation of filesystem calls.
+
+### Additional Regression Proof
+
+- Thirty-two same-key readers enter the read section simultaneously, for both
+  filesystem and storage-bin backends. The test would fail with the previous
+  exclusive-read lock.
+- Held writer/read locks prove nonblocking read admission and cleanup; replacing
+  a record before cleanup proves the replacement survives. Existing paused-read
+  tests still prove purge cannot reclaim an active reader's allocation.
+- Injected bin admission saturation remains an error while preserving object
+  accounting, purge membership and later restart recovery.
+- Live HTTP tests warm complete objects and slices on both backends, then hold
+  the actual key mutation lock while 32 concurrent requests arrive. Every
+  response is an explicit saturation 503, the origin count stays at one, and
+  the stored response becomes available again after contention ends.
+- Bounded retry tests cover transient recovery, persistent contention,
+  cancellation, and non-retryable errors. Existing concurrent slice-fill
+  coalescing tests pass on all three native platforms. Immediate rejection
+  during the first implementation failed that existing test; the final bounded
+  async retry implementation was requalified rather than relaxing the test.
+- The low-bin-limit live matrix now warms eight distinct keys before concurrent
+  traffic. It accepts only verified HITs or explicit saturation 503s and checks
+  that no extra origin requests occurred. Fixture tests reject MISS responses,
+  wrong bodies, wrong saturation reasons and unrelated failures.
+
+### Corrected Qualification
+
+Qualification date: 2026-11-14, Rust 1.99.1.
+
+| Check | Result |
+| --- | --- |
+| Linux locked workspace | Passed; existing opt-in tests remain skipped |
+| Linux all-feature server library | 800 passed, one manual capacity test ignored |
+| Native server with load-balancing | macOS 644 and Windows 641 passed; one manual capacity test ignored on each |
+| Cache crate | 76 passed on Linux, macOS and Windows |
+| Strict all-feature, all-target server Clippy | Passed on Linux |
+| Native cache/server Clippy | Passed on macOS; Windows trusted toolchain lacks Clippy |
+| Eight-case lifecycle matrix | Passed on Linux, macOS, Windows and non-root Podman |
+| Plain/encrypted filesystem recovery smoke | Passed on Linux, macOS and Windows |
+| Repeated encrypted filesystem/memory restart case | Three consecutive final-source Linux runs passed |
+| Full proxy-cache and storage-bin shell smokes | Passed on Linux, including guide/inspection/admin and lifecycle/recovery cases |
+| Python cache fixture suite | 30 tests on Linux/macOS; Windows passed with two existing platform/privilege skips |
+| Documentation layout / CI qualification classifier | 28 / 11 passed |
+| Windows release-script / filesystem-audit validators | Passed |
+| RustSec / cargo-deny | 449 dependencies, 1,509 advisories; no audit or policy failures |
+| Formatting, documentation links and diff checks | Passed |
+
+The corrected runtime image is
+`sha256:dd911897f83ebbe01025dbeb924f5b40d406dd2a5d77d6265cdfb5d1d514f920`.
+Its qualification layer is
+`sha256:fc02dae09bf5e936fe8d14fbc5715469e1235c81aae4002b24e1ff1d01dd06f2`.
+It uses the same non-root, no-host-mount, no-external-network isolation described
+above. No dependencies, persisted formats, ACL policy, TLS policy or CI gates
+changed. Native archives, ARM64, reproducibility, independent pentest and
+exact-commit GitHub acceptance remain separate gates.

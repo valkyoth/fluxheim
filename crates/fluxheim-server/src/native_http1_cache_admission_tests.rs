@@ -29,6 +29,7 @@ fn filesystem_admission_production_limit_reserves_recovery_headroom() {
         state.insert_object(
             format!("/asset.css?q={index}"),
             NativeDiskCacheRecord {
+                identity: Arc::new(()),
                 location: NativeDiskCacheLocation::Filesystem(std::path::PathBuf::from("unused")),
                 weight: 1,
                 accessed_at: SystemTime::UNIX_EPOCH,

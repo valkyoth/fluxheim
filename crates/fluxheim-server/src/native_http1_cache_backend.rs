@@ -88,6 +88,7 @@ impl NativeDiskCacheState {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct NativeDiskCacheRecord {
+    pub(super) identity: std::sync::Arc<()>,
     pub(super) location: NativeDiskCacheLocation,
     pub(super) weight: u64,
     pub(super) accessed_at: SystemTime,

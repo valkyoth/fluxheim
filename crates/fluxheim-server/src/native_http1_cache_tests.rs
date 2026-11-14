@@ -173,6 +173,7 @@ fn disk_cache_remove_combined_waits_for_key_mutation_lock() {
         state.insert_object(
             combined.to_owned(),
             NativeDiskCacheRecord {
+                identity: Arc::new(()),
                 location: NativeDiskCacheLocation::Filesystem(cache.root.join("object.fhc")),
                 weight: 8,
                 accessed_at: SystemTime::now(),
@@ -204,6 +205,7 @@ fn disk_cache_eviction_order_updates_without_scanning_objects() {
         state.insert_object(
             key.to_owned(),
             NativeDiskCacheRecord {
+                identity: Arc::new(()),
                 location: NativeDiskCacheLocation::Filesystem(std::path::PathBuf::from(key)),
                 weight: 1,
                 accessed_at,
@@ -253,6 +255,7 @@ fn storage_bin_index_flush_coalesces_and_flushes_on_shutdown() {
         state.insert_object(
             "coalesced".to_owned(),
             NativeDiskCacheRecord {
+                identity: Arc::new(()),
                 location: NativeDiskCacheLocation::StorageBin(
                     fluxheim_cache::StorageBinObjectLocation {
                         bin_id: 0,

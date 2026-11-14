@@ -21,8 +21,9 @@ changing an encrypted root or its keys.
   configured cache byte budget is not a filesystem quota. Monitor free disk
   space independently; see [cleanup eligibility](#filesystem-cleanup-eligibility).
 - **Bin-file admission:** `storage_bin.max_open_bins` bounds concurrent data-file
-  operations in one shared allocator. Busy reads fall back without invalidating
-  the entry; busy writes can skip caching. It is not a limit on every process
+  operations in one shared allocator. Busy reads return a controlled 503 without
+  contacting the origin or invalidating the entry; busy writes can skip caching.
+  It is not a limit on every process
   descriptor. See [bin-file concurrency](#bin-file-concurrency).
 
 These warnings do not authorize deleting live files, disabling path/ACL checks,
@@ -183,18 +184,30 @@ cache and budget; they do not each receive another allowance. Separate roots
 have separate limits. Two independent reads of the same bin consume two slots.
 
 Each admitted read/write opens its own file, uses its own seek position and
-closes it before returning capacity. There is no idle handle pool and no queue
-waiting for a free bin slot. Full admission returns a transient miss for reads
-or skips the attempted cache write. A busy read leaves the stored object and
-purge index intact, so a later request can hit it. Small limits can therefore
-increase origin traffic; retain origin concurrency and rate controls.
+closes it before returning capacity. There is no idle handle pool or blocking
+queue waiting for a free bin slot. A busy lookup can retry asynchronously at
+25 ms intervals, for at most 11 attempts within a 250 ms retry window. It holds
+neither a bin handle nor a blocking-work permit between attempts. Persistent
+read saturation produces a controlled HTTP 503 with cache reason
+`disk-cache-saturated`, not an ordinary miss or an origin request. This applies
+to complete objects and slices. Busy writes can skip the
+attempted cache write. A busy read leaves the stored object and purge index
+intact, so a later request can hit it. Small limits can increase temporary 503
+responses; size them for the workload and retain normal origin controls for
+genuine cache misses.
 
-Per-key synchronization protects a reader's allocation from concurrent
-replacement or purge. A bin cannot be removed while an admitted operation on
-that bin is active. Errors, unwinding and completed operations return their
+Shared per-key read locks protect allocations without serializing readers.
+Mutation is exclusive; a lookup encountering a writer returns promptly to the
+same bounded async retry path rather than occupying a blocking worker waiting
+for that lock. Corrupt-record cleanup releases its read lock, attempts exclusive
+ownership without waiting and checks the record's in-memory identity before
+removing it, so a concurrent replacement survives. A bin cannot be removed while
+an admitted operation on that bin is active. Errors, unwinding and completed operations return their
 slots. Cancelling an async caller does not forcibly interrupt an already-running
 blocking filesystem call: its slot remains owned until that operation ends.
-Existing blocking-work admission still applies independently.
+Existing blocking-work admission still applies independently and returns 503
+immediately when all workers are occupied. The retry window bounds retries,
+not the duration of an individual filesystem call.
 
 This is not a bound on all OS handles: ancestor-directory validation, allocator
 leases, index checkpoints, manifest and encryption metadata use additional

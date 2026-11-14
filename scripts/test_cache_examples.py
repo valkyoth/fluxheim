@@ -119,7 +119,7 @@ class CacheGuideTests(unittest.TestCase):
         current, history = guide.split("## Historical Memory Cache Evaluation", 1)
         prose = " ".join(current.replace("**", "").split())
         for boundary in ("not a precise measurement", "not the disk backend's access-time LRU",
-                         "not a filesystem quota", "not enforced", "local/static caching requires memory enabled and disk disabled",
+                         "not a filesystem quota", "Concurrent bin data-file operations per shared cache allocator", "local/static caching requires memory enabled and disk disabled",
                          "not proof of disk initialization",
                          "not guaranteed read-only",
                          "instead of treating a header as a storage receipt"):

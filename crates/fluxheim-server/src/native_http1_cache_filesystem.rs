@@ -207,6 +207,7 @@ impl NativeDiskCache {
                 state.insert_object(
                     combined.clone(),
                     NativeDiskCacheRecord {
+                        identity: std::sync::Arc::new(()),
                         location: NativeDiskCacheLocation::Filesystem(path),
                         weight,
                         accessed_at: SystemTime::now(),
