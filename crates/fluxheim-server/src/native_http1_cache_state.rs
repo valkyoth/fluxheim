@@ -14,6 +14,18 @@ impl NativeDiskCache {
     }
 
     pub(crate) fn remove_combined_locked(&self, combined_key: &str) -> bool {
+        let filesystem = self.with_state(|state| {
+            state.objects.get(combined_key).and_then(|record| {
+                matches!(record.location, NativeDiskCacheLocation::Filesystem(_))
+                    .then(|| record.location.clone())
+            })
+        });
+        if let Some(location) = &filesystem
+            && self.remove_location(location).is_err()
+        {
+            self.pause_filesystem_writes();
+            return false;
+        }
         let removed = self.with_state_mut(|state| {
             let removed = state.remove_object(combined_key);
             if let Some(record) = &removed {
@@ -27,7 +39,9 @@ impl NativeDiskCache {
             removed
         });
         if let Some(record) = removed {
-            let _ = self.remove_location(&record.location);
+            if filesystem.is_none() {
+                let _ = self.remove_location(&record.location);
+            }
             self.persist_storage_bin_index();
             return true;
         }
@@ -39,6 +53,15 @@ impl NativeDiskCache {
             return Ok(false);
         };
         Ok(self.remove_combined(&key))
+    }
+
+    pub(super) fn pause_filesystem_writes(&self) {
+        let already_paused = self
+            .with_state_mut(|state| std::mem::replace(&mut state.filesystem_writes_blocked, true));
+        if !already_paused {
+            log::error!(target: "fluxheim::native_http1",
+                "filesystem cache write admission paused until restart after a filesystem mutation failure");
+        }
     }
 
     pub(crate) fn with_state<R>(&self, f: impl FnOnce(&NativeDiskCacheState) -> R) -> R {

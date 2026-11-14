@@ -6,6 +6,12 @@ import tempfile
 import unittest
 
 import smoke_cache_recovery as smoke
+import test_cache_recovery_capacity
+
+
+def load_tests(loader, tests, _pattern):
+    tests.addTests(loader.loadTestsFromModule(test_cache_recovery_capacity))
+    return tests
 
 
 class RecoverySmokeTests(unittest.TestCase):

@@ -14,8 +14,8 @@ use super::native_http1_cache_disk_path::{
 };
 use super::native_http1_cache_meta::{NativeDiskCacheMeta, native_memory_entry_from_disk_object};
 use super::native_http1_cache_recovery::{
-    RECOVERY_ENTRY_LIMIT, RECOVERY_READ_LIMIT, RecoveryBudget, RecoveryReport, lowercase_hex,
-    object_name, old_temp, recognizable_file, temp_name,
+    FILESYSTEM_OBJECT_LIMIT, RECOVERY_ENTRY_LIMIT, RECOVERY_READ_LIMIT, RecoveryBudget,
+    RecoveryReport, lowercase_hex, object_name, old_temp, recognizable_file, temp_name,
 };
 use super::{
     NativeDiskCache, NativeDiskCacheLocation, NativeDiskCacheRecord, NativeDiskCacheState,
@@ -38,7 +38,15 @@ impl NativeDiskCache {
                 log::error!(target: "fluxheim::native_http1", "filesystem cache recovery incomplete; initialization rejected")
             }
         }
-        result.map(|_| ())
+        result.map(|report| {
+            // Existing unindexed files consume real directory entries too.
+            // Reserve their slots in addition to the fixed operational margin.
+            let retained = report.retained_files.saturating_add(report.unknown_entries);
+            state.filesystem_object_limit = Some(
+                FILESYSTEM_OBJECT_LIMIT
+                    .saturating_sub(usize::try_from(retained).unwrap_or(usize::MAX)),
+            );
+        })
     }
 
     pub(super) fn recover_filesystem(
@@ -288,6 +296,11 @@ impl NativeDiskCache {
     }
 
     fn write_object_atomically(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+        if self.with_state(|state| state.filesystem_writes_blocked) {
+            return Err(std::io::Error::other(
+                "filesystem cache write admission is paused",
+            ));
+        }
         let mut last_error = None;
         for _ in 0..4 {
             let tmp_path = self.temp_path_for(path)?;
@@ -297,10 +310,14 @@ impl NativeDiskCache {
                     last_error = Some(error);
                 }
                 Err(error) => {
+                    // A failed write may leave a temporary that could not be
+                    // removed. Stop admission until recovery accounts for it.
+                    self.pause_filesystem_writes();
                     return Err(error);
                 }
             }
         }
+        self.pause_filesystem_writes();
         Err(last_error.unwrap_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::AlreadyExists,

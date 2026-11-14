@@ -49,6 +49,10 @@ pub(crate) struct NativeDiskCacheState {
     pub(super) variants: HashMap<String, Vec<NativeMemoryCacheVariant>>,
     pub(super) purge_index: CachePurgeIndex,
     pub(super) bytes: u64,
+    pub(super) filesystem_object_limit: Option<usize>,
+    pub(super) pending_objects: usize,
+    pub(super) pending_bytes: u64,
+    pub(super) filesystem_writes_blocked: bool,
 }
 
 impl NativeDiskCacheState {

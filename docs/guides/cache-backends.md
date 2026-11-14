@@ -129,6 +129,11 @@ unsafe paths and undecryptable files remain. Scan limits, retained-byte reportin
 and ownership rules are detailed in [recovery](cache-recovery.md#filesystem-cleanup-eligibility).
 Monitor filesystem space and inode use independently; tracked occupancy is not
 a physical disk quota.
+Filesystem admission also enforces a per-root object ceiling below the recovery
+scan limit, with atomic reservations for concurrent writes. See the
+[capacity and upgrade preflight](cache-recovery.md#upgrade-preflight) before
+upgrading an existing large filesystem root. Bin storage does not use that
+one-file-per-object ceiling.
 
 There is no storage-bin-style exclusive allocator lease for the filesystem
 backend. That is not a multi-writer consistency guarantee. Use a separate root

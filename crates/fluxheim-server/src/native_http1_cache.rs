@@ -94,6 +94,9 @@ pub struct NativeDiskCacheObjectMetadata {
     pub header_values: Vec<(String, String)>,
 }
 
+#[path = "native_http1_cache_admission.rs"]
+mod native_http1_cache_admission;
+
 #[derive(Debug)]
 pub(crate) struct NativeDiskCache {
     root: PathBuf,
@@ -322,10 +325,15 @@ impl NativeDiskCache {
                 return Ok(());
             }
             let _mutation = self.lock_key_mutation(&key.combined);
-            if !self.key_admissible(&key.combined, encoded_len) {
+            let Some(_admission) = self.reserve_admission(&key.combined, encoded_len) else {
                 continue;
-            }
+            };
             self.remove_combined_locked(&key.combined);
+            if self.with_state(|state| state.objects.contains_key(&key.combined)) {
+                // A failed unlink must not lose accounting or overwrite a
+                // still-owned object with a second charged representation.
+                return Ok(());
+            }
             let Some(location) = self.write_encoded_object(&key.combined, &encoded)? else {
                 return Ok(());
             };
@@ -374,6 +382,9 @@ impl NativeDiskCache {
         }
         let mut evicted = false;
         loop {
+            if self.with_state(|state| state.filesystem_writes_blocked) {
+                return Ok(false);
+            }
             if self.key_admissible(incoming_key, incoming_weight) {
                 if evicted {
                     self.persist_storage_bin_index();
@@ -388,18 +399,7 @@ impl NativeDiskCache {
     }
 
     fn key_admissible(&self, incoming_key: &str, incoming_weight: u64) -> bool {
-        self.with_state(|state| {
-            let existing = state
-                .objects
-                .get(incoming_key)
-                .map(|record| record.weight)
-                .unwrap_or(0);
-            state
-                .bytes
-                .saturating_sub(existing)
-                .saturating_add(incoming_weight)
-                <= self.max_bytes
-        })
+        self.with_state(|state| state.key_admissible(incoming_key, incoming_weight, self.max_bytes))
     }
 
     fn write_encoded_object(
@@ -547,7 +547,12 @@ impl NativeDiskCache {
 
     fn prune(&self) {
         loop {
-            let over_budget = self.with_state(|state| state.bytes > self.max_bytes);
+            let over_budget = self.with_state(|state| {
+                state.bytes > self.max_bytes
+                    || state
+                        .filesystem_object_limit
+                        .is_some_and(|limit| state.objects.len() > limit)
+            });
             if !over_budget {
                 break;
             }

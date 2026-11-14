@@ -19,9 +19,10 @@ does not introduce multi-writer index consistency or protect against the trusted
 host owner changing files. Older binaries do not participate: stop every old
 owner before upgrading. Never replace/remove a live lease file.
 
-Scans are limited to 65,536 directory entries, the greater of 2 GiB or twice the
-configured disk budget in charged reads, and cooperative 30-second time checks.
-An exhausted budget or directory scan error rejects initialization, not merely
+Scans are limited to 65,536 directory entries and the greater of 2 GiB or twice
+the configured disk budget in charged reads. A scan exceeding 30 seconds warns
+but continues within those bounds. An exhausted entry/read budget or directory
+scan error rejects initialization, not merely
 part of the recovered index. Previously completed cleanup is not rolled back.
 Operating-system filesystem calls are not forcibly interruptible.
 
@@ -49,7 +50,7 @@ No dependency, version, authentication, routing or TLS policy changed.
   oversized objects and aged partial writes are removed only on idle roots.
 - Unknown bytes, legacy/nonmatching names, fresh temps, hard links, symlinks,
   FIFOs, directories and inaccessible deletion targets are preserved.
-- Entry/read/time budgets fail closed; retained and failed-removal accounting
+- Entry/read budgets fail closed; slow scans warn; retained and failed-removal accounting
   does not claim those bytes were reclaimed.
 - Active and pinned cache handles suppress cleanup across cache instances;
   actual standalone CLI inspection proves the cross-process shared lease.
@@ -59,7 +60,7 @@ No dependency, version, authentication, routing or TLS policy changed.
   removed bytes, preserved encryption/nonce state and eviction under pressure.
 - Existing lifecycle, inspection, encrypted cache, storage-bin and guide tests.
 
-## Qualification
+## Initial Qualification
 
 Qualification date: 2026-11-14, Rust 1.99.1.
 
@@ -115,3 +116,50 @@ Native release archives, ARM64 and byte reproducibility remain final release
 gates and were not rerun locally for this correction. Independent pentest and
 exact-commit GitHub acceptance are still required before proceeding. This is
 not release approval or a guarantee of absence of vulnerabilities.
+
+## Capacity Follow-Up
+
+Review of `0bdcc5e2` identified that runtime byte-only admission could outgrow
+the bounded startup inventory. The correction adds a 57,344-object filesystem
+ceiling, below the 65,536-entry scan limit. Recovery also subtracts retained and
+unknown entries from admission capacity. Storage-bin object counts are unaffected.
+
+Entry and byte reservations are taken atomically under the existing state mutex,
+then released on every success/error path. Different key stripes cannot consume
+the same final slot; no state mutex is held across disk I/O. Existing-key
+replacement and normal eviction remain available at capacity. A failed unlink
+retains its accounting, and failed filesystem mutations pause write admission
+until restart to avoid accumulating abandoned temporaries. Reads of valid entries
+and origin fallback remain available. One fixed diagnostic reports the pause.
+
+Slow scans now warn after 30 seconds instead of making a valid bounded root
+unbootable solely because storage latency changed. Hard entry/read limits,
+single-link checks, leases and encryption state protections remain in force.
+The read-only `scripts/check_cache_recovery_capacity.py` checks old roots against
+a conservative entry threshold; the recovery guide gives a fresh-root upgrade
+procedure instead of deleting unknown files or weakening startup validation.
+
+Follow-up regressions cover the exact production ceiling, simultaneous final-slot
+reservations, refund and byte bounds, real concurrent query-key churn with plain
+and encrypted restart recovery, retained-entry deductions, failed unlink and
+failed write behavior. The manual full-size test made **65,536 distinct cache
+admissions**, verified eviction kept exactly 57,343 indexed/filesystem objects
+(one root metadata entry consumes a slot), and recovered a valid final HIT after
+restart. It passed on Linux; smaller native fixtures exercise the same production
+admission path on macOS and Windows. The full-size test is opt-in to avoid adding
+tens of thousands of filesystem writes to every CI job.
+
+Follow-up validation: Linux workspace and all-feature server suite (792 passed,
+one opt-in inventory test ignored in the ordinary run), strict server Clippy,
+RustSec and cargo-deny passed. Native macOS server tests passed (636 plus the
+opt-in test ignored), as did its Clippy, live recovery and cache guide/lifecycle
+matrix. Windows server tests passed (633 plus the opt-in test ignored), alongside
+the live recovery and broader guide/lifecycle checks. Linux's full proxy-cache
+and storage-bin smokes passed. The final non-root Podman smoke passed against
+runtime image `sha256:42d4d30aab312d0147b6228811d6132a1de3ce717205721dacb3ff55b072c0ff`
+under the same restricted runtime settings described above.
+The Python cache/preflight suite has 29 tests; Windows passed 27 and skipped two
+link-creation cases because the build identity lacks that privilege. Rustfmt,
+documentation links/layout, CI qualification policy and the Windows release
+validator passed. No dependency or manifest changed. Independent retest and
+exact-commit GitHub acceptance remain pending.

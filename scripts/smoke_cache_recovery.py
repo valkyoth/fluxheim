@@ -7,6 +7,8 @@ from pathlib import Path
 import secrets
 import subprocess
 
+from check_cache_recovery_capacity import check_capacity
+
 from smoke_cache_examples import ROOT, origin_server, prepare, replace_once, request, running
 from smoke_log_file_rotation import private_fixture, protect_directory
 from smoke_operational_events import port
@@ -73,6 +75,7 @@ def run_case(parent, encrypted):
                             if path.is_file() and path.name.startswith(
                                 (".fluxheim-encryption-", ".fluxheim-gcm-"))}
         before = sum(path.stat().st_size for path in disk.glob("*/*") if path.is_file())
+        assert check_capacity(disk)[0], "offline upgrade entry preflight rejected fixture"
         for iteration in range(2):
             with running(config, public):
                 assert request(public) == "HIT" and count("/asset.css") == 1
@@ -83,7 +86,7 @@ def run_case(parent, encrypted):
                 assert before - after == len(corrupt_bytes) + len(MAGIC), "unexpected retained disk usage"
                 if iteration == 1:
                     for index in range(40):
-                        assert request(public, f"/eviction-{index}.css") == "MISS"
+                        assert request(public, f"/asset.css?churn={index}") == "MISS"
                     assert request(public) == "MISS", "tracked cache did not evict under pressure"
                     assert request(public) == "HIT"
                     assert all(path.read_bytes() == data for path, data in retained.items())

@@ -55,6 +55,9 @@ impl FilesystemRecoveryLease {
 }
 
 pub(super) const RECOVERY_ENTRY_LIMIT: usize = 65_536;
+// Leave room for shards, root metadata, retained leftovers and partial writes.
+pub(super) const RECOVERY_ENTRY_RESERVE: usize = 8_192;
+pub(super) const FILESYSTEM_OBJECT_LIMIT: usize = RECOVERY_ENTRY_LIMIT - RECOVERY_ENTRY_RESERVE;
 pub(super) const RECOVERY_READ_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
 pub(super) const TEMP_MIN_AGE: Duration = Duration::from_secs(3600);
 
@@ -93,6 +96,7 @@ pub(super) struct RecoveryBudget {
     remaining_entries: usize,
     remaining_bytes: u64,
     started: Instant,
+    slow_reported: bool,
 }
 
 impl RecoveryBudget {
@@ -101,11 +105,12 @@ impl RecoveryBudget {
             remaining_entries: entries,
             remaining_bytes: bytes,
             started: Instant::now(),
+            slow_reported: false,
         }
     }
 
     pub(super) fn children(&mut self, path: &Path) -> io::Result<Vec<std::path::PathBuf>> {
-        self.check_time()?;
+        self.check_time();
         let paths = NativeSafeDiskCachePath::from_path(path.to_path_buf())
             .child_paths_bounded(self.remaining_entries)?;
         self.remaining_entries = self.remaining_entries.saturating_sub(paths.len());
@@ -113,7 +118,7 @@ impl RecoveryBudget {
     }
 
     pub(super) fn charge_read(&mut self, bytes: u64) -> io::Result<()> {
-        self.check_time()?;
+        self.check_time();
         self.remaining_bytes = self
             .remaining_bytes
             .checked_sub(bytes)
@@ -121,14 +126,14 @@ impl RecoveryBudget {
         Ok(())
     }
 
-    fn check_time(&self) -> io::Result<()> {
-        if self.started.elapsed() > Duration::from_secs(30) {
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "cache recovery time budget exceeded",
-            ));
+    fn check_time(&mut self) {
+        if !self.slow_reported && self.started.elapsed() > Duration::from_secs(30) {
+            self.slow_reported = true;
+            // A healthy runtime-bounded root must not become unbootable merely
+            // because disk latency or host contention changed after shutdown.
+            log::warn!(target: "fluxheim::native_http1",
+                "filesystem cache recovery is slow; continuing within entry and read limits");
         }
-        Ok(())
     }
 }
 
@@ -187,15 +192,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recovery_budget_rejects_elapsed_time_and_excess_bytes() {
+    fn recovery_budget_warns_on_elapsed_time_but_rejects_excess_bytes() {
         let mut budget = RecoveryBudget::new(1, 10);
         budget.charge_read(10).unwrap();
         assert!(budget.charge_read(1).is_err());
         budget.started = Instant::now().checked_sub(Duration::from_secs(31)).unwrap();
-        assert_eq!(
-            budget.charge_read(0).unwrap_err().kind(),
-            io::ErrorKind::TimedOut
-        );
+        budget.charge_read(0).unwrap();
+        assert!(budget.slow_reported);
     }
 
     #[cfg(unix)]

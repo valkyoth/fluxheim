@@ -86,12 +86,53 @@ independent roots; the shared lease is not multi-writer index consistency.
 
 One recovery accepts at most 65,536 directory entries, including root entries,
 and charges at most the greater of 2 GiB or twice `disk.max_size_bytes` in file
-reads. Time checks between filesystem operations impose a 30-second scan
-budget; they cannot interrupt a stalled operating-system filesystem call.
-Exceeding a budget or failing directory enumeration rejects initialization,
+reads. A scan exceeding 30 seconds emits a warning and continues within those
+entry/read bounds; slow storage must not make a healthy cache permanently
+unbootable. Filesystem calls are not forcibly interruptible. Exceeding an
+entry/read budget or failing directory enumeration rejects initialization,
 rather than serving a partial index. Cleanup already performed is not rolled
 back. Move to a fresh root or perform controlled offline maintenance if a root
 exceeds these bounds; large object inventories should use storage bins.
+
+Normal filesystem admission caps tracked objects at **57,344 per root**, before
+subtracting retained files and unknown entries observed during recovery. The
+8,192-entry margin reserves room for shards, root state and in-flight temporary
+writes. This is a fixed safety ceiling, not a configurable performance target.
+The byte limit still applies; whichever limit is reached first causes eviction.
+Replacement of an existing key is permitted at capacity, and concurrent writers
+reserve entry/byte capacity atomically. Failed admissions refund their reservation.
+Storage-bin objects do not consume one file each and do not use this object cap.
+
+Failed filesystem deletion does not release the object's tracked capacity.
+An atomic-write or unlink failure pauses further filesystem write admission for
+that cache instance until restart, with one bounded error log. This prevents
+repeated failures from creating unbounded untracked files. Existing readable
+entries remain available; misses continue through the normal origin path.
+Repair the underlying filesystem problem before restarting. The pause is not
+a guarantee that a failed mutation left no temporary file behind.
+
+### Upgrade Preflight
+
+Older versions did not cap filesystem object count. Before upgrading an existing
+root, stop every owner and run the read-only check as the service identity:
+
+```sh
+python3 scripts/check_cache_recovery_capacity.py /var/cache/fluxheim/assets
+```
+
+On Windows, use `python` and the configured Windows cache path. The check counts
+only the root and real hexadecimal shards, without reading object payloads or
+changing files, permissions, encryption state or locks. It rejects linked roots
+or shards and fails on enumeration/time errors. Its conservative threshold is
+57,344 total observed entries, including metadata. Exit status 0 means only the
+entry-capacity preflight passed, not that contents, permissions, keys, startup
+or read budgets are valid. Do not run it against a changing live root.
+
+If the preflight fails, select a new service-owned independent root before the
+upgrade and warm it gradually. Retire the old root only after all old processes
+have stopped and the new deployment is verified. Do not delete arbitrary files
+or hidden encryption/nonce metadata to force a pass. This tool deliberately
+does not compact or modify existing roots, and does not prove physical free space.
 
 At logging level `info`, `filesystem cache recovery` reports `removed_files`,
 `removed_bytes`, `retained_files`, `retained_bytes`, `unknown_entries`,
@@ -284,6 +325,9 @@ sh scripts/smoke_proxy_cache.sh
 sh scripts/smoke_storage_bin_cache.sh
 cargo test --locked -p fluxheim-server documented_
 cargo test --locked -p fluxheim-server recovery
+cargo test --locked -p fluxheim-server filesystem_admission
+# Optional full-size native inventory qualification (65,536 unique keys):
+cargo test --locked -p fluxheim-server filesystem_admission_full_inventory_churn_and_restart -- --ignored
 mkdir -p target/fluxheim-smoke-tmp
 chmod 700 target/fluxheim-smoke-tmp
 python3 scripts/smoke_cache_recovery.py target/fluxheim-smoke-tmp
