@@ -80,7 +80,7 @@ at the configured limit is not guaranteed to fit a tier/bin of the same size.
 | `memory.max_size_bytes` | Tracked object weight in that memory tier | Whole-process RSS, allocator overhead, in-flight bodies or every policy's combined state |
 | `disk.max_size_bytes` | Tracked backend storage budget | A filesystem quota or every orphaned/invalid/temporary file on the device |
 | `disk.storage_bin.bin_size_bytes` | Single bin layout and allocation size | Maximum process memory or guaranteed physical reservation |
-| `disk.storage_bin.max_open_bins` | Validated, manifest-bound value | Currently **not enforced** as a concurrent-open cap  |
+| `disk.storage_bin.max_open_bins` | Concurrent bin data-file operations per shared cache allocator | All process descriptors, idle file pooling, or a process/cluster-wide limit |
 
 The disk budget is not a filesystem quota. Allow headroom outside tracked
 objects and monitor the actual device, not only cache counters.
@@ -196,7 +196,6 @@ The process tracks at most 4,096 simultaneously live shared disk caches.
 | Finding | Operator consequence | Required correction |
 | --- | --- | --- |
 | the documented limitation | Invalid/unindexed files and abandoned temporaries remain outside tracked occupancy | the local follow-up; monitor actual filesystem usage and use offline maintenance guidance |
-| the documented limitation | Configured max-open-bins is not a handle cap | the local follow-up; provision OS descriptor limits without relying on this value |
 | the documented limitation | Bounded indexed purge may report no continuation while objects remain | the local follow-up; verify remaining scope, do not assume a false completion flag proves emptiness |
 | the documented limitation | Bin soft purge deletes instead of retaining a stale body | the local follow-up; do not depend on bin stale fallback after soft purge |
 | the documented limitation | Disk stale dry-run can delete during lookup | the local follow-up; do not use it as a guaranteed read-only preview |

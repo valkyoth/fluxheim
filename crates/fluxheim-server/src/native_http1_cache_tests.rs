@@ -16,6 +16,9 @@ use std::time::{Duration, Instant, SystemTime};
 #[path = "native_http1_cache_admission_tests.rs"]
 mod admission_tests;
 
+#[path = "native_http1_cache_bin_admission_tests.rs"]
+mod bin_admission_tests;
+
 fn headers(values: &[(&str, &str)]) -> HeaderMap {
     let mut headers = HeaderMap::new();
     for (name, value) in values {

@@ -130,7 +130,7 @@ certificate verification remains mandatory under the configured TLS policy.
 | `disk.max_size_bytes` | `"10GiB"` | Positive and at least max_object_bytes when enabled |
 | `disk.storage_bin.bin_size_bytes` | `"256MiB"` | Positive, at least maximum object and no larger than disk budget |
 | `disk.storage_bin.preallocate` | `false` | Preallocate bin files when enabled |
-| `disk.storage_bin.max_open_bins` | `16` | Positive, manifest-bound setting; currently not enforced as a concurrent-open cap (the documented limitation; [maintenance](../guides/cache-recovery.md)) |
+| `disk.storage_bin.max_open_bins` | `16` | Positive, manifest-bound cap on simultaneous bin data-file operations per shared allocator; full admission falls back without waiting for capacity ([scope and maintenance](../guides/cache-recovery.md#bin-file-concurrency)) |
 
 See the checked-in [filesystem](../../examples/cache/filesystem.toml) and
 [bin](../../examples/cache/storage-bin.toml) fragments. The native memory path

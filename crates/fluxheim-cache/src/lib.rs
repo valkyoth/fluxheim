@@ -21,6 +21,7 @@ pub mod purge_index;
 pub mod request;
 pub mod storage;
 pub mod storage_bin;
+mod storage_bin_admission;
 mod storage_bin_alloc;
 #[cfg(not(windows))]
 mod storage_bin_fs;

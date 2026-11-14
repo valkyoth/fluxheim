@@ -188,7 +188,9 @@ impl NativeDiskCache {
         for entry in &entries {
             let Some(object) = self.get_combined(&entry.combined_key) else {
                 self.with_state(|state| {
-                    state.purge_index.remove_combined(&entry.combined_key);
+                    if !state.objects.contains_key(&entry.combined_key) {
+                        state.purge_index.remove_combined(&entry.combined_key);
+                    }
                 });
                 continue;
             };

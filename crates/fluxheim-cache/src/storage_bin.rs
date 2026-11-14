@@ -1,5 +1,8 @@
 use std::io::{Read as _, Seek as _, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use crate::storage_bin_admission::{BinAdmission, BinPermit};
 
 pub use crate::storage_bin_alloc::{StorageBinFreeMap, StorageBinFreeRange};
 use crate::storage_bin_fs::{
@@ -18,14 +21,27 @@ pub use crate::storage_bin_manifest::{
 
 const MAX_STORAGE_BIN_MANIFEST_BYTES: u64 = 4096;
 
+#[cfg(test)]
+#[path = "storage_bin_handles_tests.rs"]
+mod handles_tests;
+
 #[derive(Debug, Clone)]
 pub struct StorageBinFileSet {
     layout: StorageBinLayoutPlan,
+    admission: Arc<BinAdmission>,
+}
+
+// Fields drop in declaration order: close the file before returning capacity.
+#[derive(Debug)]
+struct BinHandle {
+    file: std::fs::File,
+    _permit: BinPermit,
 }
 
 impl StorageBinFileSet {
     pub fn new(layout: StorageBinLayoutPlan) -> Self {
-        Self { layout }
+        let admission = BinAdmission::new(layout.max_open_bins);
+        Self { layout, admission }
     }
 
     pub fn write_object(
@@ -41,16 +57,17 @@ impl StorageBinFileSet {
         }
         let location = location.validate(self.layout.bin_size_bytes)?;
         let mut file = self.open_bin_for_write(location.bin_id)?;
-        write_storage_bin_range(&mut file, location.offset, bytes)
+        write_storage_bin_range(&mut file.file, location.offset, bytes)
     }
 
     pub fn read_object(&self, location: StorageBinObjectLocation) -> std::io::Result<Vec<u8>> {
         let location = location.validate(self.layout.bin_size_bytes)?;
         let mut file = self.open_bin_for_read(location.bin_id)?;
-        read_storage_bin_range(&mut file, location.offset, location.len)
+        read_storage_bin_range(&mut file.file, location.offset, location.len)
     }
 
     pub fn remove_bin(&self, bin_id: u64) -> std::io::Result<()> {
+        let _permit = self.admission.reserve(bin_id, true)?;
         let path = self.safe_bin_path(bin_id)?;
         let safe_path = StorageBinSafePath::from_path(path);
         match safe_path.remove_file() {
@@ -60,16 +77,26 @@ impl StorageBinFileSet {
         }
     }
 
-    fn open_bin_for_write(&self, bin_id: u64) -> std::io::Result<std::fs::File> {
+    fn open_bin_for_write(&self, bin_id: u64) -> std::io::Result<BinHandle> {
+        let permit = self.admission.reserve(bin_id, false)?;
         let path = self.safe_bin_path(bin_id)?;
         if let Some(parent) = path.parent() {
             prepare_storage_bin_data_dir(&self.layout.root, parent)?;
         }
         let safe_path = StorageBinSafePath::from_path(path);
-        match safe_path.open_read_write_file() {
+        let file = match safe_path.open_read_write_file() {
             Ok(file) => Ok(file),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let file = safe_path.create_new_read_write_file()?;
+                let file = match safe_path.create_new_read_write_file() {
+                    Ok(file) => file,
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                        return safe_path.open_read_write_file().map(|file| BinHandle {
+                            file,
+                            _permit: permit,
+                        });
+                    }
+                    Err(error) => return Err(error),
+                };
                 if self.layout.preallocate {
                     file.set_len(self.layout.bin_size_bytes.as_u64())?;
                     file.sync_all()?;
@@ -77,12 +104,21 @@ impl StorageBinFileSet {
                 Ok(file)
             }
             Err(error) => Err(error),
-        }
+        }?;
+        Ok(BinHandle {
+            file,
+            _permit: permit,
+        })
     }
 
-    fn open_bin_for_read(&self, bin_id: u64) -> std::io::Result<std::fs::File> {
+    fn open_bin_for_read(&self, bin_id: u64) -> std::io::Result<BinHandle> {
+        let permit = self.admission.reserve(bin_id, false)?;
         let path = self.safe_bin_path(bin_id)?;
-        StorageBinSafePath::from_path(path).open_existing_file()
+        let file = StorageBinSafePath::from_path(path).open_existing_file()?;
+        Ok(BinHandle {
+            file,
+            _permit: permit,
+        })
     }
 
     fn safe_bin_path(&self, bin_id: u64) -> std::io::Result<PathBuf> {

@@ -2760,8 +2760,10 @@ table defines the allocator shape:
 `cache.disk.max_size_bytes`. Encoded metadata/encryption also needs room within
 one bin, so leave headroom beyond the maximum body size. `preallocate` extends
 new files to bin size; actual physical reservation is filesystem-dependent.
-`max_open_bins` is validated and manifest-bound but does not currently enforce
-a concurrent-open cap. The [maintenance guide](../guides/cache-recovery.md)
+`max_open_bins` caps concurrent bin data-file operations per shared allocator.
+Busy reads fall back without removing the stored entry, and busy writes may
+skip caching. It is not a limit on every process descriptor and is still
+manifest-bound. The [maintenance guide](../guides/cache-recovery.md#bin-file-concurrency)
 covers layout changes, index durability and required disk initialization.
 An enabled disk tier must initialize successfully before its router can serve;
 failure rejects startup or reload rather than silently disabling disk caching.

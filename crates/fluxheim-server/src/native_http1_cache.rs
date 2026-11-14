@@ -428,9 +428,21 @@ impl NativeDiskCache {
     }
 
     pub(crate) fn get_combined(&self, combined_key: &str) -> Option<NativeMemoryCacheEntry> {
+        self.get_combined_with_reader(combined_key, |record| self.read_record(record))
+    }
+
+    fn get_combined_with_reader(
+        &self,
+        combined_key: &str,
+        read: impl FnOnce(&NativeDiskCacheRecord) -> std::io::Result<SerializedCacheObject>,
+    ) -> Option<NativeMemoryCacheEntry> {
+        // Keep the allocation owned until reading finishes; purge/replacement
+        // must not recycle a range beneath an active storage-bin reader.
+        let _mutation = self.lock_key_mutation(combined_key);
         let record = self.with_state(|state| state.objects.get(combined_key).cloned())?;
-        let object = match self.read_record(&record) {
+        let object = match read(&record) {
             Ok(object) => object,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return None,
             Err(error) => {
                 fluxheim_observability::operational::failure(
                     fluxheim_observability::event::FailureReason::CacheRead,
@@ -440,7 +452,7 @@ impl NativeDiskCache {
                     "native disk cache read {}: {error}",
                     record.location.display()
                 );
-                self.remove_combined(combined_key);
+                self.remove_combined_locked(combined_key);
                 return None;
             }
         };
@@ -452,13 +464,13 @@ impl NativeDiskCache {
                 target: "fluxheim::security",
                 "native disk cache object identity mismatch; discarding requested cache record"
             );
-            self.remove_combined(combined_key);
+            self.remove_combined_locked(combined_key);
             return None;
         }
         let entry = match native_memory_entry_from_disk_object(&object) {
             Some(entry) => entry,
             None => {
-                self.remove_combined(combined_key);
+                self.remove_combined_locked(combined_key);
                 return None;
             }
         };

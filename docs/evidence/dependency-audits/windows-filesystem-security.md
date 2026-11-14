@@ -1,9 +1,10 @@
 # Windows Filesystem Security Audit
 
-Audit date: 2026-09-12
+Audit date: 2026-11-14
 
 This record covers the Windows filesystem security boundary used by Fluxheim
-1.8.2. It is a scoped source audit, not a claim that every public API in the
+1.9.0 development. The original dependency review was recorded on 2026-09-12.
+It is a scoped source audit, not a claim that every public API in the
 dependency is safe for arbitrary use.
 
 ## windows-permissions 0.2.4
@@ -51,7 +52,7 @@ account. Any change to that value requires a fresh ACL-policy review.
 `crates/fluxheim-windows-security` is the only first-party crate permitted to
 use unsafe Rust for handle-relative Windows path traversal and mutation. The
 reviewed source digest is
-`73362b380c18811b94388b49bb4ec0bd47ebc55796abd4db521d2f46662913d8`.
+`66386c419ea56a7f1f651dea1dd77edbd67ba1a53bb76cf5e264e9d242e01b66`.
 It covers, in this order, each UTF-8 path, a NUL delimiter, the complete file,
 and another NUL delimiter for:
 
@@ -74,6 +75,11 @@ First-party unsafe operations and their reviewed invariants are:
   payload lengths are checked before allocation and raw writes;
 - `SetFileInformationByHandle` receives a live file handle opened with delete
   access and an exact `FILE_DISPOSITION_INFO` value;
+- `GetFileInformationByHandle` receives a borrowed live `File` handle and a
+  correctly aligned, initialized `BY_HANDLE_FILE_INFORMATION` output. Failure
+  returns the OS error before inspecting output; success requires a regular
+  file and exactly one link. The helper does not close or transfer ownership of
+  the borrowed handle, follow a new pathname, or allocate variable-size storage;
 - private-directory creation retains the inspected parent handle and uses
   `NtCreateFile` with `FILE_CREATE`, `FILE_DIRECTORY_FILE`,
   `OBJ_DONT_REPARSE`, and the live protected DACL supplied through
@@ -96,7 +102,8 @@ The reviewed public surface comprises regular-file open/create/update,
 handle-relative traversal, retained path inspection, exclusive confidential
 creation, directory ACL-update and synchronization opens, private-directory
 creation, regular-file rename/hard-link/removal, handle-based removal, and the
-`RetainedPathHandles` target/ancestor accessors. New ordinary-file creation
+`RetainedPathHandles` target/ancestor accessors and retained-handle single-link
+inspection. New ordinary-file creation
 handles include delete access because callers may reject and remove a file
 after evaluating its retained parent ACLs.
 
@@ -104,3 +111,14 @@ Any expansion of this crate's unsafe API or any `windows-permissions` lockfile
 change requires a new dated review and updated checksum evidence. The normal
 validator hashes the complete first-party boundary, so any source change also
 requires an explicit review-date and digest update.
+
+## November 14 Review Follow-Up
+
+Commit 24 added `regular_file_has_single_link` for conservative recovery cleanup
+but left this validator's prior fingerprint unchanged. The scoped delta is the
+safe wrapper and its single Windows FFI call described above. Native Windows
+tests check one link, then create a hard link and recheck the same retained
+handle. The check is an observation, not a claim to atomically exclude changes
+by the trusted filesystem owner. No dependency version or existing traversal,
+ACL, rename or deletion primitive changed. Commit 25 updates this record and
+the pinned validator after review; it does not alter that helper's runtime code.

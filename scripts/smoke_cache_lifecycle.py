@@ -2,6 +2,7 @@
 """Qualify required disk cache startup and authenticated reload on loopback."""
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import http.client
 import json
 from pathlib import Path
@@ -21,6 +22,9 @@ def source_for(public, origin, admin, backend, memory, encrypted):
     if backend not in ("filesystem", "storage-bin"):
         raise ValueError("lifecycle fixture requires a disk backend")
     source = configuration(public, origin, admin, backend)
+    if backend == "storage-bin":
+        source = replace_once(source, "[vhosts.cache.disk.storage_bin]\n",
+                              "[vhosts.cache.disk.storage_bin]\nmax_open_bins = 1\n")
     if memory:
         source = replace_once(source, "[vhosts.cache.memory]\nenabled = false",
                               "[vhosts.cache.memory]\nenabled = true")
@@ -140,6 +144,11 @@ def run_case(parent, backend, memory, encrypted):
             assert request(public) == "HIT"
             assert count("/asset.css") == 1
             if backend == "storage-bin":
+                changed_limit = replace_once(source, "max_open_bins = 1", "max_open_bins = 2")
+                (root / "limit.toml").write_text(changed_limit, encoding="utf-8")
+                publish(root, "limit.toml")
+                action(admin, token, "reload", expected=500)
+                assert request(public) == "HIT"
                 # Avoid a public/admin bind collision masking the allocator check.
                 second = replace_once(source, f"127.0.0.1:{public}", f"127.0.0.1:{port()}")
                 second = replace_once(second, f"127.0.0.1:{admin}", f"127.0.0.1:{port()}")
@@ -188,6 +197,14 @@ def run_case(parent, backend, memory, encrypted):
                 assert request(public) == "HIT"
                 assert replacement_count("/asset.css") == 1
                 assert count("/asset.css") == 2
+                if backend == "storage-bin":
+                    # Capacity misses may go to the origin, but every response
+                    # must retain its exact body and subsequent caching must work.
+                    with ThreadPoolExecutor(max_workers=8) as workers:
+                        results = list(workers.map(lambda i: request(public, f"/load-{i % 8}.css"), range(64)))
+                    assert all(status in ("MISS", "HIT") for status in results), results
+                    request(public, "/after-load.css")
+                    assert request(public, "/after-load.css") == "HIT"
         print(f"required cache lifecycle {backend} memory={memory} encrypted={encrypted}: ok")
 
 

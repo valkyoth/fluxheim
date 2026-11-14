@@ -34,6 +34,8 @@ class CacheLifecycleTests(unittest.TestCase):
                     cache = config["vhosts"][0]["cache"]
                     self.assertTrue(cache["disk"]["enabled"])
                     self.assertEqual(cache["disk"]["backend"], backend)
+                    if backend == "storage-bin":
+                        self.assertEqual(cache["disk"]["storage_bin"]["max_open_bins"], 1)
                     self.assertEqual(cache["memory"]["enabled"], memory)
                     self.assertEqual(cache["disk"].get("encryption", {}).get("enabled", False), encrypted)
                     self.assertEqual(config["admin"]["listen"], "127.0.0.1:12347")
