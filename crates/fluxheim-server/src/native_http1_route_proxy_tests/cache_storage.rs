@@ -86,7 +86,7 @@ async fn native_route_proxy_caches_proxy_response_on_encrypted_disk() {
         b"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\n",
     );
     let cache_root = root.path().join("objects");
-    let legacy_object = cache_root.join("ab/legacy.fhc");
+    let legacy_object = cache_root.join(format!("ab/ab{}.fhc", "0".repeat(62)));
     #[cfg(windows)]
     fluxheim_config::fs_trust::create_private_directory_all(legacy_object.parent().unwrap())
         .unwrap();

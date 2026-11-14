@@ -120,12 +120,15 @@ respective filesystem helpers; do not infer Windows ACL behavior from a Linux
 test. Give the root trusted ownership and no symlink/reparse-point aliases.
 Do not let unrelated processes mutate it under the same service identity.
 
-Restart enumerates root child directories and parses eligible object files.
+Restart scans lowercase hexadecimal shard directories and parses eligible object files.
 The native path does **not** load the historical `.fluxheim-disk-index-v1`
 checkpoint. Accepted objects rebuild the runtime object, variant and purge
-indexes. Unsupported or invalid files can remain outside that inventory;
-temporary files are not automatically age-cleaned by this rebuild
-. Monitor filesystem space and inode use independently.
+indexes. An idle root also removes recognizable invalid objects and recognizable
+temporary writes at least one hour old, under a recovery lease. Unknown bytes,
+unsafe paths and undecryptable files remain. Scan limits, retained-byte reporting
+and ownership rules are detailed in [recovery](cache-recovery.md#filesystem-cleanup-eligibility).
+Monitor filesystem space and inode use independently; tracked occupancy is not
+a physical disk quota.
 
 There is no storage-bin-style exclusive allocator lease for the filesystem
 backend. That is not a multi-writer consistency guarantee. Use a separate root

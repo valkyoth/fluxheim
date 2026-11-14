@@ -131,6 +131,7 @@ fn disk_cache_purge_callback_runs_outside_registry_lock() {
         state: Arc::new(Mutex::new(NativeDiskCacheState::default())),
         mutation_locks: native_disk_cache_mutation_locks(),
         index_flush: None,
+        recovery_lease: None,
     });
     let vhost: Arc<str> = Arc::from(format!("purge-lock-test-{}", std::process::id()));
     register_native_disk_cache_purge_handle(vhost.clone(), None, &cache);
@@ -159,6 +160,7 @@ fn disk_cache_remove_combined_waits_for_key_mutation_lock() {
         state: Arc::new(Mutex::new(NativeDiskCacheState::default())),
         mutation_locks: native_disk_cache_mutation_locks(),
         index_flush: None,
+        recovery_lease: None,
     });
     let combined = "same-key-race";
     cache.with_state_mut(|state| {

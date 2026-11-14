@@ -147,6 +147,9 @@ impl NativeSafeDiskCachePath {
                 "native disk cache path is not a real file",
             ));
         }
+        if write {
+            validate_single_link_file(&file)?;
+        }
         Ok(file)
     }
 
@@ -171,6 +174,10 @@ impl NativeSafeDiskCachePath {
     }
 
     pub(super) fn child_paths(&self) -> std::io::Result<Vec<PathBuf>> {
+        self.child_paths_bounded(usize::MAX)
+    }
+
+    pub(super) fn child_paths_bounded(&self, limit: usize) -> std::io::Result<Vec<PathBuf>> {
         if path_contains_reparse_point(&self.path)? {
             return Err(unsafe_path_error(
                 "native disk cache directory contains a reparse point",
@@ -182,9 +189,16 @@ impl NativeSafeDiskCachePath {
                 "native disk cache directory path is not canonical",
             ));
         }
-        std::fs::read_dir(&self.path)?
-            .map(|entry| entry.map(|entry| entry.path()))
-            .collect()
+        let mut paths = Vec::new();
+        for entry in std::fs::read_dir(&self.path)? {
+            if paths.len() == limit {
+                return Err(std::io::Error::other(
+                    "cache recovery directory entry limit exceeded",
+                ));
+            }
+            paths.push(entry?.path());
+        }
+        Ok(paths)
     }
 
     pub(super) fn rename_from(&self, source: &Self) -> std::io::Result<()> {
@@ -204,6 +218,15 @@ impl NativeSafeDiskCachePath {
         self.validate_parent()?;
         fluxheim_windows_security::remove_regular_file(&self.path)
     }
+}
+
+pub(super) fn validate_single_link_file(file: &std::fs::File) -> std::io::Result<()> {
+    if !fluxheim_windows_security::regular_file_has_single_link(file)? {
+        return Err(unsafe_path_error(
+            "cache file must be regular and singly linked",
+        ));
+    }
+    Ok(())
 }
 
 fn path_contains_reparse_point(path: &Path) -> std::io::Result<bool> {

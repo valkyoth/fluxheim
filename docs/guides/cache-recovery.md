@@ -15,10 +15,11 @@ changing an encrypted root or its keys.
   status-header presentation changes. Incompatible policies, changed origin
   context and encrypted-root reloads require stop/start
   or a fresh independent root; the old router remains active after rejection.
-- **Current limitation:** native filesystem recovery skips corrupt or
-  unindexable objects and abandoned temporary files. They can remain on disk
-  outside tracked occupancy and eviction. The configured cache byte budget is
-  not a filesystem quota. Monitor free disk space independently.
+- **Bounded filesystem cleanup:** an idle root can remove recognizable invalid
+  objects and recognizable temporary writes at least one hour old. Ambiguous,
+  inaccessible and undecryptable files remain outside tracked occupancy. The
+  configured cache byte budget is not a filesystem quota. Monitor free disk
+  space independently; see [cleanup eligibility](#filesystem-cleanup-eligibility).
 - **Current limitation:** `storage_bin.max_open_bins` is validated and
   recorded in the manifest, but the current file set opens a handle per
   operation without enforcing that setting as a concurrent-open cap. Do not
@@ -33,7 +34,7 @@ or removing an allocator lock to force startup. See the
 | State | Filesystem backend | Storage-bin backend |
 | --- | --- | --- |
 | Complete persisted objects | One encoded `.fhc` object per hashed identity | Encoded objects occupy ranges inside `bins/*.fhbin` |
-| Restart discovery | Parse eligible files beneath root child directories | Read `.fluxheim-storage-bin-index-v1`, then validate referenced objects |
+| Restart discovery | Bounded scan of the 256 lowercase hexadecimal shard names | Read `.fluxheim-storage-bin-index-v1`, then validate referenced objects |
 | Layout contract | Existing safe directory and compatible object format | `.fluxheim-storage-bin-v1` must match configured layout |
 | Index persistence | Native runtime does not use `.fluxheim-disk-index-v1` | Debounced index writes, normally no more than once per second per root; final flush is best-effort |
 | Memory entries and in-flight fills | Not durable | Not durable |
@@ -46,9 +47,61 @@ that it was not fetched again. Stale objects remain subject to configured
 revalidation/stale-serving rules, not a fresh TTL starting at every restart.
 
 For filesystem storage, reads are bounded and unsafe paths/symlinks are rejected.
-The native rebuild enumerates root child directories; it is not the historical
-checkpoint-plus-fixed-shard algorithm. Do not put unrelated files in the root.
-Skipped invalid objects are not proof of automatic cleanup.
+The native rebuild recognizes two-character lowercase hexadecimal shard
+directories; it does not read a filesystem checkpoint. Do not put unrelated
+files in the root. Skipped invalid objects are not proof of automatic cleanup.
+
+## Filesystem Cleanup Eligibility
+
+Recovery can remove an invalid object only when its shard and 64-character
+hexadecimal `.fhc` name match, its contents start with a supported Fluxheim
+cache-format marker, and it is a regular, singly linked file on a safe path.
+Unsupported names, unknown bytes, symbolic links/reparse points, hard links,
+directories and FIFOs are not cleanup candidates. An oversized recognizable
+object can be removed without reading its entire payload. A decryption failure
+is preserved: an unavailable or incorrect key does not prove corruption.
+Obsolete v1 encrypted envelopes are deliberately discarded.
+
+A temporary file must additionally have the writer's `.<24 lowercase hex>.tmp`
+name and a modification time at least one hour in the past. Fresh, future-dated,
+empty or unrecognizable temporary files remain. Age alone never authorizes
+deletion. Cleanup does not descend into arbitrary directories or remove root
+encryption identities, key markers, nonce counters, allocator state or locks.
+
+Every filesystem cache handle keeps a shared lease on
+`.fluxheim-filesystem-recovery.lock`. Startup obtains an exclusive lease for
+cleanup only when no other handle exists, then retains a shared lease. A live
+inspection or retained old generation therefore suppresses cleanup, migration
+and startup pruning. Encrypted inspection loads existing state without
+initializing or rotating it. An initialization/migration requiring new state
+must wait for a stopped root. Lease operations are nonblocking: contention with
+an initializer rejects that attempt instead of waiting indefinitely.
+
+Never delete or replace the lease file. Use local filesystems with working file
+locks; this is coordination between cooperating Fluxheim processes, not a
+defense against an administrator or same-user process modifying the cache.
+Stop **all older Fluxheim processes** before upgrading: older binaries do not
+participate in this lease protocol. Overlapping serving replicas still require
+independent roots; the shared lease is not multi-writer index consistency.
+
+One recovery accepts at most 65,536 directory entries, including root entries,
+and charges at most the greater of 2 GiB or twice `disk.max_size_bytes` in file
+reads. Time checks between filesystem operations impose a 30-second scan
+budget; they cannot interrupt a stalled operating-system filesystem call.
+Exceeding a budget or failing directory enumeration rejects initialization,
+rather than serving a partial index. Cleanup already performed is not rolled
+back. Move to a fresh root or perform controlled offline maintenance if a root
+exceeds these bounds; large object inventories should use storage bins.
+
+At logging level `info`, `filesystem cache recovery` reports `removed_files`,
+`removed_bytes`, `retained_files`, `retained_bytes`, `unknown_entries`,
+`failed_removals` and `cleanup_exclusive`. Byte counts are observed logical
+file lengths, not allocated blocks or guaranteed reclaimed device space.
+Retained bytes describe inspected, unindexed regular files; unknown entries
+include unscanned directories, root metadata and files that could not be
+classified. These are startup observations, not continuously updated gauges.
+Tracked cache status excludes those leftovers. Failed deletion retains and
+counts the object; it is not falsely reported as reclaimed space.
 
 For bins, the index is the location map, not an optional accelerator. A missing
 index starts cold; Fluxheim does not scan raw bin bytes to salvage unindexed
@@ -116,8 +169,8 @@ router. Never delete the lock file to bypass that rule.
 
 Do not point a rolling replacement process at the previous process's bin root
 while both are alive. Use independent roots for overlapping replicas, or a
-maintenance stop/start for a single root. Filesystem storage does not have the
-same allocator lease; that absence is not a promise of multi-writer consistency.
+maintenance stop/start for a single root. Filesystem recovery uses the separate
+shared/exclusive lease described above, not an exclusive allocator lease.
 Separate roots are the predictable deployment model for either backend.
 
 Standalone `cache-lookup` can rebuild a filesystem cache view but cannot inspect
@@ -216,9 +269,10 @@ The repository's real proxy-cache and storage-bin smokes check live admission
 and normal persistence behavior. Dedicated native lifecycle tests additionally
 exercise compatible reload, rejected candidates, pinned/cancelled requests,
 rollback, manifest mismatch, key/index failure and restart persistence against
-a real loopback origin. Separate characterization tests for missing-index cold
-recovery and retained invalid filesystem objects still describe limitations;
-passing those tests does not mean those limitations are fixed.
+a real loopback origin. Filesystem recovery tests verify idle cleanup,
+preservation of ambiguous files and active writes, retained-byte accounting,
+scan bounds, encryption state, restart HITs and eviction. The missing bin-index
+characterization still describes cold recovery, not object salvage.
 The proxy-cache smoke also runs the guide recipes, migrates disk-only filesystem
 storage to a fresh bin root and changes bin size through another fresh root.
 It checks bodies, origin counts, restart reuse and retained old object/metadata
@@ -229,6 +283,10 @@ cargo build --locked --features metrics
 sh scripts/smoke_proxy_cache.sh
 sh scripts/smoke_storage_bin_cache.sh
 cargo test --locked -p fluxheim-server documented_
+cargo test --locked -p fluxheim-server recovery
+mkdir -p target/fluxheim-smoke-tmp
+chmod 700 target/fluxheim-smoke-tmp
+python3 scripts/smoke_cache_recovery.py target/fluxheim-smoke-tmp
 ```
 
 Keep the platform qualification boundary explicit: filesystem locking, rename

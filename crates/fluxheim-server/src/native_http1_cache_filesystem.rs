@@ -10,9 +10,13 @@ use sha2::{Digest as _, Sha256};
 
 use super::native_http1_cache_disk_path::{
     NativeSafeDiskCachePath, create_native_cache_dir_all, native_cache_path_contains_symlink,
-    native_disk_cache_read_limit, read_native_disk_cache_file,
+    native_disk_cache_read_limit, read_native_disk_cache_file, validate_single_link_file,
 };
 use super::native_http1_cache_meta::{NativeDiskCacheMeta, native_memory_entry_from_disk_object};
+use super::native_http1_cache_recovery::{
+    RECOVERY_ENTRY_LIMIT, RECOVERY_READ_LIMIT, RecoveryBudget, RecoveryReport, lowercase_hex,
+    object_name, old_temp, recognizable_file, temp_name,
+};
 use super::{
     NativeDiskCache, NativeDiskCacheLocation, NativeDiskCacheRecord, NativeDiskCacheState,
     NativeMemoryCacheVariant,
@@ -23,54 +27,175 @@ impl NativeDiskCache {
         &self,
         state: &mut NativeDiskCacheState,
     ) -> std::io::Result<()> {
-        let root = NativeSafeDiskCachePath::from_path(self.root.clone());
-        for shard_path in root.child_paths()? {
-            if !shard_path.is_dir() || native_cache_path_contains_symlink(&self.root, &shard_path)?
+        let read_limit = self.max_bytes.saturating_mul(2).max(RECOVERY_READ_LIMIT);
+        let result = self.recover_filesystem(state, RECOVERY_ENTRY_LIMIT, read_limit);
+        match &result {
+            Ok(report) => log::info!(target: "fluxheim::native_http1",
+                "filesystem cache recovery: removed_files={} removed_bytes={} retained_files={} retained_bytes={} unknown_entries={} failed_removals={} cleanup_exclusive={}",
+                report.removed_files, report.removed_bytes, report.retained_files, report.retained_bytes,
+                report.unknown_entries, report.failed_removals, self.filesystem_cleanup_allowed()),
+            Err(_) => {
+                log::error!(target: "fluxheim::native_http1", "filesystem cache recovery incomplete; initialization rejected")
+            }
+        }
+        result.map(|_| ())
+    }
+
+    pub(super) fn recover_filesystem(
+        &self,
+        state: &mut NativeDiskCacheState,
+        entries: usize,
+        bytes: u64,
+    ) -> std::io::Result<RecoveryReport> {
+        let mut budget = RecoveryBudget::new(entries, bytes);
+        let mut report = RecoveryReport::default();
+        for shard_path in budget.children(&self.root)? {
+            let Some(shard_name) = shard_path.file_name().and_then(|name| name.to_str()) else {
+                report.unknown_entries += 1;
+                continue;
+            };
+            if !lowercase_hex(shard_name, 2)
+                || !std::fs::symlink_metadata(&shard_path)?.is_dir()
+                || native_cache_path_contains_symlink(&self.root, &shard_path)?
             {
+                // Do not recurse into operator files or encryption state.
+                report.unknown_entries += 1;
                 continue;
             }
-            let shard = NativeSafeDiskCachePath::from_path(shard_path);
-            for path in shard.child_paths()? {
-                if path.is_dir()
-                    || path.extension().and_then(|value| value.to_str()) != Some("fhc")
-                    || native_cache_path_contains_symlink(&self.root, &path)?
-                {
+            for path in budget.children(&shard_path)? {
+                budget.charge_read(0)?;
+                let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+                    report.unknown_entries += 1;
+                    continue;
+                };
+                if !metadata.is_file() || native_cache_path_contains_symlink(&self.root, &path)? {
+                    report.unknown_entries += 1;
                     continue;
                 }
-                let bytes = match read_native_disk_cache_file(
-                    &path,
-                    native_disk_cache_read_limit(self.max_object_bytes),
-                ) {
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default();
+                let temporary = temp_name(name);
+                if !temporary && !object_name(name, shard_name) {
+                    report.retain(metadata.len());
+                    continue;
+                }
+                let safe = NativeSafeDiskCachePath::from_path(path.clone());
+                let Ok(mut file) = safe.open_existing_file() else {
+                    report.retain(metadata.len());
+                    continue;
+                };
+                if validate_single_link_file(&file).is_err() {
+                    report.retain(metadata.len());
+                    continue;
+                }
+                let metadata = file.metadata()?;
+                budget.charge_read(22)?;
+                let recognizable = recognizable_file(&mut file).unwrap_or(false);
+                drop(file);
+                if temporary {
+                    report.remove_or_retain(
+                        &path,
+                        metadata.len(),
+                        recognizable
+                            && old_temp(&metadata, SystemTime::now())
+                            && self.filesystem_cleanup_allowed(),
+                    );
+                    continue;
+                }
+                if !recognizable {
+                    report.retain(metadata.len());
+                    continue;
+                }
+                if metadata.len() > native_disk_cache_read_limit(self.max_object_bytes) {
+                    report.remove_or_retain(
+                        &path,
+                        metadata.len(),
+                        self.filesystem_cleanup_allowed(),
+                    );
+                    continue;
+                }
+                budget.charge_read(metadata.len().saturating_add(1))?;
+                // A shared inspection can race an atomic replacement. Do not
+                // read more than the length charged to this scan's budget.
+                let bytes = match read_native_disk_cache_file(&path, metadata.len()) {
                     Ok(bytes) => bytes,
-                    Err(_) => continue,
+                    Err(_) => {
+                        report.retain(metadata.len());
+                        continue;
+                    }
                 };
                 if bytes.starts_with(super::NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1) {
-                    let _ = NativeSafeDiskCachePath::from_path(path).remove_file();
+                    report.remove_or_retain(
+                        &path,
+                        metadata.len(),
+                        self.filesystem_cleanup_allowed(),
+                    );
                     continue;
                 }
                 let bytes = match self.decrypt_if_needed(&bytes) {
                     Ok(bytes) => bytes,
-                    Err(_) => continue,
+                    // A missing/wrong key is not proof that ciphertext is garbage.
+                    Err(_) => {
+                        report.retain(metadata.len());
+                        continue;
+                    }
                 };
                 let parsed = match parse_disk_cache_object(&bytes, self.max_object_bytes) {
                     Ok(parsed) => parsed,
-                    Err(_) => continue,
+                    Err(_) => {
+                        report.remove_or_retain(
+                            &path,
+                            metadata.len(),
+                            self.filesystem_cleanup_allowed(),
+                        );
+                        continue;
+                    }
                 };
                 let Some(combined) = parsed.combined_key.clone() else {
+                    report.remove_or_retain(
+                        &path,
+                        metadata.len(),
+                        self.filesystem_cleanup_allowed(),
+                    );
                     continue;
                 };
                 let Some(primary) = parsed.primary_key.clone() else {
+                    report.remove_or_retain(
+                        &path,
+                        metadata.len(),
+                        self.filesystem_cleanup_allowed(),
+                    );
                     continue;
                 };
                 let Some(meta) = NativeDiskCacheMeta::decode(&parsed.internal_meta) else {
+                    report.remove_or_retain(
+                        &path,
+                        metadata.len(),
+                        self.filesystem_cleanup_allowed(),
+                    );
                     continue;
                 };
                 if native_memory_entry_from_disk_object(&parsed).is_none() {
+                    report.remove_or_retain(
+                        &path,
+                        metadata.len(),
+                        self.filesystem_cleanup_allowed(),
+                    );
+                    continue;
+                }
+                if state.objects.contains_key(&combined) {
+                    report.retain(metadata.len());
                     continue;
                 }
                 let weight = bytes.len() as u64;
                 state.bytes = state.bytes.saturating_add(weight);
-                let path = self.migrate_filesystem_identity_path(&path, &combined)?;
+                let path = if self.filesystem_cleanup_allowed() {
+                    self.migrate_filesystem_identity_path(&path, &combined)?
+                } else {
+                    path
+                };
                 state.insert_object(
                     combined.clone(),
                     NativeDiskCacheRecord {
@@ -98,7 +223,7 @@ impl NativeDiskCache {
                 }
             }
         }
-        Ok(())
+        Ok(report)
     }
 
     pub(super) fn write_filesystem_encoded_object(
@@ -166,23 +291,12 @@ impl NativeDiskCache {
         let mut last_error = None;
         for _ in 0..4 {
             let tmp_path = self.temp_path_for(path)?;
-            let tmp_safe = NativeSafeDiskCachePath::from_path(tmp_path);
-            let destination = NativeSafeDiskCachePath::from_path(path.to_path_buf());
-            let write_result = (|| {
-                let mut file = tmp_safe.create_new_file()?;
-                file.write_all(bytes)?;
-                file.sync_all()?;
-                destination.rename_from(&tmp_safe)?;
-                destination.sync_parent_dir()
-            })();
-            match write_result {
+            match write_new_temporary(path, tmp_path, bytes) {
                 Ok(()) => return Ok(()),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let _ = tmp_safe.remove_file();
                     last_error = Some(error);
                 }
                 Err(error) => {
-                    let _ = tmp_safe.remove_file();
                     return Err(error);
                 }
             }
@@ -245,20 +359,89 @@ impl NativeDiskCache {
     }
 
     pub(super) fn purge_legacy_encrypted_filesystem(&self) -> std::io::Result<()> {
-        let root = NativeSafeDiskCachePath::from_path(self.root.clone());
-        for shard_path in root.child_paths()? {
-            if !shard_path.is_dir() {
+        let mut budget = RecoveryBudget::new(RECOVERY_ENTRY_LIMIT, RECOVERY_READ_LIMIT);
+        for shard_path in budget.children(&self.root)? {
+            let shard_name = shard_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default();
+            if !lowercase_hex(shard_name, 2)
+                || !std::fs::symlink_metadata(&shard_path)?.is_dir()
+                || native_cache_path_contains_symlink(&self.root, &shard_path)?
+            {
                 continue;
             }
-            let shard = NativeSafeDiskCachePath::from_path(shard_path);
-            for path in shard.child_paths()? {
-                if !path.is_dir()
-                    && path.extension().and_then(|value| value.to_str()) == Some("fhc")
+            for path in budget.children(&shard_path)? {
+                if !object_name(
+                    path.file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or_default(),
+                    shard_name,
+                ) || native_cache_path_contains_symlink(&self.root, &path)?
                 {
-                    NativeSafeDiskCachePath::from_path(path).remove_file()?;
+                    continue;
+                }
+                let safe = NativeSafeDiskCachePath::from_path(path);
+                let Ok(mut file) = safe.open_existing_file() else {
+                    continue;
+                };
+                if validate_single_link_file(&file).is_err() {
+                    continue;
+                }
+                budget.charge_read(22)?;
+                let recognizable = recognizable_file(&mut file)?;
+                drop(file);
+                if recognizable {
+                    safe.remove_file()?;
                 }
             }
         }
         Ok(())
+    }
+}
+
+fn write_new_temporary(path: &Path, temporary: PathBuf, bytes: &[u8]) -> std::io::Result<()> {
+    let tmp_safe = NativeSafeDiskCachePath::from_path(temporary);
+    let destination = NativeSafeDiskCachePath::from_path(path.to_path_buf());
+    // A failed exclusive create confers no ownership and must not unlink.
+    let mut file = tmp_safe.create_new_file()?;
+    let result = (|| {
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        destination.rename_from(&tmp_safe)?;
+        destination.sync_parent_dir()
+    })();
+    drop(file);
+    if result.is_err() {
+        let _ = tmp_safe.remove_file();
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temporary_collision_preserves_existing_file_and_destination() {
+        let directory = tempfile::tempdir().unwrap();
+        let temporary = directory.path().join("occupied.tmp");
+        let destination = directory.path().join("object.fhc");
+        std::fs::write(&temporary, b"another writer").unwrap();
+        std::fs::write(&destination, b"previous object").unwrap();
+        assert!(write_new_temporary(&destination, temporary.clone(), b"replacement").is_err());
+        assert_eq!(std::fs::read(temporary).unwrap(), b"another writer");
+        assert_eq!(std::fs::read(destination).unwrap(), b"previous object");
+    }
+
+    #[test]
+    fn failed_rename_removes_only_our_created_temporary() {
+        let directory = tempfile::tempdir().unwrap();
+        let temporary = directory.path().join("created.tmp");
+        let destination = directory.path().join("directory");
+        std::fs::create_dir(&destination).unwrap();
+        assert!(write_new_temporary(&destination, temporary.clone(), b"replacement").is_err());
+        assert!(!temporary.exists());
+        assert!(destination.is_dir());
     }
 }

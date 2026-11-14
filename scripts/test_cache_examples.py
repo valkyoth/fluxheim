@@ -12,10 +12,12 @@ from pathlib import Path
 import smoke_cache_examples as smoke
 import smoke_cache_operations as operations
 import test_cache_lifecycle
+import test_cache_recovery
 
 
 def load_tests(loader, tests, _pattern):
     tests.addTests(loader.loadTestsFromModule(test_cache_lifecycle))
+    tests.addTests(loader.loadTestsFromModule(test_cache_recovery))
     return tests
 
 

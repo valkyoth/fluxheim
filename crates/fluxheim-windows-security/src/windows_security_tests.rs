@@ -105,7 +105,11 @@ fn hard_link_is_created_from_the_retained_source_handle() {
     let destination = root.path().join("linked.bin");
     std::fs::write(&source, b"state").unwrap();
 
+    let handle = open_existing_regular_file(&source, false).unwrap();
+    assert!(regular_file_has_single_link(&handle).unwrap());
+
     create_hard_link_regular_file(&source, &destination).unwrap();
+    assert!(!regular_file_has_single_link(&handle).unwrap());
 
     assert_eq!(std::fs::read(destination).unwrap(), b"state");
 }

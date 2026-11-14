@@ -584,6 +584,8 @@ jobs:
           cargo build --locked --no-default-features --features profile-load-balancer,acme-client --bin fluxheim
           python3 scripts/test_cache_error_phase.py
           python3 scripts/smoke_cache_error_phase.py "$HOME/.fluxheim-lb-smoke"
+          python3 scripts/test_cache_recovery.py
+          python3 scripts/smoke_cache_recovery.py "$HOME/.fluxheim-lb-smoke"
           python3 scripts/test_peer_variants.py
           python3 scripts/smoke_peer_variants.py "$HOME/.fluxheim-lb-smoke"
           python3 scripts/test_slice_storage.py
@@ -725,6 +727,8 @@ jobs:
           cargo build --locked --no-default-features --features profile-load-balancer,acme-client --bin fluxheim
           python scripts/test_cache_error_phase.py
           python scripts/smoke_cache_error_phase.py $env:TEMP
+          python scripts/test_cache_recovery.py
+          python scripts/smoke_cache_recovery.py $env:TEMP
           python scripts/test_peer_variants.py
           python scripts/smoke_peer_variants.py $env:TEMP
           python scripts/test_slice_storage.py

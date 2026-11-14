@@ -164,7 +164,8 @@ impl NativeSafeDiskCachePath {
             parent,
             rustix::fs::OFlags::RDONLY
                 | rustix::fs::OFlags::CLOEXEC
-                | rustix::fs::OFlags::DIRECTORY,
+                | rustix::fs::OFlags::DIRECTORY
+                | rustix::fs::OFlags::NOFOLLOW,
             rustix::fs::Mode::empty(),
         )
         .map_err(native_rustix_to_io_error)?;
@@ -194,11 +195,21 @@ impl NativeSafeDiskCachePath {
         let fd = rustix::fs::openat(
             &parent,
             name,
-            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::NONBLOCK,
             rustix::fs::Mode::empty(),
         )
         .map_err(native_rustix_to_io_error)?;
-        Ok(fd.into())
+        let file = std::fs::File::from(fd);
+        if !file.metadata()?.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "cache read requires a regular file",
+            ));
+        }
+        Ok(file)
     }
 
     pub(super) fn open_or_create_read_write_file(&self) -> std::io::Result<std::fs::File> {
@@ -210,11 +221,14 @@ impl NativeSafeDiskCachePath {
             rustix::fs::OFlags::CREATE
                 | rustix::fs::OFlags::RDWR
                 | rustix::fs::OFlags::CLOEXEC
-                | rustix::fs::OFlags::NOFOLLOW,
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::NONBLOCK,
             rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
         )
         .map_err(native_rustix_to_io_error)?;
-        Ok(fd.into())
+        let file = std::fs::File::from(fd);
+        validate_single_link_file(&file)?;
+        Ok(file)
     }
 
     fn open_existing_dir(&self) -> std::io::Result<std::fs::File> {
@@ -231,6 +245,10 @@ impl NativeSafeDiskCachePath {
     }
 
     pub(super) fn child_paths(&self) -> std::io::Result<Vec<PathBuf>> {
+        self.child_paths_bounded(usize::MAX)
+    }
+
+    pub(super) fn child_paths_bounded(&self, limit: usize) -> std::io::Result<Vec<PathBuf>> {
         let canonical = self.path.canonicalize()?;
         if canonical != self.path {
             return Err(std::io::Error::new(
@@ -246,6 +264,11 @@ impl NativeSafeDiskCachePath {
             let name = entry.file_name().to_bytes();
             if name == b"." || name == b".." {
                 continue;
+            }
+            if paths.len() == limit {
+                return Err(std::io::Error::other(
+                    "cache recovery directory entry limit exceeded",
+                ));
             }
             paths.push(self.path.join(OsStr::from_bytes(name)));
         }
@@ -276,6 +299,18 @@ impl NativeSafeDiskCachePath {
         rustix::fs::unlinkat(&parent, name, rustix::fs::AtFlags::empty())
             .map_err(native_rustix_to_io_error)
     }
+}
+
+pub(super) fn validate_single_link_file(file: &std::fs::File) -> std::io::Result<()> {
+    use std::os::unix::fs::MetadataExt as _;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.nlink() != 1 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "cache file must be regular and singly linked",
+        ));
+    }
+    Ok(())
 }
 
 fn native_rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {

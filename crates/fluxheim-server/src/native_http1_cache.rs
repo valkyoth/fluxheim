@@ -29,6 +29,8 @@ mod native_http1_cache_memory;
 mod native_http1_cache_meta;
 #[path = "native_http1_cache_purge.rs"]
 mod native_http1_cache_purge;
+#[path = "native_http1_cache_recovery.rs"]
+mod native_http1_cache_recovery;
 #[path = "native_http1_cache_state.rs"]
 mod native_http1_cache_state;
 #[path = "native_http1_cache_storage_bin.rs"]
@@ -102,6 +104,7 @@ pub(crate) struct NativeDiskCache {
     state: Arc<Mutex<NativeDiskCacheState>>,
     mutation_locks: Box<[Mutex<()>]>,
     index_flush: Option<NativeStorageBinIndexFlush>,
+    recovery_lease: Option<native_http1_cache_recovery::FilesystemRecoveryLease>,
 }
 
 impl Drop for NativeDiskCache {
@@ -147,12 +150,22 @@ impl NativeDiskCache {
             ));
         }
         let (root, backend) = NativeDiskCacheBackend::from_config(config)?;
-        let encryption = NativeDiskCacheEncryption::from_config(&config.disk.encryption, &root)
-            .inspect_err(|_| {
-                fluxheim_observability::operational::failure(
-                    fluxheim_observability::event::FailureReason::CacheEncryption,
-                )
-            })?;
+        let recovery_lease = matches!(backend, NativeDiskCacheBackend::Filesystem)
+            .then(|| native_http1_cache_recovery::FilesystemRecoveryLease::acquire(&root))
+            .transpose()?;
+        let encryption = if recovery_lease
+            .as_ref()
+            .is_some_and(|lease| !lease.exclusive())
+        {
+            NativeDiskCacheEncryption::from_existing_config(&config.disk.encryption, &root)
+        } else {
+            NativeDiskCacheEncryption::from_config(&config.disk.encryption, &root)
+        }
+        .inspect_err(|_| {
+            fluxheim_observability::operational::failure(
+                fluxheim_observability::event::FailureReason::CacheEncryption,
+            )
+        })?;
         let mut cache = Self {
             root,
             max_bytes: config.disk.max_size_bytes.as_u64(),
@@ -162,12 +175,18 @@ impl NativeDiskCache {
             state: Arc::new(Mutex::new(NativeDiskCacheState::default())),
             mutation_locks: native_disk_cache_mutation_locks(),
             index_flush: None,
+            recovery_lease,
         };
         if cache
             .encryption
             .as_ref()
             .is_some_and(NativeDiskCacheEncryption::root_migration_required)
         {
+            if !cache.filesystem_cleanup_allowed() {
+                return Err(std::io::Error::other(
+                    "cache migration requires an idle root",
+                ));
+            }
             let migration = cache.purge_legacy_encrypted_backend().and_then(|()| {
                 cache
                     .encryption
@@ -178,6 +197,9 @@ impl NativeDiskCache {
             migration?;
         }
         cache.rebuild_index()?;
+        if let Some(lease) = &mut cache.recovery_lease {
+            lease.finish_recovery()?;
+        }
         cache.index_flush = NativeStorageBinIndexFlush::start(
             &cache.backend,
             &cache.state,
@@ -456,8 +478,16 @@ impl NativeDiskCache {
             }
         }
         self.with_state_mut(|current| *current = state);
-        self.prune();
+        if self.filesystem_cleanup_allowed() {
+            self.prune();
+        }
         Ok(())
+    }
+
+    fn filesystem_cleanup_allowed(&self) -> bool {
+        self.recovery_lease
+            .as_ref()
+            .is_none_or(|lease| lease.exclusive())
     }
 
     fn read_record(

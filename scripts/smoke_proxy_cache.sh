@@ -2488,4 +2488,5 @@ fi
 python3 "$ROOT_DIR/scripts/smoke_cache_examples.py" "$TMP_DIR"
 python3 "$ROOT_DIR/scripts/smoke_cache_operations.py" "$TMP_DIR"
 python3 "$ROOT_DIR/scripts/smoke_cache_lifecycle.py" "$TMP_DIR"
+python3 "$ROOT_DIR/scripts/smoke_cache_recovery.py" "$TMP_DIR"
 echo "proxy cache smoke: ok"

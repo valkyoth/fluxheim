@@ -19,6 +19,19 @@ use windows_sys::Win32::Storage::FileSystem::{
 mod file_mutation;
 mod path_handles;
 mod relative_open;
+/// Checks link count on the retained handle, not on a separately reopened path.
+pub fn regular_file_has_single_link(file: &File) -> io::Result<bool> {
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+    let mut information = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: the file is live and the output points to the exact API structure.
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle().cast(), &mut information) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(file.metadata()?.is_file() && information.nNumberOfLinks == 1)
+}
 pub use file_mutation::{
     create_hard_link_regular_file, create_private_directory, remove_open_regular_file,
     remove_regular_file, rename_regular_file,

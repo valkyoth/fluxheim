@@ -33,6 +33,15 @@ pub(super) struct NativeStorageBinLease {
     _file: std::fs::File,
 }
 
+#[cfg(not(windows))]
+impl Drop for NativeStorageBinLease {
+    fn drop(&mut self) {
+        // A concurrent fork can retain a CLOEXEC duplicate until exec. Release
+        // the allocator lease explicitly after its final checkpoint and files.
+        let _ = fs2::FileExt::unlock(&self._file);
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct NativeDiskCacheState {
     pub(super) objects: HashMap<String, NativeDiskCacheRecord>,
@@ -292,4 +301,18 @@ pub(super) fn prepare_native_storage_bin_layout_locked(
     })?;
     prepare_storage_bin_layout(&layout)?;
     Ok(layout)
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn storage_bin_lease_drop_releases_lock_despite_inherited_descriptor() {
+    let directory = tempfile::tempdir().unwrap();
+    let first = acquire_native_storage_bin_lease(directory.path()).unwrap();
+    let duplicate = first._file.try_clone().unwrap();
+    drop(first);
+    let next = acquire_native_storage_bin_lease(directory.path()).unwrap();
+    drop(duplicate);
+    assert!(acquire_native_storage_bin_lease(directory.path()).is_err());
+    drop(next);
+    assert!(acquire_native_storage_bin_lease(directory.path()).is_ok());
 }

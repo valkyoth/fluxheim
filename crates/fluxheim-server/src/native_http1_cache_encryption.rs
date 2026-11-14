@@ -75,12 +75,43 @@ impl NativeDiskCacheEncryption {
         config: &CacheDiskEncryptionConfig,
         cache_root: &Path,
     ) -> std::io::Result<Option<Self>> {
+        Self::load_config(config, cache_root, true)
+    }
+
+    pub(super) fn from_existing_config(
+        config: &CacheDiskEncryptionConfig,
+        cache_root: &Path,
+    ) -> std::io::Result<Option<Self>> {
+        Self::load_config(config, cache_root, false)
+    }
+
+    fn load_config(
+        config: &CacheDiskEncryptionConfig,
+        cache_root: &Path,
+        initialize: bool,
+    ) -> std::io::Result<Option<Self>> {
         if !config.enabled {
             return Ok(None);
         }
         let key_id = Arc::from(config.key_id.as_deref().unwrap_or("local"));
-        let (root_id, mut root_migration_required) =
-            load_or_create_native_cache_root_id(cache_root)?;
+        let (root_id, mut root_migration_required) = if initialize {
+            load_or_create_native_cache_root_id(cache_root)?
+        } else {
+            if native_cache_migration_is_pending(cache_root)? {
+                return Err(std::io::Error::other(
+                    "cache encryption migration requires an idle root",
+                ));
+            }
+            (
+                read_native_cache_fixed_state::<NATIVE_CACHE_ROOT_ID_BYTES>(
+                    &cache_root.join(NATIVE_CACHE_ROOT_ID_FILE),
+                )?
+                .ok_or_else(|| {
+                    std::io::Error::other("cache encryption identity requires an idle root")
+                })?,
+                false,
+            )
+        };
         let (provider, local_nonce_counter_path, index_key) = match config.provider {
             CacheDiskEncryptionProvider::Local => {
                 let master_key = match (&config.key_file, config.key_credential.as_deref()) {
@@ -113,12 +144,22 @@ impl NativeDiskCacheEncryption {
                         )
                     })?;
                 let counter_path = native_cache_nonce_counter_path(cache_root, &counter_identity);
-                root_migration_required |= initialize_native_cache_local_key(
-                    cache_root,
-                    &counter_identity,
-                    &counter_path,
-                    root_migration_required,
-                )?;
+                if initialize {
+                    root_migration_required |= initialize_native_cache_local_key(
+                        cache_root,
+                        &counter_identity,
+                        &counter_path,
+                        root_migration_required,
+                    )?;
+                } else if read_native_cache_fixed_state::<32>(
+                    &cache_root.join(NATIVE_CACHE_ACTIVE_KEY_FILE),
+                )? != Some(counter_identity)
+                    || read_native_cache_nonce_counter(&counter_path)?.is_none()
+                {
+                    return Err(std::io::Error::other(
+                        "cache encryption key initialization requires an idle root",
+                    ));
+                }
                 (
                     NativeDiskCacheEncryptionProvider::Local {
                         key: Arc::new(LessSafeKey::new(unbound)),
@@ -1116,6 +1157,45 @@ mod tests {
 
         assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
         assert!(error.to_string().contains("nonce counter is missing"));
+    }
+
+    #[test]
+    fn existing_encryption_load_cannot_initialize_or_rotate_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("cache");
+        std::fs::create_dir(&root).unwrap();
+        let key_file = directory.path().join("cache.key");
+        write_test_key(&key_file, 0x31);
+        let config = local_config(key_file.clone());
+        assert!(NativeDiskCacheEncryption::from_existing_config(&config, &root).is_err());
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+        let encryption = NativeDiskCacheEncryption::from_config(&config, &root)
+            .unwrap()
+            .unwrap();
+        assert!(NativeDiskCacheEncryption::from_existing_config(&config, &root).is_err());
+        encryption.complete_root_migration(&root).unwrap();
+        let ciphertext = encryption.encrypt("object", b"preserved").unwrap();
+        let before = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|e| {
+                let path = e.unwrap().path();
+                let bytes = std::fs::read(&path).unwrap();
+                (path, bytes)
+            })
+            .collect::<Vec<_>>();
+        let observer = NativeDiskCacheEncryption::from_existing_config(&config, &root)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            observer.decrypt(&ciphertext).unwrap().as_slice(),
+            b"preserved"
+        );
+        write_test_key(&key_file, 0x42);
+        assert!(NativeDiskCacheEncryption::from_existing_config(&config, &root).is_err());
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), before.len());
+        for (path, bytes) in before {
+            assert_eq!(std::fs::read(path).unwrap(), bytes);
+        }
     }
 
     #[test]
