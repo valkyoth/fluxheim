@@ -53,7 +53,12 @@ impl NativeDiskCache {
         let Some(key) = self.with_state(NativeDiskCacheState::oldest_key) else {
             return Ok(false);
         };
-        Ok(self.remove_combined(&key))
+        let _mutation = match self.try_lock_key_mutation(&key) {
+            Ok(guard) => guard,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        Ok(self.remove_combined_locked(&key))
     }
 
     pub(super) fn pause_filesystem_writes(&self) {
@@ -127,6 +132,15 @@ impl NativeDiskCache {
     pub(super) fn try_lock_key_read(&self, key: &str) -> std::io::Result<RwLockReadGuard<'_, ()>> {
         self.mutation_locks[native_disk_cache_mutation_lock_stripe(key)]
             .try_read()
+            .map_err(key_lock_error)
+    }
+
+    pub(super) fn try_lock_key_mutation(
+        &self,
+        key: &str,
+    ) -> std::io::Result<RwLockWriteGuard<'_, ()>> {
+        self.mutation_locks[native_disk_cache_mutation_lock_stripe(key)]
+            .try_write()
             .map_err(key_lock_error)
     }
 

@@ -265,3 +265,102 @@ The container runs under the same restricted conditions described above.
 No Cargo dependency, cache format, authentication policy, filesystem trust
 boundary or CI gate changed. Mutation waits and individual filesystem calls
 remain subject to the previously documented operational limits.
+
+## Encoded Admission And Write Contention Retest
+
+Correction base: `4b06bfaeaad1b4806912b34758f3bfca1123f8d9`.
+
+The follow-up report identified an impossible-allocation eviction path and
+blocking store/eviction key locks. Both are corrected without changing the
+persisted format or dependencies.
+
+The store checks the complete serialized, optionally encrypted object's size
+against one bin before removing or evicting any entry. An object that cannot
+fit is a rejected best-effort fill, including when it targets an existing key.
+The check includes headers, key metadata and encryption, not just response-body
+size. Exact-bin-sized encoded objects remain admissible.
+
+Stores acquire their incoming key stripe using `try_write` before capacity
+eviction. A busy stripe skips the fill rather than consuming a disk worker
+waiting for that lock. Eviction also uses `try_write` and stops at a busy victim.
+Fragmentation still releases the incoming stripe and reservation before
+eviction. Explicit purge keeps its existing synchronized removal semantics;
+individual filesystem calls and internal state/allocator operations are not
+made asynchronously interruptible by this change.
+
+The related slice-read caller validates under the disk read guard. Rejected
+slices use the existing nonblocking, generation-checked removal rather than an
+unconditional blocking purge after lookup. Busy cleanup follows the bounded
+async retry path. A newer replacement is not removed. Existing invalid-slice
+removal behavior is preserved; an intermediate retain-as-miss approach was
+rejected by the legacy-validator regression and is not included in this change.
+
+### Regression Coverage
+
+- Plain and encrypted caches start with eight real entries. Oversized bodies,
+  oversized headers and an oversized replacement must preserve all entries,
+  record identities and byte accounting. A real close/reopen retains all eight,
+  and subsequent smaller writes still work.
+- Exact encoded-bin-size admission is checked with and without encryption.
+- Filtered-read cleanup is tested on both backends while another read guard
+  remains held. It must return `WouldBlock`, preserve the old record, refuse to
+  remove a subsequently published generation, and remove a rejected entry once
+  uncontended. The existing slice legacy-validator and restart tests remain
+  unchanged and enabled.
+- An isolated child reserves all 32 real disk-worker permits and starts stores
+  for distinct keys sharing an intentionally held stripe. Both a read guard and
+  a write guard are tested, on filesystem and storage-bin backends. All stores
+  must finish while the guard remains held, all permits must become available,
+  and an independent cached read must succeed. Full-cache accounting is unchanged.
+- A separate incoming stripe needing eviction encounters a read-locked or
+  write-locked oldest victim. It skips promptly, preserves accounting and
+  refunds worker capacity; a subsequent store succeeds after contention ends.
+- A 30-second subprocess watchdog kills and reaps only the regression child if
+  a blocking-lock regression occurs. Existing purge/read coordination and
+  same-stripe fragmentation regressions remain enabled.
+- The opt-in 57,344-object filesystem concurrent-churn and restart qualification
+  passed separately on Linux, in addition to ordinary bounded-capacity tests.
+
+### Qualification
+
+Qualification date: 2026-11-14, Rust 1.99.1.
+
+| Check | Result |
+| --- | --- |
+| Linux locked workspace | Passed; existing opt-in tests remain skipped |
+| Linux all-feature server library | 807 passed, one manual capacity test ignored |
+| Native load-balancing server library | macOS 651 and Windows 648 passed; one manual capacity test ignored on each |
+| Cache crate | 76 passed on Linux, macOS and Windows |
+| Manual full-capacity filesystem test | Passed on Linux |
+| Strict all-feature/all-target server Clippy | Passed on Linux |
+| Native cache/server Clippy | Passed on macOS; Windows trusted toolchain lacks Clippy |
+| Native macOS/Windows lifecycle and recovery smokes | Passed |
+| Isolated Podman lifecycle matrix | Eight cases passed |
+| Full Linux proxy-cache smoke | Passed, including guide, admin, lifecycle and recovery checks |
+| Linux storage-bin shell smoke | Passed on unchanged rerun; initial startup timeout noted below |
+| Python cache fixtures / lifecycle / recovery / recovery-capacity | 30 / 5 / 9 / 6 passed |
+| Documentation layout / CI qualification classifier | 28 / 11 passed |
+| Windows release-script / security-source validators | Passed |
+| RustSec / cargo-deny | 449 dependencies, 1,509 advisories; no findings |
+| Formatting, documentation links and diff checks | Passed |
+
+Runtime image:
+`sha256:8806b783d746fc1fe6dd0aa3b3a1992196f6342f4af148986a21d8b3708234ed`.
+Qualification layer:
+`sha256:180300900d2f7330db65835344015599743adcf084309894003d2720893a5027`.
+The container runs non-root, without external networking, host mounts or
+capabilities, with `no-new-privileges` and CPU/memory limits.
+
+An initial Windows lifecycle run timed out on the first request after an origin
+change (encrypted storage-bin, memory disabled). Three isolated diagnostic runs
+with debug logging and the original three-second request timeout passed. The
+unchanged full Windows rerun passed, as did final-source native qualification
+after the additional slice cleanup correction. A final-source Linux bin smoke
+also hit its listener-startup timeout; an unchanged rerun passed. The causes of
+these intermittent timeouts were not established. No timeout was increased and
+no automatic test retry was added; passing reruns do not establish their cause.
+Windows Python fixtures retain two existing platform/privilege skips.
+
+The bounded store/cleanup regressions and manual filesystem capacity test pass.
+Native archives, ARM64, reproducibility, independent pentest and exact-commit
+GitHub acceptance remain separate gates.

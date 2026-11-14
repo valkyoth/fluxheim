@@ -336,12 +336,27 @@ impl NativeDiskCache {
             encoded
         };
         let encoded_len = encoded.len() as u64;
+        if let NativeDiskCacheBackend::StorageBin(storage_bin) = &self.backend
+            && encoded_len > storage_bin.layout.bin_size_bytes.as_u64()
+        {
+            // Body limits do not include serialized metadata or encryption.
+            // An impossible allocation must not evict even an existing version.
+            fluxheim_observability::operational::security(
+                fluxheim_observability::event::SecurityReason::AdmissionRejected,
+            );
+            return Ok(());
+        }
         loop {
-            if !self.evict_until_admissible(&key.combined, encoded_len)? {
-                return Ok(());
-            }
-            let mutation = self.lock_key_mutation(&key.combined);
+            let mutation = match self.try_lock_key_mutation(&key.combined) {
+                Ok(guard) => guard,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
+                Err(error) => return Err(error),
+            };
             let Some(admission) = self.reserve_admission(&key.combined, encoded_len) else {
+                drop(mutation);
+                if !self.evict_until_admissible(&key.combined, encoded_len)? {
+                    return Ok(());
+                }
                 continue;
             };
             self.remove_combined_locked(&key.combined);
@@ -456,16 +471,38 @@ impl NativeDiskCache {
         &self,
         combined_key: &str,
     ) -> std::io::Result<Option<NativeMemoryCacheEntry>> {
-        #[cfg(test)]
-        self.with_state_mut(|state| state.lookup_attempts += 1);
-        self.get_combined_with_reader(combined_key, |record| self.read_record(record))
+        self.lookup_combined_map(combined_key, Some)
     }
 
+    pub(crate) fn lookup_combined_map<T>(
+        &self,
+        combined_key: &str,
+        validate: impl FnOnce(NativeMemoryCacheEntry) -> Option<T>,
+    ) -> std::io::Result<Option<T>> {
+        #[cfg(test)]
+        self.with_state_mut(|state| state.lookup_attempts += 1);
+        self.get_combined_with_reader_and_validation(
+            combined_key,
+            |record| self.read_record(record),
+            validate,
+        )
+    }
+
+    #[cfg(test)]
     fn get_combined_with_reader(
         &self,
         combined_key: &str,
         read: impl FnOnce(&NativeDiskCacheRecord) -> std::io::Result<SerializedCacheObject>,
     ) -> std::io::Result<Option<NativeMemoryCacheEntry>> {
+        self.get_combined_with_reader_and_validation(combined_key, read, Some)
+    }
+
+    fn get_combined_with_reader_and_validation<T>(
+        &self,
+        combined_key: &str,
+        read: impl FnOnce(&NativeDiskCacheRecord) -> std::io::Result<SerializedCacheObject>,
+        validate: impl FnOnce(NativeMemoryCacheEntry) -> Option<T>,
+    ) -> std::io::Result<Option<T>> {
         // Keep the allocation owned until reading finishes; purge/replacement
         // must not recycle a range beneath an active storage-bin reader.
         let read_guard = self.try_lock_key_read(combined_key)?;
@@ -501,7 +538,7 @@ impl NativeDiskCache {
             self.remove_if_unchanged(combined_key, &record)?;
             return Ok(None);
         }
-        let entry = match native_memory_entry_from_disk_object(&object) {
+        let entry = match native_memory_entry_from_disk_object(&object).and_then(validate) {
             Some(entry) => entry,
             None => {
                 drop(read_guard);

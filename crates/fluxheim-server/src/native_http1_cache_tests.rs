@@ -22,6 +22,9 @@ mod bin_admission_tests;
 #[path = "native_http1_cache_fragmentation_tests.rs"]
 mod fragmentation;
 
+#[path = "native_http1_cache_store_admission_tests.rs"]
+mod store_admission;
+
 fn headers(values: &[(&str, &str)]) -> HeaderMap {
     let mut headers = HeaderMap::new();
     for (name, value) in values {

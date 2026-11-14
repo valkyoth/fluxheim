@@ -199,8 +199,13 @@ genuine cache misses.
 Shared per-key read locks protect allocations without serializing readers.
 Mutation is exclusive; a lookup encountering a writer returns promptly to the
 same bounded async retry path rather than occupying a blocking worker waiting
-for that lock. Fresh, stale-while-revalidate and conditional-revalidation
-decisions reuse one disk entry, rather than starting three retry windows.
+for that lock. Best-effort stores also acquire their key lock without waiting;
+a busy stripe skips the disk write before capacity eviction. An eviction that
+encounters a busy victim likewise stops rather than occupying a disk worker
+waiting for readers or another writer. The origin response is unaffected, but
+the attempted disk fill may not be retained. Fresh, stale-while-revalidate and
+conditional-revalidation decisions reuse one disk entry, rather than starting
+three retry windows.
 After a disk error, only already-available eligible memory entries may satisfy
 the lookup; it does not submit another disk phase. A distinct cached range has
 its own key, but is not read from disk after the complete-object lookup failed.
@@ -214,13 +219,19 @@ Existing blocking-work admission still applies independently and returns 503
 immediately when all workers are occupied. The retry window bounds retries,
 not the duration of an individual filesystem call.
 
+Slice validation runs under the same read guard as disk decoding. Rejected
+slices use nonblocking, identity-checked removal rather than an unconditional
+purge. Busy cleanup follows the bounded retry path; a newer replacement is not
+removed. Invalid slices are never served as valid cache hits.
+
 Fragmentation can leave enough free bytes in total without a contiguous range
 large enough for a new object. Allocation itself does not evict: the store
 releases its incoming key lock and admission reservation before selecting and
 locking an eviction victim, then retries admission and allocation. This avoids
-nested key locks, including when different keys share a lock stripe. Existing
-mutation operations may still wait for active readers or filesystem I/O; this
-is not a promise of lock fairness or an OS-operation deadline.
+nested key locks, including when different keys share a lock stripe. Explicit
+purge operations retain synchronized removal and may wait for active readers;
+individual filesystem operations can still block. Nonblocking store/eviction
+key locks are not a promise of lock fairness or an OS-operation deadline.
 
 This is not a bound on all OS handles: ancestor-directory validation, allocator
 leases, index checkpoints, manifest and encryption metadata use additional
@@ -231,7 +242,11 @@ disk reclamation.
 
 An encoded object, including metadata/encryption overhead, must fit inside one
 bin. Setting the maximum body equal to bin size does not reserve that overhead.
-Keep headroom and check actual store results. `preallocate = true` extends a
+An encoded object larger than one bin is skipped before eviction or replacement,
+preserving existing cache objects and their byte accounting. This includes
+oversized updates of an already cached key. Keep headroom and check actual cache
+hits; a successful response does not promise that its disk fill was retained.
+`preallocate = true` extends a
 new file to bin size; physical allocation depends on the filesystem, so this
 is not a guarantee of reserved device capacity.
 

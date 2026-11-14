@@ -35,14 +35,9 @@ impl NativeProxyMemoryCache {
         let slice = super::disk::bounded_disk_lookup(move || {
             // The key already includes both the configured variance and slice
             // range. Do not perform complete-object variant lookup/promotion.
-            let Some(entry) = disk.lookup_combined(&key)? else {
-                return Ok(None);
-            };
-            let slice = fresh_slice(entry, bounds);
-            if slice.is_none() {
-                disk.remove_combined(&key);
-            }
-            Ok(slice)
+            // Validate under the read guard; rejected slices use nonblocking,
+            // generation-checked cleanup instead of an unconditional purge.
+            disk.lookup_combined_map(&key, |entry| fresh_slice(entry, bounds))
         })
         .await
         .map_err(|error| error.reason())?;
