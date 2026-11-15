@@ -182,6 +182,7 @@ impl FluxProxy {
             memory_purged,
             disk_purged,
         };
+        let mut continuation_required = false;
         if selection.cache.range.enabled && selection.cache.range.slice.enabled {
             let slice_limit = usize::try_from(selection.cache.range.slice.max_slices)
                 .unwrap_or(usize::MAX.saturating_sub(4))
@@ -196,6 +197,7 @@ impl FluxProxy {
                 false,
             );
             result.memory_purged |= native_memory.purged > 0;
+            continuation_required |= native_memory.truncated;
             let native_disk = fluxheim_server::purge_native_disk_cache_path_exact(
                 &result.vhost,
                 result.route.as_deref(),
@@ -205,13 +207,20 @@ impl FluxProxy {
                 false,
             );
             result.disk_purged |= native_disk.purged > 0;
+            continuation_required |= native_disk.truncated;
         }
         record_native_cache_purge_activity(
             &result.vhost,
             result.route.as_deref(),
-            false,
+            result.memory_purged,
             result.disk_purged,
         );
+        if continuation_required {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "bounded slice purge is incomplete; some objects may already be purged; repeat the same request",
+            ));
+        }
         Ok(result)
     }
 

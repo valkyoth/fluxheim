@@ -8,11 +8,9 @@ reveal application structure even when response bodies are not printed.
 
 ## Current Invalidation Warnings
 
-- **Current limitation:** native bounded indexed purges currently report
-  `truncated = false` even when matches remain. Consequently `batches` can stop
-  after one batch and `repeat_required = false` is not proof of completion.
-  Stale scans can repeatedly inspect the same fresh front entries and never
-  reach later stale ones. Both memory and disk reporting are affected.
+- Bounded purges report unfinished traversal or failed work through `truncated`
+  and `repeat_required`. A completed traversal is not a fence against concurrent
+  fills or content already delivered to a client.
 - **Current limitation:** storage-bin `soft=true` currently performs a
   hard deletion. It does not retain the stale representation for revalidation
   or origin-failure fallback. Memory/filesystem soft purge retains the object,
@@ -22,10 +20,10 @@ reveal application structure even when response bodies are not printed.
   counting them, even while the response reports `purged = 0`. Do not use it
   as a guaranteed read-only inventory or safety preview.
 
-These are pending corrections, not guarantees supplied by passing tests. Use
+The remaining soft/dry-run limitations are not guarantees supplied by passing tests. Use
 targeted exact/bulk invalidation for known public objects and verify subsequent
 responses/origin counts. For a bounded index purge, inspect the remaining scope
-explicitly rather than trusting completion flags. Avoid unrestricted retry loops
+alongside completion flags. Avoid unrestricted retry loops
 on a changing production cache. Changing a namespace or safely switching to a
 fresh root is an alternative when complete invalidation cannot be established;
 see [recovery](cache-recovery.md). Neither invalidation nor a namespace change
@@ -278,13 +276,34 @@ either. Neither operation removes browser/CDN copies or copies on peers. A peer
 can refill an old object unless invalidation/version changes are coordinated.
 
 Check response counts and actual remaining objects, not just HTTP status.
-`truncated`, `repeat_required` and `batches_exhausted` are currently unreliable
-completion indicators. The request has a bounded result/scan
-limit; that is not a complete filesystem inventory or a hard bound on all index
-traversal work. Stale dry-run executes one scan, but can delete objects as noted
-above. `increase_limit_required` cannot currently be relied on
-to expose a partial native scan. Exact/bulk responses distinguish purged and
-not-purged objects and per-tier results; verify content independently.
+`limit` bounds examined index entries per tier and batch, including entries
+that do not match the selector. Live generations share that budget; visiting an
+empty generation costs one unit. `batches` bounds attempts in this request.
+`truncated` means traversal or failed work remains; `repeat_required` asks for
+another bounded request and `batches_exhausted` identifies the request's cap.
+Counts are tier/object visits, not globally unique client resources. Soft
+purges count only fresh-to-stale changes, not repeated visits to stale copies.
+
+Progress is shared per cache, selector and mode, including across successive
+requests and background ticks. Each index keeps at most 64 pending traversals
+and at most 8 KiB of selector text per traversal. Evicting a cursor restarts its
+scan; it does not claim completion. Each pass has an insertion-sequence boundary;
+new fills/replacements or failed mutations require another pass. Fresh entries
+and nonmatches no longer prevent later entries being examined. Concurrent
+purge contention reports continuation instead of waiting indefinitely.
+
+Retained generations receive work in rotating order. When the limit cannot
+even visit every generation, continuation can remain set after all matches
+are removed; increase the limit or retire unused generations. Continuous fills,
+selector churn or persistent storage errors can also prevent completion. Set a
+finite retry policy and inspect errors instead of looping without a bound.
+This is not a filesystem inventory, a wall-clock deadline, a durable purge
+acknowledgement, or secure erasure. `increase_limit_required` remains false:
+fresh-prefix progress no longer requires increasing the scan limit. Stale
+dry-run can advance through several batches but still has the mutation warning
+above. Exact/bulk responses distinguish purged and not-purged objects; a bounded
+slice continuation returns an explicit incomplete-operation error and may have
+already purged some objects. Repeat the same request and verify content.
 
 ## Schedule Stale Cleanup
 
@@ -301,10 +320,11 @@ an origin warm-up job. Defaults are disabled, 300 seconds, 512 entries and one
 batch. Bounds are 1-86400 seconds, 1-100000 entries and 1-100 batches. Watch
 purger truncation, duration and entry counts before increasing work per tick.
 
-Until the local follow-up, the background disk purger has the same fresh-prefix and false
-completion problem as the admin path. More configured batches do not repair
-that behavior. Monitor disk usage separately and do not assume each periodic
-run eventually visits every stale object.
+The background task shares one entry budget across disk targets per batch and
+retains scan progress between ticks. It reports the final batch's continuation,
+not whether an earlier batch was partial. Target counts represent visits, which
+can repeat across batches. Monitor disk usage separately: continuous churn and
+storage failures can still prevent completion.
 
 ## Verified Recipe Scope
 
@@ -312,11 +332,12 @@ run eventually visits every stale object.
 checked-in named-vhost recipe, private control/observer tokens and loopback-only
 listeners. It exercises status, exact/header purge, bulk, prefix, wildcard, tag,
 indexed purge, fresh-only stale preview and activity reset, across memory,
-filesystem-only and storage-bin-only policies. It verifies denied anonymous and
-observer access, bodies, origin counts and the incomplete-purge defect. Dedicated
-Rust fixtures reproduce stale-prefix starvation, bin soft deletion and expired
-disk deletion during dry-run. Passing these characterizations does not close
-the findings; native Windows/macOS and encrypted-operation proof remain separate.
+filesystem-only, storage-bin-only and both tiered policies. It verifies denied
+anonymous and observer access, bodies, origin counts and over-limit batch
+completion. Dedicated Rust fixtures cover bounded sparse scans, fresh prefixes,
+soft counts, retained generations, failed mutations, encryption and restart.
+Separate characterizations retain the bin soft-deletion and expired disk
+dry-run warnings above. Native qualification is recorded in the commit evidence.
 
 Do not remove live cache directories by hand. Preserve encrypted root/nonce
 state during supported operations, do not share one root between nodes, and

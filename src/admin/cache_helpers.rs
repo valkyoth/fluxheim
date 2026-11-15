@@ -192,18 +192,17 @@ pub(super) fn repeat_cache_indexed_purge(
 #[cfg(feature = "cache")]
 pub(super) fn repeat_cache_stale_purge(
     batches: usize,
-    dry_run: bool,
+    _dry_run: bool,
     mut purge: impl FnMut() -> std::io::Result<fluxheim_cache::CacheStalePurgeResult>,
 ) -> std::io::Result<CacheStalePurgeBatchResult> {
     let mut total: Option<fluxheim_cache::CacheStalePurgeResult> = None;
     let mut batches_run = 0;
-    let mut increase_limit_required = false;
+    let increase_limit_required = false;
 
     for _ in 0..batches {
         let result = purge()?;
         batches_run += 1;
         let truncated = result.truncated();
-        let purged = result.purged();
         match &mut total {
             Some(total) => {
                 total.memory_scanned = total.memory_scanned.saturating_add(result.memory_scanned);
@@ -219,10 +218,6 @@ pub(super) fn repeat_cache_stale_purge(
         }
 
         if !truncated {
-            break;
-        }
-        if dry_run || purged == 0 {
-            increase_limit_required = true;
             break;
         }
     }

@@ -3232,13 +3232,13 @@ batches = 1
 
 When enabled, Fluxheim periodically scans indexed disk-cache entries for each
 vhost and route cache, removes entries whose stored freshness window has
-expired, and stops after the configured bounded `limit` and `batches` per
-target. It does not walk arbitrary cache directories. Truncated non-dry-run
-continuation is not reliable in the native helper today: it reports
-`truncated = false`, and scanned fresh entries are not rotated to let later
-scans reach stale entries behind them. Additional configured
-batches can therefore stop early. This is a pending correction, not proof that
-periodic cleanup covers every expired object.
+expired, and stops after the configured bounded `limit` and `batches`.
+The entry budget is shared across disk targets in each batch, including
+nonmatching index entries and empty-target visits. It does not walk arbitrary
+cache directories. Bounded cursors advance past fresh entries across ticks;
+`truncated` reports unfinished traversal or failed work. Concurrent fills and
+persistent failures can prevent completion. See [cache operations](../guides/cache-operations.md)
+for cursor bounds, retained generations and finite retry guidance.
 Keep `limit` and `batches` modest on large production caches; the admin
 `/_fluxheim/cache/purge-stale` endpoint shares these limits. Its disk
 `dry_run=true` can mutate state during lookup, so it is not a

@@ -12,7 +12,9 @@ use super::native_http1_cache_disk_path::{
     NativeSafeDiskCachePath, create_native_cache_dir_all, native_cache_path_contains_symlink,
     native_disk_cache_read_limit, read_native_disk_cache_file, validate_single_link_file,
 };
-use super::native_http1_cache_meta::{NativeDiskCacheMeta, native_memory_entry_from_disk_object};
+use super::native_http1_cache_meta::{
+    NativeDiskCacheMeta, native_instant_to_unix_secs, native_memory_entry_from_disk_object,
+};
 use super::native_http1_cache_recovery::{
     FILESYSTEM_OBJECT_LIMIT, RECOVERY_ENTRY_LIMIT, RECOVERY_READ_LIMIT, RecoveryBudget,
     RecoveryReport, lowercase_hex, object_name, old_temp, recognizable_file, temp_name,
@@ -253,13 +255,19 @@ impl NativeDiskCache {
         entry: &CachePurgeIndexEntry,
         record: &NativeDiskCacheRecord,
         now: Instant,
-    ) -> bool {
-        let Ok(mut object) = self.read_record(record) else {
-            return false;
-        };
+    ) -> std::io::Result<bool> {
+        let mut object = self.read_record(record)?;
+        let previous_meta = NativeDiskCacheMeta::decode(&object.internal_meta)
+            .ok_or_else(|| std::io::Error::other("cache freshness metadata is invalid"))?;
+        if previous_meta.expires_at_unix_secs <= native_instant_to_unix_secs(now) {
+            return Ok(false);
+        }
         let Some(mut memory_entry) = native_memory_entry_from_disk_object(&object) else {
-            return false;
+            return Err(std::io::Error::other("cache freshness metadata is invalid"));
         };
+        if memory_entry.expires_at <= now {
+            return Ok(false);
+        }
         memory_entry.expires_at = now;
         let meta = NativeDiskCacheMeta::from_entry(
             &memory_entry,
@@ -268,7 +276,7 @@ impl NativeDiskCache {
                 .unwrap_or_default(),
         );
         object.internal_meta = meta.encode();
-        let Ok(encoded) = encode_disk_cache_object(
+        let encoded = encode_disk_cache_object(
             &DiskCacheObjectKey {
                 combined: entry.combined_key.clone(),
                 primary: entry.primary_key.clone(),
@@ -279,21 +287,19 @@ impl NativeDiskCache {
             &object.internal_meta,
             &object.response_header,
             &object.body,
-        ) else {
-            return false;
-        };
+        )?;
         let encoded = if let Some(encryption) = &self.encryption {
-            match encryption.encrypt(&entry.combined_key, &encoded) {
-                Ok(encoded) => encoded,
-                Err(_) => return false,
-            }
+            encryption.encrypt(&entry.combined_key, &encoded)?
         } else {
             encoded
         };
         let NativeDiskCacheLocation::Filesystem(path) = &record.location else {
-            return false;
+            return Err(std::io::Error::other(
+                "cache record is not a filesystem object",
+            ));
         };
-        self.write_object_atomically(path, &encoded).is_ok()
+        self.write_object_atomically(path, &encoded)?;
+        Ok(true)
     }
 
     fn write_object_atomically(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {

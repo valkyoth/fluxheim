@@ -3,7 +3,8 @@ use std::time::Instant;
 
 use fluxheim_cache::CacheBackgroundPurgeResult;
 use fluxheim_cache::purge_index::{
-    CacheIndexedPurgeResult, CachePurgeIndexEntry, CacheStalePurgeResult,
+    CacheIndexedPurgeResult, CachePurgeMode, CachePurgeSelector, CachePurgeVisit,
+    CacheStalePurgeResult,
 };
 
 use super::{NativeDiskCache, NativeDiskCacheLocation};
@@ -65,9 +66,7 @@ impl NativeDiskCache {
     }
 
     fn purge_user_tag(&self, user_tag: &str, limit: usize, soft: bool) -> CacheIndexedPurgeResult {
-        let entries =
-            self.with_state(|state| state.purge_index.entries_for_user_tag(user_tag, limit));
-        self.purge_indexed_entries(entries, soft)
+        self.purge_indexed_entries(CachePurgeSelector::Scope(user_tag), limit, soft)
     }
 
     fn purge_path_prefix(
@@ -77,12 +76,11 @@ impl NativeDiskCache {
         limit: usize,
         soft: bool,
     ) -> CacheIndexedPurgeResult {
-        let entries = self.with_state(|state| {
-            state
-                .purge_index
-                .entries_for_user_tag_path_prefix(user_tag, path_prefix, limit)
-        });
-        self.purge_indexed_entries(entries, soft)
+        self.purge_indexed_entries(
+            CachePurgeSelector::Prefix(user_tag, path_prefix),
+            limit,
+            soft,
+        )
     }
 
     fn purge_path_exact(
@@ -92,12 +90,7 @@ impl NativeDiskCache {
         limit: usize,
         soft: bool,
     ) -> CacheIndexedPurgeResult {
-        let entries = self.with_state(|state| {
-            state
-                .purge_index
-                .entries_for_user_tag_path_exact(user_tag, path_exact, limit)
-        });
-        self.purge_indexed_entries(entries, soft)
+        self.purge_indexed_entries(CachePurgeSelector::Exact(user_tag, path_exact), limit, soft)
     }
 
     fn purge_cache_tag(
@@ -107,12 +100,7 @@ impl NativeDiskCache {
         limit: usize,
         soft: bool,
     ) -> CacheIndexedPurgeResult {
-        let entries = self.with_state(|state| {
-            state
-                .purge_index
-                .entries_for_user_tag_cache_tag(user_tag, cache_tag, limit)
-        });
-        self.purge_indexed_entries(entries, soft)
+        self.purge_indexed_entries(CachePurgeSelector::Tag(user_tag, cache_tag), limit, soft)
     }
 
     fn purge_path_pattern(
@@ -122,28 +110,43 @@ impl NativeDiskCache {
         limit: usize,
         soft: bool,
     ) -> CacheIndexedPurgeResult {
-        let entries = self.with_state(|state| {
-            state
-                .purge_index
-                .entries_for_user_tag_path_pattern(user_tag, path_pattern, limit)
-        });
-        self.purge_indexed_entries(entries, soft)
+        self.purge_indexed_entries(
+            CachePurgeSelector::Pattern(user_tag, path_pattern),
+            limit,
+            soft,
+        )
     }
 
     fn purge_stale(&self, user_tag: &str, limit: usize, dry_run: bool) -> CacheStalePurgeResult {
-        let entries =
-            self.with_state(|state| state.purge_index.entries_for_user_tag(user_tag, limit));
-        self.purge_stale_entries(entries, dry_run)
+        self.purge_stale_entries(CachePurgeSelector::Scope(user_tag), limit, dry_run)
     }
 
     fn purge_indexed_entries(
         &self,
-        entries: Vec<CachePurgeIndexEntry>,
+        selector: CachePurgeSelector<'_>,
+        limit: usize,
         soft: bool,
     ) -> CacheIndexedPurgeResult {
         let now = Instant::now();
-        let mut purged = 0_usize;
-        for entry in &entries {
+        let index = self.with_state(|state| state.purge_index.clone());
+        let mode = if soft {
+            CachePurgeMode::Soft
+        } else {
+            CachePurgeMode::Hard
+        };
+        let result = index.scan(selector, mode, limit, |entry| {
+            let Ok(_mutation) = self.try_lock_key_mutation(&entry.combined_key) else {
+                return CachePurgeVisit {
+                    retry: true,
+                    ..Default::default()
+                };
+            };
+            if !index.contains_entry(entry) {
+                return CachePurgeVisit {
+                    retry: true,
+                    ..Default::default()
+                };
+            }
             if soft {
                 let Some(record) =
                     self.with_state(|state| state.objects.get(&entry.combined_key).cloned())
@@ -151,63 +154,105 @@ impl NativeDiskCache {
                     self.with_state(|state| {
                         state.purge_index.remove_combined(&entry.combined_key);
                     });
-                    continue;
+                    return CachePurgeVisit::default();
                 };
                 if matches!(record.location, NativeDiskCacheLocation::StorageBin(_)) {
-                    if self.remove_combined(&entry.combined_key) {
-                        purged = purged.saturating_add(1);
+                    let purged = self.remove_combined_locked(&entry.combined_key);
+                    return CachePurgeVisit {
+                        purged,
+                        retry: !purged,
+                        ..Default::default()
+                    };
+                }
+                match self.soft_purge_filesystem_record(entry, &record, now) {
+                    Ok(purged) => {
+                        return CachePurgeVisit {
+                            purged,
+                            ..Default::default()
+                        };
                     }
-                    continue;
+                    Err(_) => {
+                        return CachePurgeVisit {
+                            retry: true,
+                            ..Default::default()
+                        };
+                    }
                 }
-                let softened = self.soft_purge_filesystem_record(entry, &record, now);
-                if softened {
-                    purged = purged.saturating_add(1);
-                }
-                continue;
             }
-            if self.remove_combined(&entry.combined_key) {
-                purged = purged.saturating_add(1);
+            let purged = self.remove_combined_locked(&entry.combined_key);
+            let retry =
+                !purged && self.with_state(|state| state.objects.contains_key(&entry.combined_key));
+            CachePurgeVisit {
+                purged,
+                retry,
+                ..Default::default()
             }
-        }
+        });
         CacheIndexedPurgeResult {
-            matched: entries.len(),
-            purged,
-            truncated: false,
+            examined: result.examined,
+            matched: result.matched,
+            purged: result.purged,
+            truncated: result.truncated,
         }
     }
 
     fn purge_stale_entries(
         &self,
-        entries: Vec<CachePurgeIndexEntry>,
+        selector: CachePurgeSelector<'_>,
+        limit: usize,
         dry_run: bool,
     ) -> CacheStalePurgeResult {
         let now = Instant::now();
-        let mut scanned = 0_usize;
-        let mut stale = 0_usize;
-        let mut purged = 0_usize;
-        for entry in &entries {
-            let Ok(Some(object)) = self.lookup_combined(&entry.combined_key) else {
-                self.with_state(|state| {
-                    if !state.objects.contains_key(&entry.combined_key) {
-                        state.purge_index.remove_combined(&entry.combined_key);
-                    }
-                });
-                continue;
+        let index = self.with_state(|state| state.purge_index.clone());
+        let mode = if dry_run {
+            CachePurgeMode::DryRun
+        } else {
+            CachePurgeMode::Stale
+        };
+        let mut scanned = 0;
+        let result = index.scan(selector, mode, limit, |entry| {
+            let expected = self.with_state(|state| state.objects.get(&entry.combined_key).cloned());
+            let object = match self.lookup_combined(&entry.combined_key) {
+                Ok(Some(object)) => object,
+                Err(_) => {
+                    return CachePurgeVisit {
+                        retry: true,
+                        ..Default::default()
+                    };
+                }
+                Ok(None) => {
+                    self.with_state(|state| {
+                        if !state.objects.contains_key(&entry.combined_key) {
+                            state.purge_index.remove_combined(&entry.combined_key);
+                        }
+                    });
+                    return CachePurgeVisit::default();
+                }
             };
-            scanned = scanned.saturating_add(1);
+            scanned += 1;
             if object.expires_at > now {
-                continue;
+                return CachePurgeVisit::default();
             }
-            stale = stale.saturating_add(1);
-            if !dry_run && self.remove_combined(&entry.combined_key) {
-                purged = purged.saturating_add(1);
+            let purged = !dry_run
+                && expected.as_ref().is_some_and(|record| {
+                    self.remove_if_unchanged(&entry.combined_key, record)
+                        .unwrap_or(false)
+                });
+            let retry = !dry_run
+                && !purged
+                && self.with_state(|state| state.objects.contains_key(&entry.combined_key));
+            CachePurgeVisit {
+                stale: true,
+                purged,
+                retry,
             }
-        }
+        });
         CacheStalePurgeResult {
+            examined: result.examined,
             scanned,
-            stale,
-            purged,
-            truncated: false,
+            stale: result.stale,
+            purged: result.purged,
+            truncated: result.truncated,
         }
     }
 }
@@ -266,7 +311,7 @@ pub fn purge_native_disk_cache_user_tag(
     limit: usize,
     soft: bool,
 ) -> CacheIndexedPurgeResult {
-    purge_native_disk_cache_indexed(vhost, route, |cache| {
+    purge_native_disk_cache_indexed(vhost, route, limit, |cache, limit| {
         cache.purge_user_tag(user_tag, limit, soft)
     })
 }
@@ -279,7 +324,7 @@ pub fn purge_native_disk_cache_path_prefix(
     limit: usize,
     soft: bool,
 ) -> CacheIndexedPurgeResult {
-    purge_native_disk_cache_indexed(vhost, route, |cache| {
+    purge_native_disk_cache_indexed(vhost, route, limit, |cache, limit| {
         cache.purge_path_prefix(user_tag, path_prefix, limit, soft)
     })
 }
@@ -292,7 +337,7 @@ pub fn purge_native_disk_cache_path_exact(
     limit: usize,
     soft: bool,
 ) -> CacheIndexedPurgeResult {
-    purge_native_disk_cache_indexed(vhost, route, |cache| {
+    purge_native_disk_cache_indexed(vhost, route, limit, |cache, limit| {
         cache.purge_path_exact(user_tag, path_exact, limit, soft)
     })
 }
@@ -305,7 +350,7 @@ pub fn purge_native_disk_cache_tag(
     limit: usize,
     soft: bool,
 ) -> CacheIndexedPurgeResult {
-    purge_native_disk_cache_indexed(vhost, route, |cache| {
+    purge_native_disk_cache_indexed(vhost, route, limit, |cache, limit| {
         cache.purge_cache_tag(user_tag, cache_tag, limit, soft)
     })
 }
@@ -318,7 +363,7 @@ pub fn purge_native_disk_cache_path_pattern(
     limit: usize,
     soft: bool,
 ) -> CacheIndexedPurgeResult {
-    purge_native_disk_cache_indexed(vhost, route, |cache| {
+    purge_native_disk_cache_indexed(vhost, route, limit, |cache, limit| {
         cache.purge_path_pattern(user_tag, path_pattern, limit, soft)
     })
 }
@@ -330,7 +375,7 @@ pub fn purge_native_disk_cache_stale(
     limit: usize,
     dry_run: bool,
 ) -> CacheStalePurgeResult {
-    purge_native_disk_cache_stale_indexed(vhost, route, |cache| {
+    purge_native_disk_cache_stale_indexed(vhost, route, limit, |cache, limit| {
         cache.purge_stale(user_tag, limit, dry_run)
     })
 }
@@ -352,19 +397,27 @@ pub fn purge_native_disk_cache_stale_all(
         ));
     }
     let mut result = CacheBackgroundPurgeResult::default();
-    for target in native_disk_cache_purge_targets() {
-        result.targets = result.targets.saturating_add(1);
-        let user_tag =
-            fluxheim_cache::cache_user_tag(target.vhost.as_ref(), target.route.as_deref());
-        for _ in 0..batches {
-            let batch = target.cache.purge_stale(&user_tag, limit, false);
+    for _ in 0..batches {
+        let mut remaining = limit;
+        result.truncated = false;
+        for target in native_disk_cache_purge_targets() {
+            if remaining == 0 {
+                result.truncated = true;
+                break;
+            }
+            result.targets = result.targets.saturating_add(1);
+            let user_tag =
+                fluxheim_cache::cache_user_tag(target.vhost.as_ref(), target.route.as_deref());
+            let batch = target.cache.purge_stale(&user_tag, remaining, false);
+            remaining = remaining.saturating_sub(batch.examined.max(1));
             result.scanned = result.scanned.saturating_add(batch.scanned);
             result.stale = result.stale.saturating_add(batch.stale);
             result.purged = result.purged.saturating_add(batch.purged);
             result.truncated |= batch.truncated;
-            if !batch.truncated {
-                break;
-            }
+        }
+        rotate_purge_targets();
+        if !result.truncated {
+            break;
         }
     }
     Ok(result)
@@ -385,32 +438,57 @@ pub(super) fn purge_native_disk_cache(
 fn purge_native_disk_cache_indexed(
     vhost: &str,
     route: Option<&str>,
-    mut purge: impl FnMut(&NativeDiskCache) -> CacheIndexedPurgeResult,
+    mut remaining: usize,
+    mut purge: impl FnMut(&NativeDiskCache, usize) -> CacheIndexedPurgeResult,
 ) -> CacheIndexedPurgeResult {
     let mut result = CacheIndexedPurgeResult::default();
     for target in native_disk_cache_purge_targets_for(vhost, route) {
-        let scoped = purge(&target.cache);
+        if remaining == 0 {
+            result.truncated = true;
+            break;
+        }
+        let scoped = purge(&target.cache, remaining);
+        remaining = remaining.saturating_sub(scoped.examined.max(1));
+        result.examined = result.examined.saturating_add(scoped.examined);
         result.matched = result.matched.saturating_add(scoped.matched);
         result.purged = result.purged.saturating_add(scoped.purged);
         result.truncated |= scoped.truncated;
     }
+    rotate_purge_targets();
     result
 }
 
 fn purge_native_disk_cache_stale_indexed(
     vhost: &str,
     route: Option<&str>,
-    mut purge: impl FnMut(&NativeDiskCache) -> CacheStalePurgeResult,
+    mut remaining: usize,
+    mut purge: impl FnMut(&NativeDiskCache, usize) -> CacheStalePurgeResult,
 ) -> CacheStalePurgeResult {
     let mut result = CacheStalePurgeResult::default();
     for target in native_disk_cache_purge_targets_for(vhost, route) {
-        let scoped = purge(&target.cache);
+        if remaining == 0 {
+            result.truncated = true;
+            break;
+        }
+        let scoped = purge(&target.cache, remaining);
+        remaining = remaining.saturating_sub(scoped.examined.max(1));
+        result.examined = result.examined.saturating_add(scoped.examined);
         result.scanned = result.scanned.saturating_add(scoped.scanned);
         result.stale = result.stale.saturating_add(scoped.stale);
         result.purged = result.purged.saturating_add(scoped.purged);
         result.truncated |= scoped.truncated;
     }
+    rotate_purge_targets();
     result
+}
+
+fn rotate_purge_targets() {
+    if let Some(registry) = NATIVE_DISK_CACHE_PURGE_REGISTRY.get()
+        && let Ok(mut registry) = registry.lock()
+        && !registry.is_empty()
+    {
+        registry.rotate_left(1);
+    }
 }
 
 fn native_disk_cache_purge_targets_for(

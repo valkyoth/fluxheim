@@ -196,7 +196,7 @@ The process tracks at most 4,096 simultaneously live shared disk caches.
 | Finding | Operator consequence | Required correction |
 | --- | --- | --- |
 | the documented limitation | Invalid/unindexed files and abandoned temporaries remain outside tracked occupancy | the local follow-up; monitor actual filesystem usage and use offline maintenance guidance |
-| the documented limitation | Bounded indexed purge may report no continuation while objects remain | the local follow-up; verify remaining scope, do not assume a false completion flag proves emptiness |
+| Bounded indexed purge | Entry work is shared across live generations per tier; sparse scans and failures can require continuation | Repeat bounded requests, inspect `truncated`, and verify the remaining scope; completion is not a fence against concurrent fills |
 | the documented limitation | Bin soft purge deletes instead of retaining a stale body | the local follow-up; do not depend on bin stale fallback after soft purge |
 | the documented limitation | Disk stale dry-run can delete during lookup | the local follow-up; do not use it as a guaranteed read-only preview |
 

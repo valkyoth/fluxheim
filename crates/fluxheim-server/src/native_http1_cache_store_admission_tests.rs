@@ -8,7 +8,7 @@ use crate::blocking_work::{
 };
 use std::io::Write as _;
 
-fn configure_encryption(config: &mut CacheConfig, directory: &std::path::Path) {
+pub(super) fn configure_encryption(config: &mut CacheConfig, directory: &std::path::Path) {
     let key = directory.join("key");
     #[cfg(windows)]
     let mut file = fluxheim_config::fs_trust::create_confidential_file(&key).unwrap();

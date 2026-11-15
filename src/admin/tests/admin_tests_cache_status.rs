@@ -85,7 +85,7 @@ fn stale_purge_batching_repeats_while_progressing() {
 
 #[cfg(feature = "cache")]
 #[test]
-fn stale_purge_batching_does_not_repeat_dry_runs() {
+fn stale_purge_batching_advances_dry_runs_within_batch_bound() {
     let mut calls = 0;
     let result = super::super::repeat_cache_stale_purge(4, true, || {
         calls += 1;
@@ -104,13 +104,38 @@ fn stale_purge_batching_does_not_repeat_dry_runs() {
     })
     .unwrap();
 
-    assert_eq!(calls, 1);
-    assert_eq!(result.batches, 1);
-    assert_eq!(result.scanned(), 1);
-    assert_eq!(result.stale(), 1);
+    assert_eq!(calls, 4);
+    assert_eq!(result.batches, 4);
+    assert_eq!(result.scanned(), 4);
+    assert_eq!(result.stale(), 4);
     assert_eq!(result.purged(), 0);
     assert!(result.truncated());
-    assert!(result.increase_limit_required);
+    assert!(!result.increase_limit_required);
+}
+
+#[cfg(feature = "cache")]
+#[test]
+fn stale_purge_batching_continues_after_a_fresh_prefix() {
+    let mut calls = 0;
+    let result = super::super::repeat_cache_stale_purge(3, false, || {
+        calls += 1;
+        Ok(fluxheim_cache::CacheStalePurgeResult {
+            vhost: "cached".into(),
+            route: None,
+            memory_scanned: 1,
+            memory_stale: usize::from(calls == 2),
+            memory_purged: usize::from(calls == 2),
+            memory_truncated: calls == 1,
+            disk_scanned: 0,
+            disk_stale: 0,
+            disk_purged: 0,
+            disk_truncated: false,
+        })
+    })
+    .unwrap();
+    assert_eq!(result.batches, 2);
+    assert_eq!(result.purged(), 1);
+    assert!(!result.truncated());
 }
 
 #[cfg(feature = "cache")]

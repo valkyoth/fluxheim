@@ -2,7 +2,8 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Instant;
 
 use fluxheim_cache::purge_index::{
-    CacheIndexedPurgeResult, CachePurgeIndexEntry, CacheStalePurgeResult,
+    CacheIndexedPurgeResult, CachePurgeMode, CachePurgeSelector, CachePurgeVisit,
+    CacheStalePurgeResult,
 };
 
 use crate::native_http1_cache::{
@@ -175,9 +176,8 @@ pub fn purge_native_memory_cache_user_tag(
     limit: usize,
     soft: bool,
 ) -> CacheIndexedPurgeResult {
-    purge_native_memory_cache_indexed(vhost, route, |state| {
-        let entries = state.purge_index.entries_for_user_tag(user_tag, limit);
-        purge_native_memory_indexed_entries(state, entries, soft)
+    purge_native_memory_cache_indexed(vhost, route, limit, |state, limit| {
+        purge_native_memory_indexed_entries(state, CachePurgeSelector::Scope(user_tag), limit, soft)
     })
 }
 
@@ -189,12 +189,13 @@ pub fn purge_native_memory_cache_path_prefix(
     limit: usize,
     soft: bool,
 ) -> CacheIndexedPurgeResult {
-    purge_native_memory_cache_indexed(vhost, route, |state| {
-        let entries =
-            state
-                .purge_index
-                .entries_for_user_tag_path_prefix(user_tag, path_prefix, limit);
-        purge_native_memory_indexed_entries(state, entries, soft)
+    purge_native_memory_cache_indexed(vhost, route, limit, |state, limit| {
+        purge_native_memory_indexed_entries(
+            state,
+            CachePurgeSelector::Prefix(user_tag, path_prefix),
+            limit,
+            soft,
+        )
     })
 }
 
@@ -206,11 +207,13 @@ pub fn purge_native_memory_cache_path_exact(
     limit: usize,
     soft: bool,
 ) -> CacheIndexedPurgeResult {
-    purge_native_memory_cache_indexed(vhost, route, |state| {
-        let entries = state
-            .purge_index
-            .entries_for_user_tag_path_exact(user_tag, path_exact, limit);
-        purge_native_memory_indexed_entries(state, entries, soft)
+    purge_native_memory_cache_indexed(vhost, route, limit, |state, limit| {
+        purge_native_memory_indexed_entries(
+            state,
+            CachePurgeSelector::Exact(user_tag, path_exact),
+            limit,
+            soft,
+        )
     })
 }
 
@@ -222,11 +225,13 @@ pub fn purge_native_memory_cache_tag(
     limit: usize,
     soft: bool,
 ) -> CacheIndexedPurgeResult {
-    purge_native_memory_cache_indexed(vhost, route, |state| {
-        let entries = state
-            .purge_index
-            .entries_for_user_tag_cache_tag(user_tag, cache_tag, limit);
-        purge_native_memory_indexed_entries(state, entries, soft)
+    purge_native_memory_cache_indexed(vhost, route, limit, |state, limit| {
+        purge_native_memory_indexed_entries(
+            state,
+            CachePurgeSelector::Tag(user_tag, cache_tag),
+            limit,
+            soft,
+        )
     })
 }
 
@@ -238,12 +243,13 @@ pub fn purge_native_memory_cache_path_pattern(
     limit: usize,
     soft: bool,
 ) -> CacheIndexedPurgeResult {
-    purge_native_memory_cache_indexed(vhost, route, |state| {
-        let entries =
-            state
-                .purge_index
-                .entries_for_user_tag_path_pattern(user_tag, path_pattern, limit);
-        purge_native_memory_indexed_entries(state, entries, soft)
+    purge_native_memory_cache_indexed(vhost, route, limit, |state, limit| {
+        purge_native_memory_indexed_entries(
+            state,
+            CachePurgeSelector::Pattern(user_tag, path_pattern),
+            limit,
+            soft,
+        )
     })
 }
 
@@ -254,19 +260,24 @@ pub fn purge_native_memory_cache_stale(
     limit: usize,
     dry_run: bool,
 ) -> CacheStalePurgeResult {
-    purge_native_memory_cache_stale_indexed(vhost, route, |state| {
+    purge_native_memory_cache_stale_indexed(vhost, route, limit, |state, limit| {
         if !dry_run {
             state.slice_backoff.clear();
         }
-        let entries = state.purge_index.entries_for_user_tag(user_tag, limit);
-        purge_native_memory_stale_entries(state, entries, dry_run)
+        purge_native_memory_stale_entries(
+            state,
+            CachePurgeSelector::Scope(user_tag),
+            limit,
+            dry_run,
+        )
     })
 }
 
 fn purge_native_memory_cache_indexed(
     vhost: &str,
     route: Option<&str>,
-    mut purge: impl FnMut(&mut NativeMemoryCacheState) -> CacheIndexedPurgeResult,
+    mut remaining: usize,
+    mut purge: impl FnMut(&mut NativeMemoryCacheState, usize) -> CacheIndexedPurgeResult,
 ) -> CacheIndexedPurgeResult {
     let Some(registry) = NATIVE_MEMORY_CACHE_PURGE_REGISTRY.get() else {
         return CacheIndexedPurgeResult::default();
@@ -292,7 +303,13 @@ fn purge_native_memory_cache_indexed(
             return true;
         }
         let mut state = lock_native_memory_cache(&state, "proxy purge");
-        let scoped = purge(&mut state);
+        if remaining == 0 {
+            result.truncated = true;
+            return true;
+        }
+        let scoped = purge(&mut state, remaining);
+        remaining = remaining.saturating_sub(scoped.examined.max(1));
+        result.examined = result.examined.saturating_add(scoped.examined);
         // Negative slice marks have no object/tag index. Any scoped mutating
         // purge resets this small policy hint; response purge counts stay exact.
         state.slice_backoff.clear();
@@ -301,13 +318,17 @@ fn purge_native_memory_cache_indexed(
         result.truncated |= scoped.truncated;
         true
     });
+    if !registry.is_empty() {
+        registry.rotate_left(1);
+    }
     result
 }
 
 fn purge_native_memory_cache_stale_indexed(
     vhost: &str,
     route: Option<&str>,
-    mut purge: impl FnMut(&mut NativeMemoryCacheState) -> CacheStalePurgeResult,
+    mut remaining: usize,
+    mut purge: impl FnMut(&mut NativeMemoryCacheState, usize) -> CacheStalePurgeResult,
 ) -> CacheStalePurgeResult {
     let Some(registry) = NATIVE_MEMORY_CACHE_PURGE_REGISTRY.get() else {
         return CacheStalePurgeResult::default();
@@ -333,80 +354,121 @@ fn purge_native_memory_cache_stale_indexed(
             return true;
         }
         let mut state = lock_native_memory_cache(&state, "proxy purge");
-        let scoped = purge(&mut state);
+        if remaining == 0 {
+            result.truncated = true;
+            return true;
+        }
+        let scoped = purge(&mut state, remaining);
+        remaining = remaining.saturating_sub(scoped.examined.max(1));
+        result.examined = result.examined.saturating_add(scoped.examined);
         result.scanned = result.scanned.saturating_add(scoped.scanned);
         result.stale = result.stale.saturating_add(scoped.stale);
         result.purged = result.purged.saturating_add(scoped.purged);
         result.truncated |= scoped.truncated;
         true
     });
+    if !registry.is_empty() {
+        registry.rotate_left(1);
+    }
     result
 }
 
 fn purge_native_memory_indexed_entries(
     state: &mut NativeMemoryCacheState,
-    entries: Vec<CachePurgeIndexEntry>,
+    selector: CachePurgeSelector<'_>,
+    limit: usize,
     soft: bool,
 ) -> CacheIndexedPurgeResult {
-    let mut purged = 0_usize;
     let now = Instant::now();
-    for entry in &entries {
+    let index = state.purge_index.clone();
+    let mode = if soft {
+        CachePurgeMode::Soft
+    } else {
+        CachePurgeMode::Hard
+    };
+    let result = index.scan(selector, mode, limit, |entry| {
         if soft {
             let Some(object) = state.objects.get_mut(&entry.combined_key) else {
                 state.purge_index.remove_combined(&entry.combined_key);
-                continue;
+                return CachePurgeVisit::default();
             };
+            if object.expires_at <= now {
+                return CachePurgeVisit::default();
+            }
             object.expires_at = now;
-            purged = purged.saturating_add(1);
-            continue;
+            return CachePurgeVisit {
+                purged: true,
+                ..Default::default()
+            };
         }
         if let Some(object) = remove_native_memory_cache_entry(state, &entry.combined_key) {
             state.bytes = state.bytes.saturating_sub(object.weight);
-            purged = purged.saturating_add(1);
+            return CachePurgeVisit {
+                purged: true,
+                ..Default::default()
+            };
         } else {
             state.purge_index.remove_combined(&entry.combined_key);
         }
-    }
+        CachePurgeVisit::default()
+    });
     CacheIndexedPurgeResult {
-        matched: entries.len(),
-        purged,
-        truncated: false,
+        examined: result.examined,
+        matched: result.matched,
+        purged: result.purged,
+        truncated: result.truncated,
     }
 }
 
 fn purge_native_memory_stale_entries(
     state: &mut NativeMemoryCacheState,
-    entries: Vec<CachePurgeIndexEntry>,
+    selector: CachePurgeSelector<'_>,
+    limit: usize,
     dry_run: bool,
 ) -> CacheStalePurgeResult {
     let now = Instant::now();
     let mut scanned = 0_usize;
-    let mut stale = 0_usize;
-    let mut purged = 0_usize;
-    for entry in &entries {
+    let index = state.purge_index.clone();
+    let mode = if dry_run {
+        CachePurgeMode::DryRun
+    } else {
+        CachePurgeMode::Stale
+    };
+    let result = index.scan(selector, mode, limit, |entry| {
         let Some(object) = state.objects.get(&entry.combined_key) else {
             state.purge_index.remove_combined(&entry.combined_key);
-            continue;
+            return CachePurgeVisit::default();
         };
         scanned = scanned.saturating_add(1);
         if object.expires_at > now {
-            continue;
+            return CachePurgeVisit::default();
         }
-        stale = stale.saturating_add(1);
         if dry_run {
-            continue;
+            return CachePurgeVisit {
+                stale: true,
+                ..Default::default()
+            };
         }
         let weight = object.weight;
         if remove_native_memory_cache_entry(state, &entry.combined_key).is_some() {
             state.bytes = state.bytes.saturating_sub(weight);
-            purged = purged.saturating_add(1);
+            return CachePurgeVisit {
+                stale: true,
+                purged: true,
+                ..Default::default()
+            };
         }
-    }
+        CachePurgeVisit {
+            stale: true,
+            ..Default::default()
+        }
+    });
     CacheStalePurgeResult {
+        examined: result.examined,
         scanned,
-        stale,
-        purged,
-        truncated: false,
+        stale: result.stale,
+        purged: result.purged,
+        truncated: result.truncated,
     }
 }
 

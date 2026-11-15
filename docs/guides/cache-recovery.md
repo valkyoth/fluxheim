@@ -365,7 +365,7 @@ write errors remain runtime failures rather than a durable-storage guarantee.
 
 Use protected indexed purges and the background stale purger for normal work.
 The [operations warnings](cache-operations.md#current-invalidation-warnings)
-qualify this advice: bounded purges can report false completion, the bin soft
+qualify this advice: bounded purges can require continuation, the bin soft
 purge deletes instead of retaining stale bytes, and disk dry-run can mutate
 objects. Verify effects, not just success flags.
 They operate on recognized indexed objects, not arbitrary corrupt files and

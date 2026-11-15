@@ -6,7 +6,7 @@ import socket
 import unittest
 import tempfile
 from contextlib import nullcontext
-from unittest.mock import mock_open, patch
+from unittest.mock import Mock, mock_open, patch
 from pathlib import Path
 
 import smoke_cache_examples as smoke
@@ -22,6 +22,20 @@ def load_tests(loader, tests, _pattern):
 
 
 class CacheGuideTests(unittest.TestCase):
+    def test_metrics_readiness_retries_only_connection_and_has_a_deadline(self):
+        client = Mock()
+        client.connect.side_effect = [ConnectionRefusedError(), None]
+        with patch.object(operations.time, "sleep"), patch.object(operations.time, "monotonic", side_effect=[0, 1]):
+            operations.connect_metrics(client)
+        self.assertEqual(client.connect.call_count, 2)
+        client.request.assert_not_called()
+        client = Mock()
+        client.connect.side_effect = TimeoutError()
+        with patch.object(operations.time, "monotonic", side_effect=[0, 11]):
+            with self.assertRaises(TimeoutError):
+                operations.connect_metrics(client)
+        client.request.assert_not_called()
+
     def test_origin_language_header_uses_only_fixed_fixture_values(self):
         cases = (
             (b"", b"none"),
@@ -159,8 +173,8 @@ class CacheGuideTests(unittest.TestCase):
         self.assertNotIn("ResponseTooLarge", cache)
         self.assertNotIn("stale purges rotate scanned fresh entries", cache)
 
-    def test_admin_fixture_is_loopback_authenticated_and_single_tier(self):
-        for backend in ("memory", "filesystem", "storage-bin"):
+    def test_admin_fixture_is_loopback_authenticated_for_all_tiers(self):
+        for backend in ("memory", "filesystem", "storage-bin", "tiered-filesystem", "tiered-storage-bin"):
             rendered = tomllib.loads(operations.configuration(12345, 12346, 12347, backend))
             self.assertFalse(rendered["cache"]["enabled"])
             self.assertEqual(rendered["logging"]["level"], "info")
@@ -169,7 +183,7 @@ class CacheGuideTests(unittest.TestCase):
             self.assertEqual(rendered["admin"]["token_file"], "control-token")
             self.assertEqual(rendered["admin"]["operational_token_file"], "observer-token")
             cache = rendered["vhosts"][0]["cache"]
-            self.assertEqual(cache["memory"]["enabled"], backend == "memory")
+            self.assertEqual(cache["memory"]["enabled"], backend == "memory" or backend.startswith("tiered-"))
             self.assertEqual(cache["disk"]["enabled"], backend != "memory")
         with self.assertRaises(ValueError):
             operations.configuration(12345, 12346, 12347, "../untrusted")

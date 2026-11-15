@@ -1,15 +1,23 @@
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::{Arc, RwLock};
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex, RwLock};
+
+#[path = "purge_scan.rs"]
+mod scan;
+pub use scan::{CachePurgeMode, CachePurgeScanResult, CachePurgeSelector, CachePurgeVisit};
 
 #[derive(Debug, Clone)]
 pub struct CachePurgeIndex {
     inner: Arc<RwLock<CachePurgeIndexInner>>,
+    scans: Arc<Mutex<scan::Scans>>,
 }
 
 #[derive(Debug, Default)]
 struct CachePurgeIndexInner {
     entries: HashMap<String, CachePurgeIndexEntry>,
-    order: VecDeque<String>,
+    order: BTreeMap<u64, String>,
+    positions: HashMap<String, u64>,
+    sequence: u64,
+    exhausted: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -23,6 +31,7 @@ pub struct CachePurgeIndexEntry {
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct CacheIndexedPurgeResult {
+    pub examined: usize,
     pub matched: usize,
     pub purged: usize,
     pub truncated: bool,
@@ -30,6 +39,7 @@ pub struct CacheIndexedPurgeResult {
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct CacheStalePurgeResult {
+    pub examined: usize,
     pub scanned: usize,
     pub stale: usize,
     pub purged: usize,
@@ -40,6 +50,7 @@ impl CachePurgeIndex {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(RwLock::new(CachePurgeIndexInner::default())),
+            scans: Arc::new(Mutex::new(scan::Scans::default())),
         }
     }
 
@@ -70,21 +81,15 @@ impl CachePurgeIndex {
             return;
         };
 
-        if inner.entries.contains_key(&combined_key) {
-            inner.entries.insert(
-                combined_key.clone(),
-                CachePurgeIndexEntry {
-                    combined_key,
-                    primary_key,
-                    user_tag,
-                    path,
-                    cache_tags,
-                },
-            );
+        let Some(sequence) = inner.sequence.checked_add(1) else {
+            inner.exhausted = true;
             return;
+        };
+        inner.sequence = sequence;
+        if let Some(previous) = inner.positions.insert(combined_key.clone(), sequence) {
+            inner.order.remove(&previous);
         }
-
-        inner.order.push_back(combined_key.clone());
+        inner.order.insert(sequence, combined_key.clone());
         inner.entries.insert(
             combined_key.clone(),
             CachePurgeIndexEntry {
@@ -102,8 +107,8 @@ impl CachePurgeIndex {
             return false;
         };
         let removed = inner.entries.remove(combined_key).is_some();
-        if removed {
-            inner.order.retain(|candidate| candidate != combined_key);
+        if removed && let Some(position) = inner.positions.remove(combined_key) {
+            inner.order.remove(&position);
         }
         removed
     }
@@ -115,6 +120,12 @@ impl CachePurgeIndex {
         inner.entries.contains_key(combined_key)
     }
 
+    pub fn contains_entry(&self, entry: &CachePurgeIndexEntry) -> bool {
+        self.inner
+            .read()
+            .is_ok_and(|inner| inner.entries.get(&entry.combined_key) == Some(entry))
+    }
+
     #[doc(hidden)]
     pub fn move_combined_keys_to_back(&self, combined_keys: &[String]) {
         if combined_keys.is_empty() {
@@ -123,17 +134,20 @@ impl CachePurgeIndex {
         let Ok(mut inner) = self.inner.write() else {
             return;
         };
-        let candidates = combined_keys
-            .iter()
-            .filter(|key| inner.entries.contains_key(key.as_str()))
-            .cloned()
-            .collect::<Vec<_>>();
-        if candidates.is_empty() {
-            return;
+        for key in combined_keys {
+            if !inner.entries.contains_key(key) {
+                continue;
+            }
+            let Some(sequence) = inner.sequence.checked_add(1) else {
+                inner.exhausted = true;
+                return;
+            };
+            inner.sequence = sequence;
+            if let Some(previous) = inner.positions.insert(key.clone(), sequence) {
+                inner.order.remove(&previous);
+            }
+            inner.order.insert(sequence, key.clone());
         }
-        let candidate_set = candidates.iter().cloned().collect::<HashSet<_>>();
-        inner.order.retain(|key| !candidate_set.contains(key));
-        inner.order.extend(candidates);
     }
 
     pub fn combined_keys_for_primary(&self, primary_key: &str) -> Vec<String> {
@@ -240,7 +254,7 @@ impl CachePurgeIndex {
         };
         inner
             .order
-            .iter()
+            .values()
             .filter_map(|key| inner.entries.get(key))
             .filter(|entry| matches(entry))
             .take(limit)

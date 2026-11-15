@@ -15,16 +15,18 @@ impl NativeDiskCache {
     }
 
     pub(crate) fn remove_combined_locked(&self, combined_key: &str) -> bool {
-        let filesystem = self.with_state(|state| {
-            state.objects.get(combined_key).and_then(|record| {
-                matches!(record.location, NativeDiskCacheLocation::Filesystem(_))
-                    .then(|| record.location.clone())
-            })
+        let location = self.with_state(|state| {
+            state
+                .objects
+                .get(combined_key)
+                .map(|record| record.location.clone())
         });
-        if let Some(location) = &filesystem
+        if let Some(location) = &location
             && self.remove_location(location).is_err()
         {
-            self.pause_filesystem_writes();
+            if matches!(location, NativeDiskCacheLocation::Filesystem(_)) {
+                self.pause_filesystem_writes();
+            }
             return false;
         }
         let removed = self.with_state_mut(|state| {
@@ -39,10 +41,7 @@ impl NativeDiskCache {
             });
             removed
         });
-        if let Some(record) = removed {
-            if filesystem.is_none() {
-                let _ = self.remove_location(&record.location);
-            }
+        if removed.is_some() {
             self.persist_storage_bin_index();
             return true;
         }

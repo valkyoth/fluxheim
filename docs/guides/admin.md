@@ -173,7 +173,7 @@ compiled profile are not enabled by adding configuration.
 | `/_fluxheim/cache/purge-wildcard` | Indexed path pattern; same work controls |
 | `/_fluxheim/cache/purge-stale` | Stale-object traversal; limit/batches and dry-run option |
 
-Read the linked guide's outstanding soft-purge, progress and dry-run warnings
+Read the linked guide's bounded continuation contract and soft-purge/dry-run warnings
 before production use. A successful HTTP response alone does not establish
 complete purge across every tier or fix those recorded limitations.
 
