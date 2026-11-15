@@ -1,3 +1,5 @@
+use fluxheim_common::test_process::{TestBinary, self_command};
+
 use tokio::net::TcpListener;
 
 use crate::NativeHttp1RouteProxy;
@@ -83,7 +85,7 @@ async fn disk_cache_saturation_child_process() {
 
 #[test]
 fn disk_cache_saturation_fails_closed_without_origin_contact() {
-    let status = std::process::Command::new(std::env::current_exe().unwrap())
+    let status = self_command(TestBinary::NativeServer).unwrap()
         .arg("--exact")
         .arg(
             "native_http1_route_proxy_tests::cache_saturation_tests::disk_cache_saturation_child_process",
@@ -232,7 +234,7 @@ async fn disk_cache_key_contention_child_process() {
 
 #[test]
 fn disk_cache_key_contention_returns_503_without_origin_contact() {
-    let status = std::process::Command::new(std::env::current_exe().unwrap())
+    let status = self_command(TestBinary::NativeServer).unwrap()
         .args(["--exact", "native_http1_route_proxy_tests::cache_saturation_tests::disk_cache_key_contention_child_process", "--nocapture"])
         .env("FLUXHEIM_CACHE_KEY_CONTENTION_CHILD", "1")
         .status().unwrap();

@@ -1,3 +1,5 @@
+use fluxheim_common::test_process::{TestBinary, self_command};
+
 use super::super::native_http1_cache_state::native_disk_cache_mutation_lock_stripe;
 use super::*;
 use crate::blocking_work::{
@@ -262,7 +264,8 @@ fn contended_store_child() {
 
 #[test]
 fn contended_stores_and_evictions_release_disk_workers() {
-    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+    let mut child = self_command(TestBinary::NativeServer)
+        .unwrap()
         .args([
             "--exact",
             "native_http1_cache::tests::store_admission::contended_store_child",

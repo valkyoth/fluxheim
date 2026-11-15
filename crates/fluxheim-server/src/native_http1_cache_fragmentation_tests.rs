@@ -1,3 +1,5 @@
+use fluxheim_common::test_process::{TestBinary, self_command};
+
 use super::super::native_http1_cache_state::native_disk_cache_mutation_lock_stripe;
 use super::*;
 
@@ -94,7 +96,8 @@ fn storage_bin_fragmented_collision_child() {
 
 #[test]
 fn storage_bin_fragmented_same_stripe_store_finishes_and_restarts() {
-    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+    let mut child = self_command(TestBinary::NativeServer)
+        .unwrap()
         .args([
             "--exact",
             "native_http1_cache::tests::fragmentation::storage_bin_fragmented_collision_child",

@@ -364,3 +364,32 @@ Windows Python fixtures retain two existing platform/privilege skips.
 The bounded store/cleanup regressions and manual filesystem capacity test pass.
 Native archives, ARM64, reproducibility, independent pentest and exact-commit
 GitHub acceptance remain separate gates.
+
+## CodeQL Test Launcher Follow-Up
+
+Correction base: `ed7f22626e726cc6fe1281eab7eb2f458ce04e7b`.
+Qualification date: 2026-11-15.
+
+Alerts #466, #467 and #468 identify direct `current_exe()` subprocess launches
+in cache regressions. They are test-only call sites, not production command
+execution. The existing checked `fluxheim-common::test_process` launcher now
+recognizes the closed `fluxheim_server-<16 hex digits>` test-binary name with the
+platform executable suffix. It requires the canonical executable to be directly
+inside the compiler-selected Cargo profile's `deps` directory. All seven native
+server cache-test self-launches use this helper, including lease and slice tests.
+Literal test filters, subprocess isolation and existing watchdogs are unchanged.
+
+New regressions reject other directories, parent/nested paths, wrong crates,
+wrong hash lengths, non-hex hashes and appended suffixes/arguments. No CodeQL
+suppression or alert dismissal was applied. The next GitHub scan must confirm
+alert closure; local checks do not establish that scanner result.
+
+Verification passed: three launcher tests, the full locked Linux workspace,
+807 all-feature Linux server tests, 651 native macOS server tests, strict
+Clippy on both platforms, and Windows MSVC cross-checking of the common test
+helper. The existing manual capacity test remains skipped in the ordinary
+server suites; its separate qualification is recorded above. Formatting,
+documentation links, diff checks, RustSec (449 dependencies, 1,509 advisories)
+and cargo-deny also passed. Native Windows execution is left to CI for this
+test-only change. No production cache code, dependencies, workflows or private
+review documents changed.

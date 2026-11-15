@@ -1,3 +1,5 @@
+use fluxheim_common::test_process::{TestBinary, self_command};
+
 use super::*;
 use fluxheim_config::{ByteSize, CacheDiskBackend};
 
@@ -19,7 +21,7 @@ fn policy(root: &std::path::Path, backend: CacheDiskBackend) -> fluxheim_config:
 fn slice_disk_concurrent_fills_collapse_without_retained_memory() {
     // This test deliberately occupies the whole process-wide disk budget.
     // Keep unrelated parallel tests outside that budget, not outside the assertion.
-    let status = std::process::Command::new(std::env::current_exe().unwrap())
+    let status = self_command(TestBinary::NativeServer).unwrap()
         .arg("--exact")
         .arg("native_http1_route_proxy_tests::cache_slice_storage::slice_disk_concurrent_fills_child")
         .env("FLUXHEIM_SLICE_CONCURRENCY_CHILD", "1")

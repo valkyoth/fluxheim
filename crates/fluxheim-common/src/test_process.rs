@@ -8,6 +8,7 @@ use std::process::Command;
 pub enum TestBinary {
     Common,
     Server,
+    NativeServer,
     Wasm,
 }
 
@@ -32,6 +33,7 @@ fn checked_command(directory: &Path, executable: &Path, binary: TestBinary) -> i
     let prefix = match binary {
         TestBinary::Common => "fluxheim_common-",
         TestBinary::Server => "fluxheim-",
+        TestBinary::NativeServer => "fluxheim_server-",
         TestBinary::Wasm => "fluxheim_wasm-",
     };
     let name = executable
@@ -62,6 +64,7 @@ mod tests {
     fn running_common_test_binary_is_allowed() {
         assert!(self_command(TestBinary::Common).is_ok());
         assert!(self_command(TestBinary::Server).is_err());
+        assert!(self_command(TestBinary::NativeServer).is_err());
         assert!(self_command(TestBinary::Wasm).is_err());
     }
 
@@ -87,6 +90,59 @@ mod tests {
         ] {
             assert!(
                 checked_command(&root, &path, TestBinary::Server).is_err(),
+                "{path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn native_server_binary_requires_exact_directory_crate_and_cargo_hash() {
+        let root = Path::new("trusted").join("deps");
+        let name = format!(
+            "fluxheim_server-0123456789abcdef{}",
+            std::env::consts::EXE_SUFFIX
+        );
+        let expected = root.join(&name);
+        let command = checked_command(&root, &expected, TestBinary::NativeServer).unwrap();
+        assert_eq!(command.get_program(), expected.as_os_str());
+        assert_eq!(command.get_args().count(), 0);
+        for other in [TestBinary::Common, TestBinary::Server, TestBinary::Wasm] {
+            assert!(checked_command(&root, &expected, other).is_err());
+        }
+        for path in [
+            Path::new("outside").join(&name),
+            root.join("..").join(&name),
+            root.join("nested").join(&name),
+            root.join("sh"),
+            root.join(format!(
+                "fluxheim-0123456789abcdef{}",
+                std::env::consts::EXE_SUFFIX
+            )),
+            root.join(format!(
+                "fluxheim_wasm-0123456789abcdef{}",
+                std::env::consts::EXE_SUFFIX
+            )),
+            root.join(format!(
+                "fluxheim_common-0123456789abcdef{}",
+                std::env::consts::EXE_SUFFIX
+            )),
+            root.join(format!(
+                "fluxheim_server-0123456789abcde{}",
+                std::env::consts::EXE_SUFFIX
+            )),
+            root.join(format!(
+                "fluxheim_server-0123456789abcdef0{}",
+                std::env::consts::EXE_SUFFIX
+            )),
+            root.join(format!(
+                "fluxheim_server-0123456789abcdeg{}",
+                std::env::consts::EXE_SUFFIX
+            )),
+            root.join(format!("{name}.extra")),
+            root.join(format!("{name} --ignored")),
+        ] {
+            assert!(
+                checked_command(&root, &path, TestBinary::NativeServer).is_err(),
                 "{path:?}"
             );
         }

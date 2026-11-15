@@ -1,3 +1,5 @@
+use fluxheim_common::test_process::{TestBinary, self_command};
+
 use super::native_http1_cache_backend::{
     acquire_native_storage_bin_lease, prepare_native_storage_bin_layout_locked,
 };
@@ -49,7 +51,8 @@ fn storage_bin_lease_rejects_second_process() {
     let root = directory.path().join("cache");
     let config = storage_bin_config(&root);
     let _cache = NativeDiskCache::from_config(&config).unwrap();
-    let output = std::process::Command::new(std::env::current_exe().unwrap())
+    let output = self_command(TestBinary::NativeServer)
+        .unwrap()
         .arg("--exact")
         .arg("native_http1_cache::lease_tests::storage_bin_lease_child_process")
         .arg("--nocapture")
@@ -75,7 +78,8 @@ fn storage_bin_loser_cannot_mutate_winner_layout() {
     let manifest_path = root.join(".fluxheim-storage-bin-v1");
     let winning_manifest = std::fs::read(&manifest_path).unwrap();
 
-    let output = std::process::Command::new(std::env::current_exe().unwrap())
+    let output = self_command(TestBinary::NativeServer)
+        .unwrap()
         .arg("--exact")
         .arg("native_http1_cache::lease_tests::storage_bin_lease_child_process")
         .arg("--nocapture")
