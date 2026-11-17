@@ -1,4 +1,4 @@
-ARG RUST_IMAGE=docker.io/library/rust:1.99.1-alpine3.23@sha256:96e773beb97c24572dcc462458cf84776fddc347302b9ab732a6b98b7822ad38
+ARG RUST_IMAGE=docker.io/library/rust:1.100.0-alpine3.23@sha256:23ee60d5346e4042efbc9f9120d736be4b5c7f29becf2ebea181160422ca8d30
 ARG RUNTIME_IMAGE=cgr.dev/chainguard/wolfi-base:latest@sha256:81211e15a86ea1d5357f284482af45730c51de45eaf10ad9ce205d6bfc2df323
 ARG FLUXHEIM_CONFIG=packaging/container/fluxheim.toml
 

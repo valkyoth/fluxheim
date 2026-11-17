@@ -45,11 +45,7 @@ fn safe_forward_path_segment(segment: &str) -> bool {
         current.push_str(decoded_text);
     }
 
-    if current.contains('%') {
-        return false;
-    }
-
-    true
+    !current.contains('%')
 }
 
 fn unsafe_decoded_forward_path_segment(segment: &[u8]) -> bool {

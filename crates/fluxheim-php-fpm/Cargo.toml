@@ -2,7 +2,7 @@
 name = "fluxheim-php-fpm"
 version = "1.9.0"
 edition = "2024"
-rust-version = "1.99.1"
+rust-version = "1.100.0"
 license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim PHP-FPM protocol and runtime boundary."

@@ -17,6 +17,7 @@ def configuration(public, origin, admin, backend):
     if backend not in ("memory", "filesystem", "storage-bin", "tiered-filesystem", "tiered-storage-bin"):
         raise ValueError("unsupported operations backend")
     source = prepare(public, origin, operations=True)
+    source = replace_once(source, "[vhosts.cache]", '[vhosts.cache]\nstale_if_error_secs = 60\nstale_if_error_on = ["http-status"]\nstale_if_error_statuses = [503]')
     source = replace_once(source, 'level = "warn"', 'level = "info"')
     source = replace_once(source, "[cache]\nenabled = true", "[cache]\nenabled = false")
     if backend == "memory":
@@ -181,6 +182,13 @@ def run_case(parent, backend, metrics=False):
                     before = count(path)
                     assert request(public, path) == "MISS"
                     assert count(path) == before + 1
+                purge("purge-index?vhost=assets&limit=10")
+            for path, expected in (("/soft-validator.css", "REVALIDATED"), ("/soft-error.css", "STALE")):
+                fill(path)
+                result = purge("purge-index?vhost=assets&limit=10&soft=true")
+                assert result["purged"] == copies and not result["truncated"], result
+                assert request(public, path) == expected
+                assert count(path) == 2
                 purge("purge-index?vhost=assets&limit=10")
             fill("/b.css")
             purge("activity/reset")

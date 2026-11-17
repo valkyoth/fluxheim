@@ -955,9 +955,8 @@ vhost. Purge responses include the selected vhost/route, the normalized
 so bulk purge output can be audited without decoding cache keys.
 Indexed scope, prefix, tag, and wildcard purge endpoints accept `soft=true` or
 `x-fluxheim-cache-soft: true` to mark matched objects stale without deleting
-their cached bodies in memory/filesystem tiers. Storage-bin currently hard
-deletes instead. Bounded purge continuation and disk stale
-dry-run also have open corrections; read
+their cached bodies on all tiers. Storage-bin needs space for a replacement
+extent. For bounded purge continuation and disk stale dry-run limitations, read
 [operation safeguards](../guides/cache-operations.md#current-invalidation-warnings)
 before interpreting completion flags or requesting a supposedly read-only preview.
 Hard purge remains the default.

@@ -49,10 +49,13 @@ impl NativeHttp1RouteAction {
 
     pub(crate) fn https_redirect_exempt(&self) -> bool {
         #[cfg(feature = "acme")]
-        if matches!(self, Self::AcmeHttp01(_)) {
-            return true;
+        {
+            matches!(self, Self::AcmeHttp01(_))
         }
-        false
+        #[cfg(not(feature = "acme"))]
+        {
+            false
+        }
     }
 
     pub(crate) fn request_body_timeout(&self) -> Option<Duration> {

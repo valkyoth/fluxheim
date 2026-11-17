@@ -151,8 +151,8 @@ jobs:
 
       - name: Install security tools
         run: |
-          cargo install --locked cargo-deny --version 0.20.2
-          cargo install --locked cargo-audit --version 0.22.2
+          cargo install --locked cargo-deny --version 0.21.0
+          cargo install --locked cargo-audit --version 0.23.0
 
       - name: Install SBOM tool
         if: needs.qualification-scope.outputs.full == 'true'
@@ -512,7 +512,7 @@ jobs:
           python3 scripts/test_ci_macos_temp.py
 
       - name: Select reviewed Python wheel target
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14'
 
@@ -649,7 +649,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Select reviewed Python wheel target
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14'
 

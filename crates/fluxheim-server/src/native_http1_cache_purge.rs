@@ -7,7 +7,7 @@ use fluxheim_cache::purge_index::{
     CacheStalePurgeResult,
 };
 
-use super::{NativeDiskCache, NativeDiskCacheLocation};
+use super::NativeDiskCache;
 
 static NATIVE_DISK_CACHE_PURGE_REGISTRY: OnceLock<Mutex<Vec<NativeDiskCachePurgeHandle>>> =
     OnceLock::new();
@@ -156,15 +156,7 @@ impl NativeDiskCache {
                     });
                     return CachePurgeVisit::default();
                 };
-                if matches!(record.location, NativeDiskCacheLocation::StorageBin(_)) {
-                    let purged = self.remove_combined_locked(&entry.combined_key);
-                    return CachePurgeVisit {
-                        purged,
-                        retry: !purged,
-                        ..Default::default()
-                    };
-                }
-                match self.soft_purge_filesystem_record(entry, &record, now) {
+                match self.soft_purge_disk_record(entry, &record, now) {
                     Ok(purged) => {
                         return CachePurgeVisit {
                             purged,

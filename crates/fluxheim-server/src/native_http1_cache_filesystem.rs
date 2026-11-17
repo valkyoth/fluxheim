@@ -250,31 +250,23 @@ impl NativeDiskCache {
         Ok(NativeDiskCacheLocation::Filesystem(path))
     }
 
-    pub(super) fn soft_purge_filesystem_record(
+    pub(super) fn soft_purge_disk_record(
         &self,
         entry: &CachePurgeIndexEntry,
         record: &NativeDiskCacheRecord,
         now: Instant,
     ) -> std::io::Result<bool> {
         let mut object = self.read_record(record)?;
-        let previous_meta = NativeDiskCacheMeta::decode(&object.internal_meta)
+        let mut meta = NativeDiskCacheMeta::decode(&object.internal_meta)
             .ok_or_else(|| std::io::Error::other("cache freshness metadata is invalid"))?;
-        if previous_meta.expires_at_unix_secs <= native_instant_to_unix_secs(now) {
+        let expiry = native_instant_to_unix_secs(now);
+        if meta.expires_at_unix_secs <= expiry {
             return Ok(false);
         }
-        let Some(mut memory_entry) = native_memory_entry_from_disk_object(&object) else {
-            return Err(std::io::Error::other("cache freshness metadata is invalid"));
-        };
-        if memory_entry.expires_at <= now {
-            return Ok(false);
+        if object.combined_key.as_deref() != Some(&entry.combined_key) {
+            return Err(std::io::Error::other("disk cache identity mismatch"));
         }
-        memory_entry.expires_at = now;
-        let meta = NativeDiskCacheMeta::from_entry(
-            &memory_entry,
-            NativeDiskCacheMeta::decode(&object.internal_meta)
-                .map(|meta| meta.vary_fields)
-                .unwrap_or_default(),
-        );
+        meta.expires_at_unix_secs = expiry;
         object.internal_meta = meta.encode();
         let encoded = encode_disk_cache_object(
             &DiskCacheObjectKey {
@@ -293,12 +285,14 @@ impl NativeDiskCache {
         } else {
             encoded
         };
-        let NativeDiskCacheLocation::Filesystem(path) = &record.location else {
-            return Err(std::io::Error::other(
-                "cache record is not a filesystem object",
-            ));
-        };
-        self.write_object_atomically(path, &encoded)?;
+        match &record.location {
+            NativeDiskCacheLocation::Filesystem(path) => {
+                self.write_object_atomically(path, &encoded)?
+            }
+            NativeDiskCacheLocation::StorageBin(old) => {
+                self.replace_soft_purged_bin(&entry.combined_key, *old, &encoded)?;
+            }
+        }
         Ok(true)
     }
 

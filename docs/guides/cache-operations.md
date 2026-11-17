@@ -11,17 +11,15 @@ reveal application structure even when response bodies are not printed.
 - Bounded purges report unfinished traversal or failed work through `truncated`
   and `repeat_required`. A completed traversal is not a fence against concurrent
   fills or content already delivered to a client.
-- **Current limitation:** storage-bin `soft=true` currently performs a
-  hard deletion. It does not retain the stale representation for revalidation
-  or origin-failure fallback. Memory/filesystem soft purge retains the object,
-  subject to its existing stale-serving policy.
+- Storage-bin soft purge needs room for a second encoded copy of the object.
+  If the bin is full, the existing copy remains fresh and the operation reports
+  unfinished work. Free space before retrying; a retry is not a hard purge.
 - **Current limitation:** disk stale `dry_run=true` is not reliably
   non-mutating. Its lookup can remove fully expired or invalid objects before
   counting them, even while the response reports `purged = 0`. Do not use it
   as a guaranteed read-only inventory or safety preview.
 
-The remaining soft/dry-run limitations are not guarantees supplied by passing tests. Use
-targeted exact/bulk invalidation for known public objects and verify subsequent
+Use targeted exact/bulk invalidation for known public objects and verify subsequent
 responses/origin counts. For a bounded index purge, inspect the remaining scope
 alongside completion flags. Avoid unrestricted retry loops
 on a changing production cache. Changing a namespace or safely switching to a
@@ -268,9 +266,10 @@ curl --fail-with-body --request POST \
   'http://127.0.0.1:9090/_fluxheim/cache/purge-prefix?vhost=assets&path_prefix=/assets/&limit=500&batches=4'
 ```
 
-Hard purge is the default. Memory/filesystem indexed `soft=true` marks objects
-stale but retains their bodies for permitted revalidation/stale serving;
-storage-bin currently deletes them instead. Soft purge is not suitable for
+Hard purge is the default. On every tier, indexed `soft=true` marks an object
+stale while retaining its body and validators. It does not grant or extend a
+stale-serving window. A bin replacement checkpoints the index for each changed
+object: use small batches on large bins and monitor disk latency. Soft purge is not suitable for
 removing disclosed/private content. Hard invalidation is not secure disk erasure
 either. Neither operation removes browser/CDN copies or copies on peers. A peer
 can refill an old object unless invalidation/version changes are coordinated.
@@ -336,8 +335,7 @@ filesystem-only, storage-bin-only and both tiered policies. It verifies denied
 anonymous and observer access, bodies, origin counts and over-limit batch
 completion. Dedicated Rust fixtures cover bounded sparse scans, fresh prefixes,
 soft counts, retained generations, failed mutations, encryption and restart.
-Separate characterizations retain the bin soft-deletion and expired disk
-dry-run warnings above. Native qualification is recorded in the commit evidence.
+The expired disk dry-run warning still applies. Native qualification is recorded in the commit evidence.
 
 Do not remove live cache directories by hand. Preserve encrypted root/nonce
 state during supported operations, do not share one root between nodes, and

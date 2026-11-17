@@ -345,25 +345,105 @@ fn stale_scan_advances_past_fresh_prefix() {
 }
 
 #[test]
-fn documented_bin_soft_purge_currently_deletes_the_stale_copy() {
+fn soft_purge_retains_stale_body_deadlines_and_validators_on_restart() {
     for backend in [CacheDiskBackend::Filesystem, CacheDiskBackend::StorageBin] {
-        let (_directory, cache, scope) = fixture(backend);
-        let mut entry = disk_cache_entry(b"retained-body");
-        entry.stale_if_error_until = Some(Instant::now() + Duration::from_secs(120));
-        store(&cache, &scope, "asset", &entry);
-        let tag = fluxheim_cache::cache_user_tag(&scope, None);
-        let result = purge_native_disk_cache_user_tag(&scope, None, &tag, 10, true);
-        assert_eq!((result.matched, result.purged), (1, 1));
-        let retained = cache.get("asset", |_| None);
-        if matches!(backend, CacheDiskBackend::StorageBin) {
-            assert!(retained.is_none()); // documented contract: soft becomes hard.
-            assert_eq!(cache.stats().entries, 0);
-        } else {
-            let retained = retained.unwrap();
+        for encrypted in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut config = storage_bin_config(&directory.path().join("cache"));
+            config.disk.backend = backend;
+            if encrypted {
+                super::store_admission::configure_encryption(&mut config, directory.path());
+            }
+            let cache = Arc::new(NativeDiskCache::from_config(&config).unwrap());
+            let scope = &format!("soft-purge-{}", directory.path().display());
+            register_native_disk_cache_purge_handle(Arc::from(scope.as_str()), None, &cache);
+            let mut entry = disk_cache_entry(b"retained-body");
+            entry.headers.push(("etag".into(), "\"v1\"".into()));
+            entry.stale_if_error_until = Some(Instant::now() + Duration::from_secs(120));
+            store(&cache, scope, "asset", &entry);
+            let tag = fluxheim_cache::cache_user_tag(scope, None);
+            let result = purge_native_disk_cache_user_tag(scope, None, &tag, 10, true);
+            assert_eq!((result.matched, result.purged), (1, 1));
+            assert_eq!(
+                purge_native_disk_cache_user_tag(scope, None, &tag, 10, true).purged,
+                0
+            );
+            drop(cache);
+            let cache = NativeDiskCache::from_config(&config).unwrap();
+            let retained = cache.get("asset", |_| None).unwrap();
             assert_eq!(&*retained.body, b"retained-body");
+            assert_eq!(retained.headers, entry.headers);
             assert!(retained.expires_at <= Instant::now());
+            assert!(retained.stale_if_error_until.unwrap() <= entry.stale_if_error_until.unwrap());
         }
     }
+}
+
+#[test]
+fn soft_purge_does_not_make_mandatory_revalidation_eligible_for_stale_reuse() {
+    for backend in [CacheDiskBackend::Filesystem, CacheDiskBackend::StorageBin] {
+        let (_directory, cache, scope) = fixture(backend);
+        let mut entry = disk_cache_entry(b"requires-validation");
+        entry.stale_if_error_until = Some(Instant::now() + Duration::from_secs(120));
+        entry.stale_reuse_forbidden = true;
+        store(&cache, &scope, "private", &entry);
+        let tag = fluxheim_cache::cache_user_tag(&scope, None);
+        assert_eq!(
+            purge_native_disk_cache_user_tag(&scope, None, &tag, 2, true).purged,
+            1
+        );
+        assert!(cache.get("private", |_| None).is_none());
+    }
+}
+
+#[test]
+fn bin_soft_purge_checkpoint_error_leaves_the_old_location_and_accounting() {
+    let (directory, cache, scope) = fixture(CacheDiskBackend::StorageBin);
+    store(&cache, &scope, "asset", &disk_cache_entry(b"old"));
+    let old = cache.with_state(|s| (s.objects["asset"].clone(), s.bytes));
+    let path = fluxheim_cache::storage_bin_index_path(directory.path());
+    let saved = directory.path().join("saved-index");
+    std::fs::rename(&path, &saved).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    let tag = fluxheim_cache::cache_user_tag(&scope, None);
+    let result = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, true);
+    assert_eq!(result.purged, 0);
+    assert!(result.truncated);
+    assert_eq!(
+        cache.with_state(|s| (s.objects["asset"].clone(), s.bytes)),
+        old
+    );
+    assert_eq!(&*cache.get("asset", |_| None).unwrap().body, b"old");
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::rename(saved, path).unwrap();
+    assert_eq!(
+        purge_native_disk_cache_user_tag(&scope, None, &tag, 1, true).purged,
+        1
+    );
+}
+
+#[test]
+fn full_bin_soft_purge_preserves_fresh_entry_until_a_retry_can_commit() {
+    let (_directory, cache, scope) = fixture(CacheDiskBackend::StorageBin);
+    store(&cache, &scope, "asset", &disk_cache_entry(b"original"));
+    let record = cache.with_state(|state| state.objects["asset"].clone());
+    let mut reserved = Vec::new();
+    while let Some(location) = cache.allocate_storage_bin_location(record.weight).unwrap() {
+        reserved.push(location);
+    }
+    let tag = fluxheim_cache::cache_user_tag(&scope, None);
+    let failed = purge_native_disk_cache_user_tag(&scope, None, &tag, 4, true);
+    assert_eq!(failed.purged, 0);
+    assert!(failed.truncated);
+    let original = cache.get("asset", |_| None).unwrap();
+    assert!(original.expires_at > Instant::now());
+    assert_eq!(&*original.body, b"original");
+    for location in reserved {
+        cache.release_storage_bin_location(location).unwrap();
+    }
+    let retry = purge_native_disk_cache_user_tag(&scope, None, &tag, 4, true);
+    assert_eq!(retry.purged, 1);
+    assert!(!retry.truncated);
 }
 
 #[test]

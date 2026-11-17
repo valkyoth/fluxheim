@@ -1,4 +1,4 @@
-ARG RUST_IMAGE=docker.io/library/rust:1.99.1-alpine3.23@sha256:96e773beb97c24572dcc462458cf84776fddc347302b9ab732a6b98b7822ad38
+ARG RUST_IMAGE=docker.io/library/rust:1.100.0-alpine3.23@sha256:23ee60d5346e4042efbc9f9120d736be4b5c7f29becf2ebea181160422ca8d30
 ARG RUNTIME_IMAGE=registry.suse.com/bci/php:8@sha256:9e88fd7e22be80f17cb443f98e3e5bafe6b523403019e99412f8c27e9220dd02
 ARG FLUXHEIM_CONFIG=packaging/container/php-managed.toml
 

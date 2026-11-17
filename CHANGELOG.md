@@ -11,6 +11,9 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- Preserve storage-bin bodies and validators on soft purge without extending
+  stale-serving permissions. A full bin reports unfinished work instead of
+  deleting a live entry. Build with Rust 1.100.0 and refreshed CI tooling.
 - Publish the 1.9 operator walkthrough, tested local/collector configs, fixture-
   checked alert rules, troubleshooting/restart policy and management API handoff.
   Qualify refreshed compatible dependencies against native archives and release

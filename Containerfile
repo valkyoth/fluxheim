@@ -1,4 +1,4 @@
-ARG RUST_IMAGE=docker.io/library/rust:1.99.1-bookworm@sha256:5c1a1732ac3f77635b24d397ceb67b4d9ea61de348f68c0aa54a79fd01e65c69
+ARG RUST_IMAGE=docker.io/library/rust:1.100.0-bookworm@sha256:ade39a710ef85f3506cffcfec3e8a24ba090badef1dff2fb798f71d878833fea
 ARG RUNTIME_IMAGE=docker.io/library/debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8
 ARG FLUXHEIM_CONFIG=packaging/container/fluxheim.toml
 

@@ -224,6 +224,58 @@ fn native_storage_bin_index_entries(
 }
 
 impl NativeDiskCache {
+    // Caller holds the key's exclusive stripe. Do not overwrite live bytes,
+    // or release the old allocation before its replacement is checkpointed.
+    pub(super) fn replace_soft_purged_bin(
+        &self,
+        key: &str,
+        old: StorageBinObjectLocation,
+        encoded: &[u8],
+    ) -> std::io::Result<()> {
+        let task = &self
+            .index_flush
+            .as_ref()
+            .ok_or_else(|| std::io::Error::other("missing bin index"))?
+            .task;
+        let _flush = task
+            .flush_lock
+            .try_lock()
+            .map_err(|_| std::io::Error::other("bin index busy"))?;
+        let index_key = task.index_key.as_deref().map_or_else(
+            || key.to_owned(),
+            |secret| native_cache_confidential_index_identity(secret, key),
+        );
+        let mut entries = self
+            .with_state(|state| native_storage_bin_index_entries(state, task.index_key.as_deref()));
+        let entry = entries
+            .iter_mut()
+            .find(|e| e.location == old && e.combined_key == index_key)
+            .ok_or_else(|| std::io::Error::other("missing bin index entry"))?;
+        let Some(NativeDiskCacheLocation::StorageBin(new)) =
+            self.write_encoded_object(key, encoded)?
+        else {
+            return Err(std::io::Error::other("no space for soft purge"));
+        };
+        entry.location = new;
+        if let Err(error) = write_storage_bin_index(&task.layout, &entries) {
+            self.persist_storage_bin_index();
+            self.release_storage_bin_location(new)?;
+            return Err(error);
+        }
+        self.with_state_mut(|state| {
+            if let Some(record) = state.objects.get_mut(key) {
+                record.location = NativeDiskCacheLocation::StorageBin(new);
+                record.identity = Arc::new(());
+                state.bytes = state
+                    .bytes
+                    .saturating_sub(record.weight)
+                    .saturating_add(new.len);
+                record.weight = new.len;
+            }
+        });
+        self.release_storage_bin_location(old)
+    }
+
     pub(super) fn allocate_storage_bin_location(
         &self,
         len: u64,

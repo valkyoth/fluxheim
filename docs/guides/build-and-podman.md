@@ -250,9 +250,9 @@ variant uses `debian:trixie-slim`. They are not identical recipes. New packaging
 and publishing work should use the explicit variant files under `containers/`.
 
 The Alpine, Wolfi, SUSE Micro, and PHP-only SUSE BCI variants build with the official Rust
-`1.99.1-alpine3.23` image to keep a musl-linked release binary portable across
+`1.100.0-alpine3.23` image to keep a musl-linked release binary portable across
 small runtime bases. The Debian variant builds with the official Rust
-`1.99.1-bookworm` image and runs on `debian:trixie-slim`.
+`1.100.0-bookworm` image and runs on `debian:trixie-slim`.
 
 The builder installs `cmake` for native TLS/compression transitives that may
 compile C code. The runtime runs as UID/GID `65532`; the Containerfiles prepare
@@ -1050,7 +1050,7 @@ The default `generic` build is portable across the target architecture's baselin
 CPUs and is the release gate's RPM mode. `native` adds `target-cpu=native` and
 is only for the build CPU's supported instruction set, not general distribution.
 Use `FLUXHEIM_GATE_RPM_BUILD_TYPE=native` to explicitly qualify that optimization.
-During the 1.9.0 candidate checks, Rust 1.99.1 reproducibly crashed in LLVM while
+During the earlier 1.9.0 candidate checks, Rust 1.99.1 reproducibly crashed in LLVM while
 compiling `p256` with `native` on the tested Zen 5 host. Native RPM optimization
 is blocked there; do not treat a generic build as proof that native works.
 See the [qualification ledger](../evidence/observability-12.md).

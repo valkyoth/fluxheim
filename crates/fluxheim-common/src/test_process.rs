@@ -13,13 +13,12 @@ pub enum TestBinary {
 }
 
 pub fn self_command(binary: TestBinary) -> io::Result<Command> {
-    let profile = Path::new(env!("OUT_DIR"))
+    let build = Path::new(env!("OUT_DIR"))
         .ancestors()
         .nth(3)
         .ok_or_else(invalid_executable)?;
-    let directory = profile.join("deps").canonicalize()?;
     let executable = std::env::current_exe()?.canonicalize()?;
-    checked_command(&directory, &executable, binary)
+    checked_command(&build.canonicalize()?, &executable, binary)
 }
 
 fn invalid_executable() -> io::Error {
@@ -49,7 +48,18 @@ fn checked_command(directory: &Path, executable: &Path, binary: TestBinary) -> i
     }
     // Exact comparison against the trusted build directory and a closed crate
     // name + Cargo hash. Never invoke argv[0], PATH or a caller-provided program.
-    let expected = directory.join(format!("{prefix}{hash}{}", std::env::consts::EXE_SUFFIX));
+    // Cargo 1.100 keeps each unit in build/<package>/<unit hash>/out.
+    let package = match binary {
+        TestBinary::Common => "fluxheim-common",
+        TestBinary::Server => "fluxheim",
+        TestBinary::NativeServer => "fluxheim-server",
+        TestBinary::Wasm => "fluxheim-wasm",
+    };
+    let expected = directory
+        .join(package)
+        .join(hash)
+        .join("out")
+        .join(format!("{prefix}{hash}{}", std::env::consts::EXE_SUFFIX));
     if executable != expected {
         return Err(invalid_executable());
     }
@@ -70,14 +80,22 @@ mod tests {
 
     #[test]
     fn rejects_other_directories_crates_and_malformed_hashes() {
-        let root = Path::new("trusted").join("deps");
+        let root = Path::new("trusted").join("build");
         let name = format!("fluxheim-0123456789abcdef{}", std::env::consts::EXE_SUFFIX);
-        assert!(checked_command(&root, &root.join(&name), TestBinary::Server).is_ok());
+        let server = root.join("fluxheim/0123456789abcdef/out").join(&name);
+        assert!(checked_command(&root, &server, TestBinary::Server).is_ok());
         let wasm = format!(
             "fluxheim_wasm-0123456789abcdef{}",
             std::env::consts::EXE_SUFFIX
         );
-        assert!(checked_command(&root, &root.join(&wasm), TestBinary::Wasm).is_ok());
+        assert!(
+            checked_command(
+                &root,
+                &root.join("fluxheim-wasm/0123456789abcdef/out").join(&wasm),
+                TestBinary::Wasm
+            )
+            .is_ok()
+        );
         assert!(checked_command(&root, &root.join(&name), TestBinary::Wasm).is_err());
         for path in [
             Path::new("outside").join(&name),
@@ -97,12 +115,14 @@ mod tests {
 
     #[test]
     fn native_server_binary_requires_exact_directory_crate_and_cargo_hash() {
-        let root = Path::new("trusted").join("deps");
+        let root = Path::new("trusted").join("build");
         let name = format!(
             "fluxheim_server-0123456789abcdef{}",
             std::env::consts::EXE_SUFFIX
         );
-        let expected = root.join(&name);
+        let expected = root
+            .join("fluxheim-server/0123456789abcdef/out")
+            .join(&name);
         let command = checked_command(&root, &expected, TestBinary::NativeServer).unwrap();
         assert_eq!(command.get_program(), expected.as_os_str());
         assert_eq!(command.get_args().count(), 0);
@@ -111,6 +131,10 @@ mod tests {
         }
         for path in [
             Path::new("outside").join(&name),
+            root.join("fluxheim-server/fedcba9876543210/out")
+                .join(&name),
+            root.join("fluxheim-common/0123456789abcdef/out")
+                .join(&name),
             root.join("..").join(&name),
             root.join("nested").join(&name),
             root.join("sh"),

@@ -89,14 +89,9 @@ fn format_directory_listing_time(modified: SystemTime, local_time: bool) -> Opti
         return None;
     }
     if local_time {
-        let seconds = i64::try_from(duration.as_secs()).ok()?;
-        let utc =
-            chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, duration.subsec_nanos())?;
-        return Some(
-            utc.with_timezone(&chrono::Local)
-                .format("%Y-%m-%d %H:%M:%S %z")
-                .to_string(),
-        );
+        let timestamp = jiff::Timestamp::try_from(modified).ok()?;
+        let local = timestamp.to_zoned(jiff::tz::TimeZone::system());
+        return Some(local.strftime("%Y-%m-%d %H:%M:%S %z").to_string());
     }
 
     Some(httpdate::fmt_http_date(modified))

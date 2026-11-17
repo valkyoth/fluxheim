@@ -58,7 +58,18 @@ def origin_server():
         def do_GET(self):
             with lock:
                 counts[self.path] = counts.get(self.path, 0) + 1
+                seen = counts[self.path]
+            if self.path == "/soft-error.css" and seen > 1:
+                self.send_error(503)
+                return
+            if self.path == "/soft-validator.css" and self.headers.get("If-None-Match") == '"v1"':
+                self.send_response(304)
+                self.send_header("ETag", '"v1"')
+                self.end_headers()
+                return
             self.send_response(200)
+            if self.path == "/soft-validator.css":
+                self.send_header("ETag", '"v1"')
             self.send_header("Content-Length", str(len(BODY)))
             self.send_header("Content-Type", "text/css")
             self.send_header("Surrogate-Key", "guide")

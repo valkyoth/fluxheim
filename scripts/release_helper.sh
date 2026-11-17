@@ -40,7 +40,7 @@ fi
 if [[ -z "$MACOS_HOST" && -z "${FLUXHEIM_MACOS_ASSET_DIR:-}" ]]; then
     read -r -p "Enter macOS SSH alias/host, or leave blank to import: " MACOS_HOST
 fi
-[[ -n "$RUST_VERSION" ]] || read -r -p "Enter Rust version (e.g., 1.99.1): " RUST_VERSION
+[[ -n "$RUST_VERSION" ]] || read -r -p "Enter Rust version (e.g., 1.100.0): " RUST_VERSION
 [[ -n "$RELEASE_VERSION" ]] || read -r -p "Enter release version (e.g., 1.9.0): " RELEASE_VERSION
 
 case "$RUST_VERSION" in "" | *[!0-9A-Za-z._+-]*) echo "error: unsafe Rust version" >&2; exit 2;; esac
