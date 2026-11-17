@@ -21,6 +21,58 @@ pub struct StorageBinIndexEntry {
     pub accessed: SystemTime,
 }
 
+/// Exact v1 wire-size accounting, shared by snapshot construction and publication.
+pub struct StorageBinIndexBudget {
+    bytes: u64,
+    entries: usize,
+}
+
+impl Default for StorageBinIndexBudget {
+    fn default() -> Self {
+        Self {
+            bytes: STORAGE_BIN_INDEX_MAGIC_V1.len() as u64 + 1,
+            entries: 0,
+        }
+    }
+}
+
+impl StorageBinIndexBudget {
+    pub fn charge(
+        &mut self,
+        key_bytes: usize,
+        location: StorageBinObjectLocation,
+        accessed: SystemTime,
+    ) -> std::io::Result<()> {
+        if self.entries >= MAX_STORAGE_BIN_INDEX_ENTRIES
+            || key_bytes > MAX_STORAGE_BIN_INDEX_KEY_HEX_BYTES / 2
+        {
+            return Err(invalid_index(
+                "storage-bin index exceeds the supported entry or key limit",
+            ));
+        }
+        let fields = [
+            location.bin_id,
+            location.offset,
+            location.len,
+            storage_bin_system_time_unix_secs(accessed).unwrap_or(0),
+        ];
+        let digits: u64 = fields
+            .into_iter()
+            .map(|v| u64::from(v.checked_ilog10().unwrap_or(0)) + 1)
+            .sum();
+        // Hex key, four decimal fields, four tabs and a newline.
+        let bytes = self.bytes + 2 * key_bytes as u64 + digits + 5;
+        if bytes > MAX_STORAGE_BIN_INDEX_BYTES {
+            return Err(invalid_index(
+                "storage-bin index exceeds the supported file-size limit",
+            ));
+        }
+        self.bytes = bytes;
+        self.entries += 1;
+        Ok(())
+    }
+}
+
 pub fn storage_bin_index_path(root: &Path) -> PathBuf {
     root.join(STORAGE_BIN_INDEX_FILENAME)
 }
@@ -74,6 +126,11 @@ pub fn write_storage_bin_index(
     layout: &StorageBinLayoutPlan,
     entries: &[StorageBinIndexEntry],
 ) -> std::io::Result<()> {
+    let mut budget = StorageBinIndexBudget::default();
+    for entry in entries {
+        budget.charge(entry.combined_key.len(), entry.location, entry.accessed)?;
+        entry.location.validate(layout.bin_size_bytes)?;
+    }
     let path = storage_bin_index_path(&layout.root);
     if !path.starts_with(&layout.root) || storage_bin_path_contains_symlink(&layout.root, &path)? {
         return Err(std::io::Error::new(
@@ -91,12 +148,12 @@ pub fn write_storage_bin_index(
     let path = StorageBinSafePath::from_path(path);
     let temp_path = StorageBinSafePath::from_path(temp_path);
     let write_result = (|| {
-        let mut file = temp_path.create_new_file()?;
+        let file = temp_path.create_new_file()?;
+        let mut file = std::io::BufWriter::new(file);
         writeln!(file, "{STORAGE_BIN_INDEX_MAGIC_V1}")?;
-        let mut entries = entries.to_vec();
-        entries.sort_by(|left, right| left.combined_key.cmp(&right.combined_key));
+        let mut entries: Vec<_> = entries.iter().collect();
+        entries.sort_unstable_by(|left, right| left.combined_key.cmp(&right.combined_key));
         for entry in entries {
-            entry.location.validate(layout.bin_size_bytes)?;
             writeln!(
                 file,
                 "{}\t{}\t{}\t{}\t{}",
@@ -107,7 +164,9 @@ pub fn write_storage_bin_index(
                 storage_bin_system_time_unix_secs(entry.accessed).unwrap_or(0)
             )?;
         }
-        file.sync_all()?;
+        file.flush()?;
+        file.get_ref().sync_all()?;
+        drop(file);
         path.rename_from(&temp_path)?;
         path.sync_parent_directory()
     })();
@@ -230,4 +289,33 @@ fn storage_bin_unix_secs_system_time(secs: u64) -> SystemTime {
 
 fn invalid_index(message: impl Into<String>) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, message.into())
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    #[test]
+    fn exact_boundary_includes_decimal_fields_separators_and_hex_key() {
+        let location = StorageBinObjectLocation {
+            bin_id: 0,
+            offset: 10,
+            len: 999,
+        };
+        let accessed = SystemTime::UNIX_EPOCH;
+        let row = b"616263\t0\t10\t999\t0\n";
+        let mut budget = StorageBinIndexBudget {
+            bytes: MAX_STORAGE_BIN_INDEX_BYTES - row.len() as u64,
+            entries: 0,
+        };
+        budget.charge(3, location, accessed).unwrap();
+        assert_eq!(budget.bytes, MAX_STORAGE_BIN_INDEX_BYTES);
+        assert!(budget.charge(0, location, accessed).is_err());
+        let mut budget = StorageBinIndexBudget {
+            entries: MAX_STORAGE_BIN_INDEX_ENTRIES - 1,
+            ..Default::default()
+        };
+        budget.charge(0, location, accessed).unwrap();
+        assert!(budget.charge(0, location, accessed).is_err());
+    }
 }

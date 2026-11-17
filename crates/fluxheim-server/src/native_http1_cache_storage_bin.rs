@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use fluxheim_cache::{
     StorageBinFreeMap, StorageBinIndexEntry, StorageBinLayoutPlan, StorageBinObjectLocation,
@@ -20,6 +20,8 @@ use super::{
 };
 
 const NATIVE_STORAGE_BIN_INDEX_DEBOUNCE: Duration = Duration::from_secs(1);
+const SOFT_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(5);
+static SOFT_CHECKPOINT: Mutex<Option<Instant>> = Mutex::new(None);
 static NATIVE_STORAGE_BIN_INDEX_SERVICE: OnceLock<
     Result<Arc<NativeStorageBinIndexService>, String>,
 > = OnceLock::new();
@@ -71,7 +73,9 @@ impl NativeStorageBinIndexFlush {
             .state
             .lock()
             .map_err(|_| std::io::Error::other("cache index state is unavailable"))
-            .map(|state| native_storage_bin_index_entries(&state, task.index_key.as_deref()))?;
+            .and_then(|state| {
+                native_storage_bin_index_entries(&state, task.index_key.as_deref())
+            })?;
         write_storage_bin_index(&task.layout, &entries)?;
         service.register(&task);
         Ok(Some(Self { task }))
@@ -153,8 +157,13 @@ impl NativeStorageBinIndexTask {
                 );
             }
         };
-        if let Err(error) = write_storage_bin_index(&self.layout, &entries) {
-            self.dirty.store(true, Ordering::Release);
+        if let Err(error) =
+            entries.and_then(|entries| write_storage_bin_index(&self.layout, &entries))
+        {
+            // An oversized snapshot cannot succeed until the index changes.
+            if error.kind() != std::io::ErrorKind::InvalidData {
+                self.dirty.store(true, Ordering::Release);
+            }
             log::warn!(
                 target: "fluxheim::native_http1",
                 "native storage-bin index write {}: {error}",
@@ -206,7 +215,7 @@ fn native_storage_bin_index_flush_worker(
 fn native_storage_bin_index_entries(
     state: &NativeDiskCacheState,
     index_key: Option<&SecretBytes<32>>,
-) -> Vec<StorageBinIndexEntry> {
+) -> std::io::Result<Vec<StorageBinIndexEntry>> {
     native_storage_bin_index_entries_with(state, index_key, |_, location| location)
 }
 
@@ -214,33 +223,70 @@ fn native_storage_bin_index_entries_with(
     state: &NativeDiskCacheState,
     index_key: Option<&SecretBytes<32>>,
     replace: impl Fn(&str, StorageBinObjectLocation) -> StorageBinObjectLocation,
-) -> Vec<StorageBinIndexEntry> {
-    state
-        .objects
-        .iter()
-        .filter_map(|(combined_key, record)| {
-            let NativeDiskCacheLocation::StorageBin(location) = &record.location else {
-                return None;
-            };
-            Some(StorageBinIndexEntry {
-                combined_key: if let Some(index_key) = index_key {
-                    native_cache_confidential_index_identity(index_key, combined_key)
-                } else {
-                    combined_key.clone()
-                },
-                location: replace(combined_key, *location),
-                accessed: record.accessed_at,
-            })
-        })
-        .collect()
+) -> std::io::Result<Vec<StorageBinIndexEntry>> {
+    let mut budget = fluxheim_cache::StorageBinIndexBudget::default();
+    let mut entries = Vec::new();
+    for (combined_key, record) in &state.objects {
+        let NativeDiskCacheLocation::StorageBin(location) = &record.location else {
+            continue;
+        };
+        let location = replace(combined_key, *location);
+        let key_bytes = if index_key.is_some() {
+            64
+        } else {
+            combined_key.len()
+        };
+        budget.charge(key_bytes, location, record.accessed_at)?;
+        entries.push(StorageBinIndexEntry {
+            combined_key: if let Some(index_key) = index_key {
+                native_cache_confidential_index_identity(index_key, combined_key)
+            } else {
+                combined_key.clone()
+            },
+            location,
+            accessed: record.accessed_at,
+        });
+    }
+    Ok(entries)
 }
 
 impl NativeDiskCache {
-    pub(super) fn soft_purge_bin_group(
+    pub(super) fn scan_soft_bin(
+        &self,
+        index: &fluxheim_cache::CachePurgeIndex,
+        selector: fluxheim_cache::purge_index::CachePurgeSelector<'_>,
+        limit: usize,
+    ) -> fluxheim_cache::purge_index::CachePurgeScanResult {
+        use fluxheim_cache::purge_index::{
+            CachePurgeMode, CachePurgeScanResult, MAX_SOFT_PURGE_BATCH,
+        };
+        let deferred = || CachePurgeScanResult {
+            truncated: true,
+            ..Default::default()
+        };
+        let Ok(mut last) = SOFT_CHECKPOINT.try_lock() else {
+            return deferred();
+        };
+        let now = Instant::now();
+        if last.is_some_and(|t| now.saturating_duration_since(t) < SOFT_CHECKPOINT_INTERVAL) {
+            return deferred();
+        }
+        // Denial precedes cursor advancement, body reads and scratch allocation.
+        // Retain the process-wide slot through publication or rollback.
+        index.scan_batch(
+            selector,
+            CachePurgeMode::Soft,
+            limit.min(MAX_SOFT_PURGE_BATCH),
+            |entries| self.soft_purge_bin_group(index, entries.collect(), now, &mut last),
+        )
+    }
+
+    fn soft_purge_bin_group(
         &self,
         index: &fluxheim_cache::CachePurgeIndex,
         mut entries: Vec<(u64, &fluxheim_cache::CachePurgeIndexEntry)>,
-        now: std::time::Instant,
+        now: Instant,
+        last: &mut Option<Instant>,
     ) -> fluxheim_cache::purge_index::CachePurgeScanResult {
         use super::native_http1_cache_state::native_disk_cache_mutation_lock_stripe as stripe;
         use fluxheim_cache::purge_index::CachePurgeScanResult;
@@ -274,12 +320,15 @@ impl NativeDiskCache {
                 };
                 // Encode/write only one body at a time. Retain locations, not buffers.
                 match self.encode_soft_purge(entry, &record, now) {
-                    Ok(Some(bytes)) => match self.write_encoded_object(key, &bytes) {
-                        Ok(Some(NativeDiskCacheLocation::StorageBin(new))) => {
-                            staged.insert(key.as_str(), (old, new));
+                    Ok(Some(bytes)) => {
+                        *last = Some(Instant::now());
+                        match self.write_encoded_object(key, &bytes) {
+                            Ok(Some(NativeDiskCacheLocation::StorageBin(new))) => {
+                                staged.insert(key.as_str(), (old, new));
+                            }
+                            _ => result.truncated = true,
                         }
-                        _ => result.truncated = true,
-                    },
+                    }
                     Ok(None) => {}
                     Err(_) => result.truncated = true,
                 }
@@ -323,7 +372,7 @@ impl NativeDiskCache {
             native_storage_bin_index_entries_with(state, task.index_key.as_deref(), |key, old| {
                 staged.get(key).map_or(old, |(_, new)| *new)
             })
-        });
+        })?;
         #[cfg(test)]
         task.soft_checkpoints.fetch_add(1, Ordering::Relaxed);
         write_storage_bin_index(&task.layout, &entries)?;
@@ -512,6 +561,45 @@ mod confidential_index_tests {
     use super::*;
 
     #[test]
+    fn invalid_background_snapshot_preserves_index_until_next_change() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = fluxheim_config::CacheConfig::default();
+        config.disk.enabled = true;
+        config.disk.backend = fluxheim_config::CacheDiskBackend::StorageBin;
+        config.disk.path = Some(root.path().to_path_buf());
+        let cache = NativeDiskCache::try_from_config(&config).unwrap().unwrap();
+        let task = &cache.index_flush.as_ref().unwrap().task;
+        let record = NativeDiskCacheRecord {
+            identity: Arc::new(()),
+            location: NativeDiskCacheLocation::StorageBin(StorageBinObjectLocation {
+                bin_id: 0,
+                offset: 0,
+                len: 1,
+            }),
+            weight: 1,
+            accessed_at: std::time::SystemTime::UNIX_EPOCH,
+        };
+        cache.with_state_mut(|s| s.insert_object("valid".into(), record.clone()));
+        cache.persist_storage_bin_index();
+        task.flush(false);
+        let original = read_storage_bin_index(&task.layout).unwrap();
+        assert_eq!(original.len(), 1);
+        let oversized = "k".repeat(32 * 1024 + 1);
+        cache.with_state_mut(|s| s.insert_object(oversized.clone(), record));
+        cache.persist_storage_bin_index();
+        task.flush(false);
+        assert!(!task.dirty.load(Ordering::Acquire));
+        assert_eq!(read_storage_bin_index(&task.layout).unwrap(), original);
+        cache.with_state_mut(|s| {
+            s.remove_object(&oversized);
+            s.remove_object("valid");
+        });
+        cache.persist_storage_bin_index();
+        task.flush(false);
+        assert!(read_storage_bin_index(&task.layout).unwrap().is_empty());
+    }
+
+    #[test]
     fn final_index_flush_finishes_before_lease_release_and_closes_retained_tasks() {
         let root = tempfile::tempdir().unwrap();
         let mut config = fluxheim_config::CacheConfig::default();
@@ -582,7 +670,7 @@ mod confidential_index_tests {
         );
 
         let index_key = SecretBytes::from_array([9_u8; 32]);
-        let entries = native_storage_bin_index_entries(&state, Some(&index_key));
+        let entries = native_storage_bin_index_entries(&state, Some(&index_key)).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].combined_key.len(), 64);

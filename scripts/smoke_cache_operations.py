@@ -183,20 +183,42 @@ def run_case(parent, backend, metrics=False):
                     assert request(public, path) == "MISS"
                     assert count(path) == before + 1
                 purge("purge-index?vhost=assets&limit=10")
+            bin_layout = backend.endswith("storage-bin")
+
+            def finish_soft(target, first, objects):
+                memory = disk = 0
+                result = first
+                for attempt in range(6):
+                    memory += result["memory_purged"]
+                    disk += result["disk_purged"]
+                    if not result["repeat_required"]:
+                        assert not result["truncated"], result
+                        break
+                    assert result["truncated"] and attempt < 5, result
+                    time.sleep(5 if bin_layout else 1)
+                    result = purge(target)
+                assert memory == (objects if backend == "memory" or copies == 2 else 0), memory
+                assert disk == (objects if backend != "memory" else 0), disk
+
             for path, expected in (("/soft-validator.css", "REVALIDATED"), ("/soft-error.css", "STALE")):
                 fill(path)
-                result = purge("purge-index?vhost=assets&limit=10&soft=true")
-                assert result["purged"] == copies and not result["truncated"], result
+                target = "purge-index?vhost=assets&limit=10&soft=true"
+                finish_soft(target, purge(target), 1)
                 assert request(public, path) == expected
                 assert count(path) == 2
                 purge("purge-index?vhost=assets&limit=10")
+                if bin_layout:
+                    time.sleep(5)
             for n in range(35):
                 fill(f"/batch-{n}.css")
             soft = "purge-index?vhost=assets&soft=true&limit=10000&batches=64"
             first = purge(soft)
-            assert (first["limit"], first["batch_limit"], first["purged"], first["repeat_required"]) == (32, 1, 32 * copies, True), first
-            last = purge(soft)
-            assert last["purged"] == 3 * copies and not last["truncated"], last
+            assert (first["limit"], first["batch_limit"], first["repeat_required"]) == (32, 1, True), first
+            assert first["memory_purged"] <= 32 and first["disk_purged"] <= 32, first
+            if backend == "storage-bin" and first["disk_purged"]:
+                deferred = purge(soft)
+                assert deferred["purged"] == 0 and deferred["repeat_required"], deferred
+            finish_soft(soft, first, 35)
             fill("/b.css")
             purge("activity/reset")
         print(f"cache operations {backend}: protected commands and bounded purge continuation ok")

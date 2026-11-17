@@ -135,12 +135,7 @@ impl NativeDiskCache {
             CachePurgeMode::Hard
         };
         let result = if soft && matches!(self.backend, NativeDiskCacheBackend::StorageBin(_)) {
-            index.scan_batch(
-                selector,
-                mode,
-                limit.min(fluxheim_cache::purge_index::MAX_SOFT_PURGE_BATCH),
-                |entries| self.soft_purge_bin_group(&index, entries.collect(), now),
-            )
+            self.scan_soft_bin(&index, selector, limit)
         } else {
             index.scan(selector, mode, limit, |entry| {
                 let Ok(_mutation) = self.try_lock_key_mutation(&entry.combined_key) else {

@@ -344,6 +344,27 @@ fn stale_scan_advances_past_fresh_prefix() {
     }
 }
 
+// Other tests and roots share the real process-wide admission slot. Retry
+// only a deferred scan, never hide a failed mutation after examination.
+fn admitted_soft_purge(
+    scope: &str,
+    tag: &str,
+    limit: usize,
+) -> fluxheim_cache::purge_index::CacheIndexedPurgeResult {
+    let deadline = Instant::now() + Duration::from_secs(100);
+    loop {
+        let result = purge_native_disk_cache_user_tag(scope, None, tag, limit, true);
+        if result.examined != 0 || !result.truncated {
+            return result;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "storage-bin soft checkpoint admission timed out"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
 #[test]
 fn soft_purge_retains_stale_body_deadlines_and_validators_on_restart() {
     for backend in [CacheDiskBackend::Filesystem, CacheDiskBackend::StorageBin] {
@@ -362,12 +383,9 @@ fn soft_purge_retains_stale_body_deadlines_and_validators_on_restart() {
             entry.stale_if_error_until = Some(Instant::now() + Duration::from_secs(120));
             store(&cache, scope, "asset", &entry);
             let tag = fluxheim_cache::cache_user_tag(scope, None);
-            let result = purge_native_disk_cache_user_tag(scope, None, &tag, 10, true);
+            let result = admitted_soft_purge(scope, &tag, 10);
             assert_eq!((result.matched, result.purged), (1, 1));
-            assert_eq!(
-                purge_native_disk_cache_user_tag(scope, None, &tag, 10, true).purged,
-                0
-            );
+            assert_eq!(admitted_soft_purge(scope, &tag, 10).purged, 0);
             drop(cache);
             let cache = NativeDiskCache::from_config(&config).unwrap();
             let retained = cache.get("asset", |_| None).unwrap();
@@ -388,10 +406,7 @@ fn soft_purge_does_not_make_mandatory_revalidation_eligible_for_stale_reuse() {
         entry.stale_reuse_forbidden = true;
         store(&cache, &scope, "private", &entry);
         let tag = fluxheim_cache::cache_user_tag(&scope, None);
-        assert_eq!(
-            purge_native_disk_cache_user_tag(&scope, None, &tag, 2, true).purged,
-            1
-        );
+        assert_eq!(admitted_soft_purge(&scope, &tag, 2).purged, 1);
         assert!(cache.get("private", |_| None).is_none());
     }
 }
@@ -423,7 +438,7 @@ fn bin_soft_purge_checkpoints_once_per_group_even_with_colliding_stripes() {
         }
         let tag = fluxheim_cache::cache_user_tag(&scope, None);
         for (expected, truncated, writes) in [(32, true, 1), (8, false, 2), (0, true, 2)] {
-            let result = purge_native_disk_cache_user_tag(&scope, None, &tag, 10000, true);
+            let result = admitted_soft_purge(&scope, &tag, 10000);
             assert_eq!(
                 (result.purged, result.truncated, cache.soft_checkpoints()),
                 (expected, truncated, writes)
@@ -451,18 +466,29 @@ fn bin_soft_purge_checkpoint_error_leaves_the_old_location_and_accounting() {
     std::fs::rename(&path, &saved).unwrap();
     std::fs::create_dir(&path).unwrap();
     let tag = fluxheim_cache::cache_user_tag(&scope, None);
-    let result = purge_native_disk_cache_user_tag(&scope, None, &tag, 32, true);
+    let result = admitted_soft_purge(&scope, &tag, 32);
     assert_eq!(result.purged, 0);
     assert!(result.truncated);
+    let (_other_dir, other, other_scope) = fixture(CacheDiskBackend::StorageBin);
+    store(&other, &other_scope, "asset", &disk_cache_entry(b"fresh"));
+    let deferred = purge_native_disk_cache_user_tag(
+        &other_scope,
+        None,
+        &fluxheim_cache::cache_user_tag(&other_scope, None),
+        32,
+        true,
+    );
+    assert_eq!(
+        (deferred.examined, deferred.purged, deferred.truncated),
+        (0, 0, true)
+    );
+    assert_eq!(other.soft_checkpoints(), 0);
     assert_eq!(cache.with_state(|s| (s.objects.clone(), s.bytes)), old);
     assert_eq!(cache.stats().free_size_bytes, free);
     assert_eq!(&*cache.get("asset", |_| None).unwrap().body, b"old");
     std::fs::remove_dir(&path).unwrap();
     std::fs::rename(saved, path).unwrap();
-    assert_eq!(
-        purge_native_disk_cache_user_tag(&scope, None, &tag, 32, true).purged,
-        2
-    );
+    assert_eq!(admitted_soft_purge(&scope, &tag, 32).purged, 2);
 }
 
 #[test]
@@ -475,7 +501,7 @@ fn full_bin_soft_purge_preserves_fresh_entry_until_a_retry_can_commit() {
         reserved.push(location);
     }
     let tag = fluxheim_cache::cache_user_tag(&scope, None);
-    let failed = purge_native_disk_cache_user_tag(&scope, None, &tag, 4, true);
+    let failed = admitted_soft_purge(&scope, &tag, 4);
     assert_eq!(failed.purged, 0);
     assert!(failed.truncated);
     let original = cache.get("asset", |_| None).unwrap();
@@ -484,7 +510,7 @@ fn full_bin_soft_purge_preserves_fresh_entry_until_a_retry_can_commit() {
     for location in reserved {
         cache.release_storage_bin_location(location).unwrap();
     }
-    let retry = purge_native_disk_cache_user_tag(&scope, None, &tag, 4, true);
+    let retry = admitted_soft_purge(&scope, &tag, 4);
     assert_eq!(retry.purged, 1);
     assert!(!retry.truncated);
 }

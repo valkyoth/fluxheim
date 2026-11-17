@@ -11,8 +11,8 @@ use crate::storage_bin_fs::{
     storage_bin_path_file_type_no_follow, storage_bin_temp_path,
 };
 pub use crate::storage_bin_index::{
-    STORAGE_BIN_INDEX_FILENAME, StorageBinIndexEntry, read_storage_bin_index,
-    storage_bin_index_path, write_storage_bin_index,
+    STORAGE_BIN_INDEX_FILENAME, StorageBinIndexBudget, StorageBinIndexEntry,
+    read_storage_bin_index, storage_bin_index_path, write_storage_bin_index,
 };
 pub use crate::storage_bin_manifest::{
     STORAGE_BIN_DATA_DIR, STORAGE_BIN_MANIFEST_FILENAME, StorageBinLayoutPlan, StorageBinManifest,

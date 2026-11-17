@@ -276,7 +276,13 @@ per object. Leave spare space for staged replacements. Contention or limited
 space can result in partial progress; no fallback hard deletion is attempted.
 The admin controller admits four authenticated soft-purge requests per rolling
 second across selectors (429 on excess). At most two indexed purge requests
-run on blocking workers at once (503 when busy). Back off before retrying.
+run on blocking workers at once (503 when busy). Storage-bin also serializes
+soft checkpoints across **all cache roots in the process**. After staging a
+fresh replacement, allow at least five seconds before the next attempt, even
+if the write failed. A busy or cooling-down bin reports incomplete work
+without advancing its cursor. A tiered request may already have changed the
+memory tier; follow `repeat_required`, not just the HTTP status. Hard purge,
+filesystem and memory-only caches do not use the storage-bin cooldown.
 Soft purge is not suitable for
 removing disclosed/private content. Hard invalidation is not secure disk erasure
 either. Neither operation removes browser/CDN copies or copies on peers. A peer

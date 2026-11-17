@@ -59,6 +59,28 @@ async worker with at most two in flight, including work whose client disconnecte
   820 tests with the manual capacity test excluded. The Windows server suite
   passed 661 tests with that same exclusion.
 
+### Process-wide storage checkpoint limit
+
+All storage-bin indexed soft purges share one nonblocking slot. After staging
+a fresh replacement, the next bin scan must wait at least five seconds, even
+across cache roots or after a failed write. A deferred bin scan reports
+continuation without advancing its cursor. The four-per-second admin limit
+is separate; ordinary background persistence is not a soft purge.
+
+Snapshot construction and the writer enforce the reader's 64 MiB, entry-count
+and encoded-key limits. Tests check exact size accounting, preservation of the
+previous index on rejection, and successful background publication after the
+invalid state changes. The writer sorts references instead of cloning keys.
+A permitted checkpoint still processes the full index.
+
+The Linux workspace, affected all-feature suites and strict Clippy passed.
+The five-layout live fixture passed on Linux, Apple Silicon macOS, Windows 11
+and in an isolated non-root Podman container. Initial native smoke runs
+included HTTP timeouts; their cause was not established. A separate Windows
+run demonstrated legitimate partial tier progress. The fixture now follows
+explicit continuation only, with bounded attempts and exact per-tier totals;
+it does not retry a timed-out mutation.
+
 ## Toolchain
 
 The active workspace, release metadata and Rust builder images select

@@ -304,6 +304,24 @@ fn storage_bin_layout_and_index_io_round_trip() {
 
     assert!(storage_bin_index_path(&root).is_file());
     assert_eq!(read_storage_bin_index(&layout).unwrap(), entries);
+
+    let mut large = entries[0].clone();
+    large.combined_key = "k".repeat(32 * 1024 + 1);
+    assert_eq!(
+        write_storage_bin_index(&layout, std::slice::from_ref(&large))
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    large.combined_key.pop();
+    // The keys fit separately; together their hex and metadata exceed 64 MiB.
+    assert_eq!(
+        write_storage_bin_index(&layout, &vec![large; 1024])
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(read_storage_bin_index(&layout).unwrap(), entries);
 }
 
 #[test]

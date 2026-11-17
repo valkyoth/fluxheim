@@ -105,9 +105,10 @@ pub use storage::{
 };
 pub use storage_bin::{
     STORAGE_BIN_DATA_DIR, STORAGE_BIN_INDEX_FILENAME, STORAGE_BIN_MANIFEST_FILENAME,
-    StorageBinFileSet, StorageBinFreeMap, StorageBinFreeRange, StorageBinIndexEntry,
-    StorageBinLayoutPlan, StorageBinManifest, StorageBinObjectLocation, prepare_storage_bin_layout,
-    read_storage_bin_index, storage_bin_index_path, write_storage_bin_index,
+    StorageBinFileSet, StorageBinFreeMap, StorageBinFreeRange, StorageBinIndexBudget,
+    StorageBinIndexEntry, StorageBinLayoutPlan, StorageBinManifest, StorageBinObjectLocation,
+    prepare_storage_bin_layout, read_storage_bin_index, storage_bin_index_path,
+    write_storage_bin_index,
 };
 pub use tags::{
     MAX_CACHE_TAG_BYTES_PER_OBJECT, MAX_CACHE_TAG_LEN, MAX_CACHE_TAGS_PER_OBJECT,

@@ -957,7 +957,8 @@ Indexed scope, prefix, tag, and wildcard purge endpoints accept `soft=true` or
 `x-fluxheim-cache-soft: true` to mark matched objects stale without deleting
 their cached bodies on all tiers. Each indexed soft request scans at most one
 batch of 32 entries per tier. Check the continuation flags before declaring
-completion; pace requests to at most four per second. Storage-bin needs scratch
+completion; pace requests to at most four per second. For storage-bin, allow
+at least five seconds between soft checkpoints across roots. Storage-bin needs scratch
 space for the staged replacement extents. For disk stale dry-run limitations, read
 [operation safeguards](../guides/cache-operations.md#current-invalidation-warnings)
 before interpreting completion flags or requesting a supposedly read-only preview.
