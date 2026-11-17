@@ -194,6 +194,17 @@ impl AdminApp {
             );
         }
 
+        #[cfg(feature = "cache")]
+        if indexed_purge_route(method, path)
+            && (truthy_header(headers, "x-fluxheim-cache-soft")
+                || truthy_query_param(query, "soft"))
+            && !self.admit_soft_purge(Instant::now())
+        {
+            return operational_events::authenticated_outcome(
+                audit_permit,
+                error_response(StatusCode::TOO_MANY_REQUESTS, "soft purge rate limited"),
+            );
+        }
         let response = match (method, path) {
             ("GET", "/_fluxheim/status") => self.status_response(),
             ("GET", "/_fluxheim/cache/status") => self.cache_status_response(),

@@ -31,6 +31,7 @@ impl AdminApp {
         };
         let route = route.filter(|route| !route.trim().is_empty());
 
+        let (limit, batches) = indexed_purge_bounds(soft, limit, batches);
         match repeat_cache_indexed_purge(batches, || {
             self.proxy.purge_indexed_image_cache_path_prefix(
                 fluxheim_cache::CacheIndexedPathPrefixPurgeRequest {
@@ -99,6 +100,7 @@ impl AdminApp {
         };
         let route = route.filter(|route| !route.trim().is_empty());
 
+        let (limit, batches) = indexed_purge_bounds(soft, limit, batches);
         match repeat_cache_indexed_purge(batches, || {
             self.proxy
                 .purge_indexed_image_cache_tag(fluxheim_cache::CacheIndexedTagPurgeRequest {
@@ -260,6 +262,7 @@ impl AdminApp {
         };
         let route = route.filter(|route| !route.trim().is_empty());
 
+        let (limit, batches) = indexed_purge_bounds(soft, limit, batches);
         match repeat_cache_indexed_purge(batches, || {
             self.proxy.purge_indexed_image_cache_path_pattern(
                 fluxheim_cache::CacheIndexedPathPatternPurgeRequest {

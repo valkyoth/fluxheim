@@ -76,6 +76,8 @@ const MAX_CACHE_INDEXED_PURGE_BATCHES: usize = 64;
 
 #[derive(Clone)]
 pub struct AdminApp {
+    #[cfg(feature = "cache")]
+    soft_purge_times: Arc<Mutex<[Option<Instant>; 4]>>,
     #[cfg(test)]
     audit_dispatcher: Option<Arc<fluxheim_observability::operational::Dispatcher>>,
     token: AdminToken,
@@ -214,6 +216,8 @@ impl AdminApp {
         });
 
         let app = Self {
+            #[cfg(feature = "cache")]
+            soft_purge_times: Default::default(),
             operational: Arc::new(operational_status::Operational::new(config)?),
             #[cfg(test)]
             audit_dispatcher: None,
@@ -304,6 +308,43 @@ impl AdminApp {
     }
 }
 
+#[cfg(feature = "cache")]
+fn indexed_purge_route(method: &str, path: &str) -> bool {
+    method == "POST"
+        && matches!(
+            path,
+            "/_fluxheim/cache/purge-index"
+                | "/_fluxheim/cache/purge-prefix"
+                | "/_fluxheim/cache/purge-wildcard"
+                | "/_fluxheim/cache/purge-tag"
+        )
+}
+
+#[cfg(feature = "cache")]
+async fn bounded_indexed_purge(
+    slots: &'static tokio::sync::Semaphore,
+    work: impl FnOnce() -> fluxheim_server::NativeHttp1Response + Send + 'static,
+) -> fluxheim_server::NativeHttp1Response {
+    let Ok(permit) = slots.try_acquire() else {
+        return admin_native_http1_response(error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "cache purge busy",
+        ));
+    };
+    // A disconnected client must not free the slot while its mutation runs.
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work()
+    })
+    .await
+    .unwrap_or_else(|_| {
+        admin_native_http1_response(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "cache purge worker failed",
+        ))
+    })
+}
+
 impl fluxheim_server::NativeHttp1Handler for AdminApp {
     fn handle<'a>(
         &'a self,
@@ -311,7 +352,19 @@ impl fluxheim_server::NativeHttp1Handler for AdminApp {
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = fluxheim_server::NativeHttp1Response> + Send + 'a>,
     > {
-        Box::pin(async move { self.native_http1_response(request) })
+        Box::pin(async move {
+            #[cfg(feature = "cache")]
+            if indexed_purge_route(
+                &request.method,
+                native_admin_target_parts(&request.target).0,
+            ) {
+                let app = self.clone();
+                static SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+                return bounded_indexed_purge(&SLOTS, move || app.native_http1_response(request))
+                    .await;
+            }
+            self.native_http1_response(request)
+        })
     }
 }
 

@@ -343,7 +343,7 @@ fn cache_purge_tag_endpoint_accepts_header_route_scope() {
         "x-fluxheim-cache-tag",
         HeaderValue::from_static("article:1"),
     );
-    headers.insert("x-fluxheim-cache-limit", HeaderValue::from_static("16"));
+    headers.insert("x-fluxheim-cache-limit", HeaderValue::from_static("10000"));
     headers.insert("x-fluxheim-cache-batches", HeaderValue::from_static("3"));
     headers.insert("x-fluxheim-cache-soft", HeaderValue::from_static("yes"));
 
@@ -358,8 +358,8 @@ fn cache_purge_tag_endpoint_accepts_header_route_scope() {
     assert!(body.contains(r#""cache_tag":"article:1""#));
     assert!(body.contains(r#""matched":0"#));
     assert!(body.contains(r#""not_purged":0"#));
-    assert!(body.contains(r#""limit":16"#));
-    assert!(body.contains(r#""batch_limit":3"#));
+    assert!(body.contains(r#""limit":32"#));
+    assert!(body.contains(r#""batch_limit":1"#));
 }
 
 #[cfg(feature = "cache")]

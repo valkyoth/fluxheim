@@ -7,7 +7,7 @@ use fluxheim_cache::purge_index::{
     CacheStalePurgeResult,
 };
 
-use super::NativeDiskCache;
+use super::{NativeDiskCache, NativeDiskCacheBackend, NativeDiskCacheLocation};
 
 static NATIVE_DISK_CACHE_PURGE_REGISTRY: OnceLock<Mutex<Vec<NativeDiskCachePurgeHandle>>> =
     OnceLock::new();
@@ -134,52 +134,73 @@ impl NativeDiskCache {
         } else {
             CachePurgeMode::Hard
         };
-        let result = index.scan(selector, mode, limit, |entry| {
-            let Ok(_mutation) = self.try_lock_key_mutation(&entry.combined_key) else {
-                return CachePurgeVisit {
-                    retry: true,
-                    ..Default::default()
+        let result = if soft && matches!(self.backend, NativeDiskCacheBackend::StorageBin(_)) {
+            index.scan_batch(
+                selector,
+                mode,
+                limit.min(fluxheim_cache::purge_index::MAX_SOFT_PURGE_BATCH),
+                |entries| self.soft_purge_bin_group(&index, entries.collect(), now),
+            )
+        } else {
+            index.scan(selector, mode, limit, |entry| {
+                let Ok(_mutation) = self.try_lock_key_mutation(&entry.combined_key) else {
+                    return CachePurgeVisit {
+                        retry: true,
+                        ..Default::default()
+                    };
                 };
-            };
-            if !index.contains_entry(entry) {
-                return CachePurgeVisit {
-                    retry: true,
-                    ..Default::default()
-                };
-            }
-            if soft {
-                let Some(record) =
-                    self.with_state(|state| state.objects.get(&entry.combined_key).cloned())
-                else {
-                    self.with_state(|state| {
-                        state.purge_index.remove_combined(&entry.combined_key);
-                    });
-                    return CachePurgeVisit::default();
-                };
-                match self.soft_purge_disk_record(entry, &record, now) {
-                    Ok(purged) => {
-                        return CachePurgeVisit {
-                            purged,
-                            ..Default::default()
-                        };
-                    }
-                    Err(_) => {
-                        return CachePurgeVisit {
-                            retry: true,
-                            ..Default::default()
-                        };
+                if !index.contains_entry(entry) {
+                    return CachePurgeVisit {
+                        retry: true,
+                        ..Default::default()
+                    };
+                }
+                if soft {
+                    let Some(record) =
+                        self.with_state(|state| state.objects.get(&entry.combined_key).cloned())
+                    else {
+                        self.with_state(|state| {
+                            state.purge_index.remove_combined(&entry.combined_key);
+                        });
+                        return CachePurgeVisit::default();
+                    };
+                    let changed = self
+                        .encode_soft_purge(entry, &record, now)
+                        .and_then(|encoded| {
+                            let NativeDiskCacheLocation::Filesystem(path) = &record.location else {
+                                return Err(std::io::Error::other("unexpected soft purge backend"));
+                            };
+                            if let Some(bytes) = encoded {
+                                self.write_object_atomically(path, &bytes)?;
+                                return Ok(true);
+                            }
+                            Ok(false)
+                        });
+                    match changed {
+                        Ok(purged) => {
+                            return CachePurgeVisit {
+                                purged,
+                                ..Default::default()
+                            };
+                        }
+                        Err(_) => {
+                            return CachePurgeVisit {
+                                retry: true,
+                                ..Default::default()
+                            };
+                        }
                     }
                 }
-            }
-            let purged = self.remove_combined_locked(&entry.combined_key);
-            let retry =
-                !purged && self.with_state(|state| state.objects.contains_key(&entry.combined_key));
-            CachePurgeVisit {
-                purged,
-                retry,
-                ..Default::default()
-            }
-        });
+                let purged = self.remove_combined_locked(&entry.combined_key);
+                let retry = !purged
+                    && self.with_state(|state| state.objects.contains_key(&entry.combined_key));
+                CachePurgeVisit {
+                    purged,
+                    retry,
+                    ..Default::default()
+                }
+            })
+        };
         CacheIndexedPurgeResult {
             examined: result.examined,
             matched: result.matched,

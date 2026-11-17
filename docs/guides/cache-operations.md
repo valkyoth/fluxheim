@@ -268,8 +268,16 @@ curl --fail-with-body --request POST \
 
 Hard purge is the default. On every tier, indexed `soft=true` marks an object
 stale while retaining its body and validators. It does not grant or extend a
-stale-serving window. A bin replacement checkpoints the index for each changed
-object: use small batches on large bins and monitor disk latency. Soft purge is not suitable for
+stale-serving window. For soft requests the effective limit is at most 32
+entries per tier and one batch per request, even if larger values are supplied.
+Check `repeat_required` and use the effective limits in the response. Each
+affected storage-bin cache checkpoints its index once for the group, not once
+per object. Leave spare space for staged replacements. Contention or limited
+space can result in partial progress; no fallback hard deletion is attempted.
+The admin controller admits four authenticated soft-purge requests per rolling
+second across selectors (429 on excess). At most two indexed purge requests
+run on blocking workers at once (503 when busy). Back off before retrying.
+Soft purge is not suitable for
 removing disclosed/private content. Hard invalidation is not secure disk erasure
 either. Neither operation removes browser/CDN copies or copies on peers. A peer
 can refill an old object unless invalidation/version changes are coordinated.

@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex, RwLock};
 #[path = "purge_scan.rs"]
 mod scan;
 pub use scan::{CachePurgeMode, CachePurgeScanResult, CachePurgeSelector, CachePurgeVisit};
+pub const MAX_SOFT_PURGE_BATCH: usize = 32;
 
 #[derive(Debug, Clone)]
 pub struct CachePurgeIndex {

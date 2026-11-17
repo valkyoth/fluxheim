@@ -192,6 +192,7 @@ impl AdminApp {
         };
         let route = route.filter(|route| !route.trim().is_empty());
 
+        let (limit, batches) = indexed_purge_bounds(soft, limit, batches);
         match repeat_cache_indexed_purge(batches, || {
             self.proxy
                 .purge_indexed_image_cache(fluxheim_cache::CacheIndexedPurgeRequest {

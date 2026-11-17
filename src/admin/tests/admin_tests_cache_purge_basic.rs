@@ -2,6 +2,67 @@
 use super::*;
 
 #[cfg(feature = "cache")]
+#[tokio::test]
+async fn cancelling_indexed_purge_waiter_does_not_release_running_worker() {
+    use super::super::bounded_indexed_purge;
+    use fluxheim_server::NativeHttp1Response;
+    use std::time::Duration;
+    static SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+    let (started, ready) = tokio::sync::oneshot::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let runtime_thread = std::thread::current().id();
+    let task = tokio::spawn(bounded_indexed_purge(&SLOT, move || {
+        assert_ne!(std::thread::current().id(), runtime_thread);
+        started.send(()).unwrap();
+        wait.recv_timeout(Duration::from_secs(5)).unwrap();
+        NativeHttp1Response::new(200, "OK", Vec::new())
+    }));
+    tokio::time::timeout(Duration::from_secs(5), ready)
+        .await
+        .unwrap()
+        .unwrap();
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    assert_eq!(
+        bounded_indexed_purge(&SLOT, || panic!("unadmitted"))
+            .await
+            .status(),
+        503
+    );
+    release.send(()).unwrap();
+    let _permit = tokio::time::timeout(Duration::from_secs(5), SLOT.acquire())
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[cfg(feature = "cache")]
+#[test]
+fn authenticated_soft_purge_rate_is_shared_across_selectors_and_clones() {
+    let app = app();
+    let clone = app.clone();
+    let now = std::time::Instant::now();
+    for _ in 0..4 {
+        assert!(clone.admit_soft_purge(now));
+    }
+    for path in ["purge-index", "purge-prefix", "purge-wildcard", "purge-tag"] {
+        let path = format!("/_fluxheim/cache/{path}");
+        assert_eq!(
+            app.handle("POST", &path, Some("soft=true"), &HeaderMap::new())
+                .status,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            app.handle("POST", &path, Some("soft=true"), &auth_headers())
+                .status,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+    }
+    assert!(!app.admit_soft_purge(now + std::time::Duration::from_millis(999)));
+    assert!(app.admit_soft_purge(now + std::time::Duration::from_secs(1)));
+}
+
+#[cfg(feature = "cache")]
 #[test]
 fn cache_purge_endpoint_requires_auth_and_purges_by_request_identity() {
     let capture = fluxheim_observability::event_test_support::Capture::start();
@@ -335,7 +396,7 @@ fn cache_purge_index_endpoint_accepts_header_route_scope() {
     let mut headers = auth_headers();
     headers.insert("x-fluxheim-cache-vhost", HeaderValue::from_static("cached"));
     headers.insert("x-fluxheim-cache-route", HeaderValue::from_static("assets"));
-    headers.insert("x-fluxheim-cache-limit", HeaderValue::from_static("16"));
+    headers.insert("x-fluxheim-cache-limit", HeaderValue::from_static("10000"));
     headers.insert("x-fluxheim-cache-batches", HeaderValue::from_static("3"));
     headers.insert("x-fluxheim-cache-soft", HeaderValue::from_static("true"));
 
@@ -351,6 +412,6 @@ fn cache_purge_index_endpoint_accepts_header_route_scope() {
     assert!(body.contains(r#""purged":0"#));
     assert!(body.contains(r#""not_purged":0"#));
     assert!(body.contains(r#""repeat_required":false"#));
-    assert!(body.contains(r#""limit":16"#));
-    assert!(body.contains(r#""batch_limit":3"#));
+    assert!(body.contains(r#""limit":32"#));
+    assert!(body.contains(r#""batch_limit":1"#));
 }

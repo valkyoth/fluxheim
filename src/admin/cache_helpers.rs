@@ -1,4 +1,8 @@
+#[cfg(feature = "cache")]
+use super::AdminApp;
 use serde_json::{Value, json};
+#[cfg(feature = "cache")]
+use std::time::{Duration, Instant};
 
 mod stats_json;
 pub(super) use stats_json::*;
@@ -146,6 +150,34 @@ impl std::ops::Deref for CacheStalePurgeBatchResult {
 
     fn deref(&self) -> &Self::Target {
         &self.result
+    }
+}
+
+#[cfg(feature = "cache")]
+impl AdminApp {
+    pub(super) fn admit_soft_purge(&self, now: Instant) -> bool {
+        let Ok(mut times) = self.soft_purge_times.try_lock() else {
+            return false;
+        };
+        let Some(slot) = times.iter_mut().find(|slot| {
+            slot.is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_secs(1))
+        }) else {
+            return false;
+        };
+        *slot = Some(now);
+        true
+    }
+}
+
+#[cfg(feature = "cache")]
+pub(super) fn indexed_purge_bounds(soft: bool, limit: usize, batches: usize) -> (usize, usize) {
+    if soft {
+        (
+            limit.min(fluxheim_cache::purge_index::MAX_SOFT_PURGE_BATCH),
+            1,
+        )
+    } else {
+        (limit, batches)
     }
 }
 

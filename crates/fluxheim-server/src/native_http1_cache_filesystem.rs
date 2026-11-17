@@ -250,18 +250,18 @@ impl NativeDiskCache {
         Ok(NativeDiskCacheLocation::Filesystem(path))
     }
 
-    pub(super) fn soft_purge_disk_record(
+    pub(super) fn encode_soft_purge(
         &self,
         entry: &CachePurgeIndexEntry,
         record: &NativeDiskCacheRecord,
         now: Instant,
-    ) -> std::io::Result<bool> {
+    ) -> std::io::Result<Option<Vec<u8>>> {
         let mut object = self.read_record(record)?;
         let mut meta = NativeDiskCacheMeta::decode(&object.internal_meta)
             .ok_or_else(|| std::io::Error::other("cache freshness metadata is invalid"))?;
         let expiry = native_instant_to_unix_secs(now);
         if meta.expires_at_unix_secs <= expiry {
-            return Ok(false);
+            return Ok(None);
         }
         if object.combined_key.as_deref() != Some(&entry.combined_key) {
             return Err(std::io::Error::other("disk cache identity mismatch"));
@@ -285,18 +285,10 @@ impl NativeDiskCache {
         } else {
             encoded
         };
-        match &record.location {
-            NativeDiskCacheLocation::Filesystem(path) => {
-                self.write_object_atomically(path, &encoded)?
-            }
-            NativeDiskCacheLocation::StorageBin(old) => {
-                self.replace_soft_purged_bin(&entry.combined_key, *old, &encoded)?;
-            }
-        }
-        Ok(true)
+        Ok(Some(encoded))
     }
 
-    fn write_object_atomically(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    pub(super) fn write_object_atomically(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         if self.with_state(|state| state.filesystem_writes_blocked) {
             return Err(std::io::Error::other(
                 "filesystem cache write admission is paused",

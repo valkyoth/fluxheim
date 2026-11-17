@@ -93,6 +93,35 @@ impl CachePurgeIndex {
         limit: usize,
         mut visit: impl FnMut(&CachePurgeIndexEntry) -> CachePurgeVisit,
     ) -> CachePurgeScanResult {
+        self.scan_batch(selector, mode, limit, |entries| {
+            let mut result = CachePurgeScanResult::default();
+            for (_, entry) in entries {
+                let outcome = visit(entry);
+                result.purged += usize::from(outcome.purged);
+                result.stale += usize::from(outcome.stale);
+                result.truncated |= outcome.retry;
+            }
+            result
+        })
+    }
+
+    pub fn is_current_generation(&self, key: &str, sequence: u64) -> bool {
+        self.inner
+            .read()
+            .is_ok_and(|inner| inner.positions.get(key) == Some(&sequence))
+    }
+
+    /// Complete the visit before advancing this selector's cursor. A grouped
+    /// mutation signals retry via truncated; its counts include only commits.
+    pub fn scan_batch(
+        &self,
+        selector: CachePurgeSelector<'_>,
+        mode: CachePurgeMode,
+        limit: usize,
+        visit: impl FnOnce(
+            &mut dyn Iterator<Item = (u64, &CachePurgeIndexEntry)>,
+        ) -> CachePurgeScanResult,
+    ) -> CachePurgeScanResult {
         let incomplete = || CachePurgeScanResult {
             truncated: true,
             ..Default::default()
@@ -146,29 +175,23 @@ impl CachePurgeIndex {
             .collect::<Vec<_>>();
         let more = candidates.next().is_some();
         drop(inner);
-        let mut result = CachePurgeScanResult {
-            examined: selected.len(),
-            ..Default::default()
-        };
-        for (sequence, entry) in &selected {
+        let mut matched = 0;
+        let mut examined = 0;
+        let mut result = visit(&mut selected.iter().filter_map(|(sequence, entry)| {
+            examined += 1;
             progress.after = *sequence;
-            if !selector.matches(entry) {
-                continue;
+            if selector.matches(entry) && self.is_current_generation(&entry.combined_key, *sequence)
+            {
+                matched += 1;
+                Some((*sequence, entry))
+            } else {
+                None
             }
-            // Replacements get a new sequence and belong to the next traversal.
-            let current = self
-                .inner
-                .read()
-                .is_ok_and(|inner| inner.positions.get(&entry.combined_key) == Some(sequence));
-            if !current {
-                continue;
-            }
-            result.matched += 1;
-            let outcome = visit(entry);
-            result.purged += usize::from(outcome.purged);
-            result.stale += usize::from(outcome.stale);
-            progress.failed |= outcome.retry;
-        }
+        }));
+        let more = more || examined < selected.len();
+        result.examined = examined;
+        result.matched = matched;
+        progress.failed |= result.truncated;
         let Ok(inner) = self.inner.read() else {
             return incomplete();
         };
@@ -230,6 +253,22 @@ mod tests {
                 usize::from(!matches!(selector, CachePurgeSelector::Tag(..)))
             );
         }
+    }
+
+    #[test]
+    fn partially_consumed_batch_resumes_at_first_unexamined_entry() {
+        let index = index(4);
+        let selector = CachePurgeSelector::Scope("scope");
+        let mut visited = Vec::new();
+        for (count, more) in [(1, true), (3, false)] {
+            let result = index.scan_batch(selector, CachePurgeMode::Soft, 4, |entries| {
+                visited.extend(entries.take(count).map(|(_, e)| e.combined_key.clone()));
+                CachePurgeScanResult::default()
+            });
+            assert_eq!((result.examined, result.matched), (count, count));
+            assert_eq!(result.truncated, more);
+        }
+        assert_eq!(visited, ["0", "1", "2", "3"]);
     }
 
     #[test]

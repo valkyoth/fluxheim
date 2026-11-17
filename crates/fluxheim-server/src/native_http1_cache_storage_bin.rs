@@ -38,6 +38,8 @@ pub(super) struct NativeStorageBinIndexFlush {
 
 #[derive(Debug)]
 struct NativeStorageBinIndexTask {
+    #[cfg(test)]
+    soft_checkpoints: AtomicUsize,
     layout: StorageBinLayoutPlan,
     state: Arc<Mutex<NativeDiskCacheState>>,
     dirty: AtomicBool,
@@ -57,6 +59,8 @@ impl NativeStorageBinIndexFlush {
         };
         let service = native_storage_bin_index_service()?;
         let task = Arc::new(NativeStorageBinIndexTask {
+            #[cfg(test)]
+            soft_checkpoints: AtomicUsize::new(0),
             layout: storage_bin.layout.clone(),
             state: Arc::clone(state),
             dirty: AtomicBool::new(false),
@@ -203,6 +207,14 @@ fn native_storage_bin_index_entries(
     state: &NativeDiskCacheState,
     index_key: Option<&SecretBytes<32>>,
 ) -> Vec<StorageBinIndexEntry> {
+    native_storage_bin_index_entries_with(state, index_key, |_, location| location)
+}
+
+fn native_storage_bin_index_entries_with(
+    state: &NativeDiskCacheState,
+    index_key: Option<&SecretBytes<32>>,
+    replace: impl Fn(&str, StorageBinObjectLocation) -> StorageBinObjectLocation,
+) -> Vec<StorageBinIndexEntry> {
     state
         .objects
         .iter()
@@ -216,7 +228,7 @@ fn native_storage_bin_index_entries(
                 } else {
                     combined_key.clone()
                 },
-                location: *location,
+                location: replace(combined_key, *location),
                 accessed: record.accessed_at,
             })
         })
@@ -224,13 +236,79 @@ fn native_storage_bin_index_entries(
 }
 
 impl NativeDiskCache {
-    // Caller holds the key's exclusive stripe. Do not overwrite live bytes,
-    // or release the old allocation before its replacement is checkpointed.
-    pub(super) fn replace_soft_purged_bin(
+    pub(super) fn soft_purge_bin_group(
         &self,
-        key: &str,
-        old: StorageBinObjectLocation,
-        encoded: &[u8],
+        index: &fluxheim_cache::CachePurgeIndex,
+        mut entries: Vec<(u64, &fluxheim_cache::CachePurgeIndexEntry)>,
+        now: std::time::Instant,
+    ) -> fluxheim_cache::purge_index::CachePurgeScanResult {
+        use super::native_http1_cache_state::native_disk_cache_mutation_lock_stripe as stripe;
+        use fluxheim_cache::purge_index::CachePurgeScanResult;
+        let mut result = CachePurgeScanResult::default();
+        entries.sort_unstable_by_key(|(_, e)| stripe(&e.combined_key));
+        let mut guards = Vec::new();
+        let mut staged = std::collections::HashMap::new();
+        for group in
+            entries.chunk_by(|(_, a), (_, b)| stripe(&a.combined_key) == stripe(&b.combined_key))
+        {
+            let Some((_, first)) = group.first() else {
+                continue;
+            };
+            let Ok(guard) = self.try_lock_key_mutation(&first.combined_key) else {
+                result.truncated = true;
+                continue;
+            };
+            guards.push(guard);
+            for &(sequence, entry) in group {
+                let key = &entry.combined_key;
+                if !index.is_current_generation(key, sequence) {
+                    continue;
+                }
+                let Some(record) = self.with_state(|s| s.objects.get(key).cloned()) else {
+                    result.truncated = true;
+                    continue;
+                };
+                let NativeDiskCacheLocation::StorageBin(old) = record.location else {
+                    result.truncated = true;
+                    continue;
+                };
+                // Encode/write only one body at a time. Retain locations, not buffers.
+                match self.encode_soft_purge(entry, &record, now) {
+                    Ok(Some(bytes)) => match self.write_encoded_object(key, &bytes) {
+                        Ok(Some(NativeDiskCacheLocation::StorageBin(new))) => {
+                            staged.insert(key.as_str(), (old, new));
+                        }
+                        _ => result.truncated = true,
+                    },
+                    Ok(None) => {}
+                    Err(_) => result.truncated = true,
+                }
+            }
+        }
+        if !staged.is_empty() {
+            if self.checkpoint_soft_group(&staged).is_ok() {
+                result.purged = staged.len();
+                for (old, _) in staged.values() {
+                    result.truncated |= self.release_storage_bin_location(*old).is_err();
+                }
+            } else {
+                result.truncated = true;
+                self.persist_storage_bin_index();
+                for (_, new) in staged.values() {
+                    let _ = self.release_storage_bin_location(*new);
+                }
+            }
+        }
+        drop(guards);
+        result
+    }
+
+    fn checkpoint_soft_group(
+        &self,
+        staged: &std::collections::HashMap<
+            &str,
+            (StorageBinObjectLocation, StorageBinObjectLocation),
+        >,
     ) -> std::io::Result<()> {
         let task = &self
             .index_flush
@@ -241,39 +319,35 @@ impl NativeDiskCache {
             .flush_lock
             .try_lock()
             .map_err(|_| std::io::Error::other("bin index busy"))?;
-        let index_key = task.index_key.as_deref().map_or_else(
-            || key.to_owned(),
-            |secret| native_cache_confidential_index_identity(secret, key),
-        );
-        let mut entries = self
-            .with_state(|state| native_storage_bin_index_entries(state, task.index_key.as_deref()));
-        let entry = entries
-            .iter_mut()
-            .find(|e| e.location == old && e.combined_key == index_key)
-            .ok_or_else(|| std::io::Error::other("missing bin index entry"))?;
-        let Some(NativeDiskCacheLocation::StorageBin(new)) =
-            self.write_encoded_object(key, encoded)?
-        else {
-            return Err(std::io::Error::other("no space for soft purge"));
-        };
-        entry.location = new;
-        if let Err(error) = write_storage_bin_index(&task.layout, &entries) {
-            self.persist_storage_bin_index();
-            self.release_storage_bin_location(new)?;
-            return Err(error);
-        }
+        let entries = self.with_state(|state| {
+            native_storage_bin_index_entries_with(state, task.index_key.as_deref(), |key, old| {
+                staged.get(key).map_or(old, |(_, new)| *new)
+            })
+        });
+        #[cfg(test)]
+        task.soft_checkpoints.fetch_add(1, Ordering::Relaxed);
+        write_storage_bin_index(&task.layout, &entries)?;
         self.with_state_mut(|state| {
-            if let Some(record) = state.objects.get_mut(key) {
-                record.location = NativeDiskCacheLocation::StorageBin(new);
-                record.identity = Arc::new(());
-                state.bytes = state
-                    .bytes
-                    .saturating_sub(record.weight)
-                    .saturating_add(new.len);
-                record.weight = new.len;
+            for (key, (_, new)) in staged {
+                if let Some(record) = state.objects.get_mut(*key) {
+                    record.location = NativeDiskCacheLocation::StorageBin(*new);
+                    record.identity = Arc::new(());
+                    state.bytes = state
+                        .bytes
+                        .saturating_sub(record.weight)
+                        .saturating_add(new.len);
+                    record.weight = new.len;
+                }
             }
         });
-        self.release_storage_bin_location(old)
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn soft_checkpoints(&self) -> usize {
+        self.index_flush
+            .as_ref()
+            .map_or(0, |f| f.task.soft_checkpoints.load(Ordering::Relaxed))
     }
 
     pub(super) fn allocate_storage_bin_location(

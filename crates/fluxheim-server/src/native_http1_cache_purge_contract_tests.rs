@@ -397,28 +397,71 @@ fn soft_purge_does_not_make_mandatory_revalidation_eligible_for_stale_reuse() {
 }
 
 #[test]
+fn bin_soft_purge_checkpoints_once_per_group_even_with_colliding_stripes() {
+    for encrypted in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = storage_bin_config(&directory.path().join("cache"));
+        if encrypted {
+            super::store_admission::configure_encryption(&mut config, directory.path());
+        }
+        let cache = Arc::new(NativeDiskCache::from_config(&config).unwrap());
+        let scope = format!("group-soft-{}", directory.path().display());
+        register_native_disk_cache_purge_handle(Arc::from(scope.as_str()), None, &cache);
+        let mut keys = vec!["first".to_owned()];
+        let stripe = super::super::native_http1_cache_state::native_disk_cache_mutation_lock_stripe;
+        keys.extend(
+            (0..20000)
+                .map(|n| format!("collision-{n}"))
+                .filter(|k| stripe(k) == stripe("first"))
+                .take(39),
+        );
+        assert_eq!(keys.len(), 40);
+        let mut item = disk_cache_entry(b"body");
+        item.stale_if_error_until = Some(Instant::now() + Duration::from_secs(120));
+        for key in &keys {
+            store(&cache, &scope, key, &item);
+        }
+        let tag = fluxheim_cache::cache_user_tag(&scope, None);
+        for (expected, truncated, writes) in [(32, true, 1), (8, false, 2), (0, true, 2)] {
+            let result = purge_native_disk_cache_user_tag(&scope, None, &tag, 10000, true);
+            assert_eq!(
+                (result.purged, result.truncated, cache.soft_checkpoints()),
+                (expected, truncated, writes)
+            );
+        }
+        drop(cache);
+        let reopened = NativeDiskCache::from_config(&config).unwrap();
+        for key in keys {
+            let object = reopened.get(&key, |_| None).unwrap();
+            assert!(object.expires_at <= Instant::now());
+            assert_eq!(&*object.body, b"body");
+        }
+    }
+}
+
+#[test]
 fn bin_soft_purge_checkpoint_error_leaves_the_old_location_and_accounting() {
     let (directory, cache, scope) = fixture(CacheDiskBackend::StorageBin);
     store(&cache, &scope, "asset", &disk_cache_entry(b"old"));
-    let old = cache.with_state(|s| (s.objects["asset"].clone(), s.bytes));
+    store(&cache, &scope, "second", &disk_cache_entry(b"other"));
+    let old = cache.with_state(|s| (s.objects.clone(), s.bytes));
+    let free = cache.stats().free_size_bytes;
     let path = fluxheim_cache::storage_bin_index_path(directory.path());
     let saved = directory.path().join("saved-index");
     std::fs::rename(&path, &saved).unwrap();
     std::fs::create_dir(&path).unwrap();
     let tag = fluxheim_cache::cache_user_tag(&scope, None);
-    let result = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, true);
+    let result = purge_native_disk_cache_user_tag(&scope, None, &tag, 32, true);
     assert_eq!(result.purged, 0);
     assert!(result.truncated);
-    assert_eq!(
-        cache.with_state(|s| (s.objects["asset"].clone(), s.bytes)),
-        old
-    );
+    assert_eq!(cache.with_state(|s| (s.objects.clone(), s.bytes)), old);
+    assert_eq!(cache.stats().free_size_bytes, free);
     assert_eq!(&*cache.get("asset", |_| None).unwrap().body, b"old");
     std::fs::remove_dir(&path).unwrap();
     std::fs::rename(saved, path).unwrap();
     assert_eq!(
-        purge_native_disk_cache_user_tag(&scope, None, &tag, 1, true).purged,
-        1
+        purge_native_disk_cache_user_tag(&scope, None, &tag, 32, true).purged,
+        2
     );
 }
 

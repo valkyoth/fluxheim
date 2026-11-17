@@ -190,6 +190,13 @@ def run_case(parent, backend, metrics=False):
                 assert request(public, path) == expected
                 assert count(path) == 2
                 purge("purge-index?vhost=assets&limit=10")
+            for n in range(35):
+                fill(f"/batch-{n}.css")
+            soft = "purge-index?vhost=assets&soft=true&limit=10000&batches=64"
+            first = purge(soft)
+            assert (first["limit"], first["batch_limit"], first["purged"], first["repeat_required"]) == (32, 1, 32 * copies, True), first
+            last = purge(soft)
+            assert last["purged"] == 3 * copies and not last["truncated"], last
             fill("/b.css")
             purge("activity/reset")
         print(f"cache operations {backend}: protected commands and bounded purge continuation ok")

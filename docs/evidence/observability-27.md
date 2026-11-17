@@ -36,6 +36,29 @@ Soft purge is not a secure deletion or a fence against future fills.
 - Linux ARM64, final release archives and reproducibility are release gates,
   not results inferred from these tests.
 
+## Soft-purge checkpoint follow-up
+
+A storage-bin soft purge stages up to 32 examined entries per disk batch.
+It writes at most one foreground index checkpoint for that bin, and none if
+no fresh object could be staged. A checkpoint still costs a full index write;
+this change bounds how often it occurs, not the latency of the filesystem.
+The admin API limits indexed soft purges to one batch per request and four
+requests per rolling second per admin app. Indexed purge work runs off the
+async worker with at most two in flight, including work whose client disconnected.
+
+- Plain and encrypted bin tests count checkpoints across a 40-object pass
+  (32 then 8), re-scan already stale objects and verify persistence after
+  restart. An injected checkpoint failure preserves both previous objects
+  and allocator free capacity, and permits a successful retry.
+- The live admin fixture checks continuation over 35 objects in all five
+  layouts. It passed on Linux, Apple Silicon macOS, Windows 11 and in a
+  non-root Debian Podman container without external networking. On Linux the
+  metrics listener was unavailable using the pre-existing local binary; the
+  rerun after building the required metrics profile passed.
+- The locked Linux workspace passed. The all-feature Linux server suite passed
+  820 tests with the manual capacity test excluded. The Windows server suite
+  passed 661 tests with that same exclusion.
+
 ## Toolchain
 
 The active workspace, release metadata and Rust builder images select
