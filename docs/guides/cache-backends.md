@@ -172,8 +172,13 @@ bin data to recover unindexed entries. Cache storage is not a durable database.
 
 Fills reserve room in the 64 MiB recovery index before replacing or evicting
 objects. The reservation includes room for future access times and extent
-changes. A bin can therefore decline a new fill even when it has free disk
-space. Encrypted bins account for the stored digest instead of the plaintext
+changes. When the index fills, a new key can replace the least recently used
+entries even if the bin still has free disk space. A fill can evict at most
+eight entries for index space. If more are needed, a required entry is busy,
+or another writer temporarily holds the needed capacity, Fluxheim skips the
+fill instead. Invalid keys and disabled admission do not trigger eviction.
+This is LRU replacement, not a frequency filter: sustained churn can still
+reduce the hit rate. Encrypted bins account for the stored digest instead of the plaintext
 key. On upgrade, entries in an older index that do not fit this headroom are
 left out during recovery; those entries start cold.
 

@@ -104,6 +104,27 @@ The first Windows run returned zero instead of one in a soft-purge fixture;
 the affected tests now serialize fixture creation before seeding expiring
 objects, without changing production deadlines or retry assertions.
 
+### Index capacity and LRU replacement
+
+An otherwise admissible new bin key can displace up to eight LRU entries to
+reserve index capacity. The store checks that the whole set fits, obtains the
+victim stripes without waiting, then rechecks their order and reserves the
+incoming row before releasing any space. A busy victim, temporary reservation,
+disabled index or impossible row does not trigger index eviction. This is not
+a frequency filter and does not prevent ordinary cache churn.
+
+Regression tests use small index budgets with real bins. They check LRU order,
+restart membership in plaintext and encrypted bins, concurrent stores, busy
+and colliding stripes, and preservation of entries when a fill would exceed
+the eviction cap. The prior hard-purge restart tests remain enabled.
+
+The Linux workspace and all-feature server suite passed (828 server tests;
+one manual filesystem capacity test skipped). The native macOS and Windows
+suites passed. All five live layouts passed in Podman and on the three native
+platforms. Earlier Linux and Windows live runs had loopback HTTP timeouts;
+the complete reruns passed without changing the harness. Their cause was
+not established.
+
 ## Toolchain
 
 The active workspace, release metadata and Rust builder images select

@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn index_capacity_rejects_new_keys_but_allows_replacement_and_purge_at_capacity() {
+fn index_capacity_reclaims_lru_and_preserves_replacement_and_purge_on_restart() {
     for encrypted in [false, true] {
         let dir = tempfile::tempdir().unwrap();
         let mut config = storage_bin_config(&dir.path().join("cache"));
@@ -22,20 +22,22 @@ fn index_capacity_rejects_new_keys_but_allows_replacement_and_purge_at_capacity(
                 .unwrap();
         }
         cache.checkpoint_for_test();
-        let free = cache.stats().free_size_bytes;
-        cache
-            .store(disk_cache_store_key("C"), &disk_cache_entry(b"rejected"))
-            .unwrap();
-        assert!(cache.get_combined("C").is_none());
-        assert_eq!(free, cache.stats().free_size_bytes);
         cache
             .store(disk_cache_store_key("B"), &disk_cache_entry(b"replaced"))
             .unwrap();
         assert_eq!(&*cache.get_combined("B").unwrap().body, b"replaced");
-        assert!(cache.remove_combined("A"));
+        cache.with_state_mut(|s| s.touch_object("A", SystemTime::UNIX_EPOCH));
+        cache
+            .store(disk_cache_store_key("C"), &disk_cache_entry(b"admitted"))
+            .unwrap();
+        assert!(cache.get_combined("A").is_none());
+        assert!(cache.get_combined("C").is_some());
+        assert_eq!(cache.stats().entries, 2);
+        assert!(cache.remove_combined("C"));
         drop(cache);
         let cache = NativeDiskCache::from_config(&config).unwrap();
         assert!(cache.get_combined("A").is_none());
+        assert!(cache.get_combined("C").is_none());
         assert_eq!(&*cache.get_combined("B").unwrap().body, b"replaced");
         cache.with_state_mut(|s| s.bin_index.as_mut().unwrap().limit = 2 * weight);
         cache
@@ -45,7 +47,8 @@ fn index_capacity_rejects_new_keys_but_allows_replacement_and_purge_at_capacity(
             .store(disk_cache_store_key("D"), &disk_cache_entry(b"full"))
             .unwrap();
         assert!(cache.get_combined("C").is_some());
-        assert!(cache.get_combined("D").is_none());
+        assert!(cache.get_combined("D").is_some());
+        assert_eq!(cache.stats().entries, 2);
     }
 }
 
@@ -150,7 +153,7 @@ fn concurrent_bin_index_reservations_share_and_refund_the_last_row() {
             scope.spawn(move || {
                 barrier.wait();
                 let reservation = cache.reserve_bin_index(&n.to_string());
-                if reservation.is_some() {
+                if reservation.is_ok() {
                     admitted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
                 barrier.wait();
@@ -159,7 +162,142 @@ fn concurrent_bin_index_reservations_share_and_refund_the_last_row() {
         }
     });
     assert_eq!(admitted.into_inner(), 1);
-    assert!(cache.reserve_bin_index("z").is_some());
+    assert!(cache.reserve_bin_index("z").is_ok());
+}
+
+#[test]
+fn concurrent_fills_at_index_capacity_keep_recoverable_lru_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = storage_bin_config(&dir.path().join("cache"));
+    let cache = NativeDiskCache::from_config(&config).unwrap();
+    let row = fluxheim_cache::StorageBinIndexBudget::maximum_row_bytes(2).unwrap();
+    cache.with_state_mut(|s| s.bin_index.as_mut().unwrap().limit = 4 * row);
+    for n in 0..4 {
+        cache
+            .store(
+                disk_cache_store_key(&format!("a{n}")),
+                &disk_cache_entry(b"old"),
+            )
+            .unwrap();
+    }
+    let barrier = std::sync::Barrier::new(8);
+    std::thread::scope(|scope| {
+        for n in 0..8 {
+            let (barrier, cache) = (&barrier, &cache);
+            scope.spawn(move || {
+                barrier.wait();
+                cache
+                    .store(
+                        disk_cache_store_key(&format!("b{n}")),
+                        &disk_cache_entry(b"new"),
+                    )
+                    .unwrap();
+            });
+        }
+    });
+    let keys = |s: &NativeDiskCacheState| {
+        s.objects
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let expected = cache.with_state(keys);
+    assert_eq!(expected.len(), 4);
+    assert!(expected.iter().any(|key| key.starts_with('b')));
+    drop(cache);
+    let reopened = NativeDiskCache::from_config(&config).unwrap();
+    assert_eq!(reopened.with_state(keys), expected);
+}
+
+#[test]
+fn index_pressure_skips_impossible_busy_and_over_budget_victim_sets() {
+    use super::super::native_http1_cache_admission::IndexRefusal;
+    let dir = tempfile::tempdir().unwrap();
+    let cache =
+        NativeDiskCache::from_config(&storage_bin_config(&dir.path().join("cache"))).unwrap();
+    let row = fluxheim_cache::StorageBinIndexBudget::maximum_row_bytes(1).unwrap();
+    cache.with_state_mut(|s| s.bin_index.as_mut().unwrap().limit = 10 * row);
+    for key in ["0", "1", "2", "3", "4", "5", "6", "7", "8"] {
+        cache
+            .store(disk_cache_store_key(key), &disk_cache_entry(b"cached"))
+            .unwrap();
+    }
+    let pending = cache.reserve_bin_index("P").unwrap();
+    assert_eq!(cache.reserve_bin_index("N").err(), Some(IndexRefusal::Busy));
+    cache
+        .store(disk_cache_store_key("N"), &disk_cache_entry(b"new"))
+        .unwrap();
+    drop(pending);
+    let impossible = "s".repeat(500);
+    assert_eq!(
+        cache.reserve_bin_index(&impossible).err(),
+        Some(IndexRefusal::Invalid)
+    );
+    assert_eq!(
+        cache.reserve_bin_index(&"s".repeat(32769)).err(),
+        Some(IndexRefusal::Invalid)
+    );
+    cache
+        .store(
+            disk_cache_store_key(&impossible),
+            &disk_cache_entry(b"impossible"),
+        )
+        .unwrap();
+    // This row fits an empty index, but needs all nine live rows reclaimed.
+    let expensive = "s".repeat(390);
+    cache
+        .store(
+            disk_cache_store_key(&expensive),
+            &disk_cache_entry(b"skipped"),
+        )
+        .unwrap();
+    assert_eq!(cache.stats().entries, 9);
+    assert!(cache.get_combined(&expensive).is_none());
+    assert!(cache.get_combined("N").is_none());
+    cache.with_state_mut(|s| s.bin_index.as_mut().unwrap().disabled = true);
+    cache
+        .store(disk_cache_store_key("N"), &disk_cache_entry(b"disabled"))
+        .unwrap();
+    assert_eq!(cache.stats().entries, 9);
+}
+
+#[test]
+fn full_index_multivictim_fill_requires_all_victim_stripes() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache =
+        NativeDiskCache::from_config(&storage_bin_config(&dir.path().join("cache"))).unwrap();
+    let row = fluxheim_cache::StorageBinIndexBudget::maximum_row_bytes(1).unwrap();
+    cache.with_state_mut(|s| s.bin_index.as_mut().unwrap().limit = 3 * row);
+    for key in ["A", "B", "C"] {
+        cache
+            .store(disk_cache_store_key(key), &disk_cache_entry(b"cached"))
+            .unwrap();
+    }
+    cache.with_state_mut(|s| {
+        s.touch_object("A", SystemTime::UNIX_EPOCH);
+        s.touch_object("B", SystemTime::UNIX_EPOCH);
+    });
+    // The incoming key collides with A's stripe and needs A and B's space.
+    let stripe = super::super::native_http1_cache_state::native_disk_cache_mutation_lock_stripe;
+    let key = (0..4096)
+        .map(|n| format!("record-{n}"))
+        .find(|k| stripe(k) == stripe("A"))
+        .unwrap();
+    assert_ne!(stripe("A"), stripe("B"));
+    let reader = cache.try_lock_key_read("B").unwrap();
+    cache
+        .store(disk_cache_store_key(&key), &disk_cache_entry(b"incoming"))
+        .unwrap();
+    assert_eq!(cache.stats().entries, 3);
+    assert!(cache.get_combined(&key).is_none());
+    drop(reader);
+    cache
+        .store(disk_cache_store_key(&key), &disk_cache_entry(b"incoming"))
+        .unwrap();
+    assert!(cache.get_combined("A").is_none());
+    assert!(cache.get_combined("B").is_none());
+    assert!(cache.get_combined("C").is_some());
+    assert!(cache.get_combined(&key).is_some());
 }
 
 #[test]

@@ -337,7 +337,12 @@ impl NativeDiskCache {
         };
         let encoded_len = encoded.len() as u64;
         if let NativeDiskCacheBackend::StorageBin(storage_bin) = &self.backend
-            && encoded_len > storage_bin.layout.bin_size_bytes.as_u64()
+            && encoded_len
+                > storage_bin
+                    .layout
+                    .bin_size_bytes
+                    .as_u64()
+                    .min(self.max_bytes)
         {
             // Body limits do not include serialized metadata or encryption.
             // An impossible allocation must not evict even an existing version.
@@ -346,6 +351,7 @@ impl NativeDiskCache {
             );
             return Ok(());
         }
+        let mut index_evictions = native_http1_cache_admission::BIN_INDEX_EVICTIONS_PER_FILL;
         loop {
             let mutation = match self.try_lock_key_mutation(&key.combined) {
                 Ok(guard) => guard,
@@ -354,7 +360,8 @@ impl NativeDiskCache {
             };
             let index_reservation = if matches!(self.backend, NativeDiskCacheBackend::StorageBin(_))
             {
-                let Some(slot) = self.reserve_bin_index(&key.combined) else {
+                let Some(slot) = self.reserve_bin_for_store(&key.combined, &mut index_evictions)?
+                else {
                     fluxheim_observability::operational::security(
                         fluxheim_observability::event::SecurityReason::AdmissionRejected,
                     );

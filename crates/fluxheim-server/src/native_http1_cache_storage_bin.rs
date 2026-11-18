@@ -630,7 +630,10 @@ mod confidential_index_tests {
         cache.with_state_mut(|s| s.insert_object(oversized.clone(), record));
         cache.persist_storage_bin_index();
         task.flush(false);
-        assert!(cache.reserve_bin_index("later").is_none());
+        assert_eq!(
+            cache.reserve_bin_index("later").err(),
+            Some(super::super::native_http1_cache_admission::IndexRefusal::Disabled)
+        );
         {
             let _flush = task.flush_lock.lock().unwrap();
             assert!(task.dirty.load(Ordering::Acquire));
@@ -643,7 +646,7 @@ mod confidential_index_tests {
         // No new mutation notification: retry the failed cold publication.
         task.flush(false);
         assert!(read_storage_bin_index(&task.layout).unwrap().is_empty());
-        assert!(cache.reserve_bin_index("later").is_none());
+        assert!(cache.reserve_bin_index("later").is_err());
     }
 
     #[test]
