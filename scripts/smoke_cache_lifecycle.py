@@ -36,6 +36,14 @@ def source_for(public, origin, admin, backend, memory, encrypted):
     return source
 
 
+def presentation_candidate(source):
+    prefix, table = source.split("[vhosts.cache]\n")
+    fields, separator, rest = table.partition("\n[")
+    fields = replace_once(fields, 'status_reason_header = "x-cache-reason"',
+                          'status_reason_header = "x-next-cache-reason"')
+    return prefix + "[vhosts.cache]\n" + fields + separator + rest
+
+
 def publish(root, filename):
     result = subprocess.run(
         [str(ROOT / "target/debug/fluxheim"), "--config", str(root / filename), "snapshot",
@@ -123,12 +131,7 @@ def run_case(parent, backend, memory, encrypted):
         config = root / "fluxheim.toml"
         config.write_text(source, encoding="utf-8")
         baseline = publish(root, "fluxheim.toml")
-        candidate = replace_once(source, '[vhosts.cache]\nenabled = true',
-                                 '[vhosts.cache]\nenabled = true\n# candidate presentation update')
-        prefix, policy = candidate.split('[vhosts.cache]\n', 1)
-        candidate = prefix + '[vhosts.cache]\n' + replace_once(
-            policy, 'status_reason_header = "x-cache-reason"',
-            'status_reason_header = "x-next-cache-reason"')
+        candidate = presentation_candidate(source)
         (root / "candidate.toml").write_text(candidate, encoding="utf-8")
         with running(config, public):
             deadline = time.monotonic() + 10

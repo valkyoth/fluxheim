@@ -73,6 +73,18 @@ class CacheLifecycleTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 smoke.source_for(1, 2, 3, backend, False, False)
 
+    def test_reload_candidate_only_changes_vhost_reason_header(self):
+        for backend in ("filesystem", "storage-bin"):
+            for memory in (False, True):
+                for encrypted in (False, True):
+                    with self.subTest(backend=backend, memory=memory, encrypted=encrypted):
+                        source = smoke.source_for(12345, 12346, 12347, backend, memory, encrypted)
+                        expected = tomllib.loads(source)
+                        cache = expected["vhosts"][0]["cache"]
+                        self.assertEqual(cache["status_reason_header"], "x-cache-reason")
+                        cache["status_reason_header"] = "x-next-cache-reason"
+                        self.assertEqual(tomllib.loads(smoke.presentation_candidate(source)), expected)
+
     def test_failed_start_requires_cache_error_not_port_collision(self):
         for code, error, valid in ((1, b"proxy cache initialization failed", True),
                                    (1, b"address already in use", False),
