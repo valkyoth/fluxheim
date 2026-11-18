@@ -37,6 +37,16 @@ impl Default for StorageBinIndexBudget {
 }
 
 impl StorageBinIndexBudget {
+    pub const ROWS_BYTES: u64 =
+        MAX_STORAGE_BIN_INDEX_BYTES - STORAGE_BIN_INDEX_MAGIC_V1.len() as u64 - 1;
+    pub const MAX_ROWS: usize = MAX_STORAGE_BIN_INDEX_ENTRIES;
+
+    /// Reserve for later touches and extent moves: four decimal u64s, tabs and newline.
+    pub fn maximum_row_bytes(key_bytes: usize) -> Option<u64> {
+        (key_bytes <= MAX_STORAGE_BIN_INDEX_KEY_HEX_BYTES / 2)
+            .then(|| 2 * key_bytes as u64 + 4 * 20 + 5)
+    }
+
     pub fn charge(
         &mut self,
         key_bytes: usize,

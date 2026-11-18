@@ -170,6 +170,20 @@ attempts a flush. A crash can lose recently admitted index entries. Restart
 validates indexed objects and reconstructs free ranges; it does not scan raw
 bin data to recover unindexed entries. Cache storage is not a durable database.
 
+Fills reserve room in the 64 MiB recovery index before replacing or evicting
+objects. The reservation includes room for future access times and extent
+changes. A bin can therefore decline a new fill even when it has free disk
+space. Encrypted bins account for the stored digest instead of the plaintext
+key. On upgrade, entries in an older index that do not fit this headroom are
+left out during recovery; those entries start cold.
+
+An unexpectedly invalid snapshot disables new fills for that root and causes
+Fluxheim to publish an empty recovery index. Expect a cold bin on restart;
+investigate the security log before restarting. If storage errors prevent even
+the empty index from being written, do not reuse that root after a sensitive
+purge: switch to a fresh root. A successful hard purge removes the live entry;
+it is not a synchronous crash-durability acknowledgement.
+
 Every bin policy needs its own canonical root. The allocator obtains its lease
 before preparing the layout and retains it while alive. Never delete the lock
 file or bypass it. Shared filesystems must supply the required locking/rename

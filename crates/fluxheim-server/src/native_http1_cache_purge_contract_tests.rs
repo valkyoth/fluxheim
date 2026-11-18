@@ -344,7 +344,11 @@ fn stale_scan_advances_past_fresh_prefix() {
     }
 }
 
-// Other tests and roots share the real process-wide admission slot. Retry
+// Take this before creating TTL-sensitive fixtures. Unrelated tests must
+// not spend their objects' freshness windows competing for the same slot.
+static BIN_SOFT_FIXTURES: Mutex<()> = Mutex::new(());
+
+// Other roots share the real process-wide admission slot. Retry
 // only a deferred scan, never hide a failed mutation after examination.
 fn admitted_soft_purge(
     scope: &str,
@@ -367,6 +371,7 @@ fn admitted_soft_purge(
 
 #[test]
 fn soft_purge_retains_stale_body_deadlines_and_validators_on_restart() {
+    let _fixture = BIN_SOFT_FIXTURES.lock().unwrap();
     for backend in [CacheDiskBackend::Filesystem, CacheDiskBackend::StorageBin] {
         for encrypted in [false, true] {
             let directory = tempfile::tempdir().unwrap();
@@ -399,6 +404,7 @@ fn soft_purge_retains_stale_body_deadlines_and_validators_on_restart() {
 
 #[test]
 fn soft_purge_does_not_make_mandatory_revalidation_eligible_for_stale_reuse() {
+    let _fixture = BIN_SOFT_FIXTURES.lock().unwrap();
     for backend in [CacheDiskBackend::Filesystem, CacheDiskBackend::StorageBin] {
         let (_directory, cache, scope) = fixture(backend);
         let mut entry = disk_cache_entry(b"requires-validation");
@@ -413,6 +419,7 @@ fn soft_purge_does_not_make_mandatory_revalidation_eligible_for_stale_reuse() {
 
 #[test]
 fn bin_soft_purge_checkpoints_once_per_group_even_with_colliding_stripes() {
+    let _fixture = BIN_SOFT_FIXTURES.lock().unwrap();
     for encrypted in [false, true] {
         let directory = tempfile::tempdir().unwrap();
         let mut config = storage_bin_config(&directory.path().join("cache"));
@@ -456,7 +463,10 @@ fn bin_soft_purge_checkpoints_once_per_group_even_with_colliding_stripes() {
 
 #[test]
 fn bin_soft_purge_checkpoint_error_leaves_the_old_location_and_accounting() {
+    let _fixture = BIN_SOFT_FIXTURES.lock().unwrap();
     let (directory, cache, scope) = fixture(CacheDiskBackend::StorageBin);
+    let (_other_dir, other, other_scope) = fixture(CacheDiskBackend::StorageBin);
+    store(&other, &other_scope, "asset", &disk_cache_entry(b"fresh"));
     store(&cache, &scope, "asset", &disk_cache_entry(b"old"));
     store(&cache, &scope, "second", &disk_cache_entry(b"other"));
     let old = cache.with_state(|s| (s.objects.clone(), s.bytes));
@@ -469,8 +479,6 @@ fn bin_soft_purge_checkpoint_error_leaves_the_old_location_and_accounting() {
     let result = admitted_soft_purge(&scope, &tag, 32);
     assert_eq!(result.purged, 0);
     assert!(result.truncated);
-    let (_other_dir, other, other_scope) = fixture(CacheDiskBackend::StorageBin);
-    store(&other, &other_scope, "asset", &disk_cache_entry(b"fresh"));
     let deferred = purge_native_disk_cache_user_tag(
         &other_scope,
         None,
@@ -493,6 +501,7 @@ fn bin_soft_purge_checkpoint_error_leaves_the_old_location_and_accounting() {
 
 #[test]
 fn full_bin_soft_purge_preserves_fresh_entry_until_a_retry_can_commit() {
+    let _fixture = BIN_SOFT_FIXTURES.lock().unwrap();
     let (_directory, cache, scope) = fixture(CacheDiskBackend::StorageBin);
     store(&cache, &scope, "asset", &disk_cache_entry(b"original"));
     let record = cache.with_state(|state| state.objects["asset"].clone());

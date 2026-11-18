@@ -352,7 +352,20 @@ impl NativeDiskCache {
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
                 Err(error) => return Err(error),
             };
+            let index_reservation = if matches!(self.backend, NativeDiskCacheBackend::StorageBin(_))
+            {
+                let Some(slot) = self.reserve_bin_index(&key.combined) else {
+                    fluxheim_observability::operational::security(
+                        fluxheim_observability::event::SecurityReason::AdmissionRejected,
+                    );
+                    return Ok(());
+                };
+                Some(slot)
+            } else {
+                None
+            };
             let Some(admission) = self.reserve_admission(&key.combined, encoded_len) else {
+                drop(index_reservation);
                 drop(mutation);
                 if !self.evict_until_admissible(&key.combined, encoded_len)? {
                     return Ok(());
@@ -370,13 +383,17 @@ impl NativeDiskCache {
                 // total free bytes. Release this stripe and reservation first:
                 // the victim can share our stripe or be held by another store.
                 drop(admission);
+                drop(index_reservation);
                 drop(mutation);
                 if !self.evict_oldest()? {
                     return Ok(());
                 }
                 continue;
             };
-            self.with_state_mut(|state| {
+            let abandoned = self.with_state_mut(|state| {
+                if state.bin_index.as_ref().is_some_and(|index| index.disabled) {
+                    return Some(location);
+                }
                 let combined = key.combined.clone();
                 let primary = key.primary.clone();
                 let user_tag = key.user_tag.clone();
@@ -405,7 +422,12 @@ impl NativeDiskCache {
                     .purge_index
                     .insert_with_path_and_tags(combined, primary, user_tag, index_path, cache_tags);
                 state.bytes = state.bytes.saturating_add(encoded_len);
+                None
             });
+            if let Some(NativeDiskCacheLocation::StorageBin(location)) = abandoned {
+                self.release_storage_bin_location(location)?;
+                return Ok(());
+            }
             break;
         }
         self.persist_storage_bin_index();
@@ -422,7 +444,9 @@ impl NativeDiskCache {
         }
         let mut evicted = false;
         loop {
-            if self.with_state(|state| state.filesystem_writes_blocked) {
+            if self.with_state(|state| {
+                state.filesystem_writes_blocked || !state.bin_index_admissible(incoming_key)
+            }) {
                 return Ok(false);
             }
             if self.key_admissible(incoming_key, incoming_weight) {
@@ -558,6 +582,9 @@ impl NativeDiskCache {
         match &self.backend {
             NativeDiskCacheBackend::Filesystem => self.rebuild_filesystem_index(&mut state)?,
             NativeDiskCacheBackend::StorageBin(_) => {
+                state.bin_index = Some(native_http1_cache_admission::BinIndexAdmission::new(
+                    self.encryption.is_some(),
+                ));
                 self.rebuild_storage_bin_backend(&mut state)?
             }
         }

@@ -44,6 +44,7 @@ impl Drop for NativeStorageBinLease {
 
 #[derive(Debug, Default)]
 pub(crate) struct NativeDiskCacheState {
+    pub(super) bin_index: Option<super::native_http1_cache_admission::BinIndexAdmission>,
     #[cfg(test)]
     pub(crate) lookup_attempts: usize,
     pub(super) objects: HashMap<String, NativeDiskCacheRecord>,
@@ -59,6 +60,11 @@ pub(crate) struct NativeDiskCacheState {
 
 impl NativeDiskCacheState {
     pub(super) fn insert_object(&mut self, key: String, record: NativeDiskCacheRecord) {
+        if let Some(index) = &mut self.bin_index
+            && !self.objects.contains_key(&key)
+        {
+            index.insert(&key);
+        }
         if let Some(previous) = self.objects.insert(key.clone(), record.clone()) {
             self.eviction_order
                 .remove(&(previous.accessed_at, key.clone()));
@@ -68,6 +74,9 @@ impl NativeDiskCacheState {
 
     pub(super) fn remove_object(&mut self, key: &str) -> Option<NativeDiskCacheRecord> {
         let record = self.objects.remove(key)?;
+        if let Some(index) = &mut self.bin_index {
+            index.remove(key);
+        }
         self.eviction_order
             .remove(&(record.accessed_at, key.to_owned()));
         Some(record)

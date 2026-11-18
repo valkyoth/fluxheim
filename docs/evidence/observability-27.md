@@ -68,9 +68,9 @@ continuation without advancing its cursor. The four-per-second admin limit
 is separate; ordinary background persistence is not a soft purge.
 
 Snapshot construction and the writer enforce the reader's 64 MiB, entry-count
-and encoded-key limits. Tests check exact size accounting, preservation of the
-previous index on rejection, and successful background publication after the
-invalid state changes. The writer sorts references instead of cloning keys.
+and encoded-key limits. The atomic file writer leaves the destination intact
+when it rejects invalid input. The runtime's recovery policy for that condition
+is described below. The writer sorts references instead of cloning keys.
 A permitted checkpoint still processes the full index.
 
 The Linux workspace, affected all-feature suites and strict Clippy passed.
@@ -80,6 +80,29 @@ included HTTP timeouts; their cause was not established. A separate Windows
 run demonstrated legitimate partial tier progress. The fixture now follows
 explicit continuation only, with bounded attempts and exact per-tier totals;
 it does not retry a timed-out mutation.
+
+### Hard purge and restart
+
+Per-root index reservations precede destructive store operations and include
+concurrent writers. Restart applies the same conservative row budget. An
+unexpectedly unpublishable snapshot freezes admission and replaces the old
+checkpoint with an empty one, including on final flush. After an I/O failure,
+the background worker retries the empty publication rather than rebuilding the
+invalid snapshot.
+
+Tests cover competing reservations, replacement at capacity, budget recovery
+after removal and restart, legacy index headroom, and transient cold-publication
+failure. The restart regression persists two real objects in one bin, injects
+invalid state and hard-purges one object. Neither the plaintext nor the
+encrypted bin restores the purged entry.
+
+The Linux workspace and 825 all-feature server tests passed. Native macOS
+server tests and the Windows rerun (666 server and 16 web tests) passed.
+The five-layout live admin fixture passed on Linux, macOS, Windows and in
+non-root Podman. The existing manual filesystem capacity test was not run.
+The first Windows run returned zero instead of one in a soft-purge fixture;
+the affected tests now serialize fixture creation before seeding expiring
+objects, without changing production deadlines or retry assertions.
 
 ## Toolchain
 

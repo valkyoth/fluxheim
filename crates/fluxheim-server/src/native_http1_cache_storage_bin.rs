@@ -45,6 +45,7 @@ struct NativeStorageBinIndexTask {
     layout: StorageBinLayoutPlan,
     state: Arc<Mutex<NativeDiskCacheState>>,
     dirty: AtomicBool,
+    cold_published: AtomicBool,
     // The final synchronous flush closes the task while holding this lock.
     flush_lock: Mutex<bool>,
     index_key: Option<Arc<SecretBytes<32>>>,
@@ -66,6 +67,7 @@ impl NativeStorageBinIndexFlush {
             layout: storage_bin.layout.clone(),
             state: Arc::clone(state),
             dirty: AtomicBool::new(false),
+            cold_published: AtomicBool::new(false),
             flush_lock: Mutex::new(false),
             index_key,
         });
@@ -127,6 +129,13 @@ pub(super) fn native_storage_bin_index_worker_count() -> usize {
 }
 
 impl NativeStorageBinIndexTask {
+    fn state(&self) -> std::sync::MutexGuard<'_, NativeDiskCacheState> {
+        self.state.lock().unwrap_or_else(|error| {
+            log::error!(target: "fluxheim::security", "storage-bin index state lock poisoned: {error}");
+            fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::StorageBinStatePoisoned);
+        })
+    }
+
     fn flush(&self, force: bool) {
         let mut closed = self.flush_lock.lock().unwrap_or_else(|error| {
             log::error!(
@@ -142,34 +151,49 @@ impl NativeStorageBinIndexTask {
             *closed = true;
         }
         let was_dirty = self.dirty.swap(false, Ordering::AcqRel);
-        if !force && !was_dirty {
+        if self.cold_published.load(Ordering::Acquire) || (!force && !was_dirty) {
             return;
         }
-        let entries = match self.state.lock() {
-            Ok(state) => native_storage_bin_index_entries(&state, self.index_key.as_deref()),
-            Err(error) => {
-                log::error!(
-                    target: "fluxheim::security",
-                    "native storage-bin index state lock poisoned: {error}; aborting"
-                );
-                fluxheim_common::fatal::abort(
-                    fluxheim_common::fatal::Reason::StorageBinStatePoisoned,
-                );
+        let entries = {
+            let state = self.state();
+            if state.bin_index.as_ref().is_some_and(|i| i.disabled) {
+                None
+            } else {
+                Some(native_storage_bin_index_entries(
+                    &state,
+                    self.index_key.as_deref(),
+                ))
             }
         };
-        if let Err(error) =
+        let publish = entries.map(|entries| {
             entries.and_then(|entries| write_storage_bin_index(&self.layout, &entries))
-        {
-            // An oversized snapshot cannot succeed until the index changes.
-            if error.kind() != std::io::ErrorKind::InvalidData {
-                self.dirty.store(true, Ordering::Release);
+        });
+        let result = match publish {
+            Some(Err(error)) if error.kind() == std::io::ErrorKind::InvalidData => {
+                if let Some(index) = &mut self.state().bin_index {
+                    index.disabled = true;
+                }
+                log::error!(target: "fluxheim::security", "invalid storage-bin snapshot; disabling fills and clearing recovery index: {error}");
+                self.publish_cold()
             }
+            // Retry only the empty checkpoint after a failed cold publication.
+            None => self.publish_cold(),
+            Some(result) => result,
+        };
+        if let Err(error) = result {
+            self.dirty.store(true, Ordering::Release);
             log::warn!(
                 target: "fluxheim::native_http1",
                 "native storage-bin index write {}: {error}",
                 self.layout.root.display()
             );
         }
+    }
+
+    fn publish_cold(&self) -> std::io::Result<()> {
+        write_storage_bin_index(&self.layout, &[])?;
+        self.cold_published.store(true, Ordering::Release);
+        Ok(())
     }
 }
 
@@ -268,7 +292,9 @@ impl NativeDiskCache {
             return deferred();
         };
         let now = Instant::now();
-        if last.is_some_and(|t| now.saturating_duration_since(t) < SOFT_CHECKPOINT_INTERVAL) {
+        if last.is_some_and(|t| now.saturating_duration_since(t) < SOFT_CHECKPOINT_INTERVAL)
+            || self.with_state(|s| s.bin_index.as_ref().is_some_and(|i| i.disabled))
+        {
             return deferred();
         }
         // Denial precedes cursor advancement, body reads and scratch allocation.
@@ -369,6 +395,9 @@ impl NativeDiskCache {
             .try_lock()
             .map_err(|_| std::io::Error::other("bin index busy"))?;
         let entries = self.with_state(|state| {
+            if state.bin_index.as_ref().is_some_and(|i| i.disabled) {
+                return Err(std::io::Error::other("storage-bin admission disabled"));
+            }
             native_storage_bin_index_entries_with(state, task.index_key.as_deref(), |key, old| {
                 staged.get(key).map_or(old, |(_, new)| *new)
             })
@@ -390,6 +419,12 @@ impl NativeDiskCache {
             }
         });
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn checkpoint_for_test(&self) {
+        self.persist_storage_bin_index();
+        self.index_flush.as_ref().unwrap().task.flush(false);
     }
 
     #[cfg(test)]
@@ -452,6 +487,9 @@ impl NativeDiskCache {
                 parsed_combined_key.to_owned()
             };
             if expected_index_key != entry.combined_key {
+                continue;
+            }
+            if !state.bin_index_admissible(parsed_combined_key) {
                 continue;
             }
             let Some(primary) = parsed.primary_key.clone() else {
@@ -561,7 +599,7 @@ mod confidential_index_tests {
     use super::*;
 
     #[test]
-    fn invalid_background_snapshot_preserves_index_until_next_change() {
+    fn invalid_background_snapshot_stays_cold_until_restart() {
         let root = tempfile::tempdir().unwrap();
         let mut config = fluxheim_config::CacheConfig::default();
         config.disk.enabled = true;
@@ -585,18 +623,27 @@ mod confidential_index_tests {
         let original = read_storage_bin_index(&task.layout).unwrap();
         assert_eq!(original.len(), 1);
         let oversized = "k".repeat(32 * 1024 + 1);
+        let path = fluxheim_cache::storage_bin_index_path(&task.layout.root);
+        let saved = root.path().join("previous-checkpoint");
+        std::fs::rename(&path, &saved).unwrap();
+        std::fs::create_dir(&path).unwrap();
         cache.with_state_mut(|s| s.insert_object(oversized.clone(), record));
         cache.persist_storage_bin_index();
         task.flush(false);
-        assert!(!task.dirty.load(Ordering::Acquire));
-        assert_eq!(read_storage_bin_index(&task.layout).unwrap(), original);
-        cache.with_state_mut(|s| {
-            s.remove_object(&oversized);
-            s.remove_object("valid");
-        });
-        cache.persist_storage_bin_index();
+        assert!(cache.reserve_bin_index("later").is_none());
+        {
+            let _flush = task.flush_lock.lock().unwrap();
+            assert!(task.dirty.load(Ordering::Acquire));
+            cache.with_state_mut(|s| {
+                s.remove_object(&oversized);
+            });
+            std::fs::remove_dir(&path).unwrap();
+            std::fs::rename(&saved, &path).unwrap();
+        }
+        // No new mutation notification: retry the failed cold publication.
         task.flush(false);
         assert!(read_storage_bin_index(&task.layout).unwrap().is_empty());
+        assert!(cache.reserve_bin_index("later").is_none());
     }
 
     #[test]
