@@ -16,7 +16,7 @@ import yaml
 
 import container_refresh as refresh
 import container_refresh_platforms as platforms
-from smoke_container_refresh import check_php, engine_command, smoke
+from smoke_container_refresh import check_php, engine_command, smoke, start_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -299,6 +299,20 @@ class RefreshTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     smoke(SimpleNamespace(version="v1.8.2", profile="full", variant="wolfi", image=image, engine="docker"))
             run.assert_not_called()
+
+    def test_fixture_is_copied_before_start_without_mounting_runner_paths(self):
+        for profile in refresh.PROFILES:
+            with self.subTest(profile=profile):
+                commands = []
+                start_fixture(lambda *args: commands.append(args), "image", profile, "smoke", Path("fixture"))
+                self.assertEqual(commands[0], ("create", "--ulimit", "core=0:0", "--name", "smoke",
+                                               "--network", "host", "image", "--config", "/etc/fluxheim/smoke.toml"))
+                copies = [("cp", str(Path("fixture") / "smoke.toml"), "smoke:/etc/fluxheim/smoke.toml")]
+                if profile in ("full", "wasm", "php"):
+                    leaf = "index.php" if profile == "php" else "index.html"
+                    copies.append(("cp", str(Path("fixture") / leaf), f"smoke:/srv/fluxheim/{leaf}"))
+                self.assertEqual(commands[1:-1], copies)
+                self.assertEqual(commands[-1], ("start", "smoke"))
 
     def test_workflow_binds_same_attempt_digest_and_protected_signers(self):
         jobs = yaml.safe_load((ROOT / ".github/workflows/container-refresh.yml").read_text())["jobs"]

@@ -51,6 +51,19 @@ def check_php(output, modules, required, variant):
         raise ValueError("Wolfi PHP must include the PHP 8.5.12 security fixes")
 
 
+def start_fixture(run, image, profile, name, root):
+    # Do not bind-mount the runner's UID into the image's trust boundary.
+    # Copy only fixture files, never the directory or its ownership.
+    run("create", "--ulimit", "core=0:0", "--name", name, "--network", "host",
+        image, "--config", "/etc/fluxheim/smoke.toml")
+    run("cp", str(root / "smoke.toml"), f"{name}:/etc/fluxheim/smoke.toml")
+    if profile == "php":
+        run("cp", str(root / "index.php"), f"{name}:/srv/fluxheim/index.php")
+    elif profile in {"full", "wasm"}:
+        run("cp", str(root / "index.html"), f"{name}:/srv/fluxheim/index.html")
+    run("start", name)
+
+
 def smoke(args):
     stable_tag({"tag_name": args.version})
     if args.profile not in PROFILES or args.variant not in VARIANTS:
@@ -96,7 +109,6 @@ def smoke(args):
     try:
         with tempfile.TemporaryDirectory(prefix="fluxheim-refresh-") as directory:
             root = Path(directory)
-            root.chmod(0o755)
             config = f'[server]\nlisten = ["127.0.0.1:{port}"]\ndefault_vhost = "default"\n'
             config += '[logging]\nlevel = "info"\ntarget = "stderr"\n'
             config += '[[vhosts]]\nname = "default"\nhosts = ["localhost"]\n'
@@ -118,9 +130,7 @@ def smoke(args):
             (root / "smoke.toml").write_text(config)
             for file in root.iterdir():
                 file.chmod(0o644)
-            run("run", "-d", "--ulimit", "core=0:0", "--name", name, "--network", "host",
-                "-v", f"{root}:/srv/fluxheim:ro,Z", args.image,
-                "--config", "/srv/fluxheim/smoke.toml")
+            start_fixture(run, args.image, args.profile, name, root)
             opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
             url = f"http://127.0.0.1:{port}{path}"
             request = urllib.request.Request(url, headers={"Host": "localhost"})
