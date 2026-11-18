@@ -267,10 +267,22 @@ async fn handle_native_http2_stream<H>(
 where
     H: NativeHttp2Handler,
 {
+    let response = prepare_native_http2_response(request, policy, handler).await?;
+    tokio::time::timeout(
+        policy.response_write_lifetime(),
+        send_native_http2_response(respond, response),
+    )
+    .await
+    .map_err(|_| NativeHttp2StackError::ResponseWriteTimeout)?
+}
+
+async fn prepare_native_http2_response<H: NativeHttp2Handler>(
+    request: &mut http::Request<h2::RecvStream>,
+    policy: DownstreamHttp2Policy,
+    handler: Arc<H>,
+) -> Result<NativeHttp2Response, NativeHttp2StackError> {
     if let Err(error) = validate_request(request, policy) {
-        let response = native_http2_stream_error_response(&error);
-        send_native_http2_response(respond, response).await?;
-        return Ok(());
+        return Ok(native_http2_stream_error_response(&error));
     }
     let method = request.method().clone();
     let uri = request.uri().clone();
@@ -284,12 +296,9 @@ where
     {
         Ok(reservation) => reservation,
         Err(_) => {
-            send_native_http2_response(
-                respond,
-                native_http2_stream_error_response(&NativeHttp2StackError::BodyCapacityUnavailable),
-            )
-            .await?;
-            return Ok(());
+            return Ok(native_http2_stream_error_response(
+                &NativeHttp2StackError::BodyCapacityUnavailable,
+            ));
         }
     };
     let body_capacity_hint =
@@ -307,57 +316,38 @@ where
     .await
     {
         Ok(Ok(result)) => result,
-        Ok(Err(error @ NativeHttp2StackError::BodyTooLarge { .. })) => {
-            send_native_http2_response(respond, native_http2_stream_error_response(&error)).await?;
-            return Ok(());
-        }
-        Ok(Err(error @ NativeHttp2StackError::BodyCapacityUnavailable)) => {
-            send_native_http2_response(respond, native_http2_stream_error_response(&error)).await?;
-            return Ok(());
-        }
-        Ok(Err(error @ NativeHttp2StackError::InvalidContentLength)) => {
-            send_native_http2_response(respond, native_http2_stream_error_response(&error)).await?;
-            return Ok(());
+        Ok(Err(
+            error @ (NativeHttp2StackError::BodyTooLarge { .. }
+            | NativeHttp2StackError::BodyCapacityUnavailable
+            | NativeHttp2StackError::InvalidContentLength),
+        )) => {
+            return Ok(native_http2_stream_error_response(&error));
         }
         Ok(Err(error)) => return Err(error),
         Err(_) => {
-            send_native_http2_response(
-                respond,
-                native_http2_stream_error_response(&NativeHttp2StackError::BodyReadTimeout),
-            )
-            .await?;
-            return Ok(());
+            return Ok(native_http2_stream_error_response(
+                &NativeHttp2StackError::BodyReadTimeout,
+            ));
         }
     };
     body.attach_admission(request_body_reservation);
-    let response = match tokio::time::timeout(
-        policy.handler_timeout(),
-        handler.handle(NativeHttp2Request {
-            method,
-            uri,
-            headers,
-            body,
-            trailers,
-        }),
+    Ok(
+        match tokio::time::timeout(
+            policy.handler_timeout(),
+            handler.handle(NativeHttp2Request {
+                method,
+                uri,
+                headers,
+                body,
+                trailers,
+            }),
+        )
+        .await
+        {
+            Ok(response) => response,
+            Err(_) => native_http2_stream_error_response(&NativeHttp2StackError::HandlerTimeout),
+        },
     )
-    .await
-    {
-        Ok(response) => response,
-        Err(_) => {
-            send_native_http2_response(
-                respond,
-                native_http2_stream_error_response(&NativeHttp2StackError::HandlerTimeout),
-            )
-            .await?;
-            return Ok(());
-        }
-    };
-    tokio::time::timeout(
-        policy.response_write_lifetime(),
-        send_native_http2_response(respond, response),
-    )
-    .await
-    .map_err(|_| NativeHttp2StackError::ResponseWriteTimeout)?
 }
 
 fn native_http2_stream_error_response(error: &NativeHttp2StackError) -> NativeHttp2Response {

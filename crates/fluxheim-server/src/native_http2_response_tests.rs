@@ -177,6 +177,50 @@ async fn native_http2_stack_probe_rejects_prohibited_response_headers() {
 }
 
 #[tokio::test]
+async fn early_error_write_times_out_without_closing_the_connection() {
+    let (server_io, client_io) = tokio::io::duplex(4096);
+    let policy = DownstreamHttp2Policy::default()
+        .with_handler_timeout(Duration::from_millis(25))
+        .with_response_write_lifetime(Duration::from_millis(50));
+    let server = tokio::spawn(serve_native_http2_connection(
+        server_io,
+        policy,
+        Arc::new(|req: NativeHttp2Request| async move {
+            if req.uri.path() == "/slow" {
+                std::future::pending::<()>().await;
+            }
+            NativeHttp2Response::no_content()
+        }),
+    ));
+    let (mut client, connection) = h2::client::Builder::new()
+        .initial_window_size(0)
+        .handshake::<_, bytes::Bytes>(client_io)
+        .await
+        .unwrap();
+    let driver = tokio::spawn(connection);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let request = http::Request::builder().uri("/slow").body(()).unwrap();
+        let (response, _) = client.send_request(request, true).unwrap();
+        let response = response.await.unwrap();
+        assert_eq!(response.status(), http::StatusCode::GATEWAY_TIMEOUT);
+        let mut blocked = response.into_body();
+        assert!(blocked.data().await.unwrap().unwrap_err().is_reset());
+        let request = http::Request::builder().uri("/healthy").body(()).unwrap();
+        let (response, _) = client.send_request(request, true).unwrap();
+        assert_eq!(
+            response.await.unwrap().status(),
+            http::StatusCode::NO_CONTENT
+        );
+        drop(blocked);
+        drop(client);
+        driver.await.unwrap().unwrap();
+        server.await.unwrap().unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn native_http2_stack_probe_times_out_response_flow_control_hold() {
     let (server_io, client_io) = tokio::io::duplex(4096);
     let policy =
