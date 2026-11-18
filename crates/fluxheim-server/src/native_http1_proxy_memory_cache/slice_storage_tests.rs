@@ -159,7 +159,8 @@ async fn slice_scoped_purge_preserves_other_paths_and_complete_object_variants()
             "/asset.png",
             100,
             false,
-        );
+        )
+        .unwrap();
         assert_eq!(purged.purged, 2);
         crate::purge_native_memory_cache_primary(&scope, None, &primary, &primary);
         let (_, key) = keys(&cache, &request("en"));
@@ -320,9 +321,7 @@ async fn slices_recover_all_tiers_encryption_variants_and_exact_purge() {
                     cache.get(&primary, &request("en")).await.unwrap().is_none(),
                     "slices must not be complete objects"
                 );
-                assert!(purge_native_disk_cache_primary(
-                    &scope, None, &primary, &primary
-                ));
+                assert!(purge_native_disk_cache_primary(&scope, None, &primary, &primary).unwrap());
                 purge_native_memory_cache_primary(&scope, None, &primary, &primary);
                 for lang in ["en", "sv"] {
                     let (_, key) = keys(&cache, &request(lang));

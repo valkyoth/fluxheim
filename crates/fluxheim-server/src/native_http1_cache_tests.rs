@@ -19,6 +19,9 @@ mod admission_tests;
 #[path = "native_http1_cache_bin_admission_tests.rs"]
 mod bin_admission_tests;
 
+#[path = "native_http1_cache_hard_checkpoint_tests.rs"]
+mod hard_checkpoint;
+
 #[path = "native_http1_cache_fragmentation_tests.rs"]
 mod fragmentation;
 
@@ -152,7 +155,8 @@ fn disk_cache_purge_callback_runs_outside_registry_lock() {
     let purged = purge_native_disk_cache(vhost.as_ref(), None, |_| {
         callback_saw_unlocked_registry = native_disk_cache_purge_registry_is_unlocked_for_test();
         true
-    });
+    })
+    .unwrap();
 
     assert!(purged);
     assert!(callback_saw_unlocked_registry);

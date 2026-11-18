@@ -29,23 +29,21 @@ impl NativeDiskCache {
             }
             return false;
         }
-        let removed = self.with_state_mut(|state| {
+        self.with_state_mut(|state| {
             let removed = state.remove_object(combined_key);
             if let Some(record) = &removed {
                 state.bytes = state.bytes.saturating_sub(record.weight);
                 state.purge_index.remove_combined(combined_key);
+                if let Some(flush) = &self.index_flush {
+                    flush.mark_removal();
+                }
             }
             state.variants.retain(|_, variants| {
                 variants.retain(|variant| variant.key != combined_key);
                 !variants.is_empty()
             });
-            removed
-        });
-        if removed.is_some() {
-            self.persist_storage_bin_index();
-            return true;
-        }
-        false
+            removed.is_some()
+        })
     }
 
     pub(crate) fn evict_oldest(&self) -> std::io::Result<bool> {

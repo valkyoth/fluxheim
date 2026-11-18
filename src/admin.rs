@@ -354,10 +354,17 @@ impl fluxheim_server::NativeHttp1Handler for AdminApp {
     > {
         Box::pin(async move {
             #[cfg(feature = "cache")]
-            if indexed_purge_route(
-                &request.method,
-                native_admin_target_parts(&request.target).0,
-            ) {
+            let path = native_admin_target_parts(&request.target).0;
+            #[cfg(feature = "cache")]
+            if indexed_purge_route(&request.method, path)
+                || (request.method == "POST"
+                    && matches!(
+                        path,
+                        "/_fluxheim/cache/purge"
+                            | "/_fluxheim/cache/purge-bulk"
+                            | "/_fluxheim/cache/purge-stale"
+                    ))
+            {
                 let app = self.clone();
                 static SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
                 return bounded_indexed_purge(&SLOTS, move || app.native_http1_response(request))

@@ -297,12 +297,10 @@ fn native_storage_bin_disk_purge_uses_live_cache_instance() {
     assert!(cache.get("combined-live", |_| None).is_some());
     assert_eq!(cache.stats().purge_index_entries, 1);
 
-    assert!(purge_native_disk_cache_primary(
-        "purge.test",
-        None,
-        "primary-live",
-        "combined-live"
-    ));
+    assert!(
+        purge_native_disk_cache_primary("purge.test", None, "primary-live", "combined-live")
+            .unwrap()
+    );
     assert!(cache.get("combined-live", |_| None).is_none());
     assert_eq!(cache.stats().purge_index_entries, 0);
 }

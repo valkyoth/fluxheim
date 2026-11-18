@@ -20,7 +20,7 @@ use super::{
 };
 
 const NATIVE_STORAGE_BIN_INDEX_DEBOUNCE: Duration = Duration::from_secs(1);
-const SOFT_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(5);
+const PURGE_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(5);
 static SOFT_CHECKPOINT: Mutex<Option<Instant>> = Mutex::new(None);
 static NATIVE_STORAGE_BIN_INDEX_SERVICE: OnceLock<
     Result<Arc<NativeStorageBinIndexService>, String>,
@@ -45,10 +45,22 @@ struct NativeStorageBinIndexTask {
     layout: StorageBinLayoutPlan,
     state: Arc<Mutex<NativeDiskCacheState>>,
     dirty: AtomicBool,
+    removals_pending: AtomicBool,
     cold_published: AtomicBool,
     // The final synchronous flush closes the task while holding this lock.
-    flush_lock: Mutex<bool>,
+    flush_lock: Mutex<Publication>,
     index_key: Option<Arc<SecretBytes<32>>>,
+}
+
+#[derive(Debug, Default)]
+struct Publication {
+    closed: bool,
+    #[cfg(test)]
+    suspend_periodic: bool,
+    // True only after a successful, synced empty publication. A failed rename
+    // or directory sync has an uncertain outcome and must invalidate this hint.
+    empty: bool,
+    last_hard_snapshot: Option<Instant>,
 }
 
 impl NativeStorageBinIndexFlush {
@@ -67,8 +79,9 @@ impl NativeStorageBinIndexFlush {
             layout: storage_bin.layout.clone(),
             state: Arc::clone(state),
             dirty: AtomicBool::new(false),
+            removals_pending: AtomicBool::new(false),
             cold_published: AtomicBool::new(false),
-            flush_lock: Mutex::new(false),
+            flush_lock: Mutex::default(),
             index_key,
         });
         let entries = task
@@ -85,6 +98,11 @@ impl NativeStorageBinIndexFlush {
 
     pub(super) fn mark_dirty(&self) {
         self.task.dirty.store(true, Ordering::Release);
+    }
+
+    pub(super) fn mark_removal(&self) {
+        self.task.removals_pending.store(true, Ordering::Release);
+        self.mark_dirty();
     }
 }
 
@@ -137,23 +155,29 @@ impl NativeStorageBinIndexTask {
     }
 
     fn flush(&self, force: bool) {
-        let mut closed = self.flush_lock.lock().unwrap_or_else(|error| {
+        let mut publication = self.flush_lock.lock().unwrap_or_else(|error| {
             log::error!(
                 target: "fluxheim::security",
                 "native storage-bin index flush lock poisoned: {error}; aborting"
             );
             fluxheim_common::fatal::abort(fluxheim_common::fatal::Reason::StorageBinFlushPoisoned);
         });
-        if *closed {
+        if publication.closed {
+            return;
+        }
+        #[cfg(test)]
+        if !force && publication.suspend_periodic {
             return;
         }
         if force {
-            *closed = true;
+            publication.closed = true;
         }
         let was_dirty = self.dirty.swap(false, Ordering::AcqRel);
         if self.cold_published.load(Ordering::Acquire) || (!force && !was_dirty) {
             return;
         }
+        publication.empty = false;
+        let had_removals = self.removals_pending.swap(false, Ordering::AcqRel);
         let entries = {
             let state = self.state();
             if state.bin_index.as_ref().is_some_and(|i| i.disabled) {
@@ -181,6 +205,9 @@ impl NativeStorageBinIndexTask {
             Some(result) => result,
         };
         if let Err(error) = result {
+            if had_removals {
+                self.removals_pending.store(true, Ordering::Release);
+            }
             self.dirty.store(true, Ordering::Release);
             log::warn!(
                 target: "fluxheim::native_http1",
@@ -275,6 +302,61 @@ fn native_storage_bin_index_entries_with(
 }
 
 impl NativeDiskCache {
+    pub(super) fn checkpoint_hard_purge(&self, changed: bool) -> std::io::Result<()> {
+        let Some(flush) = &self.index_flush else {
+            return Ok(());
+        };
+        let task = &flush.task;
+        let mut publication = task
+            .flush_lock
+            .lock()
+            .map_err(|_| std::io::Error::other("cache index unavailable"))?;
+        if task.cold_published.load(Ordering::Acquire) || publication.empty {
+            return Ok(());
+        }
+        let pending = task.removals_pending.swap(false, Ordering::AcqRel);
+        let disabled = self.with_state(|s| s.bin_index.as_ref().is_some_and(|i| i.disabled));
+        if !changed && !pending && !disabled {
+            return Ok(());
+        }
+        task.dirty.swap(false, Ordering::AcqRel);
+        let now = Instant::now();
+        let result = if disabled {
+            task.publish_cold()
+        } else if publication
+            .last_hard_snapshot
+            .is_some_and(|t| now.saturating_duration_since(t) < PURGE_CHECKPOINT_INTERVAL)
+        {
+            // Bulk and repeated purges must not force a full index rewrite per
+            // key. An empty durable index covers the batch until the worker
+            // checkpoints the survivors. The live cache stays warm.
+            write_storage_bin_index(&task.layout, &[]).map(|()| {
+                publication.empty = true;
+                task.dirty.store(true, Ordering::Release);
+            })
+        } else {
+            publication.last_hard_snapshot = Some(now);
+            self.with_state(|s| native_storage_bin_index_entries(s, task.index_key.as_deref()))
+                .and_then(|entries| write_storage_bin_index(&task.layout, &entries))
+        };
+        if let Err(error) = result {
+            log::error!(target: "fluxheim::security", "hard purge index publication failed; disabling fills: {error}");
+            self.with_state_mut(|s| {
+                if let Some(index) = &mut s.bin_index {
+                    index.disabled = true;
+                }
+            });
+            task.dirty.store(true, Ordering::Release);
+            if !disabled && let Err(error) = task.publish_cold() {
+                log::error!(target: "fluxheim::security", "hard purge empty recovery index could not be synced: {error}");
+            }
+            return Err(std::io::Error::other(
+                "storage-bin purge durability could not be confirmed",
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn scan_soft_bin(
         &self,
         index: &fluxheim_cache::CachePurgeIndex,
@@ -292,7 +374,7 @@ impl NativeDiskCache {
             return deferred();
         };
         let now = Instant::now();
-        if last.is_some_and(|t| now.saturating_duration_since(t) < SOFT_CHECKPOINT_INTERVAL)
+        if last.is_some_and(|t| now.saturating_duration_since(t) < PURGE_CHECKPOINT_INTERVAL)
             || self.with_state(|s| s.bin_index.as_ref().is_some_and(|i| i.disabled))
         {
             return deferred();
@@ -390,7 +472,7 @@ impl NativeDiskCache {
             .as_ref()
             .ok_or_else(|| std::io::Error::other("missing bin index"))?
             .task;
-        let _flush = task
+        let mut publication = task
             .flush_lock
             .try_lock()
             .map_err(|_| std::io::Error::other("bin index busy"))?;
@@ -404,6 +486,7 @@ impl NativeDiskCache {
         })?;
         #[cfg(test)]
         task.soft_checkpoints.fetch_add(1, Ordering::Relaxed);
+        publication.empty = false;
         write_storage_bin_index(&task.layout, &entries)?;
         self.with_state_mut(|state| {
             for (key, (_, new)) in staged {
@@ -419,6 +502,18 @@ impl NativeDiskCache {
             }
         });
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn suspend_periodic_checkpoint_for_test(&self) {
+        self.index_flush
+            .as_ref()
+            .unwrap()
+            .task
+            .flush_lock
+            .lock()
+            .unwrap()
+            .suspend_periodic = true;
     }
 
     #[cfg(test)]

@@ -95,7 +95,8 @@ fn disk_selectors_complete_bounded_passes_and_preserve_other_objects_on_restart(
                     let result = match selector {
                         0 => crate::purge_native_disk_cache_path_prefix(
                             &scope, None, &tag, "/assets/", 1, false,
-                        ),
+                        )
+                        .unwrap(),
                         1 => crate::purge_native_disk_cache_path_exact(
                             &scope,
                             None,
@@ -103,7 +104,8 @@ fn disk_selectors_complete_bounded_passes_and_preserve_other_objects_on_restart(
                             "/assets/file.css",
                             1,
                             false,
-                        ),
+                        )
+                        .unwrap(),
                         2 => crate::purge_native_disk_cache_path_pattern(
                             &scope,
                             None,
@@ -111,10 +113,12 @@ fn disk_selectors_complete_bounded_passes_and_preserve_other_objects_on_restart(
                             "/assets/*.css",
                             1,
                             false,
-                        ),
+                        )
+                        .unwrap(),
                         _ => crate::purge_native_disk_cache_tag(
                             &scope, None, &tag, "assets", 1, false,
-                        ),
+                        )
+                        .unwrap(),
                     };
                     assert_eq!(result.examined, 1);
                     assert_eq!(result.truncated, n < 3);
@@ -143,11 +147,11 @@ fn filesystem_soft_batches_advance_without_counting_stale_objects_twice() {
     }
     let tag = fluxheim_cache::cache_user_tag(&scope, None);
     for n in 0..3 {
-        let result = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, true);
+        let result = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, true).unwrap();
         assert_eq!(result.purged, 1);
         assert_eq!(result.truncated, n < 2);
     }
-    let repeat = purge_native_disk_cache_user_tag(&scope, None, &tag, 3, true);
+    let repeat = purge_native_disk_cache_user_tag(&scope, None, &tag, 3, true).unwrap();
     assert_eq!(repeat.purged, 0);
     assert!(!repeat.truncated);
     assert_eq!(cache.stats().entries, 3);
@@ -166,14 +170,14 @@ fn failed_filesystem_unlink_preserves_accounting_and_requires_retry() {
     std::fs::create_dir(&path).unwrap();
     let before = cache.stats();
     let tag = fluxheim_cache::cache_user_tag(&scope, None);
-    let failed = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, false);
+    let failed = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, false).unwrap();
     assert_eq!(failed.purged, 0);
     assert!(failed.truncated);
     assert_eq!(cache.stats().entries, before.entries);
     assert_eq!(cache.stats().size_bytes, before.size_bytes);
     std::fs::remove_dir(&path).unwrap();
     std::fs::write(&path, bytes).unwrap();
-    let recovered = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, false);
+    let recovered = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, false).unwrap();
     assert_eq!(recovered.purged, 1);
     assert!(!recovered.truncated);
 }
@@ -192,7 +196,7 @@ fn failed_bin_release_preserves_accounting_and_requires_retry() {
     });
     let before = cache.stats();
     let tag = fluxheim_cache::cache_user_tag(&scope, None);
-    let failed = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, false);
+    let failed = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, false).unwrap();
     assert_eq!(failed.purged, 0);
     assert!(failed.truncated);
     assert_eq!(cache.stats().entries, before.entries);
@@ -200,7 +204,7 @@ fn failed_bin_release_preserves_accounting_and_requires_retry() {
     cache.with_state_mut(|state| {
         state.objects.get_mut("a").unwrap().location = record.location;
     });
-    let recovered = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, false);
+    let recovered = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, false).unwrap();
     assert_eq!(recovered.purged, 1);
     assert!(!recovered.truncated);
 }
@@ -212,11 +216,11 @@ fn busy_disk_mutation_is_reported_and_later_batches_recover() {
         store(&cache, &scope, "a", &disk_cache_entry(b"body"));
         let tag = fluxheim_cache::cache_user_tag(&scope, None);
         let guard = cache.try_lock_key_read("a").unwrap();
-        let busy = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, false);
+        let busy = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, false).unwrap();
         assert_eq!(busy.purged, 0);
         assert!(busy.truncated);
         drop(guard);
-        let retry = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, false);
+        let retry = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, false).unwrap();
         assert_eq!(retry.purged, 1);
         assert!(!retry.truncated);
     }
@@ -287,7 +291,7 @@ fn live_disk_generations_share_batch_budget_and_all_receive_work() {
         // Other parallel tests can register targets too; rotation still reaches
         // both retained generations without multiplying the per-call budget.
         for _ in 0..1000 {
-            let result = purge_native_disk_cache_user_tag(&scope, None, &tag, 2, false);
+            let result = purge_native_disk_cache_user_tag(&scope, None, &tag, 2, false).unwrap();
             assert!(result.examined <= 2);
             assert!(result.purged <= 2);
             if a.stats().entries + b.stats().entries == 0 {
@@ -296,7 +300,11 @@ fn live_disk_generations_share_batch_budget_and_all_receive_work() {
             assert!(result.truncated);
         }
         assert_eq!(a.stats().entries + b.stats().entries, 0);
-        assert!(!purge_native_disk_cache_user_tag(&scope, None, &tag, 10, false).truncated);
+        assert!(
+            !purge_native_disk_cache_user_tag(&scope, None, &tag, 10, false)
+                .unwrap()
+                .truncated
+        );
     }
 }
 
@@ -308,13 +316,13 @@ fn disk_purge_reports_and_advances_remaining_matches() {
             store(&cache, &scope, key, &disk_cache_entry(b"body"));
         }
         let tag = fluxheim_cache::cache_user_tag(&scope, None);
-        let result = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, false);
+        let result = purge_native_disk_cache_user_tag(&scope, None, &tag, 1, false).unwrap();
         assert_eq!((result.matched, result.purged), (1, 1));
         assert!(result.truncated);
         assert_eq!(cache.stats().entries, 2);
         assert!(cache.get("b", |_| None).is_some());
         assert!(cache.get("c", |_| None).is_some());
-        let rest = purge_native_disk_cache_user_tag(&scope, None, &tag, 3, false);
+        let rest = purge_native_disk_cache_user_tag(&scope, None, &tag, 3, false).unwrap();
         assert_eq!(rest.purged, 2);
         assert!(!rest.truncated);
         assert_eq!(cache.stats().entries, 0);
@@ -332,12 +340,12 @@ fn stale_scan_advances_past_fresh_prefix() {
         store(&cache, &scope, "stale-second", &stale);
         let tag = fluxheim_cache::cache_user_tag(&scope, None);
         for dry_run in [true, false] {
-            let result = purge_native_disk_cache_stale(&scope, None, &tag, 1, dry_run);
+            let result = purge_native_disk_cache_stale(&scope, None, &tag, 1, dry_run).unwrap();
             assert_eq!((result.scanned, result.stale, result.purged), (1, 0, 0));
             assert!(result.truncated);
             assert_eq!(cache.stats().entries, 2);
         }
-        let result = purge_native_disk_cache_stale(&scope, None, &tag, 1, false);
+        let result = purge_native_disk_cache_stale(&scope, None, &tag, 1, false).unwrap();
         assert_eq!((result.scanned, result.stale, result.purged), (1, 1, 1));
         assert!(!result.truncated);
         assert!(cache.get("fresh-first", |_| None).is_some());
@@ -357,7 +365,7 @@ fn admitted_soft_purge(
 ) -> fluxheim_cache::purge_index::CacheIndexedPurgeResult {
     let deadline = Instant::now() + Duration::from_secs(100);
     loop {
-        let result = purge_native_disk_cache_user_tag(scope, None, tag, limit, true);
+        let result = purge_native_disk_cache_user_tag(scope, None, tag, limit, true).unwrap();
         if result.examined != 0 || !result.truncated {
             return result;
         }
@@ -485,7 +493,8 @@ fn bin_soft_purge_checkpoint_error_leaves_the_old_location_and_accounting() {
         &fluxheim_cache::cache_user_tag(&other_scope, None),
         32,
         true,
-    );
+    )
+    .unwrap();
     assert_eq!(
         (deferred.examined, deferred.purged, deferred.truncated),
         (0, 0, true)
@@ -533,7 +542,7 @@ fn documented_disk_stale_dry_run_currently_removes_expired_objects() {
         store(&cache, &scope, "expired", &entry);
         assert_eq!(cache.stats().entries, 1);
         let tag = fluxheim_cache::cache_user_tag(&scope, None);
-        let result = purge_native_disk_cache_stale(&scope, None, &tag, 10, true);
+        let result = purge_native_disk_cache_stale(&scope, None, &tag, 10, true).unwrap();
         assert_eq!((result.scanned, result.stale, result.purged), (0, 0, 0));
         // documented contract: a supposedly read-only scan removed the object.
         assert_eq!(cache.stats().entries, 0);

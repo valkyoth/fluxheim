@@ -170,7 +170,7 @@ impl FluxProxy {
             selection.route_name.as_deref(),
             key,
             key,
-        );
+        )?;
         let mut result = CachePurgeResult {
             vhost: selection.vhost_name.clone(),
             route: selection.route_name.clone(),
@@ -205,7 +205,7 @@ impl FluxProxy {
                 request.path,
                 slice_limit,
                 false,
-            );
+            )?;
             result.disk_purged |= native_disk.purged > 0;
             continuation_required |= native_disk.truncated;
         }
@@ -271,7 +271,7 @@ impl FluxProxy {
             &user_tag,
             request.limit,
             request.soft,
-        );
+        )?;
         Ok(native_indexed_purge_result(
             request.vhost,
             request.route,
@@ -307,7 +307,7 @@ impl FluxProxy {
             request.path_prefix,
             request.limit,
             request.soft,
-        );
+        )?;
         Ok(native_indexed_purge_result(
             request.vhost,
             request.route,
@@ -343,7 +343,7 @@ impl FluxProxy {
             request.cache_tag,
             request.limit,
             request.soft,
-        );
+        )?;
         Ok(native_indexed_purge_result(
             request.vhost,
             request.route,
@@ -371,7 +371,7 @@ impl FluxProxy {
             &user_tag,
             request.limit,
             request.dry_run,
-        );
+        )?;
         Ok(CacheStalePurgeResult {
             vhost: request.vhost.to_owned(),
             route: request.route.map(str::to_owned),
@@ -421,7 +421,7 @@ impl FluxProxy {
             request.path_pattern,
             request.limit,
             request.soft,
-        );
+        )?;
         Ok(native_indexed_purge_result(
             request.vhost,
             request.route,

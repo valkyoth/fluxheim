@@ -125,6 +125,17 @@ platforms. Earlier Linux and Windows live runs had loopback HTTP timeouts;
 the complete reruns passed without changing the harness. Their cause was
 not established.
 
+### Hard-purge acknowledgement
+
+The Linux crash fixture suspends the periodic checkpoint, waits for the
+public disk purge API to return, then kills the child without running the
+final flush. Reopening the same root verifies both plaintext and encrypted
+purges. Repeated hard purges also exercise the bounded empty checkpoint.
+Failure fixtures cover both a rejected full snapshot and a failed empty
+publication, including a retry that no longer finds the removed key in memory.
+The Linux workspace and the five-layout live cache operations smoke passed.
+These process-exit tests do not simulate a device that ignores sync requests.
+
 ## Toolchain
 
 The active workspace, release metadata and Rust builder images select

@@ -275,8 +275,10 @@ affected storage-bin cache checkpoints its index once for the group, not once
 per object. Leave spare space for staged replacements. Contention or limited
 space can result in partial progress; no fallback hard deletion is attempted.
 The admin controller admits four authenticated soft-purge requests per rolling
-second across selectors (429 on excess). At most two indexed purge requests
-run on blocking workers at once (503 when busy). Storage-bin also serializes
+second across selectors (429 on excess). The HTTP admin purge endpoints share
+two blocking workers (503 when busy). For hard purge, see the
+[storage-bin acknowledgement and crash behavior](cache-backends.md).
+Storage-bin also serializes
 soft checkpoints across **all cache roots in the process**. After staging a
 fresh replacement, allow at least five seconds before the next attempt, even
 if the write failed. A busy or cooling-down bin reports incomplete work

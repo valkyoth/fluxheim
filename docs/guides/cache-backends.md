@@ -186,8 +186,19 @@ An unexpectedly invalid snapshot disables new fills for that root and causes
 Fluxheim to publish an empty recovery index. Expect a cold bin on restart;
 investigate the security log before restarting. If storage errors prevent even
 the empty index from being written, do not reuse that root after a sensitive
-purge: switch to a fresh root. A successful hard purge removes the live entry;
-it is not a synchronous crash-durability acknowledgement.
+purge: switch to a fresh root. Storage-bin hard purge waits for a synced
+recovery index before reporting success. A restart cannot bring the removed
+entry back from the previous index. If a second purge follows within five
+seconds on the same root, Fluxheim can sync an empty index instead of rewriting
+the full index for each key. Other live entries remain available. A crash
+before the background checkpoint restores those entries to the index can
+leave that root cold.
+
+A checkpoint error is **not** a successful purge: some entries may already
+have been removed. Fluxheim disables new fills on that root and attempts to
+sync an empty recovery index. Repair the storage and retry before relying on
+the result. Hard purge is cache invalidation, not secure erasure of bin bytes
+or a fence against fresh fills from the origin.
 
 Every bin policy needs its own canonical root. The allocator obtains its lease
 before preparing the layout and retains it while alive. Never delete the lock

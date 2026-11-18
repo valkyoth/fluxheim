@@ -306,7 +306,7 @@ pub fn purge_native_disk_cache_primary(
     route: Option<&str>,
     primary_key: &str,
     combined_key: &str,
-) -> bool {
+) -> std::io::Result<bool> {
     purge_native_disk_cache(vhost, route, |cache| {
         cache.purge_primary(primary_key, combined_key)
     })
@@ -318,8 +318,8 @@ pub fn purge_native_disk_cache_user_tag(
     user_tag: &str,
     limit: usize,
     soft: bool,
-) -> CacheIndexedPurgeResult {
-    purge_native_disk_cache_indexed(vhost, route, limit, |cache, limit| {
+) -> std::io::Result<CacheIndexedPurgeResult> {
+    purge_native_disk_cache_indexed(vhost, route, limit, soft, |cache, limit| {
         cache.purge_user_tag(user_tag, limit, soft)
     })
 }
@@ -331,8 +331,8 @@ pub fn purge_native_disk_cache_path_prefix(
     path_prefix: &str,
     limit: usize,
     soft: bool,
-) -> CacheIndexedPurgeResult {
-    purge_native_disk_cache_indexed(vhost, route, limit, |cache, limit| {
+) -> std::io::Result<CacheIndexedPurgeResult> {
+    purge_native_disk_cache_indexed(vhost, route, limit, soft, |cache, limit| {
         cache.purge_path_prefix(user_tag, path_prefix, limit, soft)
     })
 }
@@ -344,8 +344,8 @@ pub fn purge_native_disk_cache_path_exact(
     path_exact: &str,
     limit: usize,
     soft: bool,
-) -> CacheIndexedPurgeResult {
-    purge_native_disk_cache_indexed(vhost, route, limit, |cache, limit| {
+) -> std::io::Result<CacheIndexedPurgeResult> {
+    purge_native_disk_cache_indexed(vhost, route, limit, soft, |cache, limit| {
         cache.purge_path_exact(user_tag, path_exact, limit, soft)
     })
 }
@@ -357,8 +357,8 @@ pub fn purge_native_disk_cache_tag(
     cache_tag: &str,
     limit: usize,
     soft: bool,
-) -> CacheIndexedPurgeResult {
-    purge_native_disk_cache_indexed(vhost, route, limit, |cache, limit| {
+) -> std::io::Result<CacheIndexedPurgeResult> {
+    purge_native_disk_cache_indexed(vhost, route, limit, soft, |cache, limit| {
         cache.purge_cache_tag(user_tag, cache_tag, limit, soft)
     })
 }
@@ -370,8 +370,8 @@ pub fn purge_native_disk_cache_path_pattern(
     path_pattern: &str,
     limit: usize,
     soft: bool,
-) -> CacheIndexedPurgeResult {
-    purge_native_disk_cache_indexed(vhost, route, limit, |cache, limit| {
+) -> std::io::Result<CacheIndexedPurgeResult> {
+    purge_native_disk_cache_indexed(vhost, route, limit, soft, |cache, limit| {
         cache.purge_path_pattern(user_tag, path_pattern, limit, soft)
     })
 }
@@ -382,8 +382,8 @@ pub fn purge_native_disk_cache_stale(
     user_tag: &str,
     limit: usize,
     dry_run: bool,
-) -> CacheStalePurgeResult {
-    purge_native_disk_cache_stale_indexed(vhost, route, limit, |cache, limit| {
+) -> std::io::Result<CacheStalePurgeResult> {
+    purge_native_disk_cache_stale_indexed(vhost, route, limit, dry_run, |cache, limit| {
         cache.purge_stale(user_tag, limit, dry_run)
     })
 }
@@ -417,6 +417,7 @@ pub fn purge_native_disk_cache_stale_all(
             let user_tag =
                 fluxheim_cache::cache_user_tag(target.vhost.as_ref(), target.route.as_deref());
             let batch = target.cache.purge_stale(&user_tag, remaining, false);
+            target.cache.checkpoint_hard_purge(batch.purged != 0)?;
             remaining = remaining.saturating_sub(batch.examined.max(1));
             result.scanned = result.scanned.saturating_add(batch.scanned);
             result.stale = result.stale.saturating_add(batch.stale);
@@ -435,20 +436,23 @@ pub(super) fn purge_native_disk_cache(
     vhost: &str,
     route: Option<&str>,
     mut purge: impl FnMut(&NativeDiskCache) -> bool,
-) -> bool {
+) -> std::io::Result<bool> {
     let mut purged = false;
     for target in native_disk_cache_purge_targets_for(vhost, route) {
-        purged |= purge(&target.cache);
+        let changed = purge(&target.cache);
+        target.cache.checkpoint_hard_purge(changed)?;
+        purged |= changed;
     }
-    purged
+    Ok(purged)
 }
 
 fn purge_native_disk_cache_indexed(
     vhost: &str,
     route: Option<&str>,
     mut remaining: usize,
+    soft: bool,
     mut purge: impl FnMut(&NativeDiskCache, usize) -> CacheIndexedPurgeResult,
-) -> CacheIndexedPurgeResult {
+) -> std::io::Result<CacheIndexedPurgeResult> {
     let mut result = CacheIndexedPurgeResult::default();
     for target in native_disk_cache_purge_targets_for(vhost, route) {
         if remaining == 0 {
@@ -456,6 +460,9 @@ fn purge_native_disk_cache_indexed(
             break;
         }
         let scoped = purge(&target.cache, remaining);
+        if !soft {
+            target.cache.checkpoint_hard_purge(scoped.purged != 0)?;
+        }
         remaining = remaining.saturating_sub(scoped.examined.max(1));
         result.examined = result.examined.saturating_add(scoped.examined);
         result.matched = result.matched.saturating_add(scoped.matched);
@@ -463,15 +470,16 @@ fn purge_native_disk_cache_indexed(
         result.truncated |= scoped.truncated;
     }
     rotate_purge_targets();
-    result
+    Ok(result)
 }
 
 fn purge_native_disk_cache_stale_indexed(
     vhost: &str,
     route: Option<&str>,
     mut remaining: usize,
+    dry_run: bool,
     mut purge: impl FnMut(&NativeDiskCache, usize) -> CacheStalePurgeResult,
-) -> CacheStalePurgeResult {
+) -> std::io::Result<CacheStalePurgeResult> {
     let mut result = CacheStalePurgeResult::default();
     for target in native_disk_cache_purge_targets_for(vhost, route) {
         if remaining == 0 {
@@ -479,6 +487,9 @@ fn purge_native_disk_cache_stale_indexed(
             break;
         }
         let scoped = purge(&target.cache, remaining);
+        if !dry_run {
+            target.cache.checkpoint_hard_purge(scoped.purged != 0)?;
+        }
         remaining = remaining.saturating_sub(scoped.examined.max(1));
         result.examined = result.examined.saturating_add(scoped.examined);
         result.scanned = result.scanned.saturating_add(scoped.scanned);
@@ -487,7 +498,7 @@ fn purge_native_disk_cache_stale_indexed(
         result.truncated |= scoped.truncated;
     }
     rotate_purge_targets();
-    result
+    Ok(result)
 }
 
 fn rotate_purge_targets() {
