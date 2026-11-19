@@ -109,6 +109,9 @@ def run_case(parent, backend, metrics=False):
             api(admin, "GET", "status", expected=401)
             api(admin, "GET", "status", observer, expected=403)
             api(admin, "POST", "purge-index?vhost=assets", observer, expected=403)
+            stale_preview = "purge-stale?vhost=assets&limit=1&dry_run=true"
+            api(admin, "POST", stale_preview, expected=401)
+            api(admin, "POST", stale_preview, observer, expected=403)
 
             def fill(path):
                 before = count(path)
@@ -204,6 +207,10 @@ def run_case(parent, backend, metrics=False):
                 fill(path)
                 target = "purge-index?vhost=assets&limit=10&soft=true"
                 finish_soft(target, purge(target), 1)
+                for _ in range(2):
+                    preview = purge(stale_preview)
+                    assert preview["would_purge"] == copies and preview["purged"] == 0, preview
+                    assert not preview["repeat_required"], preview
                 assert request(public, path) == expected
                 assert count(path) == 2
                 purge("purge-index?vhost=assets&limit=10")

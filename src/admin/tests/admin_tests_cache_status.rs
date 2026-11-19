@@ -60,6 +60,7 @@ fn stale_purge_batching_repeats_while_progressing() {
     let result = super::super::repeat_cache_stale_purge(4, false, || {
         calls += 1;
         Ok(fluxheim_cache::CacheStalePurgeResult {
+            disk_inspection: Default::default(),
             vhost: "cached".to_owned(),
             route: None,
             memory_scanned: 1,
@@ -90,6 +91,12 @@ fn stale_purge_batching_advances_dry_runs_within_batch_bound() {
     let result = super::super::repeat_cache_stale_purge(4, true, || {
         calls += 1;
         Ok(fluxheim_cache::CacheStalePurgeResult {
+            disk_inspection: fluxheim_cache::purge_index::DiskInspectionCounts {
+                invalid: 1,
+                missing: 2,
+                unreadable: 3,
+                ..Default::default()
+            },
             vhost: "cached".to_owned(),
             route: None,
             memory_scanned: 1,
@@ -106,6 +113,9 @@ fn stale_purge_batching_advances_dry_runs_within_batch_bound() {
 
     assert_eq!(calls, 4);
     assert_eq!(result.batches, 4);
+    assert_eq!(result.disk_inspection.invalid, 4);
+    assert_eq!(result.disk_inspection.missing, 8);
+    assert_eq!(result.disk_inspection.unreadable, 12);
     assert_eq!(result.scanned(), 4);
     assert_eq!(result.stale(), 4);
     assert_eq!(result.purged(), 0);
@@ -120,6 +130,7 @@ fn stale_purge_batching_continues_after_a_fresh_prefix() {
     let result = super::super::repeat_cache_stale_purge(3, false, || {
         calls += 1;
         Ok(fluxheim_cache::CacheStalePurgeResult {
+            disk_inspection: Default::default(),
             vhost: "cached".into(),
             route: None,
             memory_scanned: 1,

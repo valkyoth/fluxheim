@@ -14,10 +14,11 @@ reveal application structure even when response bodies are not printed.
 - Storage-bin soft purge needs room for a second encoded copy of the object.
   If the bin is full, the existing copy remains fresh and the operation reports
   unfinished work. Free space before retrying; a retry is not a hard purge.
-- **Current limitation:** disk stale `dry_run=true` is not reliably
-  non-mutating. Its lookup can remove fully expired or invalid objects before
-  counting them, even while the response reports `purged = 0`. Do not use it
-  as a guaranteed read-only inventory or safety preview.
+- Disk stale preview (`dry_run=true`) reads objects without deleting them,
+  updating LRU timestamps, or scheduling an index checkpoint. Like cleanup,
+  it requires the control token. It advances its own bounded scan cursor;
+  concurrent traffic can still change the cache and the OS may update file
+  access times. Preview is not an atomic inventory.
 
 Use targeted exact/bulk invalidation for known public objects and verify subsequent
 responses/origin counts. For a bounded index purge, inspect the remaining scope
@@ -314,9 +315,20 @@ selector churn or persistent storage errors can also prevent completion. Set a
 finite retry policy and inspect errors instead of looping without a bound.
 This is not a filesystem inventory, a wall-clock deadline, a durable purge
 acknowledgement, or secure erasure. `increase_limit_required` remains false:
-fresh-prefix progress no longer requires increasing the scan limit. Stale
-dry-run can advance through several batches but still has the mutation warning
-above. Exact/bulk responses distinguish purged and not-purged objects; a bounded
+fresh-prefix progress no longer requires increasing the scan limit.
+
+For `purge-stale`, `disk_scanned` counts objects whose freshness was verified.
+`disk_stale` includes both objects inside a stale-serving window and fully
+expired objects (the latter are also counted in `disk_expired`). With
+`dry_run=true`, `disk_would_purge` reports that total and `disk_purged` is zero.
+Without dry-run, only confirmed removals count as purged. Unverifiable entries
+are **not** assumed stale: inspect `disk_invalid` (bad format, identity or
+integrity), `disk_missing`, and `disk_unreadable` (e.g. inaccessible storage).
+These are observations, not removals; check storage health before separate
+maintenance. A busy entry requests continuation rather than being counted as
+missing. Counts refer to visits, not unique objects across concurrent changes.
+
+Exact/bulk responses distinguish purged and not-purged objects; a bounded
 slice continuation returns an explicit incomplete-operation error and may have
 already purged some objects. Repeat the same request and verify content.
 
@@ -351,7 +363,7 @@ filesystem-only, storage-bin-only and both tiered policies. It verifies denied
 anonymous and observer access, bodies, origin counts and over-limit batch
 completion. Dedicated Rust fixtures cover bounded sparse scans, fresh prefixes,
 soft counts, retained generations, failed mutations, encryption and restart.
-The expired disk dry-run warning still applies. Native qualification is recorded in the commit evidence.
+Disk preview tests also compare the quiescent cache before and after inspection.
 
 Do not remove live cache directories by hand. Preserve encrypted root/nonce
 state during supported operations, do not share one root between nodes, and

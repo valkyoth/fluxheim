@@ -303,6 +303,25 @@ fn native_disk_response_headers(bytes: &[u8]) -> Option<Vec<(String, String)>> {
 pub(super) fn native_memory_entry_from_disk_object(
     object: &SerializedCacheObject,
 ) -> Option<NativeMemoryCacheEntry> {
+    let entry = decode_disk_entry(object)?;
+    (freshness(&entry) != fluxheim_cache::CacheObjectFreshnessState::Expired).then_some(entry)
+}
+
+pub(super) fn freshness(
+    entry: &NativeMemoryCacheEntry,
+) -> fluxheim_cache::CacheObjectFreshnessState {
+    use fluxheim_cache::CacheObjectFreshnessState::*;
+    let now = Instant::now();
+    if entry.expires_at > now {
+        Fresh
+    } else if native_cache_entry_has_stale_window_for_disk(entry, now) {
+        Stale
+    } else {
+        Expired
+    }
+}
+
+pub(super) fn decode_disk_entry(object: &SerializedCacheObject) -> Option<NativeMemoryCacheEntry> {
     let meta = NativeDiskCacheMeta::decode(&object.internal_meta)?;
     let now_system = SystemTime::now();
     let now_instant = Instant::now();
@@ -341,10 +360,6 @@ pub(super) fn native_memory_entry_from_disk_object(
         stored_at: native_unix_secs_to_instant(meta.stored_at_unix_secs, now_system, now_instant),
         weight: object.weight as u64,
     };
-    let now = Instant::now();
-    if entry.expires_at <= now && !native_cache_entry_has_stale_window_for_disk(&entry, now) {
-        return None;
-    }
     Some(entry)
 }
 

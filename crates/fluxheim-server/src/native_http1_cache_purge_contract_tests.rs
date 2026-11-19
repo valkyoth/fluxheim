@@ -533,19 +533,5 @@ fn full_bin_soft_purge_preserves_fresh_entry_until_a_retry_can_commit() {
     assert!(!retry.truncated);
 }
 
-#[test]
-fn documented_disk_stale_dry_run_currently_removes_expired_objects() {
-    for backend in [CacheDiskBackend::Filesystem, CacheDiskBackend::StorageBin] {
-        let (_directory, cache, scope) = fixture(backend);
-        let mut entry = disk_cache_entry(b"expired-body");
-        entry.expires_at = Instant::now() - Duration::from_secs(2);
-        store(&cache, &scope, "expired", &entry);
-        assert_eq!(cache.stats().entries, 1);
-        let tag = fluxheim_cache::cache_user_tag(&scope, None);
-        let result = purge_native_disk_cache_stale(&scope, None, &tag, 10, true).unwrap();
-        assert_eq!((result.scanned, result.stale, result.purged), (0, 0, 0));
-        // documented contract: a supposedly read-only scan removed the object.
-        assert_eq!(cache.stats().entries, 0);
-        assert_eq!(cache.with_state(|state| state.purge_index.len()), 0);
-    }
-}
+#[path = "native_http1_cache_stale_preview_tests.rs"]
+mod stale_preview;

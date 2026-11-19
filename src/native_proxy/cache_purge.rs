@@ -373,6 +373,7 @@ impl FluxProxy {
             request.dry_run,
         )?;
         Ok(CacheStalePurgeResult {
+            disk_inspection: disk.disk_inspection,
             vhost: request.vhost.to_owned(),
             route: request.route.map(str::to_owned),
             memory_scanned: memory.scanned,

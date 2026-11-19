@@ -39,7 +39,25 @@ pub struct CacheIndexedPurgeResult {
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub struct DiskInspectionCounts {
+    pub expired: usize,
+    pub invalid: usize,
+    pub missing: usize,
+    pub unreadable: usize,
+}
+
+impl DiskInspectionCounts {
+    pub fn accumulate(&mut self, other: Self) {
+        self.expired = self.expired.saturating_add(other.expired);
+        self.invalid = self.invalid.saturating_add(other.invalid);
+        self.missing = self.missing.saturating_add(other.missing);
+        self.unreadable = self.unreadable.saturating_add(other.unreadable);
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct CacheStalePurgeResult {
+    pub disk_inspection: DiskInspectionCounts,
     pub examined: usize,
     pub scanned: usize,
     pub stale: usize,

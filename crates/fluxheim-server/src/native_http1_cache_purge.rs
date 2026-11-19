@@ -210,58 +210,93 @@ impl NativeDiskCache {
         limit: usize,
         dry_run: bool,
     ) -> CacheStalePurgeResult {
-        let now = Instant::now();
+        use fluxheim_cache::{
+            CacheObjectFreshnessState as Freshness, purge_index::CachePurgeScanResult,
+        };
+        use std::io::ErrorKind;
         let index = self.with_state(|state| state.purge_index.clone());
         let mode = if dry_run {
             CachePurgeMode::DryRun
         } else {
             CachePurgeMode::Stale
         };
-        let mut scanned = 0;
-        let result = index.scan(selector, mode, limit, |entry| {
-            let expected = self.with_state(|state| state.objects.get(&entry.combined_key).cloned());
-            let object = match self.lookup_combined(&entry.combined_key) {
-                Ok(Some(object)) => object,
-                Err(_) => {
-                    return CachePurgeVisit {
-                        retry: true,
-                        ..Default::default()
-                    };
+        let mut counts = CacheStalePurgeResult::default();
+        let result = index.scan_batch(selector, mode, limit, |entries| {
+            let mut result = CachePurgeScanResult::default();
+            for (sequence, entry) in entries {
+                let key = &entry.combined_key;
+                let Ok(guard) = self.try_lock_key_read(key) else {
+                    result.truncated = true;
+                    continue;
+                };
+                if !index.is_current_generation(key, sequence) {
+                    result.truncated = true;
+                    continue;
                 }
-                Ok(None) => {
-                    self.with_state(|state| {
-                        if !state.objects.contains_key(&entry.combined_key) {
-                            state.purge_index.remove_combined(&entry.combined_key);
+                let Some(record) = self.with_state(|s| s.objects.get(key).cloned()) else {
+                    counts.disk_inspection.missing += 1;
+                    continue;
+                };
+                // Pin the extent through reading and classification, never through removal.
+                let inspected = self.inspect_stale_record(key, &record);
+                drop(guard);
+                match inspected {
+                    Ok(state) => {
+                        counts.scanned += 1;
+                        if state == Freshness::Fresh {
+                            continue;
                         }
-                    });
-                    return CachePurgeVisit::default();
+                        result.stale += 1;
+                        counts.disk_inspection.expired += usize::from(state == Freshness::Expired);
+                        if !dry_run {
+                            if self.remove_if_unchanged(key, &record).unwrap_or(false) {
+                                result.purged += 1;
+                            } else {
+                                result.truncated = true;
+                            }
+                        }
+                    }
+                    Err(e) => match e.kind() {
+                        ErrorKind::WouldBlock => result.truncated = true,
+                        ErrorKind::InvalidData | ErrorKind::UnexpectedEof => {
+                            counts.disk_inspection.invalid += 1
+                        }
+                        ErrorKind::NotFound => counts.disk_inspection.missing += 1,
+                        _ => counts.disk_inspection.unreadable += 1,
+                    },
                 }
-            };
-            scanned += 1;
-            if object.expires_at > now {
-                return CachePurgeVisit::default();
             }
-            let purged = !dry_run
-                && expected.as_ref().is_some_and(|record| {
-                    self.remove_if_unchanged(&entry.combined_key, record)
-                        .unwrap_or(false)
-                });
-            let retry = !dry_run
-                && !purged
-                && self.with_state(|state| state.objects.contains_key(&entry.combined_key));
-            CachePurgeVisit {
-                stale: true,
-                purged,
-                retry,
-            }
+            result
         });
         CacheStalePurgeResult {
             examined: result.examined,
-            scanned,
             stale: result.stale,
             purged: result.purged,
             truncated: result.truncated,
+            ..counts
         }
+    }
+
+    fn inspect_stale_record(
+        &self,
+        key: &str,
+        record: &super::NativeDiskCacheRecord,
+    ) -> std::io::Result<fluxheim_cache::CacheObjectFreshnessState> {
+        use super::native_http1_cache_meta::{decode_disk_entry, freshness};
+        let invalid = || std::io::Error::from(std::io::ErrorKind::InvalidData);
+        if matches!(record.location, NativeDiskCacheLocation::StorageBin(loc) if loc.len > super::native_disk_cache_read_limit(self.max_object_bytes))
+        {
+            return Err(invalid());
+        }
+        let object = self.read_record(record)?;
+        if object.combined_key.as_deref() != Some(key) {
+            return Err(invalid());
+        }
+        let entry = decode_disk_entry(&object).ok_or_else(invalid)?;
+        if *entry.body_sha256 != super::native_cache_body_sha256(&entry.body) {
+            return Err(invalid());
+        }
+        Ok(freshness(&entry))
     }
 }
 
@@ -493,6 +528,7 @@ fn purge_native_disk_cache_stale_indexed(
         remaining = remaining.saturating_sub(scoped.examined.max(1));
         result.examined = result.examined.saturating_add(scoped.examined);
         result.scanned = result.scanned.saturating_add(scoped.scanned);
+        result.disk_inspection.accumulate(scoped.disk_inspection);
         result.stale = result.stale.saturating_add(scoped.stale);
         result.purged = result.purged.saturating_add(scoped.purged);
         result.truncated |= scoped.truncated;

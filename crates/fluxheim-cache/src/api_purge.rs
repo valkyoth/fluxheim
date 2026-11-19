@@ -112,6 +112,7 @@ pub struct CacheIndexedPurgeResult {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CacheStalePurgeResult {
+    pub disk_inspection: crate::purge_index::DiskInspectionCounts,
     pub vhost: String,
     pub route: Option<String>,
     pub memory_scanned: usize,

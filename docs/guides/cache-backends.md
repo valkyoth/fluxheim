@@ -228,7 +228,7 @@ The process tracks at most 4,096 simultaneously live shared disk caches.
 | the documented limitation | Invalid/unindexed files and abandoned temporaries remain outside tracked occupancy | the local follow-up; monitor actual filesystem usage and use offline maintenance guidance |
 | Bounded indexed purge | Entry work is shared across live generations per tier; sparse scans and failures can require continuation | Repeat bounded requests, inspect `truncated`, and verify the remaining scope; completion is not a fence against concurrent fills |
 | Storage-bin soft purge | Publishes staged stale copies with one index checkpoint per group before releasing original extents | Leave scratch space for replacements; checkpoints share a five-second cooldown across roots. Check continuation before assuming invalidation succeeded |
-| the documented limitation | Disk stale dry-run can delete during lookup | the local follow-up; do not use it as a guaranteed read-only preview |
+| Disk stale preview | Reports verified stale and fully expired objects without touching cache entries, LRU or checkpoint state | Check invalid, missing and unreadable counts separately; preview is not a snapshot under concurrent traffic |
 
 These are open corrections, not accepted behavior merely because documented.
 Use [recovery](cache-recovery.md) and [operation safeguards](cache-operations.md#current-invalidation-warnings).

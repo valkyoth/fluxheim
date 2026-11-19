@@ -241,6 +241,7 @@ pub(super) fn repeat_cache_stale_purge(
                 total.memory_stale = total.memory_stale.saturating_add(result.memory_stale);
                 total.memory_purged = total.memory_purged.saturating_add(result.memory_purged);
                 total.disk_scanned = total.disk_scanned.saturating_add(result.disk_scanned);
+                total.disk_inspection.accumulate(result.disk_inspection);
                 total.disk_stale = total.disk_stale.saturating_add(result.disk_stale);
                 total.disk_purged = total.disk_purged.saturating_add(result.disk_purged);
                 total.memory_truncated = result.memory_truncated;

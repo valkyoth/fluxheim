@@ -194,6 +194,7 @@ qualification are different checks; see each guide's limitations and evidence.
 - [Storage-bin handle admission qualification](evidence/observability-25.md)
 - [Bounded cache purge qualification](evidence/observability-26.md)
 - [Storage-bin soft purge and Rust refresh](evidence/observability-27.md)
+- [Read-only stale cache preview](evidence/observability-28.md)
 - [Commit 12 native archive identities and checksums](evidence/observability-12-archives.json)
 - [Commit 12 local performance measurements](evidence/observability-12-performance.json)
 - [Commit 12 ARM performance measurements](evidence/observability-12-performance-arm.json)

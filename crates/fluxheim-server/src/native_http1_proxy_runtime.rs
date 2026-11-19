@@ -436,7 +436,9 @@ fn purge_native_memory_stale_entries(
     };
     let result = index.scan(selector, mode, limit, |entry| {
         let Some(object) = state.objects.get(&entry.combined_key) else {
-            state.purge_index.remove_combined(&entry.combined_key);
+            if !dry_run {
+                state.purge_index.remove_combined(&entry.combined_key);
+            }
             return CachePurgeVisit::default();
         };
         scanned = scanned.saturating_add(1);
@@ -464,6 +466,7 @@ fn purge_native_memory_stale_entries(
         }
     });
     CacheStalePurgeResult {
+        disk_inspection: Default::default(),
         examined: result.examined,
         scanned,
         stale: result.stale,
