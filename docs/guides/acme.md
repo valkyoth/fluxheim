@@ -195,6 +195,19 @@ To switch off both scheduled and forced renewals, use:
 enabled = false
 ```
 
+With renewal off, run `fluxheim-acme --config /etc/fluxheim/fluxheim.toml status`
+to check the installed leaf certificate for every managed vhost. Add
+`--vhost NAME` after `status` to check just one. This is a local read:
+it does not create storage, read the private key, contact the CA or renew.
+For example, `target: shop status=missing renewal=off not_after=missing`
+means the vhost is managed but no certificate is installed.
+
+The exit status is nonzero if a selected leaf is missing, invalid, unreadable,
+not yet valid, expired, or expires within seven days (inclusive). All selected
+vhosts are reported even when one fails. A parsed leaf reports its expiry as
+Unix seconds. A successful inventory checks dates only: it does not prove that
+the live listener serves the leaf or that a client trusts the chain.
+
 Other scheduling considerations:
 - **Current limitation:** `retry_initial_secs` and `retry_max_secs` validate but the
   background loop does not use them for per-target failure backoff. It runs a

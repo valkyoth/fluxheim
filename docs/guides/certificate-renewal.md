@@ -547,7 +547,9 @@ The default elective hold permits missing, expired, and last-seven-days
 certificates to renew immediately; a due ARI recommendation can also override
 the date. Use `hold_mode = "absolute"` for a timed freeze that skips ARI and
 all unforced renewal, or `enabled = false` to turn renewal off, including
-force. See the [policy table and examples](acme.md#renewal-holds-and-reload).
+force. With renewal off, `status` still checks installed certificates and exits
+nonzero if any selected leaf needs attention. See the
+[policy table and status examples](acme.md#renewal-holds-and-reload).
 
 When Fluxheim is built with `acme-client`, the runtime registers a background
 renewal service when ACME-managed vhosts are configured and

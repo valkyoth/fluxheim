@@ -14,6 +14,11 @@ See the [operator guide](../guides/acme.md#renewal-holds-and-reload).
   and no account or certificate state creation during an absolute hold.
 - Native all-feature ACME suites ran on Linux, Apple Silicon macOS and
   Windows x64. Linux skipped its existing privileged mount-namespace test.
+- Off-mode inventory regressions passed on all three platforms. They cover
+  mixed healthy, missing, malformed and unreadable leaves, vhost selection,
+  not-yet-valid certificates and the exact warning and expiry boundaries.
+  The Podman check also ran status before and after real issuance: the
+  missing leaf failed, the installed leaf passed, and neither placed an order.
 - The packaged Wolfi full and PHP profiles ran against local Pebble via
   Podman. With an absolutely held background gateway and a missing certificate, unforced
   legacy and companion commands (including a selected vhost) attempted zero

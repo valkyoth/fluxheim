@@ -41,7 +41,35 @@ pub fn load_certificate_not_after(path: &Path) -> io::Result<Option<SystemTime>>
         return Ok(None);
     };
 
-    let (_, pem) = x509_parser::pem::parse_x509_pem(&contents).map_err(|_| {
+    let timestamp = leaf_validity(&contents)?.not_after.timestamp();
+    if timestamp < 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "certificate expiration is before the Unix epoch",
+        ));
+    }
+
+    Ok(Some(UNIX_EPOCH + Duration::from_secs(timestamp as u64)))
+}
+
+/// Inspect only the installed leaf's validity interval; never read the key or schedule renewal.
+pub fn inspect_managed_leaf_validity(target: &AcmeRenewalTarget) -> io::Result<Option<(i64, i64)>> {
+    let file = match fluxheim_config::fs_trust::open_regular_file(&target.certificate.cert_path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let validity = leaf_validity(&read_bounded_open_file(file)?)?;
+    let start = validity.not_before.timestamp();
+    let end = validity.not_after.timestamp();
+    if end < start {
+        return Err(io::Error::from(io::ErrorKind::InvalidData));
+    }
+    Ok(Some((start, end)))
+}
+
+fn leaf_validity(contents: &[u8]) -> io::Result<x509_parser::certificate::Validity> {
+    let (_, pem) = x509_parser::pem::parse_x509_pem(contents).map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             "certificate file does not contain a valid PEM certificate",
@@ -53,15 +81,7 @@ pub fn load_certificate_not_after(path: &Path) -> io::Result<Option<SystemTime>>
             "certificate file does not contain a valid X.509 certificate",
         )
     })?;
-    let timestamp = certificate.validity().not_after.timestamp();
-    if timestamp < 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "certificate expiration is before the Unix epoch",
-        ));
-    }
-
-    Ok(Some(UNIX_EPOCH + Duration::from_secs(timestamp as u64)))
+    Ok(certificate.validity().clone())
 }
 
 pub(super) fn read_bounded_certificate_file(path: &Path) -> io::Result<Option<Vec<u8>>> {
@@ -70,6 +90,10 @@ pub(super) fn read_bounded_certificate_file(path: &Path) -> io::Result<Option<Ve
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
+    read_bounded_open_file(file).map(Some)
+}
+
+fn read_bounded_open_file(file: std::fs::File) -> io::Result<Vec<u8>> {
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(io::Error::new(
@@ -92,7 +116,7 @@ pub(super) fn read_bounded_certificate_file(path: &Path) -> io::Result<Option<Ve
             "certificate file is too large",
         ));
     }
-    Ok(Some(contents))
+    Ok(contents)
 }
 
 #[cfg(target_os = "linux")]

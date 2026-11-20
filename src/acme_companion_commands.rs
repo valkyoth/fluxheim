@@ -11,6 +11,10 @@ use crate::config::Config;
 #[path = "acme_companion_target_contract_tests.rs"]
 mod target_contract_tests;
 
+#[cfg(feature = "acme")]
+#[path = "acme_companion_off_status.rs"]
+mod off_status;
+
 #[cfg(feature = "acme-client")]
 pub(super) fn run_account_operation(
     config_path: Option<&std::path::Path>,
@@ -383,15 +387,13 @@ pub(super) fn print_status(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = load_validated_config(config_path)?;
     if !config.tls.acme.renewal.enabled {
-        if let Some(name) = vhost
-            && !fluxheim_acme::managed_acme_targets(&config)
-                .iter()
-                .any(|target| target.vhost_name == name)
-        {
-            return Err(format!("unknown ACME vhost target {name:?}").into());
-        }
-        println!("acme status targets: 0\nacme renewal: off (forced renewal is also disabled)");
-        return Ok(());
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
+        return off_status::write_inventory(
+            &config,
+            vhost,
+            i64::try_from(now.as_secs())?,
+            std::io::stdout().lock(),
+        );
     }
     if let Some(vhost) = vhost {
         ensure_acme_target_exists(&config, vhost)?;

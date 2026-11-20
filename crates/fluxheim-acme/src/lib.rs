@@ -271,7 +271,8 @@ pub use acme_certificate_install::{
 use acme_certificate_paths::read_bounded_certificate_file;
 use acme_certificate_paths::{MANAGED_FULLCHAIN_FILE, MANAGED_PRIVATE_KEY_FILE};
 pub use acme_certificate_paths::{
-    load_certificate_not_after, managed_certificate_paths, observe_target_certificate,
+    inspect_managed_leaf_validity, load_certificate_not_after, managed_certificate_paths,
+    observe_target_certificate,
 };
 pub use acme_challenges::{
     AcmeHttp01ChallengeStore, AcmeTlsAlpn01ChallengeStore, http_01_token_from_path,

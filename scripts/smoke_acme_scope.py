@@ -310,13 +310,15 @@ def qualify(smoke, full, php, legacy):
     if "1 missing or expiring by release; CA advice not checked" not in log.stdout + log.stderr:
         raise AssertionError("background absolute hold failed to warn about the missing certificate")
     segment = "scope-" + hashlib.sha256(b"scope").hexdigest()[:16]
-    for index, (args, expected) in enumerate((
-        (["status", "--vhost", "scope"], "acme renewal: off"),
-        (["renew", "--force-renew", "--no-reload"], "acme attempted: 0"),
-    )):
-        code, logs = smoke.launch(f"off-{index}", full, args, entry="/usr/local/bin/fluxheim-acme", config="off.toml")
-        if code or expected not in logs or order_count():
-            raise AssertionError("disabled renewal did not remain off")
+    code, logs = smoke.launch("off-missing", full, ["status", "--vhost", "scope"],
+                              entry="/usr/local/bin/fluxheim-acme", config="off.toml")
+    if (not code or "target: scope status=missing renewal=off not_after=missing" not in logs
+            or "acme status targets: 1" not in logs or order_count()):
+        raise AssertionError(f"off status did not report the missing certificate: {code}\n{logs}")
+    code, logs = smoke.launch("off-force", full, ["renew", "--force-renew", "--no-reload"],
+                              entry="/usr/local/bin/fluxheim-acme", config="off.toml")
+    if code or "acme attempted: 0" not in logs or order_count():
+        raise AssertionError("disabled renewal did not remain off")
     certificate_dir = "/var/lib/fluxheim/acme/certificates/" + segment
     for index, (image, entry, args) in enumerate((
         (full, "/usr/local/bin/fluxheim-acme", ["renew", "--no-reload"]),
@@ -341,6 +343,10 @@ def qualify(smoke, full, php, legacy):
         if mode != "600:65532":
             raise AssertionError("installed private key permissions changed")
         print(f"renewal {index}: issued and installed, real HTTP-01 challenge passed", flush=True)
+    code, logs = smoke.launch("off-installed", full, ["status", "--vhost", "scope"],
+                              entry="/usr/local/bin/fluxheim-acme", config="off.toml")
+    if code or "target: scope status=valid renewal=off not_after=" not in logs or order_count() != 4:
+        raise AssertionError(f"off status did not recognize the issued certificate: {code}\n{logs}")
     code, logs = smoke.launch("elective-routine", full, ["acme-renew"], config="elective.toml")
     if code or "acme attempted: 0" not in logs or order_count() != 4:
         raise AssertionError("elective hold did not defer an otherwise locally due certificate")
