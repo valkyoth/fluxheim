@@ -541,16 +541,13 @@ is implemented and produces queue items with:
 - certificate expiration time
 - next renewal time
 
-The local planner's renewal time is the later of:
-
-- `certificate_not_after - tls.acme.renewal.renew_before_secs`
-- `tls.acme.renewal.renew_after`, when set
-
-`renew_after` accepts a TOML offset datetime, for example
-`2027-01-01T00:00:00Z`; local TOML datetimes are rejected. Until that instant,
-all unforced renewal is held, even for missing or expired certificates. A hold
-overrides ARI and emergency scheduling, so monitor expiry. Once released, the
-local queue time is an estimate: ARI may adjust the actual renewal time.
+The local planner uses `renew_before_secs` before expiry. Set `renew_after` to
+a TOML offset datetime such as `2027-01-01T00:00:00Z` to defer routine work.
+The default elective hold permits missing, expired, and last-seven-days
+certificates to renew immediately; a due ARI recommendation can also override
+the date. Use `hold_mode = "absolute"` for a timed freeze that skips ARI and
+all unforced renewal, or `enabled = false` to turn renewal off, including
+force. See the [policy table and examples](acme.md#renewal-holds-and-reload).
 
 When Fluxheim is built with `acme-client`, the runtime registers a background
 renewal service when ACME-managed vhosts are configured and

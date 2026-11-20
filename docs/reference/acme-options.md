@@ -33,7 +33,8 @@ modes. Do not paste a second `[tls.acme]` table to override the first.
 | --- | --- | --- |
 | `enabled` | `true` | Permit renewal target generation; false also suppresses CLI forced targets |
 | `renew_before_secs` | `2592000` | Local planner's pre-expiry window (30 days); positive when renewal enabled; ARI may influence actual execution |
-| `renew_after` | Absent | TOML offset datetime, e.g. `2027-01-01T00:00:00Z`; no unforced issuance before this instant, even on expiry |
+| `renew_after` | Absent | Offset datetime, e.g. `2027-01-01T00:00:00Z`. Sets a timed hold; normal scheduling resumes at this instant. |
+| `hold_mode` | `"elective"` | Elective permits missing, last-seven-days, expired and due ARI renewals. `"absolute"` suppresses all unforced issuance and ARI lookups during the hold. Without a future date there is no hold. |
 | `check_interval_secs` | `3600` | Positive background sleep after a renewal tick; work time is additional |
 | `retry_initial_secs` | `300` | Positive, no greater than max; **Current limitation:** |
 | `retry_max_secs` | `86400` | Positive maximum backoff setting; same runtime gap |

@@ -2,7 +2,7 @@ pub use crate::config_access::{
     AccessPolicyConfig, ConcurrencyLimitConfig, RateLimitConfig, RateLimitMode,
 };
 pub use crate::config_acme::{
-    AcmeAutomationMode, AcmeChallenge, AcmeConfig, AcmeExternalAccountBindingConfig,
+    AcmeAutomationMode, AcmeChallenge, AcmeConfig, AcmeExternalAccountBindingConfig, AcmeHoldMode,
     AcmeIssuerConfig, AcmeRenewalConfig, VhostAcmeChallengeConfig, VhostAcmeConfig,
 };
 #[cfg(test)]

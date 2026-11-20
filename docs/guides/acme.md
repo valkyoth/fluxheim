@@ -160,11 +160,21 @@ this documentation. Protect secret parents as well as the files themselves.
 
 ## Renewal, Holds And Reload
 
-`status` shows the local expiry-based plan, not a live CA decision. For example,
-to pause unforced issuance until a maintenance window:
+`fluxheim-acme status` shows the local plan and observed expiry, not a live CA
+decision. Choose the policy under `[tls.acme.renewal]`:
+
+| Goal | Settings | What happens |
+| --- | --- | --- |
+| Normal renewal (default) | `enabled = true`, no `renew_after` | Use the local schedule and issuer renewal information (ARI). |
+| Delay routine renewals | Future `renew_after`, `hold_mode = "elective"` (default) | Missing certificates, expiry within seven days (inclusive), or a due issuer-advised renewal can override the date. |
+| Freeze automatic issuance | Future `renew_after`, `hold_mode = "absolute"` | No unforced order or ARI lookup until the deadline. Explicit force still works. A missing certificate can stay missing. |
+| Turn renewal off | `enabled = false` | No background or CLI renewal targets, even with force. Existing certificates stay installed. Re-enable explicitly; no date re-enables renewal. |
+
+For example, to freeze automatic issuance until a maintenance window:
 
 ```toml
 [tls.acme.renewal]
+hold_mode = "absolute"
 renew_after = 2027-01-01T02:00:00+02:00
 ```
 
@@ -174,6 +184,16 @@ issuer renewal information (ARI) nor the emergency window overrides the hold.
 At the deadline normal scheduling resumes; it does not force a fresh certificate
 to renew. Only an explicit forced renewal bypasses the hold. Choose the deadline
 carefully: a held site can remain without a usable certificate.
+
+To delay only routine work, change the example to `hold_mode = "elective"`.
+If upgrading from a development build that treated every date as an absolute
+freeze, set `hold_mode = "absolute"` explicitly to preserve that behavior.
+To switch off both scheduled and forced renewals, use:
+
+```toml
+[tls.acme.renewal]
+enabled = false
+```
 
 Other scheduling considerations:
 - **Current limitation:** `retry_initial_secs` and `retry_max_secs` validate but the

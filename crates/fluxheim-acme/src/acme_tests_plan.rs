@@ -128,12 +128,12 @@ fn selected_renewal_skips_not_due_target_without_network() {
 fn uses_later_of_renew_window_and_operator_date() {
     let now = UNIX_EPOCH + Duration::from_secs(1_000);
     let mut config = acme_config_with_vhosts(vec![managed_vhost("example")]);
-    config.tls.acme.renewal.renew_before_secs = 100;
+    config.tls.acme.renewal.renew_before_secs = 864_100;
     config.tls.acme.renewal.renew_after =
         Some("1970-01-01T00:18:20Z".parse().expect("valid TOML datetime"));
     let observations = vec![CertificateObservation {
         vhost_name: "example".to_owned(),
-        not_after: UNIX_EPOCH + Duration::from_secs(1_150),
+        not_after: UNIX_EPOCH + Duration::from_secs(865_150),
     }];
 
     let queue = plan_renewal_queue(&config, &observations, now);

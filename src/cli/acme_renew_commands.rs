@@ -28,7 +28,7 @@ pub(super) fn run_acme_renew_command(
         let target = &item.target;
         let status = if force_renew {
             "forced"
-        } else if fluxheim_acme::renewal_held(&config, now) {
+        } else if !item.due_now && fluxheim_acme::renewal_held(&config, now) {
             "held"
         } else if item.due_now {
             "due"

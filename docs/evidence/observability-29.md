@@ -1,8 +1,8 @@
 # ACME renewal holds and dependency refresh
 
-Selected and all-target due runs share the same scheduling path. Before
-`renew_after`, neither missing certificates, ARI nor the emergency window
-authorize an unforced attempt. At the deadline the ordinary rules resume.
+Selected and all-target due runs share the same scheduling path. A future
+`renew_after` defaults to an elective hold; only an explicit absolute hold
+blocks emergency and issuer-advised renewal. At the deadline ordinary rules resume.
 An explicit forced run still needs an enabled target and issuer terms. Status
 reports the local schedule; it does not query the issuer for a prediction.
 See the [operator guide](../guides/acme.md#renewal-holds-and-reload).
@@ -11,13 +11,15 @@ See the [operator guide](../guides/acme.md#renewal-holds-and-reload).
 
 - Offline tests exercise instant equality, offset-equivalent times, missing
   and observed certificates, selected and all-target force, rejected terms,
-  and no account or certificate state creation during the hold.
+  and no account or certificate state creation during an absolute hold.
 - Native all-feature ACME suites ran on Linux, Apple Silicon macOS and
   Windows x64. Linux skipped its existing privileged mount-namespace test.
 - The packaged Wolfi full and PHP profiles ran against local Pebble via
-  Podman. With a held background gateway and a missing certificate, unforced
+  Podman. With an absolutely held background gateway and a missing certificate, unforced
   legacy and companion commands (including a selected vhost) attempted zero
-  renewals. The fixture counts order requests rather than relying solely on
+  renewals. An elective hold permits initial issuance but defers routine
+  replacement without due issuer advice. An explicitly disabled target stays
+  off even with force. The fixture counts order requests rather than relying solely on
   CLI output. It checks four CLI issuance paths and a fifth order from the
   released background scheduler, then compares the served leaf with the
   installed certificate over hostname-verified TLS. No public CA is used.

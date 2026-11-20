@@ -263,6 +263,8 @@ pub struct AcmeRenewalConfig {
     pub renew_before_secs: u64,
     #[serde(default)]
     pub renew_after: Option<Datetime>,
+    #[serde(default)]
+    pub hold_mode: AcmeHoldMode,
     #[serde(default = "default_acme_renewal_check_interval_secs")]
     pub check_interval_secs: u64,
     #[serde(default = "default_acme_renewal_retry_initial_secs")]
@@ -275,12 +277,21 @@ pub struct AcmeRenewalConfig {
     pub zero_downtime_reload: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AcmeHoldMode {
+    #[default]
+    Elective,
+    Absolute,
+}
+
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct AcmeRenewalConfigFragment {
     enabled: Option<bool>,
     renew_before_secs: Option<u64>,
     renew_after: Option<Datetime>,
+    hold_mode: Option<AcmeHoldMode>,
     check_interval_secs: Option<u64>,
     retry_initial_secs: Option<u64>,
     retry_max_secs: Option<u64>,
@@ -294,6 +305,7 @@ impl Default for AcmeRenewalConfig {
             enabled: true,
             renew_before_secs: default_acme_renew_before_secs(),
             renew_after: None,
+            hold_mode: AcmeHoldMode::default(),
             check_interval_secs: default_acme_renewal_check_interval_secs(),
             retry_initial_secs: default_acme_renewal_retry_initial_secs(),
             retry_max_secs: default_acme_renewal_retry_max_secs(),
@@ -313,6 +325,9 @@ impl AcmeRenewalConfig {
         }
         if let Some(renew_after) = fragment.renew_after {
             self.renew_after = Some(renew_after);
+        }
+        if let Some(mode) = fragment.hold_mode {
+            self.hold_mode = mode;
         }
         if let Some(check_interval_secs) = fragment.check_interval_secs {
             self.check_interval_secs = check_interval_secs;

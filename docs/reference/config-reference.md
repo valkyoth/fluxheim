@@ -3520,7 +3520,9 @@ rule as private keys.
 
 Start with the [ACME operator guide](../guides/acme.md) and
 [complete option reference](acme-options.md). The renewal hold applies to all
-unforced runs. Per-target failure backoff and background reload flags still
+unforced runs according to `hold_mode`: elective (default) permits emergency
+or issuer-advised renewal; absolute does not. Use `enabled = false` to disable
+even forced renewal. Per-target failure backoff and background reload flags still
 have the limitations described in the operator guide.
 
 ACME config parsing, renewal planning, managed certificate storage paths, local

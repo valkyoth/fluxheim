@@ -4,6 +4,7 @@ fn held_config(label: &str) -> Config {
     let mut config = acme_config_with_vhosts(vec![managed_vhost("example")]);
     config.tls.acme.storage = Some(fluxheim_common::test_support::unique_temp_path(label));
     config.tls.acme.renewal.renew_after = Some("2099-01-01T00:00:00Z".parse().unwrap());
+    config.tls.acme.renewal.hold_mode = fluxheim_config::AcmeHoldMode::Absolute;
     config
 }
 
@@ -119,4 +120,72 @@ fn disabled_renewal_produces_no_targets_even_with_force() {
         ))
         .unwrap();
     assert_eq!(run.attempted, 0);
+    assert_eq!(
+        runtime()
+            .block_on(crate::renew_all_instant_acme_targets(&config, now))
+            .unwrap()
+            .attempted,
+        0
+    );
+    assert!(!config.tls.acme.storage.unwrap().exists());
+}
+
+#[test]
+fn elective_hold_skips_only_routine_renewal_without_issuer_advice() {
+    let now = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+    let week = Duration::from_secs(7 * 86400);
+    for (expiry, attempts) in [
+        (None, 1),
+        (Some(now), 1),
+        (Some(now - week), 1),
+        (Some(now + week), 1),
+        (Some(now + week + Duration::from_secs(1)), 0),
+    ] {
+        let mut config = held_config("acme-elective");
+        config.tls.acme.renewal.hold_mode = fluxheim_config::AcmeHoldMode::Elective;
+        let obs: Vec<_> = expiry
+            .into_iter()
+            .map(|not_after| CertificateObservation {
+                vhost_name: "example".into(),
+                not_after,
+            })
+            .collect();
+        let queue = plan_renewal_queue(&config, &obs, now);
+        assert_eq!(queue[0].due_now, attempts == 1);
+        let run = runtime()
+            .block_on(crate::acme_ari::execute_due_queue(&config, &queue, now))
+            .unwrap();
+        assert_eq!(run.attempted, attempts);
+        if attempts != 0 {
+            assert!(run.failed[0].error.contains("terms"));
+            std::fs::remove_dir_all(config.tls.acme.storage.unwrap()).unwrap();
+        }
+    }
+}
+
+#[test]
+fn elective_hold_accepts_due_advice_but_not_an_unavailable_lookup() {
+    let mut config = held_config("acme-elective-ari");
+    config.tls.acme.renewal.hold_mode = fluxheim_config::AcmeHoldMode::Elective;
+    let now = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+    let obs = [CertificateObservation {
+        vhost_name: "example".into(),
+        not_after: now + Duration::from_secs(14 * 86400),
+    }];
+    let queue = plan_renewal_queue(&config, &obs, now);
+    let item = &queue[0];
+    assert!(!item.due_now);
+    runtime().block_on(async {
+        for advice in [true, false] {
+            assert_eq!(
+                crate::acme_ari::due_decision(item, now, true, async { advice }).await,
+                advice
+            );
+        }
+        assert!(!crate::acme_ari::due_decision(item, now, false, std::future::pending()).await);
+        let emergency = plan_renewal_queue(&config, &[], now);
+        assert!(
+            crate::acme_ari::due_decision(&emergency[0], now, false, std::future::pending()).await
+        );
+    });
 }

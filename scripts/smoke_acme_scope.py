@@ -28,10 +28,12 @@ def command(args, *, check=True, data=None, timeout=180):
     return result
 
 
-def configuration(extra="", *, renewal=True, issuer="pebble", held=False, released=False):
-    hold = "renew_after = 2099-01-01T00:00:00Z\ncheck_interval_secs = 1" if held else ""
+def configuration(extra="", *, renewal=True, issuer="pebble", held=False, released=False, elective=False, off=False):
+    hold = 'renew_after = 2099-01-01T00:00:00Z\nhold_mode = "absolute"\ncheck_interval_secs = 1' if held else ""
     if released:
         hold = "renew_after = 2000-01-01T00:00:00Z\nrenew_before_secs = 315360000"
+    if elective:
+        hold = "renew_after = 2099-01-01T00:00:00Z\nrenew_before_secs = 315360000"
     tls_listener = 'tls_listen = ["0.0.0.0:5443"]' if held or released else ""
     return f'''[server]
 listen = ["0.0.0.0:5002"]
@@ -46,6 +48,7 @@ contact_email = "test@example.test"
 default_issuer = "{issuer}"
 automation = "{'background' if held or released else 'external'}"
 [tls.acme.renewal]
+enabled = {str(not off).lower()}
 reload_after_renewal = {str(released).lower()}
 {hold}
 [[tls.acme.issuers]]
@@ -102,7 +105,9 @@ def fixtures(root):
     # Pebble can reuse an authorization even with AUTHZREUSE=0. Distinct
     # issuer names isolate accounts while retaining the same certificate store.
     for index, name in enumerate(RENEWAL_CONFIGS):
-        (control / name).write_text(configuration(issuer=f"pebble-{index}"))
+        (control / name).write_text(configuration(issuer=f"pebble-{index}", elective=index == 0))
+    (control / "off.toml").write_text(configuration(off=True))
+    (control / "elective.toml").write_text(configuration(issuer="elective", elective=True))
     (control / "server.toml").write_text(configuration(renewal=False, held=True))
     (control / "served.toml").write_text(configuration(renewal=False, issuer="pebble-background", released=True))
     # Isolate feature mismatch from PHP filesystem availability.
@@ -139,7 +144,7 @@ class Smoke:
         # preserving ownership) into an engine volume, then mount it read-only.
         name = self.prefix + "-fixtures"
         self.names.append(name)
-        sources = ("renew.toml", "server.toml", "served.toml", "cache.toml", *RENEWAL_CONFIGS, "ca.pem")
+        sources = ("renew.toml", "server.toml", "served.toml", "cache.toml", "elective.toml", "off.toml", *RENEWAL_CONFIGS, "ca.pem")
         mounts = [argument for source in sources
                   for argument in self.mount(source, "/input/" + source)]
         command([self.runtime, "run", "--name", name, "--network=none", "--user=0",
@@ -290,7 +295,8 @@ def qualify(smoke, full, php, legacy):
 
     code, status = smoke.launch("held-status", full, ["status", "--vhost", "scope"],
                                 entry="/usr/local/bin/fluxheim-acme", config="server.toml")
-    if code or "status=held due_now=false" not in status or "not_after=missing" not in status:
+    if (code or "status=held due_now=false" not in status or "not_after=missing" not in status
+            or "Absolute until 2099-01-01" not in status):
         raise AssertionError("status did not distinguish the hold from certificate availability")
     for index, (entry, args) in enumerate((
         ("/usr/local/bin/fluxheim", ["acme-renew"]),
@@ -300,7 +306,17 @@ def qualify(smoke, full, php, legacy):
         code, logs = smoke.launch(f"held-{index}", full, args, entry=entry, config="server.toml")
         if code or "acme attempted: 0" not in logs or order_count() != 0:
             raise AssertionError(f"held renewal {index} was not skipped: {code}\n{logs}")
+    log = command([smoke.runtime, "logs", gateway])
+    if "1 missing or expiring by release; CA advice not checked" not in log.stdout + log.stderr:
+        raise AssertionError("background absolute hold failed to warn about the missing certificate")
     segment = "scope-" + hashlib.sha256(b"scope").hexdigest()[:16]
+    for index, (args, expected) in enumerate((
+        (["status", "--vhost", "scope"], "acme renewal: off"),
+        (["renew", "--force-renew", "--no-reload"], "acme attempted: 0"),
+    )):
+        code, logs = smoke.launch(f"off-{index}", full, args, entry="/usr/local/bin/fluxheim-acme", config="off.toml")
+        if code or expected not in logs or order_count():
+            raise AssertionError("disabled renewal did not remain off")
     certificate_dir = "/var/lib/fluxheim/acme/certificates/" + segment
     for index, (image, entry, args) in enumerate((
         (full, "/usr/local/bin/fluxheim-acme", ["renew", "--no-reload"]),
@@ -325,6 +341,9 @@ def qualify(smoke, full, php, legacy):
         if mode != "600:65532":
             raise AssertionError("installed private key permissions changed")
         print(f"renewal {index}: issued and installed, real HTTP-01 challenge passed", flush=True)
+    code, logs = smoke.launch("elective-routine", full, ["acme-renew"], config="elective.toml")
+    if code or "acme attempted: 0" not in logs or order_count() != 4:
+        raise AssertionError("elective hold did not defer an otherwise locally due certificate")
     code, logs = smoke.launch("not-due", full, ["acme-renew"])
     if code or "acme attempted: 0" not in logs:
         raise AssertionError("installed certificate was not observed as valid")

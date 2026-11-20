@@ -1,6 +1,18 @@
 use super::super::*;
 
 #[test]
+fn renewal_defaults_to_elective_and_rejects_unknown_modes_even_when_disabled() {
+    let config: Config = toml::from_str("[tls.acme.renewal]\nenabled = false").unwrap();
+    assert_eq!(
+        config.tls.acme.renewal.hold_mode,
+        crate::AcmeHoldMode::Elective
+    );
+    assert!(
+        toml::from_str::<Config>("[tls.acme.renewal]\nenabled=false\nhold_mode='typo'").is_err()
+    );
+}
+
+#[test]
 fn parses_tls_acme_config_with_actalis_eab() {
     let storage = secure_test_dir("config-actalis-acme");
     let config: Config = toml::from_str(&format!(
@@ -21,6 +33,7 @@ fn parses_tls_acme_config_with_actalis_eab() {
             enabled = true
             renew_before_secs = 2592000
             renew_after = 2026-06-01T00:00:00Z
+            hold_mode = "absolute"
             check_interval_secs = 3600
             retry_initial_secs = 300
             retry_max_secs = 86400
@@ -54,6 +67,10 @@ fn parses_tls_acme_config_with_actalis_eab() {
     );
     assert_eq!(config.tls.acme.renewal.renew_before_secs, 2_592_000);
     assert!(config.tls.acme.renewal.renew_after.is_some());
+    assert_eq!(
+        config.tls.acme.renewal.hold_mode,
+        crate::AcmeHoldMode::Absolute
+    );
     config.validate().unwrap();
 }
 

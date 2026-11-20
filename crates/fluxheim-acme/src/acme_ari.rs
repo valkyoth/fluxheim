@@ -4,7 +4,6 @@ const LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);
 const PLANNING_BUDGET: Duration = Duration::from_secs(30);
 const LOOKUP_CONCURRENCY: usize = 4;
 const MAX_CACHE_ENTRIES: usize = 4096;
-const EMERGENCY_RENEWAL_WINDOW: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct AriCacheKey {
@@ -33,38 +32,63 @@ pub(super) async fn execute_due_queue(
         renewed: Vec::new(),
         failed: Vec::new(),
     };
-    // An operator hold precedes missing-certificate, ARI and emergency decisions.
-    if renewal_held(config, now) {
+    let hold = acme_queue::renewal_deadline(config).filter(|deadline| *deadline > now);
+    if let Some(deadline) = hold
+        && config.tls.acme.renewal.hold_mode == fluxheim_config::AcmeHoldMode::Absolute
+    {
+        let at_risk = queue
+            .iter()
+            .filter(|item| item.not_after.is_none_or(|expiry| expiry <= deadline))
+            .count();
+        if !queue.is_empty() {
+            log::warn!(target: "fluxheim::acme", "absolute ACME hold until {deadline:?}: {} targets skipped; {at_risk} missing or expiring by release; CA advice not checked", queue.len());
+        }
         return Ok(run);
     }
+    let mut deferred = 0usize;
     for chunk in queue.chunks(LOOKUP_CONCURRENCY) {
-        let decisions = if started.elapsed() >= PLANNING_BUDGET {
-            chunk.iter().map(|item| item.due_now).collect::<Vec<_>>()
-        } else {
-            futures::future::join_all(chunk.iter().map(|item| async move {
-                if item.not_after.is_none() {
-                    true
-                } else {
-                    allows_renewal_now_bounded(config, item, now).await
-                }
-            }))
-            .await
-        };
+        let lookup_allowed = started.elapsed() < PLANNING_BUDGET;
+        let decisions = futures::future::join_all(chunk.iter().map(|item| {
+            due_decision(
+                item,
+                now,
+                lookup_allowed,
+                allows_renewal_now(config, item, now),
+            )
+        }))
+        .await;
         for (item, should_renew) in chunk.iter().zip(decisions) {
             if should_renew {
                 acme_instant::execute_instant_acme_item(config, item, &mut run).await;
+            } else if hold.is_some()
+                && item.not_after.is_some_and(|expiry| {
+                    expiry.duration_since(now).unwrap_or_default()
+                        <= Duration::from_secs(config.tls.acme.renewal.renew_before_secs)
+                })
+            {
+                deferred += 1;
             }
         }
+    }
+    if deferred != 0 {
+        log::warn!(target: "fluxheim::acme", "elective ACME hold: {deferred} locally due renewals deferred");
     }
     Ok(run)
 }
 
-async fn allows_renewal_now_bounded(
-    config: &Config,
+pub(super) async fn due_decision(
     item: &AcmeRenewalItem,
     now: SystemTime,
+    lookup_allowed: bool,
+    advisory: impl std::future::Future<Output = bool>,
 ) -> bool {
-    tokio::time::timeout(LOOKUP_TIMEOUT, allows_renewal_now(config, item, now))
+    if acme_queue::emergency_at(item.not_after, now) <= now {
+        return true;
+    }
+    if !lookup_allowed {
+        return item.due_now;
+    }
+    tokio::time::timeout(LOOKUP_TIMEOUT, advisory)
         .await
         .unwrap_or(item.due_now)
 }
@@ -101,9 +125,6 @@ async fn allows_renewal_now(config: &Config, item: &AcmeRenewalItem, now: System
     let Ok(identifier) = instant_acme::CertificateIdentifier::try_from(&leaf) else {
         return fallback;
     };
-    if emergency_renewal_required(item.not_after, now) {
-        return true;
-    }
     let cache_key = AriCacheKey {
         issuer_directory: issuer.directory_url.clone(),
         certificate_identifier: identifier.to_string(),
@@ -163,13 +184,6 @@ async fn allows_renewal_now(config: &Config, item: &AcmeRenewalItem, now: System
     };
     store_cache(&cache_key, Some(scheduled), now, retry_after);
     unix_secs(now) >= scheduled
-}
-
-fn emergency_renewal_required(not_after: Option<SystemTime>, now: SystemTime) -> bool {
-    let Some(emergency_deadline) = now.checked_add(EMERGENCY_RENEWAL_WINDOW) else {
-        return true;
-    };
-    not_after.is_none_or(|not_after| not_after <= emergency_deadline)
 }
 
 fn safe_ari_schedule(
@@ -366,19 +380,16 @@ mod tests {
 
     #[test]
     fn expired_and_emergency_window_certificates_renew_immediately() {
+        use acme_queue::{EMERGENCY_RENEWAL_WINDOW, emergency_at};
         let now = UNIX_EPOCH + Duration::from_secs(40_000);
-        assert!(emergency_renewal_required(
-            Some(now - Duration::from_secs(1)),
-            now
-        ));
-        assert!(emergency_renewal_required(
-            Some(now + EMERGENCY_RENEWAL_WINDOW),
-            now
-        ));
-        assert!(!emergency_renewal_required(
-            Some(now + EMERGENCY_RENEWAL_WINDOW + Duration::from_secs(1)),
-            now
-        ));
+        assert!(emergency_at(Some(now - Duration::from_secs(1)), now) <= now);
+        assert_eq!(emergency_at(Some(now + EMERGENCY_RENEWAL_WINDOW), now), now);
+        assert!(
+            emergency_at(
+                Some(now + EMERGENCY_RENEWAL_WINDOW + Duration::from_secs(1)),
+                now
+            ) > now
+        );
     }
 
     #[test]

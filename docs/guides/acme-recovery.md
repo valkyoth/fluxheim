@@ -66,7 +66,8 @@ automation = "external"
 
 Replace the field in the existing table. Apply the change through the supported
 service lifecycle; merely editing a file does not change the running process.
-A future `renew_after` holds unforced issuance, not explicit forced renewals. Monitor expiry
+A future `renew_after` with `hold_mode = "absolute"` holds unforced issuance,
+not explicit forced renewals. The default elective hold permits emergency or CA-directed renewal. Monitor expiry
 while paused. The companion's incident-target gate currently also rejects
 `renewal.enabled = false`, so disabling that flag is not equivalent
 to pausing just the scheduler. Do not turn it back on under an active background

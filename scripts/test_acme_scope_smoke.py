@@ -113,7 +113,7 @@ class AcmeSmokeTests(unittest.TestCase):
         self.assertIn("--entrypoint=/bin/cp", args)
         self.assertNotIn("-p", args)
         self.assertNotIn("-a", args)
-        sources = ["renew.toml", "server.toml", "served.toml", "cache.toml", *smoke.RENEWAL_CONFIGS, "ca.pem"]
+        sources = ["renew.toml", "server.toml", "served.toml", "cache.toml", "elective.toml", "off.toml", *smoke.RENEWAL_CONFIGS, "ca.pem"]
         self.assertEqual(args[-len(sources)-1:],
                          ["/input/" + name for name in sources] + ["/control/"])
         host_mounts = [arg for arg in args if arg.startswith("/fixture-input/")]
@@ -157,8 +157,8 @@ class AcmeSmokeTests(unittest.TestCase):
                        for name in smoke.RENEWAL_CONFIGS]
         self.assertEqual(len(configs), 4)
         issuers = set()
-        baseline = tomllib.loads(smoke.configuration())
-        for config in configs:
+        for index, config in enumerate(configs):
+            baseline = tomllib.loads(smoke.configuration(elective=index == 0))
             acme = config["tls"]["acme"]
             self.assertEqual(acme["default_issuer"], acme["issuers"][0]["name"])
             issuers.add(acme["default_issuer"])

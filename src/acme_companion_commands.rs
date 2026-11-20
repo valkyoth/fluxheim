@@ -382,6 +382,17 @@ pub(super) fn print_status(
     vhost: Option<&str>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = load_validated_config(config_path)?;
+    if !config.tls.acme.renewal.enabled {
+        if let Some(name) = vhost
+            && !fluxheim_acme::managed_acme_targets(&config)
+                .iter()
+                .any(|target| target.vhost_name == name)
+        {
+            return Err(format!("unknown ACME vhost target {name:?}").into());
+        }
+        println!("acme status targets: 0\nacme renewal: off (forced renewal is also disabled)");
+        return Ok(());
+    }
     if let Some(vhost) = vhost {
         ensure_acme_target_exists(&config, vhost)?;
     }
@@ -394,8 +405,16 @@ pub(super) fn print_status(
         .filter(|item| vhost.is_none_or(|name| item.target.vhost_name == name))
         .collect();
     println!("acme status targets: {}", items.len());
+    if fluxheim_acme::renewal_held(&config, now)
+        && let Some(until) = config.tls.acme.renewal.renew_after
+    {
+        println!(
+            "acme renewal hold: {:?} until {until}; not_after is the observed certificate expiry (Unix seconds)",
+            config.tls.acme.renewal.hold_mode
+        );
+    }
     for item in items {
-        let status = if fluxheim_acme::renewal_held(&config, now) {
+        let status = if !item.due_now && fluxheim_acme::renewal_held(&config, now) {
             "held"
         } else if item.not_after.is_none() {
             "missing"

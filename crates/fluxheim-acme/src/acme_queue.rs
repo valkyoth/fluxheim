@@ -4,7 +4,15 @@ use toml::value::{Datetime, Offset};
 
 use super::*;
 
-fn renewal_deadline(config: &Config) -> Option<SystemTime> {
+pub(super) const EMERGENCY_RENEWAL_WINDOW: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+pub(super) fn emergency_at(not_after: Option<SystemTime>, now: SystemTime) -> SystemTime {
+    not_after.map_or(now, |time| {
+        time.checked_sub(EMERGENCY_RENEWAL_WINDOW).unwrap_or(now)
+    })
+}
+
+pub(super) fn renewal_deadline(config: &Config) -> Option<SystemTime> {
     config
         .tls
         .acme
@@ -37,9 +45,16 @@ pub fn plan_renewal_queue(
             let certificate_due_at = not_after
                 .map(|time| time.checked_sub(renew_before).unwrap_or(UNIX_EPOCH))
                 .unwrap_or(now);
-            let due_at = renew_after
-                .map(|time| max_system_time(certificate_due_at, time))
-                .unwrap_or(certificate_due_at);
+            let emergency = emergency_at(not_after, now);
+            let due_at = match (renew_after, renewal.hold_mode) {
+                (None, _) => certificate_due_at.min(emergency),
+                (Some(hold), fluxheim_config::AcmeHoldMode::Absolute) => {
+                    certificate_due_at.min(emergency).max(hold)
+                }
+                (Some(hold), fluxheim_config::AcmeHoldMode::Elective) => {
+                    certificate_due_at.max(hold).min(emergency)
+                }
+            };
 
             AcmeRenewalItem {
                 target,
@@ -101,10 +116,6 @@ fn compare_queue_items(left: &AcmeRenewalItem, right: &AcmeRenewalItem) -> Order
     left.due_at
         .cmp(&right.due_at)
         .then_with(|| left.target.vhost_name.cmp(&right.target.vhost_name))
-}
-
-fn max_system_time(left: SystemTime, right: SystemTime) -> SystemTime {
-    if left >= right { left } else { right }
 }
 
 fn days_from_civil(year: i64, month: i64, day: i64) -> Option<i64> {
