@@ -280,8 +280,7 @@ mod tests {
         rustix::process::umask(previous);
         result.unwrap();
 
-        let mode = snapshot_path_mode(std::path::Path::new(&root));
-        assert_eq!(mode, super::SNAPSHOT_DIR_MODE);
+        assert_snapshot_dir_mode(std::path::Path::new(&root));
     }
 
     #[cfg(unix)]
@@ -304,15 +303,17 @@ mod tests {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        assert_eq!(snapshot_path_mode(&root), super::SNAPSHOT_DIR_MODE);
+        assert_snapshot_dir_mode(&root);
     }
 
     #[cfg(unix)]
-    fn snapshot_path_mode(path: &std::path::Path) -> u32 {
-        rustix::fs::statat(rustix::fs::CWD, path, rustix::fs::AtFlags::SYMLINK_NOFOLLOW)
-            .unwrap()
-            .st_mode
-            & 0o777
+    fn assert_snapshot_dir_mode(path: &std::path::Path) {
+        let stat = rustix::fs::statat(rustix::fs::CWD, path, rustix::fs::AtFlags::SYMLINK_NOFOLLOW)
+            .unwrap();
+        assert_eq!(
+            u64::from(stat.st_mode & 0o777),
+            u64::from(super::SNAPSHOT_DIR_MODE)
+        );
     }
 
     #[cfg(unix)]

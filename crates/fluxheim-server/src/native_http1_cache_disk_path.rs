@@ -89,17 +89,28 @@ pub(super) fn native_cache_path_contains_symlink(
     let Ok(relative) = path.strip_prefix(root) else {
         return Ok(true);
     };
-    let mut current = root.to_path_buf();
-    for component in relative.components() {
-        if !matches!(component, std::path::Component::Normal(_)) {
-            return Ok(true);
-        }
-        current.push(component.as_os_str());
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error),
+    use rustix::fs::{AtFlags, FileType, Mode, OFlags, open, openat, statat};
+    use std::path::Component;
+
+    // Check the entire suffix before treating any missing component as harmless.
+    if relative
+        .components()
+        .any(|c| !matches!(c, Component::Normal(_)))
+    {
+        return Ok(true);
+    }
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut parent = open(root, flags, Mode::empty())?;
+    let mut parts = relative.iter().peekable();
+    while let Some(name) = parts.next() {
+        match statat(&parent, name, AtFlags::SYMLINK_NOFOLLOW) {
+            Ok(stat) if FileType::from_raw_mode(stat.st_mode).is_symlink() => return Ok(true),
+            Ok(_) if parts.peek().is_some() => {
+                parent = openat(&parent, name, flags, Mode::empty())?;
+            }
+            Ok(_) => (),
+            Err(rustix::io::Errno::NOENT) => return Ok(false),
+            Err(error) => return Err(error.into()),
         }
     }
     Ok(false)
@@ -315,4 +326,33 @@ pub(super) fn validate_single_link_file(file: &std::fs::File) -> std::io::Result
 
 fn native_rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {
     std::io::Error::from_raw_os_error(error.raw_os_error())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn cache_root_walk_rejects_links_and_traversal_even_after_missing_component() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("cache");
+        let shard = root.join("shard");
+        std::fs::create_dir_all(&shard).unwrap();
+        std::fs::write(shard.join("entry"), b"data").unwrap();
+        symlink(&shard, root.join("alias")).unwrap();
+        symlink(tmp.path().join("absent"), shard.join("dangling")).unwrap();
+        for suffix in ["", "shard", "shard/entry", "shard/missing"] {
+            assert!(!native_cache_path_contains_symlink(&root, &root.join(suffix)).unwrap());
+        }
+        for suffix in ["alias/entry", "shard/dangling", "missing/../shard/entry"] {
+            assert!(native_cache_path_contains_symlink(&root, &root.join(suffix)).unwrap());
+        }
+        assert!(
+            native_cache_path_contains_symlink(&root, &tmp.path().join("cache-other")).unwrap()
+        );
+        assert!(
+            native_cache_path_contains_symlink(&root, &shard.join("entry/not-a-child")).is_err()
+        );
+    }
 }

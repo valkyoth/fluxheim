@@ -384,8 +384,8 @@ fn prior_manifest_format_loads_and_migrates_on_locked_creation() {
     let second = store
         .snapshot_config(&Config::default(), Some("second"))
         .unwrap();
-    for id in [&first.id, &second.id] {
-        rewrite_manifest_as_v1(&store, id);
+    for snapshot in [&first, &second] {
+        crate::snapshot_test_fixtures::install_default_config_v1_manifest(&store, snapshot);
     }
 
     assert_eq!(store.current_snapshot().unwrap().unwrap().id, second.id);
@@ -409,18 +409,6 @@ fn prior_manifest_format_loads_and_migrates_on_locked_creation() {
             crate::SnapshotIntegrityStatus::Authenticated
         );
     }
-}
-
-fn rewrite_manifest_as_v1(store: &SnapshotStore, id: &str) {
-    let path = store
-        .root()
-        .join("configs")
-        .join(format!("{id}.integrity.toml"));
-    let mut manifest: toml::Table =
-        toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    manifest.remove("generation");
-    manifest.remove("generation_hmac_sha256");
-    write_atomically(&path, toml::to_string_pretty(&manifest).unwrap().as_bytes()).unwrap();
 }
 
 fn manifest_raw(store: &SnapshotStore, id: &str) -> String {

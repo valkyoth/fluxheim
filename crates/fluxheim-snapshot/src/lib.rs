@@ -25,6 +25,8 @@ mod operations_tests;
 #[cfg(test)]
 mod snapshot_hardening_tests;
 #[cfg(test)]
+mod snapshot_test_fixtures;
+#[cfg(test)]
 mod snapshot_upgrade_tests;
 
 pub use integrity::SnapshotCryptoProvider;
