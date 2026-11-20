@@ -3519,10 +3519,9 @@ rule as private keys.
 ## ACME
 
 Start with the [ACME operator guide](../guides/acme.md) and
-[complete option reference](acme-options.md). Current execution gaps are tracked
-as the documented limitation (hold enforcement), the documented limitation (unwired failure backoff) and
-the documented limitation (background reload flags). Accepted settings do not prove those
-contracts are implemented.
+[complete option reference](acme-options.md). The renewal hold applies to all
+unforced runs. Per-target failure backoff and background reload flags still
+have the limitations described in the operator guide.
 
 ACME config parsing, renewal planning, managed certificate storage paths, local
 HTTP-01 challenge serving, and the local renewal execution contract exist.

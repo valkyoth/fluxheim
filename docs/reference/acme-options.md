@@ -33,7 +33,7 @@ modes. Do not paste a second `[tls.acme]` table to override the first.
 | --- | --- | --- |
 | `enabled` | `true` | Permit renewal target generation; false also suppresses CLI forced targets |
 | `renew_before_secs` | `2592000` | Local planner's pre-expiry window (30 days); positive when renewal enabled; ARI may influence actual execution |
-| `renew_after` | Absent | TOML offset datetime, e.g. `2099-01-01T00:00:00Z`; planner lower bound, **Current limitation:** |
+| `renew_after` | Absent | TOML offset datetime, e.g. `2027-01-01T00:00:00Z`; no unforced issuance before this instant, even on expiry |
 | `check_interval_secs` | `3600` | Positive background sleep after a renewal tick; work time is additional |
 | `retry_initial_secs` | `300` | Positive, no greater than max; **Current limitation:** |
 | `retry_max_secs` | `86400` | Positive maximum backoff setting; same runtime gap |
@@ -42,8 +42,8 @@ modes. Do not paste a second `[tls.acme]` table to override the first.
 
 Scheduling validators do not currently impose a small maximum on the positive
 duration values. Use practical intervals, not integer-limit values. Local
-datetimes without offsets are rejected. To pause safely, use the workflow in
-the operator guide rather than relying on the currently inconsistent hold.
+datetimes without offsets are rejected. An explicit forced renewal bypasses the
+hold, but does not re-enable a disabled renewal target.
 
 ## Per-Vhost Certificate
 

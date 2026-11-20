@@ -335,22 +335,18 @@ pub async fn renew_selected_instant_acme_targets(
     vhost_name: &str,
     force_renew: bool,
 ) -> Result<AcmeRenewalRun, AcmeRenewalError> {
-    let queue = if force_renew {
+    let mut queue = if force_renew {
         plan_renewal_queue(config, &[], now)
     } else {
         let observations = observe_configured_certificates(config);
         plan_renewal_queue(config, &observations, now)
     };
-    let mut selected_queue = Vec::new();
-    for item in queue
-        .into_iter()
-        .filter(|item| item.target.vhost_name == vhost_name)
-    {
-        if force_renew || acme_ari::allows_renewal_now_bounded(config, &item, now).await {
-            selected_queue.push(item);
-        }
+    queue.retain(|item| item.target.vhost_name == vhost_name);
+    if force_renew {
+        execute_instant_acme_queue(config, &queue).await
+    } else {
+        execute_due_instant_acme_queue(config, &queue, now).await
     }
-    execute_instant_acme_queue(config, &selected_queue).await
 }
 
 #[cfg(feature = "acme-client")]

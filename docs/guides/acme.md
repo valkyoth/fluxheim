@@ -160,14 +160,22 @@ this documentation. Protect secret parents as well as the files themselves.
 
 ## Renewal, Holds And Reload
 
-`status` shows local expiry-based planning. A future time in that output is
-**not currently a reliable issuance embargo**. These findings remain scheduled
-for correction, not fixed by the documentation:
+`status` shows the local expiry-based plan, not a live CA decision. For example,
+to pause unforced issuance until a maintenance window:
 
-- **Current limitation:** the planner respects `renew_after`, but all-target due
-  execution attempts a missing certificate despite that future hold. Selected
-  renewal differs in the no-account case. ARI/emergency decisions also need an
-  explicit hold-precedence contract. Do not use this field as a safety lock.
+```toml
+[tls.acme.renewal]
+renew_after = 2027-01-01T02:00:00+02:00
+```
+
+Before midnight UTC on January 1 in this example, background and CLI due runs
+skip even missing and expired certificates, without contacting the CA. Neither
+issuer renewal information (ARI) nor the emergency window overrides the hold.
+At the deadline normal scheduling resumes; it does not force a fresh certificate
+to renew. Only an explicit forced renewal bypasses the hold. Choose the deadline
+carefully: a held site can remain without a usable certificate.
+
+Other scheduling considerations:
 - **Current limitation:** `retry_initial_secs` and `retry_max_secs` validate but the
   background loop does not use them for per-target failure backoff. It runs a
   tick, then waits `check_interval_secs`. Keep that interval conservative and

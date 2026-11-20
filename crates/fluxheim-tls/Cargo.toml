@@ -30,7 +30,7 @@ fluxheim-openssl-fips-support = { path = "../../vendor/fluxheim-openssl-fips-sup
 log = "0.4.34"
 openssl = { version = "0.10.81", optional = true }
 rustls = { version = "0.23.46", optional = true, default-features = false, features = ["std", "tls12", "logging"] }
-sanitization = { version = "2.1.1", features = ["alloc"], optional = true }
+sanitization = { version = "2.2.0", features = ["alloc"], optional = true }
 tempfile = { version = "3.27.0", optional = true }
 thiserror = "2.0.21"
 

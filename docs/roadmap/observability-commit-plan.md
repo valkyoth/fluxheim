@@ -973,5 +973,6 @@ collector behavior is not the new required-collector acceptance contract.
 | 25 - Storage-bin handle admission | Accepted for progression | Owner supplied clean retest through `ed7f2262`, reported GitHub green after the test-only scanning correction through `3c1f65ac`, and authorized Commit 26. [Evidence](../evidence/observability-25.md). |
 | 26 - Bounded purge progress | Accepted for progression | Clean owner-supplied retest through `d7296351` and successful Rust CI and push scanning. [Evidence](../evidence/observability-26.md). |
 | 27 - Storage-bin soft purge | Accepted for progression | Owner supplied a clean retest through `a8022a12`, reported GitHub green after CI harness fixes and authorized Commit 28. [Qualification and tooling changes](../evidence/observability-27.md). |
-| 28 - Non-mutating stale preview | Implemented; review pending | Inspect disk freshness without deleting cache objects or updating LRU state. [Evidence](../evidence/observability-28.md). |
+| 28 - Non-mutating stale preview | Accepted for progression | Owner reviewed the cache change and requested a separate Wasmtime update, completed in `8c539d4a`, before proceeding. [Evidence](../evidence/observability-28.md). |
+| 29 - ACME renewal holds | Implemented; review pending | Apply the same hold to background and CLI due runs; retain explicit force. [Evidence](../evidence/observability-29.md). |
 | Post-documentation corrections | Pending | Detailed numbering and evidence retained locally; no release acceptance claimed. |

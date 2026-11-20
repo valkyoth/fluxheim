@@ -268,4 +268,9 @@ fn converts_offset_datetime_to_utc_system_time() {
         toml_offset_datetime_to_system_time(&datetime),
         Some(UNIX_EPOCH)
     );
+    let before_epoch = "1970-01-01T00:59:59.750+01:00".parse().unwrap();
+    assert_eq!(
+        toml_offset_datetime_to_system_time(&before_epoch),
+        UNIX_EPOCH.checked_sub(Duration::from_millis(250))
+    );
 }

@@ -113,7 +113,7 @@ class AcmeSmokeTests(unittest.TestCase):
         self.assertIn("--entrypoint=/bin/cp", args)
         self.assertNotIn("-p", args)
         self.assertNotIn("-a", args)
-        sources = ["renew.toml", "server.toml", "cache.toml", *smoke.RENEWAL_CONFIGS, "ca.pem"]
+        sources = ["renew.toml", "server.toml", "served.toml", "cache.toml", *smoke.RENEWAL_CONFIGS, "ca.pem"]
         self.assertEqual(args[-len(sources)-1:],
                          ["/input/" + name for name in sources] + ["/control/"])
         host_mounts = [arg for arg in args if arg.startswith("/fixture-input/")]
@@ -167,11 +167,17 @@ class AcmeSmokeTests(unittest.TestCase):
             self.assertEqual(config, baseline)
         self.assertEqual(len(issuers), 4)
 
-    def test_gateway_fixture_does_not_enable_background_renewal(self):
-        config = tomllib.loads(smoke.configuration(renewal=False))
+    def test_held_and_released_background_gateways_are_distinct(self):
+        config = tomllib.loads(smoke.configuration(renewal=False, held=True))
         self.assertNotIn("php", config["vhosts"][0])
         self.assertNotIn("cache", config)
-        self.assertEqual(config["tls"]["acme"]["automation"], "external")
+        self.assertEqual(config["tls"]["acme"]["automation"], "background")
+        self.assertEqual(config["tls"]["acme"]["renewal"]["renew_after"].year, 2099)
+        served = tomllib.loads(smoke.configuration(renewal=False, released=True))
+        self.assertEqual(served["tls"]["acme"]["automation"], "background")
+        self.assertEqual(served["tls"]["acme"]["renewal"]["renew_after"].year, 2000)
+        self.assertTrue(served["tls"]["acme"]["renewal"]["reload_after_renewal"])
+        self.assertEqual(served["server"]["tls_listen"], ["0.0.0.0:5443"])
 
     def test_adapter_changes_only_expected_terms_metadata(self):
         original = {"newOrder": "https://localhost:14000/order-plz", "meta": {

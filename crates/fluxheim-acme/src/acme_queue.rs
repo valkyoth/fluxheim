@@ -3,16 +3,28 @@ use std::cmp::Ordering;
 use toml::value::{Datetime, Offset};
 
 use super::*;
+
+fn renewal_deadline(config: &Config) -> Option<SystemTime> {
+    config
+        .tls
+        .acme
+        .renewal
+        .renew_after
+        .as_ref()
+        .and_then(toml_offset_datetime_to_system_time)
+}
+
+pub fn renewal_held(config: &Config, now: SystemTime) -> bool {
+    renewal_deadline(config).is_some_and(|deadline| now < deadline)
+}
+
 pub fn plan_renewal_queue(
     config: &Config,
     observations: &[CertificateObservation],
     now: SystemTime,
 ) -> Vec<AcmeRenewalItem> {
     let renewal = &config.tls.acme.renewal;
-    let renew_after = renewal
-        .renew_after
-        .as_ref()
-        .and_then(toml_offset_datetime_to_system_time);
+    let renew_after = renewal_deadline(config);
     let renew_before = Duration::from_secs(renewal.renew_before_secs);
 
     let mut items: Vec<AcmeRenewalItem> = renewal_targets(config)
@@ -76,7 +88,14 @@ pub fn toml_offset_datetime_to_system_time(datetime: &Datetime) -> Option<System
     let unix_seconds = local_seconds.checked_sub(offset_seconds)?;
     let nanos = time.nanosecond.unwrap_or(0);
 
-    Some(system_time_from_unix(unix_seconds, nanos))
+    if unix_seconds >= 0 {
+        UNIX_EPOCH.checked_add(Duration::new(unix_seconds as u64, nanos))
+    } else {
+        UNIX_EPOCH.checked_sub(
+            Duration::from_secs(unix_seconds.unsigned_abs())
+                .checked_sub(Duration::from_nanos(u64::from(nanos)))?,
+        )
+    }
 }
 fn compare_queue_items(left: &AcmeRenewalItem, right: &AcmeRenewalItem) -> Ordering {
     left.due_at
@@ -86,14 +105,6 @@ fn compare_queue_items(left: &AcmeRenewalItem, right: &AcmeRenewalItem) -> Order
 
 fn max_system_time(left: SystemTime, right: SystemTime) -> SystemTime {
     if left >= right { left } else { right }
-}
-
-fn system_time_from_unix(seconds: i64, nanos: u32) -> SystemTime {
-    if seconds >= 0 {
-        UNIX_EPOCH + Duration::new(seconds as u64, nanos)
-    } else {
-        UNIX_EPOCH - Duration::new(seconds.unsigned_abs(), nanos)
-    }
 }
 
 fn days_from_civil(year: i64, month: i64, day: i64) -> Option<i64> {

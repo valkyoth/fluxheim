@@ -10,7 +10,7 @@ description = "Internal Fluxheim configuration snapshot store."
 [dependencies]
 fluxheim-config = { path = "../fluxheim-config" }
 rustix = { version = "1.1.5", features = ["fs", "process"] }
-sanitization = { version = "2.1.1", features = ["alloc"] }
+sanitization = { version = "2.2.0", features = ["alloc"] }
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.8"
 

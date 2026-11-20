@@ -8,4 +8,4 @@ publish = false
 description = "Internal Fluxheim protocol framing helpers."
 
 [dependencies]
-sanitization = { version = "2.1.1", features = ["alloc"] }
+sanitization = { version = "2.2.0", features = ["alloc"] }

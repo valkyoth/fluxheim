@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import socket
 import ssl
 import subprocess
 import tempfile
@@ -27,9 +28,14 @@ def command(args, *, check=True, data=None, timeout=180):
     return result
 
 
-def configuration(extra="", *, renewal=True, issuer="pebble"):
+def configuration(extra="", *, renewal=True, issuer="pebble", held=False, released=False):
+    hold = "renew_after = 2099-01-01T00:00:00Z\ncheck_interval_secs = 1" if held else ""
+    if released:
+        hold = "renew_after = 2000-01-01T00:00:00Z\nrenew_before_secs = 315360000"
+    tls_listener = 'tls_listen = ["0.0.0.0:5443"]' if held or released else ""
     return f'''[server]
 listen = ["0.0.0.0:5002"]
+{tls_listener}
 default_vhost = "scope"
 [tls]
 enabled = true
@@ -38,9 +44,10 @@ enabled = true
 storage = "/var/lib/fluxheim/acme"
 contact_email = "test@example.test"
 default_issuer = "{issuer}"
-automation = "external"
+automation = "{'background' if held or released else 'external'}"
 [tls.acme.renewal]
-reload_after_renewal = false
+reload_after_renewal = {str(released).lower()}
+{hold}
 [[tls.acme.issuers]]
 name = "{issuer}"
 directory_url = "https://localhost:14000/dir"
@@ -96,7 +103,8 @@ def fixtures(root):
     # issuer names isolate accounts while retaining the same certificate store.
     for index, name in enumerate(RENEWAL_CONFIGS):
         (control / name).write_text(configuration(issuer=f"pebble-{index}"))
-    (control / "server.toml").write_text(configuration(renewal=False))
+    (control / "server.toml").write_text(configuration(renewal=False, held=True))
+    (control / "served.toml").write_text(configuration(renewal=False, issuer="pebble-background", released=True))
     # Isolate feature mismatch from PHP filesystem availability.
     (control / "cache.toml").write_text(configuration(renewal=False) +
         "[cache]\nenabled=true\n[cache.memory]\nenabled=true\n")
@@ -131,7 +139,7 @@ class Smoke:
         # preserving ownership) into an engine volume, then mount it read-only.
         name = self.prefix + "-fixtures"
         self.names.append(name)
-        sources = ("renew.toml", "server.toml", "cache.toml", *RENEWAL_CONFIGS, "ca.pem")
+        sources = ("renew.toml", "server.toml", "served.toml", "cache.toml", *RENEWAL_CONFIGS, "ca.pem")
         mounts = [argument for source in sources
                   for argument in self.mount(source, "/input/" + source)]
         command([self.runtime, "run", "--name", name, "--network=none", "--user=0",
@@ -159,7 +167,7 @@ class Smoke:
         cmd += ["--user", "65532:65532"]
         if ca:
             cmd += ["--add-host", "scope.example.test:127.0.0.1", "-p", "127.0.0.1::14000",
-                    "-p", "127.0.0.1::5002", "-e", "PEBBLE_VA_NOSLEEP=1",
+                    "-p", "127.0.0.1::5002", "-p", "127.0.0.1::5443", "-e", "PEBBLE_VA_NOSLEEP=1",
                     "-e", "PEBBLE_AUTHZREUSE=100", "-e", "PEBBLE_WFE_NONCEREJECT=0"]
             for source in ("server.pem", "server.key", "pebble.json"):
                 cmd += self.mount(source, "/fixture/" + source)
@@ -214,7 +222,7 @@ def verify_ca_validations(logs):
 def qualify(smoke, full, php, legacy):
     smoke.prepare_state(full)
     smoke.launch("ca", PEBBLE, ["-config", "/fixture/pebble.json"], ca=True, wait=False)
-    smoke.launch("frontend", PYTHON, ["python3", "-B", "/fixture/frontend.py"], frontend=True, wait=False)
+    frontend = smoke.launch("frontend", PYTHON, ["python3", "-B", "/fixture/frontend.py"], frontend=True, wait=False)
     info = json.loads(command([smoke.runtime, "inspect", smoke.anchor]).stdout)[0]
     port = int(info["NetworkSettings"]["Ports"]["14000/tcp"][0]["HostPort"])
     context = ssl.create_default_context(cafile=str(smoke.control / "ca.pem"))
@@ -263,8 +271,12 @@ def qualify(smoke, full, php, legacy):
         print("released-image renewal failures reproduced; legacy PHP gateway serves the same config", flush=True)
         return
     gateway = smoke.launch("gateway", full, [], config="server.toml", wait=False)
-    ownership = command([smoke.runtime, "exec", gateway, "stat", "-c", "%a:%u",
-                         "/etc/fluxheim/server.toml", "/etc/fluxheim/ca.pem"]).stdout.splitlines()
+    stat = command([smoke.runtime, "exec", gateway, "stat", "-c", "%a:%u",
+                    "/etc/fluxheim/server.toml", "/etc/fluxheim/ca.pem"], check=False)
+    if stat.returncode:
+        logs = command([smoke.runtime, "logs", gateway])
+        raise RuntimeError("gateway did not start: " + logs.stdout + logs.stderr)
+    ownership = stat.stdout.splitlines()
     if ownership != ["644:0", "644:0"]:
         raise AssertionError("config/CA fixtures must be root-owned and not group/world writable")
     for index, flags in enumerate(([], ["--validate-config"], ["--check-config"])):
@@ -272,10 +284,26 @@ def qualify(smoke, full, php, legacy):
                        "cache module not compiled")
         expect_failure(smoke.launch(f"server-php-{index}", full, flags), "php_fpm_binary")
     serials = set()
+    def order_count():
+        log = command([smoke.runtime, "logs", frontend])
+        return (log.stdout + log.stderr).splitlines().count("order request")
+
+    code, status = smoke.launch("held-status", full, ["status", "--vhost", "scope"],
+                                entry="/usr/local/bin/fluxheim-acme", config="server.toml")
+    if code or "status=held due_now=false" not in status or "not_after=missing" not in status:
+        raise AssertionError("status did not distinguish the hold from certificate availability")
+    for index, (entry, args) in enumerate((
+        ("/usr/local/bin/fluxheim", ["acme-renew"]),
+        ("/usr/local/bin/fluxheim-acme", ["renew", "--no-reload"]),
+        ("/usr/local/bin/fluxheim-acme", ["renew", "--vhost", "scope", "--no-reload"]),
+    )):
+        code, logs = smoke.launch(f"held-{index}", full, args, entry=entry, config="server.toml")
+        if code or "acme attempted: 0" not in logs or order_count() != 0:
+            raise AssertionError(f"held renewal {index} was not skipped: {code}\n{logs}")
     segment = "scope-" + hashlib.sha256(b"scope").hexdigest()[:16]
     certificate_dir = "/var/lib/fluxheim/acme/certificates/" + segment
     for index, (image, entry, args) in enumerate((
-        (full, "/usr/local/bin/fluxheim", ["acme-renew", "--force-renew"]),
+        (full, "/usr/local/bin/fluxheim-acme", ["renew", "--no-reload"]),
         (php, "/usr/local/bin/fluxheim", ["acme-renew", "--force-renew"]),
         (full, "/usr/local/bin/fluxheim-acme", ["renew", "--force-renew", "--no-reload"]),
         (php, "/usr/local/bin/fluxheim-acme", ["renew", "--force-renew", "--no-reload"]),
@@ -290,6 +318,8 @@ def qualify(smoke, full, php, legacy):
         if "DNS:scope.example.test" not in details or details in serials:
             raise AssertionError("certificate was not freshly issued for the requested domain")
         serials.add(details)
+        if order_count() != index + 1:
+            raise AssertionError("unexpected number of orders at the local CA")
         mode = command([smoke.runtime, "exec", gateway, "stat", "-c", "%a:%u",
                         certificate_dir + "/privkey.pem"]).stdout.strip()
         if mode != "600:65532":
@@ -300,6 +330,36 @@ def qualify(smoke, full, php, legacy):
         raise AssertionError("installed certificate was not observed as valid")
     ca_logs = command([smoke.runtime, "logs", smoke.anchor])
     verify_ca_validations(ca_logs.stdout + ca_logs.stderr)
+    # Installation does not imply activation. Restart on the same volume and pin
+    # the issued leaf, retaining hostname and certificate verification.
+    command([smoke.runtime, "stop", gateway])
+    activated = smoke.launch("served", full, [], config="served.toml", wait=False)
+    for _ in range(120):
+        current = command([smoke.runtime, "exec", activated, "cat", certificate_dir + "/fullchain.pem"])
+        if current.stdout != certificate and order_count() == 5:
+            certificate = current.stdout
+            break
+        time.sleep(0.25)
+    else:
+        logs = command([smoke.runtime, "logs", activated])
+        raise AssertionError("released background renewal did not install a new certificate: " + logs.stdout + logs.stderr)
+    leaf = certificate.split("-----END CERTIFICATE-----", 1)[0] + "-----END CERTIFICATE-----"
+    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    tls.minimum_version = ssl.TLSVersion.TLSv1_2
+    tls.load_verify_locations(cadata=leaf)
+    tls.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
+    tls_port = int(info["NetworkSettings"]["Ports"]["5443/tcp"][0]["HostPort"])
+    for _ in range(50):
+        try:
+            with socket.create_connection(("127.0.0.1", tls_port), timeout=2) as conn:
+                with tls.wrap_socket(conn, server_hostname="scope.example.test") as peer:
+                    if peer.getpeercert(binary_form=True) != ssl.PEM_cert_to_DER_cert(leaf):
+                        raise AssertionError("served certificate differs from installed leaf")
+                    break
+        except (ConnectionError, ssl.SSLEOFError, ssl.SSLCertVerificationError):
+            time.sleep(0.1)
+    else:
+        raise AssertionError("issued certificate was not served after restart")
     print("ACME operation scope and server feature parity smoke: ok", flush=True)
 
 

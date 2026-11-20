@@ -66,7 +66,7 @@ automation = "external"
 
 Replace the field in the existing table. Apply the change through the supported
 service lifecycle; merely editing a file does not change the running process.
-Do not rely on `renew_after` as a hold until the documented limitation is fixed. Monitor expiry
+A future `renew_after` holds unforced issuance, not explicit forced renewals. Monitor expiry
 while paused. The companion's incident-target gate currently also rejects
 `renewal.enabled = false`, so disabling that flag is not equivalent
 to pausing just the scheduler. Do not turn it back on under an active background

@@ -28,13 +28,15 @@ pub(super) fn run_acme_renew_command(
         let target = &item.target;
         let status = if force_renew {
             "forced"
+        } else if fluxheim_acme::renewal_held(&config, now) {
+            "held"
         } else if item.due_now {
             "due"
         } else {
             "skipped"
         };
         println!(
-            "target: {} status={} issuer={} domains={} certificate=managed",
+            "target: {} status={} issuer={} domains={} certificate=managed schedule=local",
             target.vhost_name,
             status,
             target.issuer,
@@ -74,7 +76,7 @@ pub(super) fn run_acme_renew_command(
         );
     }
     if !force_renew && run.attempted == 0 {
-        println!("acme status: no certificates are missing or due for renewal");
+        println!("acme status: no unforced renewal scheduled");
     }
     for outcome in &run.renewed {
         println!(

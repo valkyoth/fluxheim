@@ -33,6 +33,10 @@ pub(super) async fn execute_due_queue(
         renewed: Vec::new(),
         failed: Vec::new(),
     };
+    // An operator hold precedes missing-certificate, ARI and emergency decisions.
+    if renewal_held(config, now) {
+        return Ok(run);
+    }
     for chunk in queue.chunks(LOOKUP_CONCURRENCY) {
         let decisions = if started.elapsed() >= PLANNING_BUDGET {
             chunk.iter().map(|item| item.due_now).collect::<Vec<_>>()
@@ -55,7 +59,7 @@ pub(super) async fn execute_due_queue(
     Ok(run)
 }
 
-pub(super) async fn allows_renewal_now_bounded(
+async fn allows_renewal_now_bounded(
     config: &Config,
     item: &AcmeRenewalItem,
     now: SystemTime,

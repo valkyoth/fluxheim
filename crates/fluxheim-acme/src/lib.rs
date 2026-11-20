@@ -309,7 +309,9 @@ use acme_names::{
     valid_http_01_key_authorization, valid_http_01_token,
 };
 use acme_pem::validate_issued_material;
-pub use acme_queue::{next_retry_at, plan_renewal_queue, toml_offset_datetime_to_system_time};
+pub use acme_queue::{
+    next_retry_at, plan_renewal_queue, renewal_held, toml_offset_datetime_to_system_time,
+};
 pub use acme_targets::{managed_acme_targets, renewal_targets};
 #[cfg(feature = "acme-client")]
 use acme_tls_alpn::{cleanup_tls_alpn_01_challenges, tls_alpn_01_certificate};

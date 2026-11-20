@@ -151,7 +151,7 @@ jobs:
 
       - name: Install security tools
         run: |
-          cargo install --locked cargo-deny --version 0.21.0
+          cargo install --locked cargo-deny --version 0.22.0
           cargo install --locked cargo-audit --version 0.23.0
 
       - name: Install SBOM tool

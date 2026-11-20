@@ -317,7 +317,7 @@ pub(super) fn run_renew(
 
     println!("acme attempted: {}", run.attempted);
     if !force_renew && run.attempted == 0 {
-        println!("acme status: no certificates are missing or due for renewal");
+        println!("acme status: no unforced renewal scheduled");
     }
 
     let renewed_count = run.renewed.len();
@@ -395,7 +395,9 @@ pub(super) fn print_status(
         .collect();
     println!("acme status targets: {}", items.len());
     for item in items {
-        let status = if item.not_after.is_none() {
+        let status = if fluxheim_acme::renewal_held(&config, now) {
+            "held"
+        } else if item.not_after.is_none() {
             "missing"
         } else if item.due_now {
             "due"
@@ -407,7 +409,7 @@ pub(super) fn print_status(
             .map(system_time_epoch_secs)
             .unwrap_or_else(|| "missing".to_owned());
         println!(
-            "target: {} status={} due_now={} due_at={} not_after={} issuer={} domains={} certificate=managed",
+            "target: {} status={} due_now={} due_at={} not_after={} issuer={} domains={} certificate=managed schedule=local",
             item.target.vhost_name,
             status,
             item.due_now,

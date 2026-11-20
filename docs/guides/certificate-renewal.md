@@ -547,11 +547,10 @@ The local planner's renewal time is the later of:
 - `tls.acme.renewal.renew_after`, when set
 
 `renew_after` accepts a TOML offset datetime, for example
-`2099-01-01T00:00:00Z`; local TOML datetimes are rejected. **Current limitation:**
-the executor does not consistently enforce the planner's hold. All-target
-execution attempts missing certificates despite a future hold, and ARI/emergency
-precedence needs correction. Do not treat the displayed queue time as a reliable
-issuance embargo. See the operator guide for stopping automatic scheduling.
+`2027-01-01T00:00:00Z`; local TOML datetimes are rejected. Until that instant,
+all unforced renewal is held, even for missing or expired certificates. A hold
+overrides ARI and emergency scheduling, so monitor expiry. Once released, the
+local queue time is an estimate: ARI may adjust the actual renewal time.
 
 When Fluxheim is built with `acme-client`, the runtime registers a background
 renewal service when ACME-managed vhosts are configured and

@@ -38,6 +38,8 @@ def main():
             connection = http.client.HTTPSConnection("localhost", 14001, context=context, timeout=10)
             try:
                 headers = {"Host": "localhost:14000", "User-Agent": "Fluxheim-ACME-smoke"}
+                if self.command == "POST" and self.path == "/order-plz":
+                    print("order request", flush=True)
                 if self.headers.get("Content-Type"):
                     headers["Content-Type"] = self.headers["Content-Type"]
                 connection.request(self.command, self.path, self.rfile.read(size), headers)
