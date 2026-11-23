@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import socket
 import subprocess
+import tarfile
 import tempfile
 import threading
 import time
@@ -17,14 +18,14 @@ import uuid
 from container_refresh import PROFILES, VARIANTS, release_text, stable_tag
 
 
-def engine_command(engine, *command, check=True):
+def engine_command(engine, *command, check=True, stdin=None):
     # Literal executables, not CLI-provided program paths. All calls use argv,
     # never a shell; cleanup uses the same boundary as normal execution.
     if engine == "docker":
-        result = subprocess.run(["docker", *command], check=check, text=True,
+        result = subprocess.run(["docker", *command], check=check, text=True, stdin=stdin,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     elif engine == "podman":
-        result = subprocess.run(["podman", *command], check=check, text=True,
+        result = subprocess.run(["podman", *command], check=check, text=True, stdin=stdin,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     else:
         raise ValueError("unsupported container engine")
@@ -52,15 +53,27 @@ def check_php(output, modules, required, variant):
 
 
 def start_fixture(run, image, profile, name, root):
-    # Do not bind-mount the runner's UID into the image's trust boundary.
-    # Copy only fixture files, never the directory or its ownership.
     run("create", "--ulimit", "core=0:0", "--name", name, "--network", "host",
         image, "--config", "/etc/fluxheim/smoke.toml")
-    run("cp", str(root / "smoke.toml"), f"{name}:/etc/fluxheim/smoke.toml")
+    files = [("smoke.toml", "/etc/fluxheim")]
     if profile == "php":
-        run("cp", str(root / "index.php"), f"{name}:/srv/fluxheim/index.php")
+        files.append(("index.php", "/srv/fluxheim"))
     elif profile in {"full", "wasm"}:
-        run("cp", str(root / "index.html"), f"{name}:/srv/fluxheim/index.html")
+        files.append(("index.html", "/srv/fluxheim"))
+    # Supply container-side ownership and modes, not the CI runner's metadata.
+    # Only regular leaves are copied; image directories keep their own permissions.
+    for leaf, destination in files:
+        with tempfile.TemporaryFile() as archive:
+            with tarfile.open(fileobj=archive, mode="w", format=tarfile.USTAR_FORMAT) as tar:
+                with (root / leaf).open("rb") as source:
+                    member = tarfile.TarInfo(leaf)
+                    member.size = source.seek(0, 2)
+                    source.seek(0)
+                    member.mode = 0o644
+                    member.uid = member.gid = 0
+                    tar.addfile(member, source)
+            archive.seek(0)
+            run("cp", "-a", "-", f"{name}:{destination}/", stdin=archive)
     run("start", name)
 
 
@@ -71,8 +84,8 @@ def smoke(args):
     if (len(args.image) > 256 or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9./:@_-]*", args.image)):
         raise ValueError("invalid image reference")
 
-    def run(*command):
-        return engine_command(args.engine, *command)
+    def run(*command, **kwargs):
+        return engine_command(args.engine, *command, **kwargs)
 
     version = run("run", "--rm", "--ulimit", "core=0:0", "--network", "none", args.image, "--version")
     if not re.search(rf"^fluxheim {re.escape(args.version.removeprefix('v'))}(?:\s|$)", version, re.M):
@@ -128,8 +141,6 @@ def smoke(args):
                 (root / "index.html").write_text(marker)
                 path = "/"
             (root / "smoke.toml").write_text(config)
-            for file in root.iterdir():
-                file.chmod(0o644)
             start_fixture(run, args.image, args.profile, name, root)
             opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
             url = f"http://127.0.0.1:{port}{path}"

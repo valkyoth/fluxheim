@@ -7,6 +7,7 @@ import io
 import os
 from pathlib import Path
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -302,15 +303,33 @@ class RefreshTests(unittest.TestCase):
 
     def test_fixture_is_copied_before_start_without_mounting_runner_paths(self):
         for profile in refresh.PROFILES:
-            with self.subTest(profile=profile):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                for leaf in ("smoke.toml", "index.php", "index.html"):
+                    (root / leaf).write_bytes(leaf.encode())
+                    (root / leaf).chmod(0o666)
                 commands = []
-                start_fixture(lambda *args: commands.append(args), "image", profile, "smoke", Path("fixture"))
+                copied = []
+
+                def record(*args, stdin=None):
+                    commands.append(args)
+                    if args[0] == "cp":
+                        with tarfile.open(fileobj=stdin) as archive:
+                            member, = archive.getmembers()
+                            self.assertTrue(member.isfile())
+                            self.assertEqual((member.uid, member.gid, member.mode), (0, 0, 0o644))
+                            self.assertEqual(archive.extractfile(member).read(), member.name.encode())
+                            copied.append(member.name)
+
+                start_fixture(record, "image", profile, "smoke", root)
                 self.assertEqual(commands[0], ("create", "--ulimit", "core=0:0", "--name", "smoke",
                                                "--network", "host", "image", "--config", "/etc/fluxheim/smoke.toml"))
-                copies = [("cp", str(Path("fixture") / "smoke.toml"), "smoke:/etc/fluxheim/smoke.toml")]
+                copies = [("cp", "-a", "-", "smoke:/etc/fluxheim/")]
+                leaves = ["smoke.toml"]
                 if profile in ("full", "wasm", "php"):
-                    leaf = "index.php" if profile == "php" else "index.html"
-                    copies.append(("cp", str(Path("fixture") / leaf), f"smoke:/srv/fluxheim/{leaf}"))
+                    leaves.append("index.php" if profile == "php" else "index.html")
+                    copies.append(("cp", "-a", "-", "smoke:/srv/fluxheim/"))
+                self.assertEqual(copied, leaves)
                 self.assertEqual(commands[1:-1], copies)
                 self.assertEqual(commands[-1], ("start", "smoke"))
 
