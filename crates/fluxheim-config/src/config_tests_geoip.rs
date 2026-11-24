@@ -7,8 +7,16 @@ fn geoip_guide_base_matches_feature_contract() {
     let config: Config = toml::from_str(GEOIP_GUIDE_BASE).unwrap();
     #[cfg(all(feature = "geoip", not(feature = "privacy-mode")))]
     config.validate().unwrap();
-    #[cfg(any(not(feature = "geoip"), feature = "privacy-mode"))]
-    assert!(config.validate().is_err());
+    #[cfg(not(feature = "geoip"))]
+    assert_eq!(config.validate(), Err(ConfigError::GeoIpNotCompiled));
+    #[cfg(all(feature = "geoip", feature = "privacy-mode"))]
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::InvalidGeoIpPolicy {
+            field: "geoip.enabled",
+            ..
+        })
+    ));
 }
 
 #[cfg(all(feature = "geoip", not(feature = "privacy-mode")))]
@@ -76,7 +84,7 @@ fn geoip_guide_rejects_invalid_policy_values_and_database_counts() {
     assert!(config.validate().is_err());
 }
 
-#[cfg(feature = "geoip")]
+#[cfg(all(feature = "geoip", not(feature = "privacy-mode")))]
 #[test]
 fn geoip_config_accepts_local_mmdb_providers() {
     let config: Config = toml::from_str(
@@ -97,6 +105,24 @@ fn geoip_config_accepts_local_mmdb_providers() {
     .unwrap();
 
     config.validate().unwrap();
+}
+
+#[cfg(all(feature = "geoip", feature = "privacy-mode"))]
+#[test]
+fn privacy_mode_allows_dormant_geoip_configuration_but_not_lookup() {
+    let mut config = Config::default();
+    let example: Config = toml::from_str(GEOIP_GUIDE_BASE).unwrap();
+    config.geoip = example.geoip;
+    config.geoip.enabled = false;
+    config.validate().unwrap();
+    config.geoip.enabled = true;
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::InvalidGeoIpPolicy {
+            field: "geoip.enabled",
+            ..
+        })
+    ));
 }
 
 #[cfg(not(feature = "geoip"))]

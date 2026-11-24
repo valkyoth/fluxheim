@@ -49,6 +49,12 @@ impl GeoIpConfig {
         }
         #[cfg(feature = "geoip")]
         {
+            if cfg!(feature = "privacy-mode") {
+                return Err(ConfigError::InvalidGeoIpPolicy {
+                    field: "geoip.enabled",
+                    reason: "GeoIP lookup is not available in privacy-mode builds",
+                });
+            }
             validate_config_list_len(
                 "geoip.databases".to_owned(),
                 self.databases.len(),
