@@ -42,7 +42,7 @@ for the difference between these aliases and published artifacts.
 | `metrics-otlp` | No | Optional OTLP/HTTP JSON metrics export to a local Prometheus OTLP receiver or collector. |
 | `otel-tracing` | No | W3C `traceparent` propagation and access-log trace ID correlation. |
 | `otel-otlp` | No | Optional OTLP/HTTP JSON trace export to a local collector or Jaeger endpoint. |
-| `acme` | No | ACME config, renewal planning, managed certificate/account paths, local HTTP-01 serving and challenge primitives. Managed TLS-ALPN-01 is rejected; see [current ACME limits](../guides/acme.md). |
+| `acme` | No | ACME configuration, renewal planning, managed paths and local HTTP-01 serving. Managed TLS-ALPN-01 additionally requires the ACME client and a supported Rustls listener; see [challenge selection](../guides/acme.md#challenge-selection). |
 | `acme-client` | No | Live ACME account/order HTTP client and background renewal service. |
 | `compression` | No | Shared response compression config and body-filter integration. |
 | `compression-brotli` | No | Brotli response compression for eligible known-length responses. |

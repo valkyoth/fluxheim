@@ -12,6 +12,32 @@ use crate::config_net::normalize_host;
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 use crate::config_tls::TlsConfig;
 
+impl crate::Config {
+    pub fn validate_managed_challenge_transport(&self) -> Result<(), ConfigError> {
+        if self.tls.acme.enabled
+            && self.tls.acme.challenge == crate::AcmeChallenge::TlsAlpn01
+            && !(cfg!(all(
+                feature = "native-acme-alpn",
+                feature = "tls-rustls-backend",
+                not(feature = "tls-openssl")
+            )) && self.tls.enabled
+                && self.tls.backend == crate::TlsBackend::Rustls
+                && self.tls.client_auth.mode == crate::TlsClientAuthMode::Off
+                && !self.tls.compliance_mode().required()
+                && !self.server.tls_listen.is_empty()
+                && self
+                    .vhosts
+                    .iter()
+                    .any(|v| v.tls.enabled && v.tls.acme.enabled))
+        {
+            return Err(ConfigError::UnsupportedAcmeChallenge {
+                challenge: self.tls.acme.challenge,
+            });
+        }
+        Ok(())
+    }
+}
+
 pub const MAX_ACME_ISSUERS: usize = 128;
 pub const MAX_VHOST_ACME_DOMAINS: usize = 64;
 
@@ -176,7 +202,7 @@ impl AcmeConfig {
         validate_config_list_len("tls.acme.issuers", self.issuers.len(), MAX_ACME_ISSUERS)?;
 
         if self.enabled {
-            if self.challenge != AcmeChallenge::Http01 {
+            if self.challenge != AcmeChallenge::Http01 && !cfg!(feature = "native-acme-alpn") {
                 return Err(ConfigError::UnsupportedAcmeChallenge {
                     challenge: self.challenge,
                 });

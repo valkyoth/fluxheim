@@ -30,13 +30,23 @@ fn acme_guide_templates_validate_without_implied_terms_acceptance() {
 }
 
 #[test]
-fn managed_tls_alpn_is_rejected_in_server_and_companion_scopes() {
+fn managed_tls_alpn_requires_capable_server_and_companion_scopes() {
     let root = secure_test_dir("acme-guide-alpn");
     let mut config = recipe(HTTP, &root);
     config.tls.acme.challenge = crate::AcmeChallenge::TlsAlpn01;
     for backend in [crate::TlsBackend::Rustls, crate::TlsBackend::Openssl] {
         config.tls.backend = backend;
         for scope in [crate::ValidationScope::Server, crate::ValidationScope::Acme] {
+            if backend == crate::TlsBackend::Rustls
+                && cfg!(all(
+                    feature = "native-acme-alpn",
+                    feature = "tls-rustls-backend",
+                    not(feature = "tls-openssl")
+                ))
+            {
+                config.validate_for_scope(scope).unwrap();
+                continue;
+            }
             let error = config.validate_for_scope(scope).unwrap_err();
             assert!(matches!(
                 error,

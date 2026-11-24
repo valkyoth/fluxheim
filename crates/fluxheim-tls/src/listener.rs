@@ -14,9 +14,7 @@ impl DownstreamTlsListenerPlan {
         config: &Config,
         resolver: impl Fn(&Config, &VhostConfig) -> Option<DownstreamCertificateSource>,
     ) -> Result<Option<Self>, DownstreamTlsPlanError> {
-        if config.tls.acme.enabled
-            && config.tls.acme.challenge != fluxheim_config::AcmeChallenge::Http01
-        {
+        if config.validate_managed_challenge_transport().is_err() {
             return Err(DownstreamTlsPlanError::UnsupportedAcmeChallenge);
         }
         if config.server.tls_listen.is_empty() {

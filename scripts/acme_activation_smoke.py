@@ -13,10 +13,10 @@ def pinned_tls(chain):
     return context, ssl.PEM_cert_to_DER_cert(leaf)
 
 
-def assert_served(port, chain):
+def assert_served(port, chain, hostname="scope.example.test"):
     context, expected = pinned_tls(chain)
     with socket.create_connection(("127.0.0.1", port), timeout=3) as connection:
-        with context.wrap_socket(connection, server_hostname="scope.example.test") as peer:
+        with context.wrap_socket(connection, server_hostname=hostname) as peer:
             if peer.getpeercert(binary_form=True) != expected:
                 raise AssertionError("unexpected served leaf")
 

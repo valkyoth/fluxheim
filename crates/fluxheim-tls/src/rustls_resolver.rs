@@ -86,47 +86,16 @@ pub enum RustlsDownstreamCertificateError {
 
 #[derive(Debug, Default)]
 pub struct RustlsTlsAlpnCertificateStore {
-    certificates: arc_swap::ArcSwap<HashMap<String, Arc<CertifiedKey>>>,
+    certificates: arc_swap::ArcSwap<HashMap<String, Arc<ChallengeEntry>>>,
+    writers: std::sync::Mutex<()>,
 }
-
-impl RustlsTlsAlpnCertificateStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn replace(
-        &self,
-        certificates: impl IntoIterator<Item = (String, Arc<CertifiedKey>)>,
-    ) -> Result<(), RustlsDownstreamCertificateError> {
-        let mut replacement = HashMap::new();
-        for (index, (sni, certificate)) in certificates.into_iter().enumerate() {
-            if index >= MAX_TLS_ALPN_CHALLENGE_CERTIFICATES {
-                return Err(
-                    RustlsDownstreamCertificateError::TooManyTlsAlpnCertificates {
-                        maximum: MAX_TLS_ALPN_CHALLENGE_CERTIFICATES,
-                    },
-                );
-            }
-            let normalized = normalize_host(&sni)
-                .ok_or(RustlsDownstreamCertificateError::InvalidTlsAlpnSni { sni })?;
-            if replacement
-                .insert(normalized.clone(), certificate)
-                .is_some()
-            {
-                return Err(RustlsDownstreamCertificateError::DuplicateTlsAlpnSni {
-                    sni: normalized,
-                });
-            }
-        }
-        self.certificates.store(Arc::new(replacement));
-        Ok(())
-    }
-
-    fn resolve(&self, sni: Option<&str>) -> Option<Arc<CertifiedKey>> {
-        let normalized = sni.and_then(normalize_host)?;
-        self.certificates.load().get(&normalized).cloned()
-    }
+#[derive(Debug, Clone)]
+struct ChallengeEntry {
+    key: Arc<CertifiedKey>,
+    expires: std::time::Instant,
 }
+#[path = "rustls_challenge_store.rs"]
+mod challenge_store;
 
 pub struct RustlsDownstreamCertificateResolver {
     selector: DownstreamCertificateSelector,
@@ -218,23 +187,27 @@ impl RustlsDownstreamCertificateResolver {
         })
     }
 
-    fn resolve_tls_alpn_challenge(
-        &self,
-        client_hello: &ClientHello<'_>,
-    ) -> Option<Arc<CertifiedKey>> {
-        let challenge = self.tls_alpn_challenge.as_ref()?;
-        if !client_hello_requests_alpn_protocol(client_hello, challenge.protocol.as_slice()) {
-            return None;
-        }
-
-        challenge.certificates.resolve(client_hello.server_name())
+    pub fn challenge_store(&self) -> Option<Arc<RustlsTlsAlpnCertificateStore>> {
+        self.tls_alpn_challenge
+            .as_ref()
+            .map(|c| c.certificates.clone())
     }
 }
 
 impl ResolvesServerCert for RustlsDownstreamCertificateResolver {
     fn resolve(&self, client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
-        self.resolve_tls_alpn_challenge(&client_hello)
-            .or_else(|| self.resolve_static_certificate(client_hello.server_name()))
+        if let Some(challenge) = &self.tls_alpn_challenge
+            && client_hello_requests_alpn_protocol(&client_hello, &challenge.protocol)
+        {
+            if !client_hello
+                .alpn()?
+                .eq(std::iter::once(challenge.protocol.as_slice()))
+            {
+                return None;
+            }
+            return challenge.certificates.resolve(client_hello.server_name());
+        }
+        self.resolve_static_certificate(client_hello.server_name())
     }
 }
 

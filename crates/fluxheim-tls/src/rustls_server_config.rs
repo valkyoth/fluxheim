@@ -110,6 +110,11 @@ pub fn build_rustls_downstream_server_config(
     };
     let mut config = builder.with_cert_resolver(cert_resolver);
     config.alpn_protocols = rustls_alpn_protocols(tls, acme_tls_alpn_protocol);
+    if acme_tls_alpn_protocol.is_some() {
+        // A resumed session must never outlive a challenge lease.
+        config.send_tls13_tickets = 0;
+        config.session_storage = Arc::new(rustls::server::NoServerSessionStorage {});
+    }
 
     if fips_required && !config.fips() {
         return Err(RustlsDownstreamServerConfigError::FipsNotReported);

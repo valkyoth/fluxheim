@@ -87,12 +87,23 @@ async fn native_listener_refuses_challenge_only_handshakes_before_and_after_relo
         cert_path,
         key_path,
     }];
-    assert!(matches!(
-        native_rustls_server_config(&config),
-        Err(NativeHttp1ProxyRuntimeError::TlsPlan(
-            fluxheim_tls::DownstreamTlsPlanError::UnsupportedAcmeChallenge
-        ))
-    ));
+    if config.validate_managed_challenge_transport().is_ok() {
+        let (server, resolver) = native_rustls_server_config(&config).unwrap();
+        assert!(
+            server
+                .alpn_protocols
+                .iter()
+                .any(|value| value == b"acme-tls/1")
+        );
+        assert!(resolver.challenge_store().is_some());
+    } else {
+        assert!(matches!(
+            native_rustls_server_config(&config),
+            Err(NativeHttp1ProxyRuntimeError::TlsPlan(
+                fluxheim_tls::DownstreamTlsPlanError::UnsupportedAcmeChallenge
+            ))
+        ));
+    }
     config.tls.acme.challenge = fluxheim_config::AcmeChallenge::Http01;
     let (server, resolver) = native_rustls_server_config(&config).unwrap();
     assert!(

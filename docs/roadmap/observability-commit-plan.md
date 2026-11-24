@@ -980,4 +980,5 @@ collector behavior is not the new required-collector acceptance contract.
 | 32 - ACME challenge cleanup | Implemented; review pending | Stop serving abandoned challenges, reconcile only owned material and preserve the installation outcome. [Evidence](../evidence/observability-32.md). |
 | 33 - Certificate install recovery | Implemented; review pending | Restore the previous pair without consuming rollback data and verify file identities before cleanup. [Evidence](../evidence/observability-33.md). |
 | 34 - Incident target selection | Implemented; review pending | Revoke and recover managed targets without enabling renewal. [Evidence](../evidence/observability-34.md). |
+| 35 - Native TLS-ALPN-01 | Implemented; review pending | Publish challenge identities from background and external clients, including Windows. [Evidence](../evidence/observability-35.md). |
 | Post-documentation corrections | Pending | Detailed numbering and evidence retained locally; no release acceptance claimed. |

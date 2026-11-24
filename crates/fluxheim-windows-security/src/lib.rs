@@ -19,6 +19,31 @@ use windows_sys::Win32::Storage::FileSystem::{
 mod file_mutation;
 mod path_handles;
 mod relative_open;
+/// Inspect the directory entry itself, not the target of a reparse point.
+pub fn is_local_socket(path: &Path) -> io::Result<bool> {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::Storage::FileSystem::{FindClose, FindFirstFileW, WIN32_FIND_DATAW};
+    let mut wide: Vec<_> = path.as_os_str().encode_wide().collect();
+    if wide.contains(&0)
+        || path
+            .file_name()
+            .is_none_or(|n| n.encode_wide().any(|c| matches!(c, 42 | 63)))
+    {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    wide.push(0);
+    let mut info = WIN32_FIND_DATAW::default();
+    // SAFETY: the input is terminated and the output structure is live.
+    let handle = unsafe { FindFirstFileW(wide.as_ptr(), &mut info) };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: this call owns the search handle from FindFirstFileW.
+    unsafe { FindClose(handle) };
+    const IO_REPARSE_TAG_AF_UNIX: u32 = 0x8000_0023;
+    Ok(info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        && info.dwReserved0 == IO_REPARSE_TAG_AF_UNIX)
+}
 /// Checks link count on the retained handle, not on a separately reopened path.
 pub fn regular_file_has_single_link(file: &File) -> io::Result<bool> {
     use std::os::windows::io::AsRawHandle as _;

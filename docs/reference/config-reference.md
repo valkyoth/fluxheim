@@ -3529,7 +3529,8 @@ commands do not share that state. See the
 ACME config parsing, renewal planning, managed certificate storage paths, local
 HTTP-01 challenge serving, and the local renewal execution contract exist.
 Builds with `acme-client` can load or create issuer accounts and complete
-HTTP-01 orders through `instant-acme`. Managed TLS-ALPN-01 is rejected.
+HTTP-01 orders through `instant-acme`. A native Rustls TLS listener can also
+answer [TLS-ALPN-01](../guides/acme.md#challenge-selection).
 By default, the
 runtime registers a background renewal service for configured ACME vhosts when
 `acme-client` is compiled in. Set `tls.acme.automation = "external"` when a

@@ -7,6 +7,7 @@ import base64
 import hashlib
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 import json
 import ssl
 import threading
@@ -49,8 +50,8 @@ def directory_body(body):
     return json.dumps(directory).encode()
 
 
-def main():
-    context = ssl.create_default_context(cafile="/fixture/ca.pem")
+def frontend(root, bind, paused=None):
+    context = ssl.create_default_context(cafile=root / "ca.pem")
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     failures_left = 2
     pause_phase = None
@@ -110,6 +111,8 @@ def main():
                             pause_phase = None
                     if pause:
                         print("paused issuer response: " + phase, flush=True)
+                        if paused is not None:
+                            paused.set()
                         time.sleep(30)
                         return
                 if path == "/dir" and response.status == 200:
@@ -132,11 +135,12 @@ def main():
 
     tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     tls.minimum_version = ssl.TLSVersion.TLSv1_2
-    tls.load_cert_chain("/fixture/server.pem", "/fixture/server.key")
-    server = ThreadingHTTPServer(("0.0.0.0", 14000), Handler)
+    tls.load_cert_chain(root / "server.pem", root / "server.key")
+    server = ThreadingHTTPServer((bind, 14000), Handler)
     server.socket = tls.wrap_socket(server.socket, server_side=True)
-    server.serve_forever()
+    return server
 
 
 if __name__ == "__main__":
-    main()
+    with frontend(Path("/fixture"), "0.0.0.0") as server:
+        server.serve_forever()

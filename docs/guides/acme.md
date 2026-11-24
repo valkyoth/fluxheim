@@ -96,12 +96,36 @@ An interrupted managed renewal stops serving its token without waiting for
 disk cleanup. When upgrading a gateway and a separate companion, upgrade the
 gateway first. See [challenge cleanup and recovery](acme-recovery.md#challenge-cleanup).
 
-**HTTP-01 is the only supported managed challenge.** If an existing
-configuration sets `tls.acme.challenge = "tls-alpn-01"`, change it to
-`"http-01"` (the default) and route public port 80 to the gateway before
-upgrading. The gateway and renewal companion both reject the unsupported
-setting; they do not silently switch protocols. The native TLS listener does
-not advertise `acme-tls/1`. Normal HTTPS and HTTP/2 on port 443 are unchanged.
+**Use TLS-ALPN-01 when the CA can reach your gateway on TCP 443 but not port
+80.** In your existing managed ACME configuration, set:
+
+```toml
+[tls.acme]
+challenge = "tls-alpn-01"
+```
+
+Use a Rustls gateway with the ACME client, a TLS listener, and a managed DNS
+vhost. OpenSSL, required compliance mode and downstream client authentication
+are not supported for this challenge; use HTTP-01 instead. Forward raw TLS
+to this gateway: a proxy terminating TLS in front of it cannot answer on its
+behalf. All addresses advertised for each name must reach the active gateway.
+Do not distribute validation connections across independent gateway instances.
+
+Both background renewal and a separate companion publish to a private local
+socket at `<storage>/.alpn/s`, including on Windows. Use the same service
+identity and local ACME storage, with a short absolute path that fits the OS
+socket-path limit. Configure each managed name once. The gateway acknowledges
+publication before the companion signals readiness to the CA. Only that SNI
+offering exactly `acme-tls/1` receives the temporary certificate. Ordinary
+HTTPS still uses the site's certificate; TLS resumption is disabled on this
+listener so an old challenge session cannot survive removal.
+
+Certificates for challenges are generated in memory, expire after at most
+three minutes, and disappear on release, disconnect or gateway restart.
+Do not copy challenge key files into the storage directory. On Windows this
+local channel publishes **challenges**, not ordinary certificate reloads: an
+external scheduler can use `renew --no-reload` and then restart the gateway
+under its normal supervisor to activate the installed site certificate.
 DNS-01 and wildcard issuance are not supported.
 
 To forward HTTP-01 to a different ACME agent instead of Fluxheim's token store:
@@ -245,7 +269,7 @@ issuance support.
 | No targets | Global TLS/ACME, vhost TLS/ACME, concrete domains and renewal enabled |
 | Agreement error | Exact issuer entry, reviewed terms URL, explicit acceptance |
 | HTTP-01 failure | DNS, public port 80, container listen/publish addresses, correct vhost, external-forwarder precedence |
-| TLS-ALPN-01 failure | Set `challenge = "http-01"` and make port 80 reachable before starting the gateway or companion |
+| TLS-ALPN-01 failure | Check TCP 443 reaches the active Rustls gateway on all advertised addresses. Run the companion's online doctor with the gateway's local storage and service identity. |
 | Files renewed but old certificate served | Reload result, serving process storage, default-vhost/SNI routing; use a new TLS connection |
 | EAB/ownership error | Secret source, service identity, mounts, symlinks and writable ancestors; do not solve by making keys public |
 | Repeated renewal failures | Check CA limits, clock and credentials; allow for the background retry delay, or correct the external timer's cadence |

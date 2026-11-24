@@ -27,30 +27,36 @@ async fn execute_instant_acme_renewal_inner(
     config: &Config,
     item: &AcmeRenewalItem,
 ) -> Result<AcmeRenewalOutcome, AcmeRenewalError> {
-    match item.target.challenge {
-        AcmeChallenge::Http01 => execute_instant_http_01_renewal(config, item).await,
-        AcmeChallenge::TlsAlpn01 => Err(AcmeRenewalError::UnsupportedChallenge {
+    if item.target.challenge == AcmeChallenge::TlsAlpn01
+        && (!config.tls.acme.enabled
+            || config.tls.acme.challenge != item.target.challenge
+            || config.validate_managed_challenge_transport().is_err())
+    {
+        return Err(AcmeRenewalError::UnsupportedChallenge {
             challenge: item.target.challenge,
-        }),
+        });
     }
-}
-
-#[cfg(feature = "acme-client")]
-async fn execute_instant_http_01_renewal(
-    config: &Config,
-    item: &AcmeRenewalItem,
-) -> Result<AcmeRenewalOutcome, AcmeRenewalError> {
     let storage = config
         .tls
         .acme
         .storage
         .as_deref()
         .ok_or(AcmeRenewalError::MissingStorage)?;
+    let alpn = item.target.challenge == AcmeChallenge::TlsAlpn01;
+    if alpn {
+        crate::alpn_control::probe(storage)
+            .await
+            .map_err(|_| AcmeRenewalError::Client {
+                issuer: item.target.issuer.clone(),
+                message: "TLS-ALPN gateway unavailable".into(),
+            })?;
+    }
     let account = load_or_create_instant_acme_account(config, &item.target.issuer)
         .await
         .map_err(instant_client_error_to_renewal_error)?;
     let mut ownership = acme_order::Order::new().map_err(acme_cleanup::order_error)?;
     let mut published = Vec::with_capacity(item.target.domains.len());
+    let mut leases = Vec::new();
 
     let result = async {
         let identifiers: Vec<instant_acme::Identifier> = item
@@ -89,21 +95,42 @@ async fn execute_instant_http_01_renewal(
                     return Err(acme_cleanup::order_error(io::ErrorKind::InvalidData.into()));
                 }
                 let mut challenge = authorization
-                    .challenge(instant_acme::ChallengeType::Http01)
+                    .challenge(if alpn {
+                        instant_acme::ChallengeType::TlsAlpn01
+                    } else {
+                        instant_acme::ChallengeType::Http01
+                    })
                     .ok_or_else(|| AcmeRenewalError::Client {
                         issuer: item.target.issuer.clone(),
                         message: format!(
-                            "authorization for {} did not include an http-01 challenge",
+                            "authorization for {} did not include the configured challenge",
                             identifier
                         ),
                     })?;
-                let token = challenge.token.clone();
-                let key_authorization = challenge.key_authorization().as_str().to_owned();
-
-                ownership
-                    .http(storage, &item.target.vhost_name, &token, &key_authorization)
-                    .map_err(acme_cleanup::order_error)?;
-                published.push(token.clone());
+                if alpn {
+                    if leases.len() >= item.target.domains.len() {
+                        return Err(acme_cleanup::order_error(io::ErrorKind::InvalidData.into()));
+                    }
+                    let digest = challenge.key_authorization().digest();
+                    leases.push(
+                        crate::alpn_control::Publication::open(
+                            storage,
+                            Some((&identifier.to_ascii_lowercase(), digest.as_ref())),
+                        )
+                        .await
+                        .map_err(|_| AcmeRenewalError::Client {
+                            issuer: item.target.issuer.clone(),
+                            message: "TLS-ALPN publication not acknowledged".into(),
+                        })?,
+                    );
+                } else {
+                    let token = challenge.token.clone();
+                    let key_authorization = challenge.key_authorization().as_str().to_owned();
+                    ownership
+                        .http(storage, &item.target.vhost_name, &token, &key_authorization)
+                        .map_err(acme_cleanup::order_error)?;
+                    published.push(token);
+                }
                 challenge
                     .set_ready()
                     .await
@@ -130,6 +157,13 @@ async fn execute_instant_http_01_renewal(
                     &published,
                 ),
             })?;
+        let published_challenges = published.len().saturating_add(leases.len());
+        for lease in leases.drain(..) {
+            lease.close().await.map_err(|_| AcmeRenewalError::Client {
+                issuer: item.target.issuer.clone(),
+                message: "TLS-ALPN removal not acknowledged".into(),
+            })?;
+        }
         let private_key_pem = SecretVec::from_vec(
             order
                 .finalize()
@@ -172,7 +206,7 @@ async fn execute_instant_http_01_renewal(
             vhost_name: item.target.vhost_name.clone(),
             issuer: item.target.issuer.clone(),
             certificate,
-            published_challenges: published.len(),
+            published_challenges,
             cleanup_pending: false,
         })
     }

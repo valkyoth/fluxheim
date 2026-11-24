@@ -17,8 +17,8 @@ sanitized and hash-suffixed by Fluxheim, not supplied by the operator.
 For HTTP-01, Fluxheim also derives a local challenge store at
 `<storage>/http-01/<safe-vhost-segment>/` and serves safe challenge token files
 directly when `tls.acme.challenge = "http-01"`.
-Managed TLS-ALPN-01 is rejected before issuance. Use HTTP-01 and route port
-80 to the gateway; opening port 443 alone is not sufficient. DNS-01 is not
+HTTP-01 requires port 80. For a Rustls gateway on port 443, see the
+[TLS-ALPN-01 requirements](acme.md#challenge-selection). DNS-01 is not
 supported. HTTP-01 tokens must be single URL-safe path segments, and
 key-authorizations are bounded and checked for control bytes.
 ACME account credentials are stored separately at

@@ -5,8 +5,8 @@ import tomllib
 
 VERSION = "0.2.4"
 CHECKSUM = "9e2ccdc3c6bf4d4a094e031b63fadd08d8e42abd259940eb8aa5fdc09d4bf9be"
-REVIEW_DATE = "2026-11-14"
-SOURCE_DIGEST = "66386c419ea56a7f1f651dea1dd77edbd67ba1a53bb76cf5e264e9d242e01b66"
+REVIEW_DATE = "2026-11-24"
+SOURCE_DIGEST = "14cfeb08825c773e5a5a137e2b13242a46a596ccdf7f2068a35988a6962fffcc"
 SOURCE_FILES = (
     Path("crates/fluxheim-windows-security/src/lib.rs"),
     Path("crates/fluxheim-windows-security/src/file_mutation.rs"),
@@ -51,6 +51,8 @@ for required in (
     "NtSetInformationFile",
     "SetFileInformationByHandle",
     "GetFileInformationByHandle",
+    "FindFirstFileW",
+    "FindClose",
     "SecurityDescriptor",
     "RtlNtStatusToDosError",
     "RetainedPathHandles",

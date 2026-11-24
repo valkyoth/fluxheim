@@ -76,7 +76,8 @@ corrections and qualification; a table entry is not release approval.
 | rustls or OpenSSL TLS backends | ✅ | [HTTPS and TLS](docs/guides/tls.md) |
 | Client certificates, fingerprint rules and upstream mTLS | ✅ | [Fingerprint authorization](docs/guides/access-control.md#require-and-pin-a-client-certificate), [client authentication](docs/guides/tls.md#require-client-certificates-mtls) and [proxy TLS](docs/guides/upstream-tls.md) |
 | FIPS-capable backend build paths | Conditional | [Required provider and deployment evidence](docs/guides/fips.md) |
-| ACME issuance and renewal: HTTP-01, EAB and ARI | Limited: scheduling and recovery corrections pending | [Certificates, ACME and current limits](docs/guides/acme.md) |
+| ACME issuance and renewal: HTTP-01, EAB and ARI | Limited: see activation and account-management boundaries | [Certificates and renewal](docs/guides/acme.md) |
+| Native TLS-ALPN-01: background and external renewal | Qualified locally on Rustls; release review pending | [Listener requirements](docs/guides/acme.md#challenge-selection) |
 | External HTTP-01 challenge forwarding | ✅ | [Challenge forwarding](docs/reference/acme-options.md#external-http-01-forwarding) |
 | Privacy build profile | ✅ | [Privacy boundaries](docs/guides/zero-retention-privacy-mode.md) |
 

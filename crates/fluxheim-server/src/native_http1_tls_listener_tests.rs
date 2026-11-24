@@ -47,6 +47,84 @@ fn hex_lower(bytes: &[u8]) -> String {
 
 #[cfg(feature = "tls-rustls-backend")]
 #[tokio::test]
+async fn challenge_handshake_ends_without_an_application_request() {
+    use rustls::pki_types::{PrivateKeyDer, ServerName, pem::PemObject};
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let fixture = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let key =
+        PrivateKeyDer::from_pem_slice(fixture.signing_key.serialize_pem().as_bytes()).unwrap();
+    let mut tls = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(vec![fixture.cert.der().clone()], key)
+        .unwrap();
+    tls.alpn_protocols = vec![b"acme-tls/1".to_vec()];
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(fixture.cert.der().clone()).unwrap();
+    let mut client = rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    client.alpn_protocols = tls.alpn_protocols.clone();
+    let connector = tokio_rustls::TlsConnector::from(Arc::new(client));
+    let tls = Arc::new(tls);
+    for http2 in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = oneshot::channel::<()>();
+        let tls = tls.clone();
+        let serving = tokio::spawn(async move {
+            let handler = Arc::new(|_: NativeHttp1Request| async {
+                NativeHttp1Response::new(200, "OK", b"ordinary".as_slice())
+            });
+            let stop = async {
+                let _ = rx.await;
+            };
+            if http2 {
+                crate::native_http1::serve_native_http1_and_http2_rustls_listener(
+                    listener,
+                    Default::default(),
+                    tls,
+                    crate::native_http1::NativeTlsHttp2Dispatch {
+                        policy: Default::default(),
+                        http1_allowed: true,
+                        http2_allowed: true,
+                    },
+                    handler,
+                    stop,
+                )
+                .await
+            } else {
+                crate::serve_native_http1_rustls_listener(
+                    listener,
+                    Default::default(),
+                    tls,
+                    handler,
+                    stop,
+                )
+                .await
+            }
+        });
+        let mut stream = connector
+            .connect(
+                ServerName::try_from("localhost").unwrap(),
+                TcpStream::connect(addr).await.unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            stream.get_ref().1.alpn_protocol(),
+            Some(b"acme-tls/1".as_slice())
+        );
+        let end = tokio::time::timeout(std::time::Duration::from_secs(2), stream.read(&mut [0]))
+            .await
+            .expect("challenge listener must not wait for an HTTP request");
+        assert!(matches!(end, Ok(0) | Err(_)));
+        tx.send(()).unwrap();
+        serving.await.unwrap().unwrap();
+    }
+}
+
+#[cfg(feature = "tls-rustls-backend")]
+#[tokio::test]
 async fn native_http1_rustls_listener_serves_request() {
     use crate::serve_native_http1_rustls_listener;
     use rcgen::{CertificateParams, KeyPair};

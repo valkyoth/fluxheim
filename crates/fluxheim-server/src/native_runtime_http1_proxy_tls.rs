@@ -33,14 +33,27 @@ pub(super) fn native_rustls_server_config(
     let plan = native_downstream_tls_listener_plan(config)
         .map_err(NativeHttp1ProxyRuntimeError::TlsPlan)?
         .ok_or(NativeHttp1ProxyRuntimeError::MissingProxyHttpListener)?;
+    let alpn = config.tls.acme.enabled
+        && config.tls.acme.challenge == fluxheim_config::AcmeChallenge::TlsAlpn01;
+    let protocol = alpn.then_some(b"acme-tls/1".as_slice());
     let resolver = Arc::new(
-        fluxheim_tls::RustlsDownstreamCertificateResolver::new(plan.selector())
-            .map_err(NativeHttp1ProxyRuntimeError::RustlsCertificate)?,
+        match protocol {
+            Some(p) => fluxheim_tls::RustlsDownstreamCertificateResolver::with_tls_alpn_challenge(
+                plan.selector(),
+                p.to_vec(),
+                Arc::default(),
+            ),
+            None => fluxheim_tls::RustlsDownstreamCertificateResolver::new(plan.selector()),
+        }
+        .map_err(NativeHttp1ProxyRuntimeError::RustlsCertificate)?,
     );
-    let server_config =
-        fluxheim_tls::build_rustls_downstream_server_config(&config.tls, resolver.clone(), None)
-            .map(Arc::new)
-            .map_err(NativeHttp1ProxyRuntimeError::RustlsServerConfig)?;
+    let server_config = fluxheim_tls::build_rustls_downstream_server_config(
+        &config.tls,
+        resolver.clone(),
+        protocol,
+    )
+    .map(Arc::new)
+    .map_err(NativeHttp1ProxyRuntimeError::RustlsServerConfig)?;
     Ok((server_config, resolver))
 }
 

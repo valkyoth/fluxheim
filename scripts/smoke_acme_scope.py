@@ -16,6 +16,7 @@ import time
 
 from acme_backoff_smoke import backoff_configuration, qualify_backoff
 from acme_activation_smoke import assert_served, companion_matrix, pinned_tls
+import acme_alpn_smoke as alpn
 from acme_cleanup_smoke import qualify_cleanup
 from acme_pebble_frontend import PAUSE_PHASES
 
@@ -106,13 +107,16 @@ def fixtures(root):
     (control / "pebble.json").write_text(json.dumps({"pebble": {
         "listenAddress": "0.0.0.0:14001", "managementListenAddress": "0.0.0.0:15000",
         "certificate": "/fixture/server.pem", "privateKey": "/fixture/server.key",
-        "httpPort": 5002, "tlsPort": 5001, "externalAccountBindingRequired": False}}))
+        "httpPort": 5002, "tlsPort": 5443, "externalAccountBindingRequired": False}}))
+    for mode in alpn.MODES:
+        for run in (1, 2):
+            (control / f"alpn-{mode}-{run}.toml").write_text(alpn.config(configuration, mode, run))
     (control / "renew.toml").write_text(configuration())
     # Pebble can reuse an authorization even with AUTHZREUSE=0. Distinct
     # issuer names isolate accounts while retaining the same certificate store.
     for index, name in enumerate(RENEWAL_CONFIGS):
         (control / name).write_text(configuration(issuer=f"pebble-{index}", elective=index == 0))
-    (control / "unsupported-alpn.toml").write_text(configuration(renewal=False, held=True).replace(
+    (control / "unsupported-alpn.toml").write_text(configuration(renewal=False).replace(
         "[tls.acme]\n", '[tls.acme]\nchallenge = "tls-alpn-01"\n'))
     (control / "off.toml").write_text(configuration(off=True))
     (control / "elective.toml").write_text(configuration(issuer="elective", elective=True))
@@ -156,7 +160,7 @@ class Smoke:
         # preserving ownership) into an engine volume, then mount it read-only.
         name = self.prefix + "-fixtures"
         self.names.append(name)
-        sources = ("renew.toml", "server.toml", "served.toml", "backoff.toml", *PAUSE_CONFIGS, "unsupported-alpn.toml", "cache.toml", "elective.toml", "off.toml", *RENEWAL_CONFIGS, "ca.pem")
+        sources = ("renew.toml", "server.toml", "served.toml", "backoff.toml", *PAUSE_CONFIGS, *alpn.CONFIGS, "unsupported-alpn.toml", "cache.toml", "elective.toml", "off.toml", *RENEWAL_CONFIGS, "ca.pem")
         mounts = [argument for source in sources
                   for argument in self.mount(source, "/input/" + source)]
         command([self.runtime, "run", "--name", name, "--network=none", "--user=0",
@@ -446,6 +450,8 @@ def qualify(smoke, full, php, legacy):
             sum(name.startswith(".revoked-") for name in names) < 2 or order_count() != before):
         raise AssertionError("revocation did not quarantine the pair without a replacement order")
     assert_served(tls_port, cert)
+    command([smoke.runtime, "stop", incident])
+    alpn.qualify(smoke, full, tls_port, segment, command)
     print("ACME operation scope and server feature parity smoke: ok", flush=True)
 
 

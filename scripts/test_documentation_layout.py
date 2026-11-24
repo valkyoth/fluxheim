@@ -181,6 +181,7 @@ class DocumentationLayoutTests(unittest.TestCase):
                         "CLI validation and standalone configuration tester"):
             self.assertIn(f"| {feature} | Limited", readme)
         self.assertNotIn("bounded queues and redaction", readme)
+        self.assertIn("Native TLS-ALPN-01: background and external renewal | Qualified locally on Rustls", readme)
         self.assertIn("legacy or dependency log messages", readme)
         self.assertIn("a table entry is not release approval", readme)
 

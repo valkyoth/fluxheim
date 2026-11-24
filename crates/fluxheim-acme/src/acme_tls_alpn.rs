@@ -1,11 +1,41 @@
 use sanitization::SecretVec;
 
+#[cfg(test)]
+#[test]
+fn generated_certificate_contains_only_the_requested_san_and_critical_identifier() {
+    let digest = [42; 32];
+    let (cert_pem, _) = tls_alpn_01_certificate("Example.TEST", &digest).unwrap();
+    let (_, pem) = x509_parser::pem::parse_x509_pem(&cert_pem).unwrap();
+    let certificate = pem.parse_x509().unwrap();
+    let san = certificate.subject_alternative_name().unwrap().unwrap();
+    assert_eq!(
+        san.value.general_names,
+        [x509_parser::extensions::GeneralName::DNSName(
+            "example.test"
+        )]
+    );
+    let extensions: Vec<_> = certificate
+        .extensions()
+        .iter()
+        .filter(|extension| extension.oid.to_id_string() == "1.3.6.1.5.5.7.1.31")
+        .collect();
+    assert_eq!(extensions.len(), 1);
+    assert!(extensions[0].critical);
+    assert_eq!(extensions[0].value, [&[4, 32][..], &digest].concat());
+    assert_eq!(
+        certificate.validity().not_after.timestamp()
+            - certificate.validity().not_before.timestamp(),
+        240
+    );
+    assert!(tls_alpn_01_certificate("example.test", &[0; 31]).is_err());
+}
+
 use fluxheim_config::normalize_host;
 
 use super::AcmeRenewalError;
 
 #[cfg(feature = "acme-client")]
-pub(super) fn tls_alpn_01_certificate(
+pub fn tls_alpn_01_certificate(
     domain: &str,
     key_authorization_digest: &[u8],
 ) -> Result<(Vec<u8>, SecretVec), AcmeRenewalError> {
@@ -29,6 +59,18 @@ pub(super) fn tls_alpn_01_certificate(
                 message: error.to_string(),
             }
         })?;
+    let now = std::time::SystemTime::now();
+    params.not_before = now
+        .checked_sub(std::time::Duration::from_secs(60))
+        .unwrap_or(now)
+        .into();
+    params.not_after = now
+        .checked_add(std::time::Duration::from_secs(180))
+        .ok_or_else(|| AcmeRenewalError::TlsAlpnCertificate {
+            domain: normalized_domain.clone(),
+            message: "challenge validity out of range".into(),
+        })?
+        .into();
     params
         .custom_extensions
         .push(rcgen::CustomExtension::new_acme_identifier(

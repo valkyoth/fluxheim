@@ -124,6 +124,7 @@ acme = [
     "fluxheim-tls/acme",
 ]
 acme-client = [
+    "fluxheim-config/native-acme-alpn",
     "acme",
     "fluxheim-acme/acme-client",
     "dep:rpassword",

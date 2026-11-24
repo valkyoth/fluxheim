@@ -236,11 +236,13 @@ mod acme_pem;
 mod acme_queue;
 #[path = "acme_targets.rs"]
 mod acme_targets;
-#[cfg(all(test, feature = "acme-client"))]
+#[cfg(feature = "acme-client")]
 #[path = "acme_tls_alpn.rs"]
 mod acme_tls_alpn;
 #[path = "acme_transaction.rs"]
 mod acme_transaction;
+#[cfg(feature = "acme-client")]
+pub mod alpn_control;
 #[cfg(feature = "acme-client")]
 pub use acme_account_async::{
     load_account_credentials_async, remove_account_credentials_async,

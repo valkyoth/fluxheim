@@ -52,6 +52,9 @@ where
                     match handshake {
                         Ok(Ok(stream)) => {
                             record(Measurement::TlsHandshake(HandshakeOutcome::Succeeded));
+                            if stream.get_ref().1.alpn_protocol() == Some(b"acme-tls/1") {
+                                return;
+                            }
                             let mut request_context = native_rustls_request_context(&stream);
                             request_context.local_addr = local_addr;
                             let _ = serve_native_http1_connection_with_context(stream, Some(peer_addr), request_context, policy, handler).await;
@@ -124,6 +127,7 @@ where
                             let mut request_context = native_rustls_request_context(&stream);
                             request_context.local_addr = local_addr;
                             match stream.get_ref().1.alpn_protocol() {
+                                Some(b"acme-tls/1") => (),
                                 Some(b"h2") if h2_dispatch.http2_allowed => {
                                     let h2_handler = Arc::new(crate::NativeHttp2RouteAdapter::new(
                                         handler,

@@ -15,6 +15,14 @@ use runtime_background::DownstreamCertificateReloader;
 use runtime_background::MetricsOtlpBackgroundService;
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]
 use runtime_background::certificate_reload_control_service;
+#[cfg(all(
+    feature = "proxy",
+    feature = "acme-client",
+    feature = "tls-rustls-backend",
+    not(feature = "tls-openssl")
+))]
+#[path = "runtime_acme_alpn.rs"]
+mod runtime_acme_alpn;
 #[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
 use runtime_background::{CacheRuntimeMetricsBackgroundService, record_cache_runtime_metrics};
 
@@ -176,6 +184,13 @@ async fn run_native_runtime_async(
     let native_router_reloader = native_proxy_runtime
         .as_ref()
         .map(fluxheim_server::NativeHttp1ProxyRuntime::router_reloader);
+    #[cfg(all(
+        feature = "acme-client",
+        feature = "tls-rustls-backend",
+        not(feature = "tls-openssl")
+    ))]
+    let _challenge_channel =
+        runtime_acme_alpn::bind(&config, native_certificate_reloader.as_ref())?;
     reject_unsupported_native_background_tasks(
         &launch_plan,
         native_certificate_reloader.is_some(),

@@ -134,3 +134,49 @@ fn tls_alpn_challenge_store_bounds_published_entries()
     assert!(store.resolve(Some("host-0.example")).is_none());
     Ok(())
 }
+
+#[test]
+fn live_publications_require_unique_names_bounded_lifetimes_and_capacity()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use std::time::{Duration, Instant};
+    let fixture = crate::test_certificates::static_certificate_file_fixture()?;
+    let key = Arc::new(load_rustls_certified_key_from_paths(
+        &fixture.cert_path,
+        &fixture.key_path,
+    )?);
+    let store = Arc::new(RustlsTlsAlpnCertificateStore::new());
+    let now = Instant::now();
+    let expires = now + Duration::from_secs(120);
+    for (name, deadline) in [
+        ("ok.test", now),
+        ("ok.test", now + Duration::from_secs(300)),
+        ("bad:80", expires),
+    ] {
+        assert!(store.publish(name, key.clone(), deadline).is_err());
+    }
+    let lease = store.publish("first.test", key.clone(), expires)?;
+    assert!(store.resolve(None).is_none());
+    assert!(store.resolve(Some("other.test")).is_none());
+    assert!(store.resolve(Some("first.test")).is_some());
+    assert!(store.publish("first.test", key.clone(), expires).is_err());
+    drop(lease);
+    assert!(store.resolve(Some("first.test")).is_none());
+    let old = store.publish("first.test", key.clone(), expires)?;
+    // Advance the stored deadline without a scheduling-sensitive sleep.
+    let mut expired = (**store.certificates.load()).clone();
+    Arc::make_mut(expired.get_mut("first.test").unwrap()).expires = now;
+    store.certificates.store(Arc::new(expired));
+    assert!(store.resolve(Some("first.test")).is_none());
+    let current = store.publish("first.test", key.clone(), expires)?;
+    drop(old);
+    assert!(store.resolve(Some("first.test")).is_some());
+    drop(current);
+    let mut leases = Vec::new();
+    for index in 0..MAX_TLS_ALPN_CHALLENGE_CERTIFICATES {
+        leases.push(store.publish(&format!("n{index}.test"), key.clone(), expires)?);
+    }
+    assert!(store.publish("full.test", key.clone(), expires).is_err());
+    leases.pop();
+    let _last = store.publish("full.test", key, expires)?;
+    Ok(())
+}

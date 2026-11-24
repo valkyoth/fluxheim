@@ -9,6 +9,7 @@ description = "Internal Fluxheim configuration schema, parsing, and validation."
 
 [features]
 acme = []
+native-acme-alpn = ["acme"]
 cache = []
 geoip = []
 load-balancer = []

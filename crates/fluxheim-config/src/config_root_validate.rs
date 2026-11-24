@@ -24,6 +24,7 @@ impl Config {
         match scope {
             ValidationScope::Server => self.validate(),
             ValidationScope::Acme => {
+                self.validate_managed_challenge_transport()?;
                 #[cfg(not(feature = "acme"))]
                 if self.tls.acme.enabled || self.vhosts.iter().any(|vhost| vhost.tls.acme.enabled) {
                     return Err(ConfigError::InvalidTlsPolicy {
@@ -51,6 +52,7 @@ impl Config {
         &self,
         validate_runtime_paths: bool,
     ) -> Result<(), ConfigError> {
+        self.validate_managed_challenge_transport()?;
         self.server.validate_with_runtime_path_validation(
             validate_runtime_paths,
             self.stream.enabled || self.udp.enabled,

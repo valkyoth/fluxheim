@@ -118,16 +118,9 @@ pub(super) fn run_doctor(
             )
             .into());
         }
-        if online {
+        if online && target.challenge == fluxheim_config::AcmeChallenge::Http01 {
             for domain in &target.domains {
-                match target.challenge {
-                    fluxheim_config::AcmeChallenge::Http01 => {
-                        doctor_http_01_reachability(storage, &target.vhost_name, domain)?;
-                    }
-                    fluxheim_config::AcmeChallenge::TlsAlpn01 => {
-                        return Err("managed TLS-ALPN-01 is not supported; use http-01".into());
-                    }
-                }
+                doctor_http_01_reachability(storage, &target.vhost_name, domain)?;
             }
         }
     }
@@ -139,6 +132,12 @@ pub(super) fn run_doctor(
                 .build()
         })
         .transpose()?;
+    if let Some(runtime) = runtime.as_ref()
+        && config.tls.acme.challenge == fluxheim_config::AcmeChallenge::TlsAlpn01
+    {
+        // One gateway endpoint per root; this does not test public reachability.
+        runtime.block_on(fluxheim_acme::alpn_control::probe(storage))?;
+    }
     let used_issuers = targets
         .iter()
         .map(|target| target.issuer.as_str())

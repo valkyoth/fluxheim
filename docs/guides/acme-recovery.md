@@ -35,7 +35,7 @@ it is not a forensic read-only command.
 | `.install.transaction` and `.revocation.transaction` in a certificate directory | Install/revocation phase records | Preserve with their referenced files; never hand-edit phases |
 | `.fullchain.pem.previous`, `.privkey.pem.previous`, `.revoked-<transaction>-...` files | Recovery/incident material | Not arbitrary cache; private-key material remains sensitive |
 | `http-01/<vhost-segment>/` | HTTP-01 token responses | Temporary, but deletion can invalidate an active order |
-| `tls-alpn-01/<domain-segment>/` | Challenge certificate/key pairs | Not the site's normal TLS identity; native serving integration is currently incomplete |
+| `.alpn/s` | Private local publication socket | One gateway owns this endpoint. Restart starts with no challenge identities. |
 
 Segments are generated and hash-suffixed by Fluxheim. Do not construct them by
 concatenating an untrusted domain or rename them after changing a vhost/issuer
@@ -119,8 +119,8 @@ state is incomplete/ambiguous, keep the affected listener isolated until repaire
 **When a renewal stops:** managed HTTP-01 tokens are served only while their
 publisher holds an operating-system lock. A cancelled renewal, timeout or dead
 companion releases that lock. A new lookup no longer serves its token, even if
-the file is still on disk. TLS-ALPN challenge files use the same ownership
-rule; this does not enable live TLS-ALPN validation on a listener by itself.
+the file is still on disk. The native TLS-ALPN listener never reads staged
+challenge files: its in-memory publication ends when the owner disconnects.
 Use a private filesystem shared by gateway and companion that supports
 cross-process file locking and atomic directory rename.
 

@@ -1,6 +1,6 @@
 # Windows Filesystem Security Audit
 
-Audit date: 2026-11-14
+Audit date: 2026-11-24
 
 This record covers the Windows filesystem security boundary used by Fluxheim
 1.9.0 development. The original dependency review was recorded on 2026-09-12.
@@ -52,7 +52,7 @@ account. Any change to that value requires a fresh ACL-policy review.
 `crates/fluxheim-windows-security` is the only first-party crate permitted to
 use unsafe Rust for handle-relative Windows path traversal and mutation. The
 reviewed source digest is
-`66386c419ea56a7f1f651dea1dd77edbd67ba1a53bb76cf5e264e9d242e01b66`.
+`14cfeb08825c773e5a5a137e2b13242a46a596ccdf7f2068a35988a6962fffcc`.
 It covers, in this order, each UTF-8 path, a NUL delimiter, the complete file,
 and another NUL delimiter for:
 
@@ -63,6 +63,15 @@ and another NUL delimiter for:
 
 First-party unsafe operations and their reviewed invariants are:
 
+- The ACME socket probe uses `FindFirstFileW` on the fixed socket name in
+  the private publication directory. The UTF-16 input is NUL-terminated;
+  embedded NULs and wildcard leaf names are rejected. Its aligned
+  `WIN32_FIND_DATAW` is inspected only on success. Each successful search
+  handle is closed once with `FindClose`. Both the reparse attribute and
+  the exact AF_UNIX tag must match, so ordinary files and other reparse tags
+  are not classified as sockets. This is classification, not an ACL check
+  or an atomic delete: the directory is service-private and the gateway
+  holds its exclusive ownership lock during stale-socket removal;
 - `NtCreateFile` receives live, aligned `OBJECT_ATTRIBUTES`, `UNICODE_STRING`,
   and status storage; every relative open is rooted in a live parent handle,
   disables reparse traversal, and requests an explicit object type;

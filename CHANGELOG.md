@@ -17,9 +17,9 @@ behavior when the change improves security or project direction.
 - Interrupted ACME installation rollback can be retried without consuming the
   only copy of the previous certificate or key.
 
-- Enabled managed ACME now rejects `challenge = "tls-alpn-01"` rather than
-  negotiating a protocol the gateway cannot serve. Use `http-01` and route
-  public port 80 to the gateway before upgrading. Normal HTTPS is unchanged.
+- Native Rustls gateways can answer TLS-ALPN-01 for background and external
+  ACME orders. Unsupported listener configurations are rejected; HTTP-01
+  remains the default. See [challenge selection](docs/guides/acme.md#challenge-selection).
 
 - Give ACME renewals ownership of their challenge files across cancellation,
   timeout and restart. Upgrade the gateway before its external companion;
