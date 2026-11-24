@@ -273,8 +273,6 @@ pub struct AcmeRenewalConfig {
     pub retry_max_secs: u64,
     #[serde(default = "default_true")]
     pub reload_after_renewal: bool,
-    #[serde(default = "default_true")]
-    pub zero_downtime_reload: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -296,7 +294,6 @@ struct AcmeRenewalConfigFragment {
     retry_initial_secs: Option<u64>,
     retry_max_secs: Option<u64>,
     reload_after_renewal: Option<bool>,
-    zero_downtime_reload: Option<bool>,
 }
 
 impl Default for AcmeRenewalConfig {
@@ -310,7 +307,6 @@ impl Default for AcmeRenewalConfig {
             retry_initial_secs: default_acme_renewal_retry_initial_secs(),
             retry_max_secs: default_acme_renewal_retry_max_secs(),
             reload_after_renewal: true,
-            zero_downtime_reload: true,
         }
     }
 }
@@ -340,9 +336,6 @@ impl AcmeRenewalConfig {
         }
         if let Some(reload_after_renewal) = fragment.reload_after_renewal {
             self.reload_after_renewal = reload_after_renewal;
-        }
-        if let Some(zero_downtime_reload) = fragment.zero_downtime_reload {
-            self.zero_downtime_reload = zero_downtime_reload;
         }
     }
 

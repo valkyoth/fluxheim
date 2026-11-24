@@ -1,6 +1,23 @@
 use super::super::*;
 
 #[test]
+fn removed_zero_downtime_option_is_rejected_in_root_and_fragments() {
+    for value in [true, false] {
+        let text = format!("[tls.acme.renewal]\nzero_downtime_reload = {value}");
+        for error in [
+            toml::from_str::<Config>(&text).unwrap_err(),
+            toml::from_str::<crate::config_fragment::ConfigFragment>(&text).unwrap_err(),
+        ] {
+            assert!(
+                error
+                    .to_string()
+                    .contains("unknown field `zero_downtime_reload`")
+            );
+        }
+    }
+}
+
+#[test]
 fn renewal_defaults_to_elective_and_rejects_unknown_modes_even_when_disabled() {
     let config: Config = toml::from_str("[tls.acme.renewal]\nenabled = false").unwrap();
     assert_eq!(
@@ -38,7 +55,6 @@ fn parses_tls_acme_config_with_actalis_eab() {
             retry_initial_secs = 300
             retry_max_secs = 86400
             reload_after_renewal = true
-            zero_downtime_reload = true
 
             [[tls.acme.issuers]]
             name = "actalis"

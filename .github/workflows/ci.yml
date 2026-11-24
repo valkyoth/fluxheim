@@ -45,6 +45,7 @@ jobs:
           cargo test --locked -p fluxheim-config --no-default-features acme_scope
           cargo test --locked --no-default-features --features profile-web-server,php-fpm,acme-client --lib cli::
           cargo test --locked --no-default-features --features proxy,tls-rustls,acme-client --lib cli::
+          cargo test --locked --no-default-features --features proxy,tls-rustls,acme-client --lib reload
           python3 scripts/test_acme_scope_smoke.py
       - name: Build Wolfi images and renew through both entry points
         env:
@@ -545,6 +546,9 @@ jobs:
       - name: Test macOS ACME storage and lifecycle
         run: cargo test --locked -p fluxheim-acme --lib --features acme-client
 
+      - name: Test macOS certificate activation and control transport
+        run: cargo test --locked -p fluxheim --lib --features tls-rustls,acme-client reload
+
       - name: Test macOS bounded logging and real pipe backpressure
         run: |
           cargo test --locked -p fluxheim-common fatal::tests
@@ -666,6 +670,9 @@ jobs:
 
       - name: Run Windows workspace tests
         run: cargo test --workspace --locked
+
+      - name: Test Windows in-process certificate activation
+        run: cargo test --locked -p fluxheim --lib --features tls-rustls,acme-client reload
 
       - name: Compile Windows portable profiles
         run: |

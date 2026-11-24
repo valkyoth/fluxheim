@@ -150,7 +150,6 @@ check_interval_secs = 3600
 retry_initial_secs = 300
 retry_max_secs = 86400
 reload_after_renewal = false
-zero_downtime_reload = false
 
 [[tls.acme.issuers]]
 name = "letsencrypt-staging"

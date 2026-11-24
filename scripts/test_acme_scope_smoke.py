@@ -194,6 +194,7 @@ class AcmeSmokeTests(unittest.TestCase):
         self.assertEqual([item["directory_url"] for item in acme["issuers"]],
                          ["https://localhost:14000/retry-dir", "https://localhost:14000/dir"])
         self.assertEqual(acme["default_issuer"], "retry-issuer")
+        self.assertFalse(acme["renewal"]["reload_after_renewal"])
         self.assertEqual(config["vhosts"][1]["tls"]["acme"]["issuer"], "healthy-issuer")
         self.assertEqual([acme["renewal"][k] for k in
                           ("check_interval_secs", "retry_initial_secs", "retry_max_secs")], [1, 3, 6])

@@ -56,7 +56,6 @@ struct AcmeInitRenewalToml {
     retry_initial_secs: u64,
     retry_max_secs: u64,
     reload_after_renewal: bool,
-    zero_downtime_reload: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -141,7 +140,6 @@ pub(super) fn build_acme_init_toml(
                     retry_initial_secs: 300,
                     retry_max_secs: 86_400,
                     reload_after_renewal: true,
-                    zero_downtime_reload: true,
                 },
                 issuers,
             },

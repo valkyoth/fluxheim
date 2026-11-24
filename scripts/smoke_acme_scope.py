@@ -15,6 +15,7 @@ import tempfile
 import time
 
 from acme_backoff_smoke import backoff_configuration, qualify_backoff
+from acme_activation_smoke import companion_matrix, pinned_tls
 
 PEBBLE = "ghcr.io/letsencrypt/pebble@sha256:5080492187bea12909c053d7a2b90a9e95104ef1c82381828e7823db71ce7e54"
 PYTHON = "docker.io/library/python@sha256:281d39ff02e3b389401586134ff9e6572954687822a58055ec07a60ded4e0b7f"
@@ -388,6 +389,8 @@ def qualify(smoke, full, php, legacy):
             time.sleep(0.1)
     else:
         raise AssertionError("issued certificate was not served after restart")
+    certificate = companion_matrix(smoke, full, activated, tls_port, certificate_dir, certificate, command)
+    tls, _ = pinned_tls(certificate)
     command([smoke.runtime, "stop", activated])
     qualify_backoff(smoke, full, frontend, tls_port, tls, certificate_dir, certificate, command)
     print("ACME operation scope and server feature parity smoke: ok", flush=True)

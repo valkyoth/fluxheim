@@ -43,12 +43,37 @@ impl DownstreamCertificateReloader {
 }
 
 #[cfg(feature = "acme-client")]
-async fn reload_downstream_certificates(
-    reloader: &DownstreamCertificateReloader,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+async fn activate_installed_certificates(
+    enabled: bool,
+    reloader: Option<&DownstreamCertificateReloader>,
+) -> Result<Activation, Box<dyn Error + Send + Sync>> {
+    if !enabled {
+        return Ok(Activation::NotRequested);
+    }
+    let Some(reloader) = reloader else {
+        return Ok(Activation::Unavailable);
+    };
     let reloader = reloader.clone();
-    tokio::task::spawn_blocking(move || reloader.reload()).await?
+    tokio::task::spawn_blocking(move || reloader.reload()).await??;
+    Ok(Activation::Reloaded)
 }
+
+#[cfg(feature = "acme-client")]
+#[derive(Debug, PartialEq, Eq)]
+enum Activation {
+    NotRequested,
+    Unavailable,
+    Reloaded,
+}
+
+#[cfg(all(
+    test,
+    feature = "acme-client",
+    feature = "tls-rustls",
+    not(feature = "tls-openssl")
+))]
+#[path = "runtime_acme_activation_tests.rs"]
+mod activation_tests;
 
 #[cfg(all(feature = "acme-client", unix))]
 pub(super) fn certificate_reload_control_service(
@@ -88,6 +113,7 @@ fn handle_certificate_reload_control_request(
     use std::io::{Read as _, Write as _};
 
     stream.set_read_timeout(Some(read_timeout))?;
+    stream.set_write_timeout(Some(read_timeout))?;
     let mut buffer = [0_u8; 1024];
     let bytes = stream.read(&mut buffer)?;
     let command = std::str::from_utf8(&buffer[..bytes])?.trim();
@@ -388,7 +414,12 @@ impl crate::background::FluxBackgroundTask for AcmeRenewalBackgroundService {
                 break;
             }
 
-            run_acme_renewal_tick(&mut renewals, self.certificate_reloader.as_ref()).await;
+            run_acme_renewal_tick(
+                &mut renewals,
+                self.config.tls.acme.renewal.reload_after_renewal,
+                self.certificate_reloader.as_ref(),
+            )
+            .await;
             if shutdown.sleep_or_shutdown(interval).await {
                 break;
             }
@@ -399,6 +430,7 @@ impl crate::background::FluxBackgroundTask for AcmeRenewalBackgroundService {
 #[cfg(feature = "acme-client")]
 async fn run_acme_renewal_tick(
     renewals: &mut fluxheim_acme::BackgroundRenewals<'_>,
+    activate: bool,
     reloader: Option<&DownstreamCertificateReloader>,
 ) {
     match renewals.tick(std::time::SystemTime::now()).await {
@@ -425,23 +457,31 @@ async fn run_acme_renewal_tick(
             }
             if renewed_count == 0 {
                 log::debug!("ACME renewal check completed without renewed certificates");
-            } else if let Some(reloader) = reloader {
-                if reload_downstream_certificates(reloader).await.is_err() {
-                    events::reload_outcome(false);
-                    #[cfg(feature = "metrics")]
-                    crate::metrics::record_acme_event("reload_failed");
-                } else {
-                    events::reload_outcome(true);
-                    #[cfg(feature = "metrics")]
-                    crate::metrics::record_acme_event("reload_success");
-                    log::info!("downstream TLS certificates reloaded after ACME renewal");
-                }
             } else {
-                #[cfg(feature = "metrics")]
-                crate::metrics::record_acme_event("reload_unavailable");
-                log::warn!(
-                    "ACME renewed certificates but no downstream TLS reload handle is available; restart or reload Fluxheim to use them"
-                );
+                match activate_installed_certificates(activate, reloader).await {
+                    Ok(Activation::NotRequested) => log::info!(
+                        "ACME certificates installed; activation disabled by configuration"
+                    ),
+                    Err(_) => {
+                        log::error!("ACME certificates installed; downstream TLS reload failed");
+                        events::reload_outcome(false);
+                        #[cfg(feature = "metrics")]
+                        crate::metrics::record_acme_event("reload_failed");
+                    }
+                    Ok(Activation::Reloaded) => {
+                        events::reload_outcome(true);
+                        #[cfg(feature = "metrics")]
+                        crate::metrics::record_acme_event("reload_success");
+                        log::info!("downstream TLS certificates reloaded after ACME renewal");
+                    }
+                    Ok(Activation::Unavailable) => {
+                        #[cfg(feature = "metrics")]
+                        crate::metrics::record_acme_event("reload_unavailable");
+                        log::warn!(
+                            "ACME renewed certificates but no downstream TLS reload handle is available; restart or reload Fluxheim to use them"
+                        );
+                    }
+                }
             }
         }
         Err(_) => {

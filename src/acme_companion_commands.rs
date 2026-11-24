@@ -341,8 +341,12 @@ pub(super) fn run_renew(
         );
     }
 
-    if renewed_count > 0 && reload_after_renewal && config.tls.acme.renewal.reload_after_renewal {
-        request_certificate_reload(&config)?;
+    if renewed_count > 0 {
+        if reload_after_renewal && config.tls.acme.renewal.reload_after_renewal {
+            request_certificate_reload(&config)?;
+        } else {
+            println!("certificate reload: not requested; certificates installed on disk");
+        }
     }
 
     if !run.failed.is_empty() {

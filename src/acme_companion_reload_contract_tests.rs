@@ -1,63 +1,103 @@
-use std::io::{Read as _, Write as _};
-use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::io::ErrorKind;
+use std::time::Duration;
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::net::UnixListener;
 
 #[test]
-fn reload_client_currently_waits_for_peer_close_even_after_ok_line() {
-    for reply in [b"".as_slice(), b"ok\n".as_slice()] {
-        let root = tempfile::Builder::new()
-            .prefix("arc-")
-            .tempdir_in(std::fs::canonicalize("target").unwrap())
-            .unwrap();
-        let socket = root.path().join("reload.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let (ready_tx, ready_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let peer = std::thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(5);
-            let mut stream = loop {
-                match listener.accept() {
-                    Ok((stream, _)) => break stream,
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        assert!(Instant::now() < deadline, "reload fixture accept timed out");
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    Err(error) => panic!("reload fixture accept failed: {error}"),
+fn reload_requires_a_complete_bounded_ack_not_eof() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("reload.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        for (reply, keep_open, expected) in [
+            (b"ok\n".as_slice(), true, None),
+            (b"ok", false, Some(ErrorKind::InvalidData)),
+            (b"", true, Some(ErrorKind::TimedOut)),
+            (b"error: test\n", false, Some(ErrorKind::Other)),
+            (&[b'x'; 4096], true, Some(ErrorKind::InvalidData)),
+        ] {
+            let peer = async {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut command = [0; 20];
+                stream.read_exact(&mut command).await.unwrap();
+                assert_eq!(&command, b"reload-certificates\n");
+                stream.write_all(reply).await.unwrap();
+                if keep_open {
+                    // The client must finish while this descriptor is still open.
+                    assert_eq!(stream.read(&mut [0]).await.unwrap(), 0);
                 }
             };
-            stream
-                .set_read_timeout(Some(Duration::from_secs(3)))
-                .unwrap();
-            stream
-                .set_write_timeout(Some(Duration::from_secs(3)))
-                .unwrap();
-            let mut command = [0; b"reload-certificates\n".len()];
-            stream.read_exact(&mut command).unwrap();
-            assert_eq!(&command, b"reload-certificates\n");
-            stream.write_all(reply).unwrap();
-            ready_tx.send(()).unwrap();
-            // Always close the peer within a finite time, even if the test
-            // controller fails, so the production blocking read is released.
-            let _ = release_rx.recv_timeout(Duration::from_secs(3));
-        });
-        let mut config = crate::config::Config::default();
-        config.server.process.certificate_reload_sock = socket;
-        let (done_tx, done_rx) = mpsc::channel();
-        let client = std::thread::spawn(move || {
-            let result =
-                super::request_certificate_reload(&config).map_err(|error| error.to_string());
-            let _ = done_tx.send(result);
-        });
+            let client = super::reload_exchange(&path, Duration::from_millis(500));
+            let (result, ()) =
+                tokio::time::timeout(Duration::from_secs(5), futures::future::join(client, peer))
+                    .await
+                    .unwrap();
+            assert_eq!(result.err().map(|e| e.kind()), expected);
+        }
+    });
+}
 
-        let ready = ready_rx.recv_timeout(Duration::from_secs(6));
-        let while_open = done_rx.recv_timeout(Duration::from_millis(200));
-        let _ = release_tx.send(());
-        peer.join().unwrap();
-        client.join().unwrap();
-        ready.unwrap();
-        assert!(matches!(while_open, Err(mpsc::RecvTimeoutError::Timeout)));
-        let after_close = done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
-        assert_eq!(after_close.is_ok(), !reply.is_empty(), "{after_close:?}");
-    }
+#[test]
+fn trickling_reply_does_not_extend_the_overall_deadline() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("reload.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        let peer = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            while stream.write_all(b"x").await.is_ok() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        });
+        let result = tokio::time::timeout(
+            Duration::from_secs(3),
+            super::reload_exchange(&path, Duration::from_millis(300)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.unwrap_err().kind(), ErrorKind::TimedOut);
+        peer.abort();
+        let _ = peer.await;
+    });
+}
+
+#[test]
+fn absent_refused_and_full_sockets_never_confirm_activation() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("reload.sock");
+        let limit = Duration::from_millis(200);
+        assert!(super::reload_exchange(&path, limit).await.is_err());
+        let socket = tokio::net::UnixSocket::new_stream().unwrap();
+        socket.bind(&path).unwrap();
+        let listener = socket.listen(1).unwrap();
+        let mut clients = Vec::new();
+        for _ in 0..8 {
+            match tokio::time::timeout(limit, tokio::net::UnixStream::connect(&path)).await {
+                Ok(Ok(client)) => clients.push(client),
+                _ => break,
+            }
+        }
+        assert!(!clients.is_empty());
+        assert!(
+            tokio::time::timeout(Duration::from_secs(3), super::reload_exchange(&path, limit))
+                .await
+                .unwrap()
+                .is_err()
+        );
+        drop(listener);
+        assert!(super::reload_exchange(&path, limit).await.is_err());
+    });
 }

@@ -285,14 +285,16 @@ mod tests {
             let mut buffer = [0_u8; 64];
             let bytes = stream.read(&mut buffer).unwrap();
             assert_eq!(&buffer[..bytes], b"reload-certificates\n");
-            stream.write_all(b"not-ok").unwrap();
             stream
-                .write_all(&vec![
-                    b'x';
-                    (super::MAX_CERTIFICATE_RELOAD_RESPONSE_BYTES as usize)
-                        * 2
-                ])
+                .write_all(&[b'x'; super::MAX_CERTIFICATE_RELOAD_RESPONSE_BYTES as usize])
                 .unwrap();
+            // A client that has consumed its bound may close before the excess byte.
+            if let Err(error) = stream.write_all(b"x") {
+                assert!(matches!(
+                    error.kind(),
+                    std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset
+                ));
+            }
         });
 
         let mut config = crate::config::Config::default();

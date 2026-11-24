@@ -225,14 +225,11 @@ outside the deployment. On Unix the companion reload command is:
 fluxheim-acme --config /etc/fluxheim/fluxheim.toml reload
 ```
 
-The reply byte cap is not a client-side timeout: the current socket client can
-wait for EOF without a read deadline. A local Unix socket test confirms that
-even a received `ok` line does not finish the call until the peer closes; it
-also checks a silent peer. The bounded test releases each peer after observation,
-not after a built-in client timeout. Bound maintenance jobs using your
-supervisor and treat a timeout as an unknown activation outcome. The reload
-correction plan includes this transport issue. Never turn a timeout into a claim
-that an earlier install/revoke did not happen.
+The Unix client requires a complete acknowledgement within 4096 bytes and a
+15-second socket exchange. A timeout means activation is unknown, not that
+an earlier install or revocation did not happen. Inspect the leaf from a new
+TLS connection before retrying. See the [reload migration](certificate-renewal.md#reload-migration)
+for install-only configurations and Windows activation.
 
 Record the target, public certificate fingerprint/expiry, CA-side outcome,
 recovery result and independently observed serving result. Keep secrets out of

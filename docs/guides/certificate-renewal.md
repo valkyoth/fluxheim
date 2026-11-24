@@ -558,16 +558,30 @@ single-process installs. The service observes managed certificate expiry, sleeps
 for `tls.acme.renewal.check_interval_secs` after each tick, and renews missing or due
 certificates through the same ACME challenge path used by the CLI.
 
-After successful background renewal, Fluxheim reloads the downstream SNI certificate
+After successful background renewal with `reload_after_renewal = true`, Fluxheim reloads the downstream SNI certificate
 resolver or callback so new handshakes can use the freshly installed files
 without restarting. If a TLS backend or listener shape cannot provide a reload
 handle, Fluxheim logs that a restart or process reload is required.
 
-**Current limitation:** this background path does not check `reload_after_renewal`;
-the companion and reload-control service planning do. `zero_downtime_reload`
-has no runtime consumer. Neither flag currently selects an alternative restart
-workflow. Corrections and live reload-policy proof are planned after the
-documentation audit.
+### Reload migration
+
+Before upgrading to 1.9, delete `zero_downtime_reload` from the main TOML and
+included files, whether its value was true or false. Older releases accepted
+it but did not use it. The new parser rejects it. Use one setting instead:
+
+```toml
+[tls.acme.renewal]
+reload_after_renewal = false # install on disk; activate during planned maintenance
+```
+
+Omit the setting (or set it to true) for live activation after renewal. With
+false, the background worker does not change its active TLS handle and the
+server does not create the Unix reload socket. Restart the service during your
+chosen maintenance window. If you only want to stage a single renewal on Unix,
+leave the setting true and use `fluxheim-acme renew --no-reload`, then
+`fluxheim-acme reload` when ready. On Windows, background activation is
+in-process; for external renewal use `renew --no-reload`, restart your
+Fluxheim service, and check a new TLS connection. No flag restarts the process.
 
 This reload happens inside the long-running Fluxheim process. The gateway also
 owns a local Unix-domain certificate reload socket at
@@ -582,12 +596,10 @@ created with owner-only permissions by the running gateway. It is intended for
 the same runtime user or container pod, not remote administration. The
 long-running gateway caps concurrent reload-control requests, and each accepted
 request still uses a short fixed read timeout. The
-companion reads the gateway response with a small fixed bound so a compromised
-or replaced local socket cannot grow companion memory without limit.
-That byte cap is not a time bound: the companion does not set socket I/O
-deadlines and waits for EOF. A stalled peer can hold the maintenance invocation.
-The reload-policy correction includes bounded client transport and explicit
-unknown-activation reporting; use a supervisor deadline meanwhile.
+companion accepts a complete `ok` line (including its newline), without waiting
+for EOF. It limits the response to 4096 bytes and the entire socket exchange
+(connect, write and read) to 15 seconds. Timeout means activation was not
+confirmed; verify the served leaf before retrying activation, not issuance.
 
 Production packages include the `fluxheim-acme` companion binary while keeping
 the integrated background worker for simple installs. In this model,

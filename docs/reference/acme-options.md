@@ -38,8 +38,7 @@ modes. Do not paste a second `[tls.acme]` table to override the first.
 | `check_interval_secs` | `3600` | Positive background sleep after a renewal tick; work time is additional |
 | `retry_initial_secs` | `300` | Minimum delay after the first failed background issuance for a vhost; positive, no greater than max |
 | `retry_max_secs` | `86400` | Upper bound on the doubling delay; configure at most 604800 seconds. For a missing certificate or one with seven days or less left, the effective delay is at most 3600 seconds. |
-| `reload_after_renewal` | `true` | Companion reload and server reload-control service selection; **Current limitation:** |
-| `zero_downtime_reload` | `true` | Accepted configuration, **Current limitation:** |
+| `reload_after_renewal` | `true` | Activate after successful background or companion installation and enable the Unix reload socket. Set false for install-only, or use companion `renew --no-reload` for one run. |
 
 One-shot renewals do not share background retry history. See the
 [retry policy](../guides/certificate-renewal.md#retry-policy). Local

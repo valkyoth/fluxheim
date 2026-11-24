@@ -975,5 +975,6 @@ collector behavior is not the new required-collector acceptance contract.
 | 27 - Storage-bin soft purge | Accepted for progression | Owner supplied a clean retest through `a8022a12`, reported GitHub green after CI harness fixes and authorized Commit 28. [Qualification and tooling changes](../evidence/observability-27.md). |
 | 28 - Non-mutating stale preview | Accepted for progression | Owner reviewed the cache change and requested a separate Wasmtime update, completed in `8c539d4a`, before proceeding. [Evidence](../evidence/observability-28.md). |
 | 29 - ACME renewal holds | Accepted | Apply the same hold to background and CLI due runs; retain explicit force. [Evidence](../evidence/observability-29.md). |
-| 30 - ACME background retry | Implemented; review pending | Delay retries per failed vhost without delaying healthy targets. [Evidence](../evidence/observability-30.md). |
+| 30 - ACME background retry | Accepted | Delay retries per failed vhost without delaying healthy targets. [Evidence](../evidence/observability-30.md). |
+| 31 - ACME reload policy | Implemented; review pending | Separate installation from activation and bound companion reload confirmation. [Evidence](../evidence/observability-31.md). |
 | Post-documentation corrections | Pending | Detailed numbering and evidence retained locally; no release acceptance claimed. |

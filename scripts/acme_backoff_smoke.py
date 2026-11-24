@@ -5,10 +5,12 @@ import socket
 import ssl
 import time
 
+from acme_activation_smoke import assert_served
+
 
 def backoff_configuration(configuration):
     config = configuration(renewal=False, issuer="retry-issuer", released=True)
-    return config.replace("renew_before_secs = 315360000",
+    return config.replace("reload_after_renewal = true", "reload_after_renewal = false").replace("renew_before_secs = 315360000",
                           "renew_before_secs = 315360000\ncheck_interval_secs = 1\n"
                           "retry_initial_secs = 3\nretry_max_secs = 6").replace(
         "https://localhost:14000/dir", "https://localhost:14000/retry-dir") + '''
@@ -65,4 +67,10 @@ def qualify_backoff(smoke, image, frontend, port, tls, cert_dir, original, comma
     first, second, third = attempts()[:3]
     if second - first < 3_000_000_000 or third - second < 6_000_000_000:
         raise AssertionError("CA saw a retry before its configured minimum delay")
+    def installed_without_activation():
+        logs = command([smoke.runtime, "logs", gateway])
+        return "activation disabled by configuration" in logs.stdout + logs.stderr
+
+    until(installed_without_activation, "worker did not report install-only mode")
+    assert_served(port, original)
     print("ACME background: two timed refusals, independent issuance, live TLS and recovery passed", flush=True)

@@ -3583,7 +3583,6 @@ check_interval_secs = 3600
 retry_initial_secs = 300
 retry_max_secs = 86400
 reload_after_renewal = true
-zero_downtime_reload = true
 ```
 
 Managed ACME accepts `http-01` and `tls-alpn-01` configuration. Use HTTP-01

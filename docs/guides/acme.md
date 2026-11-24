@@ -215,10 +215,10 @@ Other scheduling considerations:
   left, the cooldown is capped at one hour. The worker retries on a normal check,
   not on a separate timer; an absolute hold still takes precedence.
   CLI invocations do not share this history. See the [retry example](certificate-renewal.md#retry-policy).
-- **Current limitation:** background renewal reloads whenever a reload handle exists,
-  irrespective of `reload_after_renewal`. The companion and reload-control
-  service planning do honor that flag. `zero_downtime_reload` has no runtime
-  consumer; setting false does not select a restart-based reload mode.
+- Background and companion renewals install on disk before attempting activation.
+  Set `reload_after_renewal = false` to leave the current listener unchanged.
+  See the [reload migration](certificate-renewal.md#reload-migration) for older
+  configurations and external Windows activation.
 
 For a deliberate pause, stop the external timer/renewal invocation and use
 `automation = "external"` to stop background scheduling. Leaving
