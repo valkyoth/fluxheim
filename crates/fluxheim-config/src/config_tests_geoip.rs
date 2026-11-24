@@ -2,9 +2,15 @@ use super::*;
 
 const GEOIP_GUIDE_BASE: &str = include_str!("../../../examples/geoip/local.toml");
 
+fn guide_config(source: &str) -> (Config, TestDir) {
+    let mut config: Config = toml::from_str(source).unwrap();
+    let root = prepare_guide_process_paths(&mut config);
+    (config, root)
+}
+
 #[test]
 fn geoip_guide_base_matches_feature_contract() {
-    let config: Config = toml::from_str(GEOIP_GUIDE_BASE).unwrap();
+    let (config, _root) = guide_config(GEOIP_GUIDE_BASE);
     #[cfg(all(feature = "geoip", not(feature = "privacy-mode")))]
     config.validate().unwrap();
     #[cfg(not(feature = "geoip"))]
@@ -22,7 +28,7 @@ fn geoip_guide_base_matches_feature_contract() {
 #[cfg(all(feature = "geoip", not(feature = "privacy-mode")))]
 #[test]
 fn geoip_guide_fragments_validate_with_the_complete_base() {
-    let base: Config = toml::from_str(GEOIP_GUIDE_BASE).unwrap();
+    let (base, _root) = guide_config(GEOIP_GUIDE_BASE);
     let deny: toml::Value =
         toml::from_str(include_str!("../../../examples/geoip/deny-only.toml")).unwrap();
     let mut config = base.clone();
@@ -38,7 +44,7 @@ fn geoip_guide_fragments_validate_with_the_complete_base() {
         "{GEOIP_GUIDE_BASE}\n{}",
         include_str!("../../../examples/geoip/route.toml")
     );
-    let mut config: Config = toml::from_str(&with_route).unwrap();
+    let (mut config, _route_root) = guide_config(&with_route);
     config.validate().unwrap();
     config.vhosts[0].routes[0].access.enabled = false;
     config.validate().unwrap();
@@ -47,7 +53,7 @@ fn geoip_guide_fragments_validate_with_the_complete_base() {
 #[cfg(all(feature = "geoip", not(feature = "privacy-mode")))]
 #[test]
 fn geoip_guide_disabling_policy_does_not_skip_validation() {
-    let mut config: Config = toml::from_str(GEOIP_GUIDE_BASE).unwrap();
+    let (mut config, _root) = guide_config(GEOIP_GUIDE_BASE);
     config.vhosts[0].access.enabled = false;
     config.geoip.enabled = false;
     assert!(config.validate().is_err());
@@ -59,7 +65,7 @@ fn geoip_guide_disabling_policy_does_not_skip_validation() {
 #[cfg(all(feature = "geoip", not(feature = "privacy-mode")))]
 #[test]
 fn geoip_guide_rejects_invalid_policy_values_and_database_counts() {
-    let base: Config = toml::from_str(GEOIP_GUIDE_BASE).unwrap();
+    let (base, _root) = guide_config(GEOIP_GUIDE_BASE);
     for countries in [vec!["us"], vec!["USA"], vec!["US", "US"]] {
         let mut config = base.clone();
         config.vhosts[0].access.allow_countries =
