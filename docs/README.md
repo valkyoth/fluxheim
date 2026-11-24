@@ -198,6 +198,7 @@ qualification are different checks; see each guide's limitations and evidence.
 - [ACME renewal holds and tooling refresh](evidence/observability-29.md)
 - [ACME background retry and recovery](evidence/observability-30.md)
 - [ACME certificate installation and activation](evidence/observability-31.md)
+- [ACME challenge ownership and restart](evidence/observability-32.md)
 - [Commit 12 native archive identities and checksums](evidence/observability-12-archives.json)
 - [Commit 12 local performance measurements](evidence/observability-12-performance.json)
 - [Commit 12 ARM performance measurements](evidence/observability-12-performance-arm.json)

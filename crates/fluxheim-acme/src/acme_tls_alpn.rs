@@ -2,23 +2,7 @@ use sanitization::SecretVec;
 
 use fluxheim_config::normalize_host;
 
-use super::{AcmeRenewalError, AcmeTlsAlpn01ChallengeStore};
-
-#[cfg(feature = "acme-client")]
-pub(super) fn cleanup_tls_alpn_01_challenges(
-    store: &AcmeTlsAlpn01ChallengeStore,
-    domains: &[String],
-) -> Result<(), AcmeRenewalError> {
-    for domain in domains {
-        store
-            .remove_challenge_certificate(domain)
-            .map_err(|error| AcmeRenewalError::Challenge {
-                token: domain.clone(),
-                error,
-            })?;
-    }
-    Ok(())
-}
+use super::AcmeRenewalError;
 
 #[cfg(feature = "acme-client")]
 pub(super) fn tls_alpn_01_certificate(

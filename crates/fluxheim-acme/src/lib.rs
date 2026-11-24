@@ -155,6 +155,7 @@ pub struct AcmeRenewalOutcome {
     pub issuer: String,
     pub certificate: AcmeCertificatePaths,
     pub published_challenges: usize,
+    pub cleanup_pending: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -209,6 +210,9 @@ mod acme_certificate_paths;
 mod acme_challenges;
 #[path = "acme_cleanup.rs"]
 mod acme_cleanup;
+mod acme_order;
+mod acme_order_slot;
+pub use acme_order::reconcile_managed_challenges;
 #[path = "acme_directory.rs"]
 mod acme_directory;
 #[path = "acme_eab.rs"]
@@ -274,10 +278,10 @@ pub use acme_certificate_paths::{
     inspect_managed_leaf_validity, load_certificate_not_after, managed_certificate_paths,
     observe_target_certificate,
 };
+use acme_challenges::acme_client_error_message_with_http_01_context;
 pub use acme_challenges::{
     AcmeHttp01ChallengeStore, AcmeTlsAlpn01ChallengeStore, http_01_token_from_path,
 };
-use acme_challenges::{acme_client_error_message_with_http_01_context, cleanup_http_01_challenges};
 use acme_cleanup::finish_renewal_cleanup;
 #[cfg(all(feature = "acme-client", test))]
 pub(crate) use acme_eab::decode_eab_hmac_key;
@@ -319,7 +323,7 @@ pub use acme_queue::{
 };
 pub use acme_targets::{managed_acme_targets, renewal_targets};
 #[cfg(feature = "acme-client")]
-use acme_tls_alpn::{cleanup_tls_alpn_01_challenges, tls_alpn_01_certificate};
+use acme_tls_alpn::tls_alpn_01_certificate;
 pub use acme_transaction::{AcmeCertificateReadLock, lock_managed_certificate_pair};
 use acme_transaction::{AcmeMutationLock, unique_transaction_id};
 
@@ -365,12 +369,24 @@ pub fn execute_renewal<Client: AcmeIssuerClient>(
                 message: error.to_string(),
             })?;
     let challenge_store = AcmeHttp01ChallengeStore::new(storage, &item.target.vhost_name);
+    if order.challenges.len() > acme_order_slot::MAX {
+        return Err(AcmeRenewalError::Client {
+            issuer: item.target.issuer.clone(),
+            message: "too many HTTP-01 challenges".into(),
+        });
+    }
+    let mut ownership = acme_order::Order::new().map_err(acme_cleanup::order_error)?;
     let mut published = Vec::with_capacity(order.challenges.len());
 
     let result = (|| {
         for challenge in &order.challenges {
-            challenge_store
-                .install_key_authorization(&challenge.token, &challenge.key_authorization)
+            ownership
+                .http(
+                    storage,
+                    &item.target.vhost_name,
+                    &challenge.token,
+                    &challenge.key_authorization,
+                )
                 .map_err(|error| AcmeRenewalError::Challenge {
                     token: challenge.token.clone(),
                     error,
@@ -406,10 +422,11 @@ pub fn execute_renewal<Client: AcmeIssuerClient>(
             issuer: item.target.issuer.clone(),
             certificate,
             published_challenges: published.len(),
+            cleanup_pending: false,
         })
     })();
 
-    let cleanup = cleanup_http_01_challenges(&challenge_store, &published);
+    let cleanup = ownership.finish().map_err(acme_cleanup::order_error);
     finish_renewal_cleanup(result, cleanup)
 }
 

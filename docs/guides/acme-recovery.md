@@ -116,29 +116,34 @@ state is incomplete/ambiguous, keep the affected listener isolated until repaire
 
 ## Challenge Cleanup
 
-Normal completed renewal paths attempt to remove published challenges. Two
-important limits remain under **Current limitation:**
+**When a renewal stops:** managed HTTP-01 tokens are served only while their
+publisher holds an operating-system lock. A cancelled renewal, timeout or dead
+companion releases that lock. A new lookup no longer serves its token, even if
+the file is still on disk. TLS-ALPN challenge files use the same ownership
+rule; this does not enable live TLS-ALPN validation on a listener by itself.
+Use a private filesystem shared by gateway and companion that supports
+cross-process file locking and atomic directory rename.
 
-- Cleanup is after the awaited operation. Dropping/cancelling that future or
-  the outer renewal timeout can skip it; there is no cancellation-owned cleanup
-  guard in that path. This is source-confirmed; a local-CA cancellation test is
-  still required for the correction.
-- Each cleanup list stops on its first error. Tests prove that an unsafe first
-  HTTP token or TLS challenge path leaves later valid challenges untouched.
-  TLS pair removal can delete the certificate before failing on the key path.
+**What gets removed:** each HTTP vhost or TLS challenge domain has a private
+`.fluxheim-order` directory. Cancellation hands deletion to a bounded worker;
+gateway startup and the next order retry cleanup for configured targets. A live
+order is never swept. Independent files are processed even if one removal fails.
+A changed file, unexpected link or unknown file is left out of service under
+`retired` for inspection. The same slot cannot publish again until it is clear.
+Do not delete lock files to force a renewal or recursively clean live storage.
 
-The async renewal timeout is not a guarantee that synchronous filesystem work
-or lock acquisition can always be preempted. A failed or interrupted order
-must not be assumed to have left an empty challenge store. Conversely, a leftover
-challenge is not proof that the CA issued a certificate or that someone can
-obtain one without the matching order/account authorization.
+**When cleanup fails:** an installed certificate still follows your configured
+activation policy. The companion distinguishes installation from pending
+challenge cleanup and returns nonzero. Check the served leaf before reissuing.
+Stop writers before inspecting the affected slot; repair permissions or move
+the unexpected file to protected storage, then restart or retry. If you remove
+a vhost or domain, its directories are no longer visited at startup.
 
-Do not use a recursive cleanup command against live storage. First stop the
-responsible writer, identify the exact failed order's artifacts, and preserve
-evidence. Do not remove another order's challenge or follow links placed in an
-unexpected path. There is no documented general-purpose “sweep all leftovers”
-command. Cleanup ownership, restart reconciliation and bounded retention are
-part of the planned correction.
+**Upgrading an external companion:** finish or stop old orders first. Upgrade
+the gateway before enabling the new companion. Older gateways do not know the
+managed layout. Flat challenge files from older versions or manual provisioning
+remain readable and are never swept: inspect any leftovers offline. No
+configuration migration is needed for a gateway that renews its own certificates.
 
 ## Revocation
 

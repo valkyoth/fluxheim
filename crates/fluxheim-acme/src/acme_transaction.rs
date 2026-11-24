@@ -107,7 +107,6 @@ impl AcmeMutationLock {
         }
     }
 
-    #[cfg(any(feature = "acme-client", test))]
     pub(crate) fn try_acquire(directory: &Path) -> io::Result<Option<Self>> {
         #[cfg(unix)]
         {

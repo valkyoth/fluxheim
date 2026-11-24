@@ -47,7 +47,7 @@ async fn execute_instant_http_01_renewal(
     let account = load_or_create_instant_acme_account(config, &item.target.issuer)
         .await
         .map_err(instant_client_error_to_renewal_error)?;
-    let challenge_store = AcmeHttp01ChallengeStore::new(storage, &item.target.vhost_name);
+    let mut ownership = acme_order::Order::new().map_err(acme_cleanup::order_error)?;
     let mut published = Vec::with_capacity(item.target.domains.len());
 
     let result = async {
@@ -78,6 +78,14 @@ async fn execute_instant_http_01_renewal(
                 }
 
                 let identifier = authorization.identifier().to_string();
+                if !item
+                    .target
+                    .domains
+                    .iter()
+                    .any(|d| d.eq_ignore_ascii_case(&identifier))
+                {
+                    return Err(acme_cleanup::order_error(io::ErrorKind::InvalidData.into()));
+                }
                 let mut challenge = authorization
                     .challenge(instant_acme::ChallengeType::Http01)
                     .ok_or_else(|| AcmeRenewalError::Client {
@@ -90,12 +98,9 @@ async fn execute_instant_http_01_renewal(
                 let token = challenge.token.clone();
                 let key_authorization = challenge.key_authorization().as_str().to_owned();
 
-                challenge_store
-                    .install_key_authorization(&token, &key_authorization)
-                    .map_err(|error| AcmeRenewalError::Challenge {
-                        token: token.clone(),
-                        error,
-                    })?;
+                ownership
+                    .http(storage, &item.target.vhost_name, &token, &key_authorization)
+                    .map_err(acme_cleanup::order_error)?;
                 published.push(token.clone());
                 challenge
                     .set_ready()
@@ -166,11 +171,12 @@ async fn execute_instant_http_01_renewal(
             issuer: item.target.issuer.clone(),
             certificate,
             published_challenges: published.len(),
+            cleanup_pending: false,
         })
     }
     .await;
 
-    let cleanup = cleanup_http_01_challenges(&challenge_store, &published);
+    let cleanup = ownership.finish().map_err(acme_cleanup::order_error);
     finish_renewal_cleanup(result, cleanup)
 }
 
@@ -188,7 +194,7 @@ async fn execute_instant_tls_alpn_01_renewal(
     let account = load_or_create_instant_acme_account(config, &item.target.issuer)
         .await
         .map_err(instant_client_error_to_renewal_error)?;
-    let challenge_store = AcmeTlsAlpn01ChallengeStore::new(storage);
+    let mut ownership = acme_order::Order::new().map_err(acme_cleanup::order_error)?;
     let mut published = Vec::with_capacity(item.target.domains.len());
 
     let result = async {
@@ -219,6 +225,14 @@ async fn execute_instant_tls_alpn_01_renewal(
                 }
 
                 let identifier = authorization.identifier().to_string();
+                if !item
+                    .target
+                    .domains
+                    .iter()
+                    .any(|d| d.eq_ignore_ascii_case(&identifier))
+                {
+                    return Err(acme_cleanup::order_error(io::ErrorKind::InvalidData.into()));
+                }
                 let mut challenge = authorization
                     .challenge(instant_acme::ChallengeType::TlsAlpn01)
                     .ok_or_else(|| AcmeRenewalError::Client {
@@ -232,13 +246,9 @@ async fn execute_instant_tls_alpn_01_renewal(
                 let (cert_pem, key_pem) = tls_alpn_01_certificate(&identifier, digest.as_ref())?;
                 key_pem
                     .with_secret(|private_key| {
-                        challenge_store.install_challenge_certificate(
-                            &identifier,
-                            &cert_pem,
-                            private_key,
-                        )
+                        ownership.alpn(storage, &identifier, &cert_pem, private_key)
                     })
-                    .map_err(AcmeRenewalError::CertificateInstall)?;
+                    .map_err(acme_cleanup::order_error)?;
                 published.push(identifier.clone());
                 challenge
                     .set_ready()
@@ -293,11 +303,12 @@ async fn execute_instant_tls_alpn_01_renewal(
             issuer: item.target.issuer.clone(),
             certificate,
             published_challenges: published.len(),
+            cleanup_pending: false,
         })
     }
     .await;
 
-    let cleanup = cleanup_tls_alpn_01_challenges(&challenge_store, &published);
+    let cleanup = ownership.finish().map_err(acme_cleanup::order_error);
     finish_renewal_cleanup(result, cleanup)
 }
 

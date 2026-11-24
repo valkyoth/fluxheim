@@ -977,4 +977,5 @@ collector behavior is not the new required-collector acceptance contract.
 | 29 - ACME renewal holds | Accepted | Apply the same hold to background and CLI due runs; retain explicit force. [Evidence](../evidence/observability-29.md). |
 | 30 - ACME background retry | Accepted | Delay retries per failed vhost without delaying healthy targets. [Evidence](../evidence/observability-30.md). |
 | 31 - ACME reload policy | Implemented; review pending | Separate installation from activation and bound companion reload confirmation. [Evidence](../evidence/observability-31.md). |
+| 32 - ACME challenge cleanup | Implemented; review pending | Stop serving abandoned challenges, reconcile only owned material and preserve the installation outcome. [Evidence](../evidence/observability-32.md). |
 | Post-documentation corrections | Pending | Detailed numbering and evidence retained locally; no release acceptance claimed. |

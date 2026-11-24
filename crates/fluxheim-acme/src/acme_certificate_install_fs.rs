@@ -2,7 +2,7 @@ use super::super::*;
 
 #[path = "acme_certificate_install_write.rs"]
 mod write;
-pub(super) use write::{certificate_metadata_is_link, write_new_file};
+pub(crate) use write::{certificate_metadata_is_link, write_new_file};
 
 #[cfg(unix)]
 pub(super) type CertificateDirectoryFd = rustix::fd::OwnedFd;
@@ -148,7 +148,7 @@ pub(crate) fn managed_certificate_owner(
     managed_certificate_ownership(storage).map(|ownership| ownership.file_owner())
 }
 
-pub(super) fn ensure_safe_directory(
+pub(crate) fn ensure_safe_directory(
     directory: &Path,
     ownership: &ManagedCertificateOwnership,
 ) -> Result<(), AcmeCertificateInstallError> {

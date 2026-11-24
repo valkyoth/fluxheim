@@ -326,6 +326,12 @@ pub(super) fn run_renew(
 
     let renewed_count = run.renewed.len();
     for outcome in &run.renewed {
+        if outcome.cleanup_pending {
+            println!(
+                "challenge cleanup pending: certificate already installed for {}",
+                outcome.vhost_name
+            );
+        }
         println!(
             "renewed: {} issuer={} certificate=installed challenges={}",
             outcome.vhost_name, outcome.issuer, outcome.published_challenges
@@ -351,6 +357,9 @@ pub(super) fn run_renew(
 
     if !run.failed.is_empty() {
         return Err(format!("ACME renewal failed for {} target(s)", run.failed.len()).into());
+    }
+    if run.renewed.iter().any(|outcome| outcome.cleanup_pending) {
+        return Err("ACME certificate installed; challenge cleanup requires attention".into());
     }
     Ok(())
 }

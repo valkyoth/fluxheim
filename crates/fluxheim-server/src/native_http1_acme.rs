@@ -39,10 +39,13 @@ impl NativeHttp1AcmeHttp01Store {
             _ => return Ok(None),
         };
 
-        let file = match open_regular_http_01_challenge_file(&path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error),
+        let file = match fluxheim_config::acme_publication::open_live_file(&self.root, token)? {
+            Some(file) => file,
+            None => match open_regular_http_01_challenge_file(&path) {
+                Ok(file) => file,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => return Err(error),
+            },
         };
         let metadata = file.metadata()?;
         if metadata.file_type().is_symlink() || !metadata.is_file() {

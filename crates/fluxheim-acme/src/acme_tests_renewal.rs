@@ -31,7 +31,7 @@ fn renewal_cleanup_preserves_the_primary_failure() {
         message: "cleanup failed".to_owned(),
     };
 
-    let error = crate::finish_renewal_cleanup::<()>(Err(primary), Err(cleanup)).unwrap_err();
+    let error = crate::finish_renewal_cleanup(Err(primary), Err(cleanup)).unwrap_err();
     assert!(error.to_string().contains("issuance failed"));
     assert!(!error.to_string().contains("cleanup failed"));
 }

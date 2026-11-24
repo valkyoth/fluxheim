@@ -16,10 +16,13 @@ import time
 
 from acme_backoff_smoke import backoff_configuration, qualify_backoff
 from acme_activation_smoke import companion_matrix, pinned_tls
+from acme_cleanup_smoke import qualify_cleanup
+from acme_pebble_frontend import PAUSE_PHASES
 
 PEBBLE = "ghcr.io/letsencrypt/pebble@sha256:5080492187bea12909c053d7a2b90a9e95104ef1c82381828e7823db71ce7e54"
 PYTHON = "docker.io/library/python@sha256:281d39ff02e3b389401586134ff9e6572954687822a58055ec07a60ded4e0b7f"
 RENEWAL_CONFIGS = tuple(f"renew-{index}.toml" for index in range(4))
+PAUSE_CONFIGS = tuple(f"pause-{phase}.toml" for phase in PAUSE_PHASES)
 
 
 def command(args, *, check=True, data=None, timeout=180):
@@ -114,6 +117,9 @@ def fixtures(root):
     (control / "server.toml").write_text(configuration(renewal=False, held=True))
     (control / "served.toml").write_text(configuration(renewal=False, issuer="pebble-background", released=True))
     (control / "backoff.toml").write_text(backoff_configuration(configuration))
+    for phase, name in zip(PAUSE_PHASES, PAUSE_CONFIGS, strict=True):
+        (control / name).write_text(configuration(renewal=False, issuer="pause-" + phase).replace(
+            "https://localhost:14000/dir", "https://localhost:14000/pause-" + phase))
     # Isolate feature mismatch from PHP filesystem availability.
     (control / "cache.toml").write_text(configuration(renewal=False) +
         "[cache]\nenabled=true\n[cache.memory]\nenabled=true\n")
@@ -148,7 +154,7 @@ class Smoke:
         # preserving ownership) into an engine volume, then mount it read-only.
         name = self.prefix + "-fixtures"
         self.names.append(name)
-        sources = ("renew.toml", "server.toml", "served.toml", "backoff.toml", "cache.toml", "elective.toml", "off.toml", *RENEWAL_CONFIGS, "ca.pem")
+        sources = ("renew.toml", "server.toml", "served.toml", "backoff.toml", *PAUSE_CONFIGS, "cache.toml", "elective.toml", "off.toml", *RENEWAL_CONFIGS, "ca.pem")
         mounts = [argument for source in sources
                   for argument in self.mount(source, "/input/" + source)]
         command([self.runtime, "run", "--name", name, "--network=none", "--user=0",
@@ -393,6 +399,10 @@ def qualify(smoke, full, php, legacy):
     tls, _ = pinned_tls(certificate)
     command([smoke.runtime, "stop", activated])
     qualify_backoff(smoke, full, frontend, tls_port, tls, certificate_dir, certificate, command)
+    command([smoke.runtime, "stop", smoke.prefix + "-retry"])
+    for phase in PAUSE_PHASES:
+        qualify_cleanup(smoke, full, frontend, int(info["NetworkSettings"]["Ports"]["5002/tcp"][0]["HostPort"]),
+                        segment, certificate_dir, phase, command)
     print("ACME operation scope and server feature parity smoke: ok", flush=True)
 
 

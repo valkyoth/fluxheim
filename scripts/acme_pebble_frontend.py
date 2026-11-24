@@ -13,6 +13,29 @@ import time
 LIMIT = 2 * 1024 * 1024
 TERMS = "https://localhost:14000/terms"
 PEBBLE_TERMS = "data:text/plain,Do%20what%20thou%20wilt"
+PAUSE_PHASES = ("account", "order", "authorization", "challenge", "ready", "finalize", "certificate")
+
+
+def response_phase(path, mime, body):
+    if mime == "application/pem-certificate-chain":
+        return "certificate"
+    if mime != "application/json":
+        return None
+    obj = json.loads(body)
+    if "orders" in obj and "status" in obj:
+        return "account"
+    if path == "/order-plz":
+        return "order"
+    if "challenges" in obj and "identifier" in obj:
+        return "authorization"
+    if "token" in obj and "type" in obj:
+        return "challenge"
+    if "authorizations" in obj:
+        if path == obj.get("finalize", "").removeprefix("https://localhost:14000"):
+            return "finalize"
+        if obj.get("status") == "ready":
+            return "ready"
+    return None
 
 
 def directory_body(body):
@@ -27,6 +50,7 @@ def main():
     context = ssl.create_default_context(cafile="/fixture/ca.pem")
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     failures_left = 2
+    pause_phase = None
     fault_lock = threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
@@ -34,13 +58,17 @@ def main():
             pass
 
         def handle_request(self):
-            nonlocal failures_left
+            nonlocal failures_left, pause_phase
             self.connection.settimeout(10)
             size = int(self.headers.get("Content-Length", "0"))
             if not 0 <= size <= LIMIT or self.headers.get("Transfer-Encoding"):
                 self.send_error(400)
                 return
             path = self.path
+            if self.command == "GET" and path.removeprefix("/pause-") in PAUSE_PHASES and path.startswith("/pause-"):
+                with fault_lock:
+                    pause_phase = path.removeprefix("/pause-")
+                path = "/dir"
             if self.command == "GET" and path == "/retry-dir":
                 with fault_lock:
                     print(f"retry directory {time.monotonic_ns()}", flush=True)
@@ -58,11 +86,22 @@ def main():
                     print("order request", flush=True)
                 if self.headers.get("Content-Type"):
                     headers["Content-Type"] = self.headers["Content-Type"]
-                connection.request(self.command, path, self.rfile.read(size), headers)
+                request = self.rfile.read(size)
+                connection.request(self.command, path, request, headers)
                 response = connection.getresponse()
                 body = response.read(LIMIT + 1)
                 if len(body) > LIMIT:
                     raise ValueError("oversized local CA response")
+                if self.command == "POST" and 200 <= response.status < 300:
+                    phase = response_phase(path, response.headers.get_content_type(), body)
+                    with fault_lock:
+                        pause = phase is not None and phase == pause_phase
+                        if pause:
+                            pause_phase = None
+                    if pause:
+                        print("paused issuer response: " + phase, flush=True)
+                        time.sleep(30)
+                        return
                 if path == "/dir" and response.status == 200:
                     body = directory_body(body)
                 self.send_response(response.status)

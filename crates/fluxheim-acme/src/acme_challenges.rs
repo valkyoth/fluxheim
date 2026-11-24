@@ -86,10 +86,13 @@ impl AcmeHttp01ChallengeStore {
             _ => return Ok(None),
         }
 
-        let file = match open_regular_http_01_challenge_file(&path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error),
+        let file = match fluxheim_config::acme_publication::open_live_file(&self.root, token)? {
+            Some(file) => file,
+            None => match open_regular_http_01_challenge_file(&path) {
+                Ok(file) => file,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => return Err(error),
+            },
         };
         let metadata = file.metadata()?;
         if metadata.file_type().is_symlink() || !metadata.is_file() {
@@ -307,7 +310,21 @@ impl AcmeTlsAlpn01ChallengeStore {
     }
 
     pub fn certificate_paths_for_sni(&self, sni: &str) -> Option<AcmeCertificatePaths> {
-        self.certificate_paths_for_domain(sni)
+        use fluxheim_config::acme_publication::{ACTIVE_DIR, ORDER_DIR, open_live_file};
+        let legacy = self.certificate_paths_for_domain(sni)?;
+        let parent = legacy.cert_path.parent()?;
+        if open_live_file(parent, MANAGED_FULLCHAIN_FILE)
+            .ok()?
+            .is_some()
+        {
+            let active = parent.join(ORDER_DIR).join(ACTIVE_DIR);
+            Some(AcmeCertificatePaths {
+                cert_path: active.join(MANAGED_FULLCHAIN_FILE),
+                key_path: active.join(MANAGED_PRIVATE_KEY_FILE),
+            })
+        } else {
+            Some(legacy)
+        }
     }
 
     fn certificate_paths_for_domain(&self, domain: &str) -> Option<AcmeCertificatePaths> {
@@ -318,21 +335,6 @@ impl AcmeTlsAlpn01ChallengeStore {
             key_path: directory.join(MANAGED_PRIVATE_KEY_FILE),
         })
     }
-}
-
-pub(super) fn cleanup_http_01_challenges(
-    store: &AcmeHttp01ChallengeStore,
-    tokens: &[String],
-) -> Result<(), AcmeRenewalError> {
-    for token in tokens {
-        store
-            .remove_key_authorization(token)
-            .map_err(|error| AcmeRenewalError::Challenge {
-                token: token.clone(),
-                error,
-            })?;
-    }
-    Ok(())
 }
 
 pub(super) fn acme_client_error_message_with_http_01_context(

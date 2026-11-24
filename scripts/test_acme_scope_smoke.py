@@ -90,6 +90,22 @@ class AcmeDeploymentDocumentationTests(unittest.TestCase):
 
 
 class AcmeSmokeTests(unittest.TestCase):
+    def test_paused_issuer_distinguishes_each_order_stage(self):
+        stages = (
+            ("/acct", {"orders": "/orders", "status": "valid"}),
+            ("/order-plz", {"status": "pending"}),
+            ("/auth", {"challenges": [], "identifier": {"type": "dns"}}),
+            ("/challenge", {"type": "http-01", "token": "fixture"}),
+            ("/order", {"authorizations": [], "status": "ready"}),
+            ("/finish", {"authorizations": [], "finalize": "https://localhost:14000/finish"}),
+        )
+        results = [frontend.response_phase(path, "application/json", json.dumps(body))
+                   for path, body in stages]
+        results.append(frontend.response_phase("/cert", "application/pem-certificate-chain", b""))
+        self.assertEqual(tuple(results), frontend.PAUSE_PHASES)
+        self.assertIsNone(frontend.response_phase("/order", "application/json",
+                                                  '{"authorizations": [], "status": "pending"}'))
+
     def instance(self, runtime="podman"):
         with patch.object(smoke, "fixtures", return_value=Path("/fixture-input")):
             return smoke.Smoke(runtime, Path("/unused"))
@@ -113,7 +129,7 @@ class AcmeSmokeTests(unittest.TestCase):
         self.assertIn("--entrypoint=/bin/cp", args)
         self.assertNotIn("-p", args)
         self.assertNotIn("-a", args)
-        sources = ["renew.toml", "server.toml", "served.toml", "backoff.toml", "cache.toml", "elective.toml", "off.toml", *smoke.RENEWAL_CONFIGS, "ca.pem"]
+        sources = ["renew.toml", "server.toml", "served.toml", "backoff.toml", *smoke.PAUSE_CONFIGS, "cache.toml", "elective.toml", "off.toml", *smoke.RENEWAL_CONFIGS, "ca.pem"]
         self.assertEqual(args[-len(sources)-1:],
                          ["/input/" + name for name in sources] + ["/control/"])
         host_mounts = [arg for arg in args if arg.startswith("/fixture-input/")]

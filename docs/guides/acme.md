@@ -94,6 +94,9 @@ HTTP-01 serves token files beneath `/.well-known/acme-challenge/`. Keep that
 path reachable by the CA even when the rest of the site redirects to HTTPS.
 Fluxheim's managed challenge handling has its own route; an external HTTP-01
 forwarder takes precedence if you enable one on the same vhost.
+An interrupted managed renewal stops serving its token without waiting for
+disk cleanup. When upgrading a gateway and a separate companion, upgrade the
+gateway first. See [challenge cleanup and recovery](acme-recovery.md#challenge-cleanup).
 
 **the documented limitation: native TLS-ALPN-01 serving is incomplete. Use HTTP-01 for
 managed issuance today.** The accepted configuration below is not a working
