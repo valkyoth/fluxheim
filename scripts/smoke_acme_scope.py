@@ -15,7 +15,7 @@ import tempfile
 import time
 
 from acme_backoff_smoke import backoff_configuration, qualify_backoff
-from acme_activation_smoke import companion_matrix, pinned_tls
+from acme_activation_smoke import assert_served, companion_matrix, pinned_tls
 from acme_cleanup_smoke import qualify_cleanup
 from acme_pebble_frontend import PAUSE_PHASES
 
@@ -415,6 +415,37 @@ def qualify(smoke, full, php, legacy):
     for phase in PAUSE_PHASES:
         qualify_cleanup(smoke, full, frontend, int(info["NetworkSettings"]["Ports"]["5002/tcp"][0]["HostPort"]),
                         segment, certificate_dir, phase, command)
+    incident = smoke.launch("incident", full, [], config="server.toml", wait=False)
+    exe = "/usr/local/bin/fluxheim-acme"
+    def incident_cmd(config, *args):
+        return command([smoke.runtime, "exec", incident, exe, "--config", "/etc/fluxheim/" + config, *args])
+    incident_cmd("renew.toml", "renew", "--force-renew", "--no-reload")
+    command([smoke.runtime, "stop", incident])
+    incident = smoke.launch("incident-active", full, [], config="server.toml", wait=False)
+    cert = command([smoke.runtime, "exec", incident, "cat", certificate_dir + "/fullchain.pem"]).stdout
+    for attempt in range(50):
+        try:
+            assert_served(tls_port, cert)
+            break
+        except (ConnectionError, ssl.SSLEOFError):
+            if attempt == 49:
+                raise
+            time.sleep(0.1)
+    before = order_count()
+    incident_cmd("off.toml", "doctor")
+    code, logs = smoke.launch("off-revoke", full, ["revoke", "--vhost", "scope", "--confirm"],
+                              entry=exe, config="off.toml")
+    if not code or "remote=confirmed status=quarantined replacement_required=true" not in logs or "activation not confirmed" not in logs:
+        raise AssertionError("detached revocation failed to distinguish remote and listener outcomes: " + logs)
+    expected = hashlib.sha256(pinned_tls(cert)[1]).hexdigest()
+    events = command([smoke.runtime, "logs", frontend]).stdout.splitlines()
+    if events.count("confirmed revocation " + expected) != 1:
+        raise AssertionError("issuer did not confirm revocation of the installed leaf")
+    names = command([smoke.runtime, "exec", incident, "ls", "-a", certificate_dir]).stdout.splitlines()
+    if ("fullchain.pem" in names or "privkey.pem" in names or
+            sum(name.startswith(".revoked-") for name in names) < 2 or order_count() != before):
+        raise AssertionError("revocation did not quarantine the pair without a replacement order")
+    assert_served(tls_port, cert)
     print("ACME operation scope and server feature parity smoke: ok", flush=True)
 
 

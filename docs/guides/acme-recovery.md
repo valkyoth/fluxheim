@@ -94,7 +94,7 @@ supports recovery after an interrupted writer.
 | `published` | Keep the newly published pair and finish temporary/backup cleanup |
 | `rolled-back` | Verify the restored pair and finish cleanup, even if one backup has already been removed |
 
-Recovery runs before another install and through `doctor` for renewal targets:
+Recovery runs before another install and through `doctor` for managed targets, even with scheduling off:
 
 ```bash
 fluxheim-acme --config /etc/fluxheim/fluxheim.toml doctor
@@ -164,11 +164,9 @@ quarantined certificate and journals the remote-operation phase:
 | `remote-pending` | Remote outcome may be ambiguous; retain quarantine and fail closed on disk |
 | `remote-confirmed` | Retain quarantine for review; permit replacement issuance after transaction cleanup |
 
-The library can select managed incident targets even when renewal is disabled.
-**Current limitation:** the companion currently applies a renewal-only target check
-first and rejects that situation. Its test confirms the mismatch without making
-a remote request. It needs a separate incident-target guard, not weaker general
-configuration or path validation.
+Leave renewal disabled during incident response. The companion can revoke a
+managed target without enabling issuance or scheduling a replacement. A vhost
+with ACME disabled is not a managed target.
 
 After successful remote revocation, the companion requests the Unix reload
 socket. On failure or an ambiguous remote result, do not assume the running

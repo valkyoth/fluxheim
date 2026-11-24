@@ -3,12 +3,15 @@
 No ACME/JWS, authorization, challenge or certificate result is synthesized.
 The retry fixture also refuses the first two requests to its separate directory.
 """
+import base64
+import hashlib
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import ssl
 import threading
 import time
+from urllib.parse import urlsplit
 
 LIMIT = 2 * 1024 * 1024
 TERMS = "https://localhost:14000/terms"
@@ -51,6 +54,7 @@ def main():
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     failures_left = 2
     pause_phase = None
+    revoke_path = None
     fault_lock = threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
@@ -58,7 +62,7 @@ def main():
             pass
 
         def handle_request(self):
-            nonlocal failures_left, pause_phase
+            nonlocal failures_left, pause_phase, revoke_path
             self.connection.settimeout(10)
             size = int(self.headers.get("Content-Length", "0"))
             if not 0 <= size <= LIMIT or self.headers.get("Transfer-Encoding"):
@@ -93,7 +97,13 @@ def main():
                 if len(body) > LIMIT:
                     raise ValueError("oversized local CA response")
                 if self.command == "POST" and 200 <= response.status < 300:
-                    phase = response_phase(path, response.headers.get_content_type(), body)
+                    if path == revoke_path:
+                        payload = json.loads(base64.urlsafe_b64decode(json.loads(request)["payload"] + "==="))
+                        der = base64.urlsafe_b64decode(payload["certificate"] + "===")
+                        print("confirmed revocation " + hashlib.sha256(der).hexdigest(), flush=True)
+                        phase = None
+                    else:
+                        phase = response_phase(path, response.headers.get_content_type(), body)
                     with fault_lock:
                         pause = phase is not None and phase == pause_phase
                         if pause:
@@ -104,6 +114,7 @@ def main():
                         return
                 if path == "/dir" and response.status == 200:
                     body = directory_body(body)
+                    revoke_path = urlsplit(json.loads(body)["revokeCert"]).path
                 self.send_response(response.status)
                 for name in ("Replay-Nonce", "Location", "Content-Type", "Retry-After"):
                     if response.getheader(name):

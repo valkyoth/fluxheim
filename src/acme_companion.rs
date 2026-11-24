@@ -188,13 +188,19 @@ mod tests {
     #[cfg(any(feature = "acme", feature = "acme-client"))]
     #[test]
     fn targets_requires_valid_config_path() {
-        let error =
-            run_from_args(["fluxheim-acme", "--config", "/no/such/file", "targets"]).unwrap_err();
-
+        let dir = tempfile::tempdir_in(fluxheim_common::test_support::test_root()).unwrap();
+        let path = dir.path().join("missing.toml");
+        let error = run_from_args([
+            "fluxheim-acme",
+            "--config",
+            path.to_str().unwrap(),
+            "targets",
+        ])
+        .unwrap_err();
         assert!(
-            error.to_string().contains("No such file")
-                || error.to_string().contains("not found")
-                || error.to_string().contains("does not exist")
+            matches!(error.downcast_ref::<fluxheim_config::ConfigLoadError>(),
+            Some(fluxheim_config::ConfigLoadError::Read(e)) if e.kind() == std::io::ErrorKind::NotFound),
+            "{error}"
         );
     }
 

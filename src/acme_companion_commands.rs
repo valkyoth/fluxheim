@@ -57,7 +57,7 @@ pub(super) fn run_revoke(
     #[cfg(feature = "tls-rustls-backend")]
     crate::tls::install_rustls_crypto_provider()?;
     let config = load_validated_config(config_path)?;
-    ensure_acme_target_exists(&config, vhost)?;
+    require_named_target(fluxheim_acme::managed_acme_targets(&config), vhost)?;
     config.validate_certificate_reload_path()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -65,12 +65,16 @@ pub(super) fn run_revoke(
     let outcome = runtime.block_on(fluxheim_acme::revoke_instant_acme_certificate(
         &config, vhost,
     ))?;
-    request_certificate_reload(&config)?;
     println!(
-        "acme certificate revoke: vhost={vhost} status=quarantined replacement_required={}",
+        "acme certificate revoke: vhost={vhost} remote=confirmed status=quarantined replacement_required={}",
         outcome.replacement_required
     );
-    Ok(())
+    #[cfg(unix)]
+    return request_certificate_reload(&config).map_err(|error| {
+        format!("certificate revoked remotely; gateway activation not confirmed: {error}; isolate the listener and verify the served leaf").into()
+    });
+    #[cfg(not(unix))]
+    Err("certificate revoked remotely; gateway activation not confirmed: isolate the listener, restart the service with a replacement and verify the served leaf".into())
 }
 
 #[cfg(feature = "acme-client")]
@@ -87,7 +91,7 @@ pub(super) fn run_doctor(
         .storage
         .as_deref()
         .ok_or("ACME doctor: tls.acme.storage is not configured")?;
-    let targets = fluxheim_acme::renewal_targets(&config);
+    let targets = fluxheim_acme::managed_acme_targets(&config);
     if targets.is_empty() {
         return Err("ACME doctor: no enabled ACME vhost targets are configured".into());
     }
@@ -272,7 +276,7 @@ pub(super) fn run_renew(
 
     let config = load_validated_config(config_path)?;
     if let Some(vhost) = vhost {
-        ensure_acme_target_exists(&config, vhost)?;
+        require_named_target(fluxheim_acme::renewal_targets(&config), vhost)?;
     }
 
     if reload_after_renewal && config.tls.acme.renewal.reload_after_renewal {
@@ -386,7 +390,7 @@ pub(super) fn print_status(
         );
     }
     if let Some(vhost) = vhost {
-        ensure_acme_target_exists(&config, vhost)?;
+        require_named_target(fluxheim_acme::renewal_targets(&config), vhost)?;
     }
 
     let now = std::time::SystemTime::now();
@@ -434,14 +438,11 @@ pub(super) fn print_status(
 }
 
 #[cfg(feature = "acme")]
-fn ensure_acme_target_exists(
-    config: &Config,
+fn require_named_target(
+    targets: Vec<fluxheim_acme::AcmeRenewalTarget>,
     vhost: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    if fluxheim_acme::renewal_targets(config)
-        .into_iter()
-        .any(|target| target.vhost_name == vhost)
-    {
+    if targets.into_iter().any(|target| target.vhost_name == vhost) {
         return Ok(());
     }
     Err(format!("unknown ACME vhost target {vhost:?}").into())

@@ -101,7 +101,7 @@ fn off_status_uses_leaf_dates_including_exact_warning_and_expiry_boundaries() {
 }
 
 #[test]
-fn companion_incident_target_gate_currently_rejects_disabled_renewal() {
+fn incident_inventory_remains_available_without_opening_renewal_admission() {
     let mut config: Config = toml::from_str(
         r#"
 [tls]
@@ -119,13 +119,21 @@ enabled = true
 "#,
     )
     .unwrap();
-    ensure_acme_target_exists(&config, "incident").unwrap();
+    require_named_target(fluxheim_acme::renewal_targets(&config), "incident").unwrap();
     config.tls.acme.renewal.enabled = false;
     let incident_targets = fluxheim_acme::managed_acme_targets(&config);
     assert_eq!(incident_targets.len(), 1);
     assert_eq!(incident_targets[0].vhost_name, "incident");
-    // documented contract: run_revoke applies this renewal-only guard before calling
-    // the incident-capable library. No storage or remote operation is invoked.
-    let error = ensure_acme_target_exists(&config, "incident").unwrap_err();
-    assert!(error.to_string().contains("unknown ACME vhost target"));
+    assert!(require_named_target(incident_targets, "unknown").is_err());
+    require_named_target(fluxheim_acme::managed_acme_targets(&config), "incident").unwrap();
+    assert!(require_named_target(fluxheim_acme::renewal_targets(&config), "incident").is_err());
+    config.vhosts[0].tls.acme.enabled = false;
+    assert!(
+        require_named_target(fluxheim_acme::managed_acme_targets(&config), "incident").is_err()
+    );
+    config.vhosts[0].tls.acme.enabled = true;
+    config.tls.acme.enabled = false;
+    assert!(
+        require_named_target(fluxheim_acme::managed_acme_targets(&config), "incident").is_err()
+    );
 }

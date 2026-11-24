@@ -375,10 +375,8 @@ neither a successful exit nor local restoration proves the remote account state.
 `fluxheim-acme doctor` reports `account-rollover=unavailable` explicitly so
 operators can see this capability limit before an incident.
 
-The revocation library selects managed targets even when automatic renewal is
-disabled. **Current limitation:** the companion's renewal-only precheck rejects those
-targets before calling the library. Do not assume the CLI supports that incident
-workflow until corrected. Fluxheim quarantines the certificate and key under
+The companion can revoke a managed certificate with renewal disabled. Do not
+enable scheduling to perform incident response. Fluxheim quarantines the certificate and key under
 the same mutation lock used by TLS readers, then reads and submits the exact
 quarantined certificate while retaining that lock so concurrent renewal cannot
 substitute another identity. A durable fixed-name journal records

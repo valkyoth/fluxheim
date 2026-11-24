@@ -11,6 +11,9 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- The ACME companion can revoke a managed leaf and run recovery with renewal
+  disabled. It reports confirmed revocation separately from listener activation.
+
 - Interrupted ACME installation rollback can be retried without consuming the
   only copy of the previous certificate or key.
 
