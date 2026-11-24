@@ -74,11 +74,13 @@ pub fn next_retry_at(
     failures: u32,
     initial_secs: u64,
     max_secs: u64,
-) -> SystemTime {
-    let capped_shift = failures.min(63);
-    let multiplier = 1_u64.checked_shl(capped_shift).unwrap_or(u64::MAX);
-    let delay_secs = initial_secs.saturating_mul(multiplier).min(max_secs);
-    now + Duration::from_secs(delay_secs)
+) -> Option<SystemTime> {
+    now.checked_add(retry_delay(failures, initial_secs, max_secs))
+}
+
+pub(super) fn retry_delay(prior_failures: u32, initial_secs: u64, max_secs: u64) -> Duration {
+    let multiplier = 1_u64.checked_shl(prior_failures).unwrap_or(u64::MAX);
+    Duration::from_secs(initial_secs.saturating_mul(multiplier).min(max_secs))
 }
 
 pub fn toml_offset_datetime_to_system_time(datetime: &Datetime) -> Option<SystemTime> {

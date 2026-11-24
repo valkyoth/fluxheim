@@ -381,13 +381,14 @@ impl crate::background::FluxBackgroundTask for AcmeRenewalBackgroundService {
         ready.notify_ready();
         let interval =
             std::time::Duration::from_secs(self.config.tls.acme.renewal.check_interval_secs);
+        let mut renewals = fluxheim_acme::BackgroundRenewals::new(&self.config);
 
         loop {
             if shutdown.is_shutdown() {
                 break;
             }
 
-            run_acme_renewal_tick(&self.config, self.certificate_reloader.as_ref()).await;
+            run_acme_renewal_tick(&mut renewals, self.certificate_reloader.as_ref()).await;
             if shutdown.sleep_or_shutdown(interval).await {
                 break;
             }
@@ -397,11 +398,10 @@ impl crate::background::FluxBackgroundTask for AcmeRenewalBackgroundService {
 
 #[cfg(feature = "acme-client")]
 async fn run_acme_renewal_tick(
-    config: &crate::config::Config,
+    renewals: &mut fluxheim_acme::BackgroundRenewals<'_>,
     reloader: Option<&DownstreamCertificateReloader>,
 ) {
-    match fluxheim_acme::renew_due_instant_acme_targets(config, std::time::SystemTime::now()).await
-    {
+    match renewals.tick(std::time::SystemTime::now()).await {
         Ok(run) if run.attempted == 0 => {
             log::debug!("ACME renewal check complete; no due certificates");
         }

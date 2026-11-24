@@ -171,11 +171,11 @@ fn retry_backoff_is_capped() {
 
     assert_eq!(
         next_retry_at(now, 0, 300, 86_400),
-        UNIX_EPOCH + Duration::from_secs(1_300)
+        Some(UNIX_EPOCH + Duration::from_secs(1_300))
     );
     assert_eq!(
         next_retry_at(now, 20, 300, 86_400),
-        UNIX_EPOCH + Duration::from_secs(87_400)
+        Some(UNIX_EPOCH + Duration::from_secs(87_400))
     );
 }
 

@@ -16,6 +16,88 @@ fn runtime() -> tokio::runtime::Runtime {
 }
 
 #[test]
+fn background_failure_suppresses_the_next_due_attempt() {
+    let mut config = held_config("acme-backoff");
+    config.tls.acme.renewal.renew_after = None;
+    let now = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+    let rt = runtime();
+    config.tls.acme.renewal.retry_initial_secs = 3;
+    config.tls.acme.renewal.retry_max_secs = 8;
+    let mut worker = crate::BackgroundRenewals::new(&config);
+    let start = std::time::Instant::now();
+    let mut attempts = Vec::new();
+    for elapsed in [0, 0, 2, 3, 8, 9, 16, 17, 24, 25] {
+        let run = rt
+            .block_on(worker.tick_with_clock(now, || start + Duration::from_secs(elapsed)))
+            .unwrap();
+        attempts.push(run.attempted);
+    }
+    std::fs::remove_dir_all(config.tls.acme.storage.unwrap()).unwrap();
+    assert_eq!(attempts, [1, 0, 0, 1, 0, 1, 0, 1, 0, 1]);
+}
+
+#[test]
+fn background_backoff_is_per_managed_vhost_and_dies_with_the_worker() {
+    let mut config = held_config("acme-backoff-reset");
+    config.tls.acme.renewal.renew_after = None;
+    config.vhosts = (0..32)
+        .map(|n| managed_vhost(&format!("target-{n}")))
+        .collect();
+    let rt = runtime();
+    let now = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+    {
+        let mut worker = crate::BackgroundRenewals::new(&config);
+        let run = rt.block_on(worker.tick(now)).unwrap();
+        assert_eq!((run.attempted, run.failed.len()), (32, 32));
+        assert_eq!(rt.block_on(worker.tick(now)).unwrap().attempted, 0);
+        assert_eq!(
+            rt.block_on(renew_selected_instant_acme_targets(
+                &config, now, "target-0", false
+            ))
+            .unwrap()
+            .attempted,
+            1
+        );
+    }
+    config.vhosts.truncate(1);
+    let mut replacement = crate::BackgroundRenewals::new(&config);
+    assert_eq!(rt.block_on(replacement.tick(now)).unwrap().attempted, 1);
+    std::fs::remove_dir_all(config.tls.acme.storage.unwrap()).unwrap();
+}
+
+#[test]
+fn cancelling_mid_tick_keeps_completed_failures_but_not_pending_attempts() {
+    let mut config = held_config("acme-backoff-cancel");
+    config.tls.acme.renewal.renew_after = None;
+    let mut first = managed_vhost("a");
+    first.tls.acme.issuer = Some("unknown-test-issuer".into()); // fails before any I/O
+    config.vhosts = vec![first, managed_vhost("b")];
+    let now = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    let mut worker = crate::BackgroundRenewals::new(&config);
+    rt.block_on(async {
+        // Keep the second target's filesystem bootstrap pending until the tick is dropped.
+        let (release, gate) = std::sync::mpsc::channel();
+        let blocker =
+            tokio::task::spawn_blocking(move || gate.recv_timeout(Duration::from_secs(10)));
+        {
+            let mut tick = Box::pin(worker.tick(now));
+            assert!(futures::poll!(&mut tick).is_pending());
+        }
+        release.send(()).unwrap();
+        blocker.await.unwrap().unwrap();
+        let retried = worker.tick(now).await.unwrap();
+        assert_eq!(retried.attempted, 1);
+        assert_eq!(retried.failed[0].vhost_name, "b");
+    });
+    std::fs::remove_dir_all(config.tls.acme.storage.unwrap()).unwrap();
+}
+
+#[test]
 fn missing_certificate_due_executor_respects_future_hold_without_creating_state() {
     let config = held_config("acme-guide-future-hold");
     let now = UNIX_EPOCH + Duration::from_secs(1_800_000_000);

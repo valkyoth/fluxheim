@@ -311,6 +311,7 @@ impl Display for ConfigError {
             | Self::InvalidAcmeRenewalDuration { .. }
             | Self::InvalidAcmeRenewAfterDatetime
             | Self::AcmeRenewalRetryInitialExceedsMax
+            | Self::AcmeRenewalRetryMaxExceedsWeek
             | Self::EmptyAcmeIssuerName { .. }
             | Self::DuplicateAcmeIssuerName { .. }
             | Self::UnknownAcmeIssuer { .. }

@@ -209,10 +209,10 @@ Unix seconds. A successful inventory checks dates only: it does not prove that
 the live listener serves the leaf or that a client trusts the chain.
 
 Other scheduling considerations:
-- **Current limitation:** `retry_initial_secs` and `retry_max_secs` validate but the
-  background loop does not use them for per-target failure backoff. It runs a
-  tick, then waits `check_interval_secs`. Keep that interval conservative and
-  monitor failures; lowering it can repeatedly retry a failing CA.
+- After a failed background issuance, only that vhost waits: the delay starts at
+  `retry_initial_secs`, doubles after consecutive failures up to `retry_max_secs`,
+  and resets on success. The worker retries on a normal check, not on a separate timer.
+  CLI invocations do not share this history. See the [retry example](certificate-renewal.md#retry-policy).
 - **Current limitation:** background renewal reloads whenever a reload handle exists,
   irrespective of `reload_after_renewal`. The companion and reload-control
   service planning do honor that flag. `zero_downtime_reload` has no runtime
@@ -260,7 +260,7 @@ issuance support.
 | TLS-ALPN-01 failure | Native challenge serving is incomplete; use HTTP-01 rather than repeatedly forcing orders |
 | Files renewed but old certificate served | Reload result, serving process storage, default-vhost/SNI routing; use a new TLS connection |
 | EAB/ownership error | Secret source, service identity, mounts, symlinks and writable ancestors; do not solve by making keys public |
-| Repeated renewal failures | CA errors/limits, clock, credentials and the current unwired backoff limitation |
+| Repeated renewal failures | Check CA limits, clock and credentials; allow for the background retry delay, or correct the external timer's cadence |
 
 For issuer selection, registration, EAB and account incident limitations, see
 [ACME accounts and issuers](acme-accounts.md). In particular, account deactivation

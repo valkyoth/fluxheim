@@ -886,16 +886,37 @@ signing, key generation, EAB, and outbound TLS evidence.
 
 ## Retry Policy
 
-**Current limitation:** failure backoff is not wired into the background worker.
-`retry_initial_secs` and `retry_max_secs` are validated settings, and a retry
-calculation helper exists, but production renewal ticks do not retain target
-failure counts or retry deadlines. The worker waits `check_interval_secs` after
-each tick, including a failing tick. External invocation frequency is controlled
-by the operator's timer. Keep intervals conservative; these settings do not
-currently protect an aggressively scheduled deployment from repeated CA calls.
-Failed issuance preserves the existing certificate pair; that storage property
-is separate from scheduling backoff. Implementing and qualifying backoff remains
-a planned correction, not a completed feature.
+For background automation, configure how often to check and the minimum time
+to wait before retrying a failed vhost:
+
+```toml
+[tls.acme.renewal]
+check_interval_secs = 60
+retry_initial_secs = 300
+retry_max_secs = 3600
+```
+
+In this example, consecutive failures wait at least 5, 10, 20, 40 and then
+60 minutes. A successful renewal clears that vhost's streak. Other due
+vhosts, including those using the same issuer, remain eligible. Failed
+issuance does not replace the installed certificate.
+
+The delay runs from completion of the failed attempt, using monotonic time
+without jitter. The worker checks eligibility at the start of a tick and sleeps
+`check_interval_secs` after each tick. An elapsed delay permits a due check;
+it does not schedule an immediate order. Missing and expiring certificates are
+eligible immediately on the first attempt but do not bypass a failure cooldown.
+CA renewal advice (ARI) has a separate cache; an unsuccessful advice lookup is
+not itself a failed issuance.
+
+Both retry values must be positive when renewal is enabled, with
+`retry_initial_secs <= retry_max_secs <= 604800` (seven days). If an older
+configuration set a higher maximum while these knobs were inactive, lower it
+before upgrading. History is held only by the current worker, keyed by its
+configured vhost names. Replacing the worker or restarting the server clears it;
+there is no durable or shared CA-wide rate limit. A graceful stop waits for
+the current tick and does not schedule another. External timers and one-shot
+commands do not consult this state; space those invocations independently.
 
 ## Atomic Install
 

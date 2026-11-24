@@ -36,13 +36,13 @@ modes. Do not paste a second `[tls.acme]` table to override the first.
 | `renew_after` | Absent | Offset datetime, e.g. `2027-01-01T00:00:00Z`. Sets a timed hold; normal scheduling resumes at this instant. |
 | `hold_mode` | `"elective"` | Elective permits missing, last-seven-days, expired and due ARI renewals. `"absolute"` suppresses all unforced issuance and ARI lookups during the hold. Without a future date there is no hold. |
 | `check_interval_secs` | `3600` | Positive background sleep after a renewal tick; work time is additional |
-| `retry_initial_secs` | `300` | Positive, no greater than max; **Current limitation:** |
-| `retry_max_secs` | `86400` | Positive maximum backoff setting; same runtime gap |
+| `retry_initial_secs` | `300` | Minimum delay after the first failed background issuance for a vhost; positive, no greater than max |
+| `retry_max_secs` | `86400` | Upper bound on the doubling delay; at most 604800 seconds when renewal is enabled |
 | `reload_after_renewal` | `true` | Companion reload and server reload-control service selection; **Current limitation:** |
 | `zero_downtime_reload` | `true` | Accepted configuration, **Current limitation:** |
 
-Scheduling validators do not currently impose a small maximum on the positive
-duration values. Use practical intervals, not integer-limit values. Local
+One-shot renewals do not share background retry history. See the
+[retry policy](../guides/certificate-renewal.md#retry-policy). Local
 datetimes without offsets are rejected. An explicit forced renewal bypasses the
 hold, but does not re-enable a disabled renewal target.
 

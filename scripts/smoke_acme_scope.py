@@ -14,6 +14,8 @@ import subprocess
 import tempfile
 import time
 
+from acme_backoff_smoke import backoff_configuration, qualify_backoff
+
 PEBBLE = "ghcr.io/letsencrypt/pebble@sha256:5080492187bea12909c053d7a2b90a9e95104ef1c82381828e7823db71ce7e54"
 PYTHON = "docker.io/library/python@sha256:281d39ff02e3b389401586134ff9e6572954687822a58055ec07a60ded4e0b7f"
 RENEWAL_CONFIGS = tuple(f"renew-{index}.toml" for index in range(4))
@@ -110,6 +112,7 @@ def fixtures(root):
     (control / "elective.toml").write_text(configuration(issuer="elective", elective=True))
     (control / "server.toml").write_text(configuration(renewal=False, held=True))
     (control / "served.toml").write_text(configuration(renewal=False, issuer="pebble-background", released=True))
+    (control / "backoff.toml").write_text(backoff_configuration(configuration))
     # Isolate feature mismatch from PHP filesystem availability.
     (control / "cache.toml").write_text(configuration(renewal=False) +
         "[cache]\nenabled=true\n[cache.memory]\nenabled=true\n")
@@ -144,7 +147,7 @@ class Smoke:
         # preserving ownership) into an engine volume, then mount it read-only.
         name = self.prefix + "-fixtures"
         self.names.append(name)
-        sources = ("renew.toml", "server.toml", "served.toml", "cache.toml", "elective.toml", "off.toml", *RENEWAL_CONFIGS, "ca.pem")
+        sources = ("renew.toml", "server.toml", "served.toml", "backoff.toml", "cache.toml", "elective.toml", "off.toml", *RENEWAL_CONFIGS, "ca.pem")
         mounts = [argument for source in sources
                   for argument in self.mount(source, "/input/" + source)]
         command([self.runtime, "run", "--name", name, "--network=none", "--user=0",
@@ -171,7 +174,7 @@ class Smoke:
                "--memory=1g", "--cpus=2", "--log-opt", "max-size=1m"]
         cmd += ["--user", "65532:65532"]
         if ca:
-            cmd += ["--add-host", "scope.example.test:127.0.0.1", "-p", "127.0.0.1::14000",
+            cmd += ["--add-host", "scope.example.test:127.0.0.1", "--add-host", "healthy.example.test:127.0.0.1", "-p", "127.0.0.1::14000",
                     "-p", "127.0.0.1::5002", "-p", "127.0.0.1::5443", "-e", "PEBBLE_VA_NOSLEEP=1",
                     "-e", "PEBBLE_AUTHZREUSE=100", "-e", "PEBBLE_WFE_NONCEREJECT=0"]
             for source in ("server.pem", "server.key", "pebble.json"):
@@ -385,6 +388,8 @@ def qualify(smoke, full, php, legacy):
             time.sleep(0.1)
     else:
         raise AssertionError("issued certificate was not served after restart")
+    command([smoke.runtime, "stop", activated])
+    qualify_backoff(smoke, full, frontend, tls_port, tls, certificate_dir, certificate, command)
     print("ACME operation scope and server feature parity smoke: ok", flush=True)
 
 

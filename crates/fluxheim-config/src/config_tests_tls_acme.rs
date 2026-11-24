@@ -193,6 +193,20 @@ fn rejects_acme_renewal_retry_initial_over_max() {
 }
 
 #[test]
+fn acme_backoff_maximum_is_one_week_when_enabled() {
+    let mut config = Config::default();
+    config.tls.acme.renewal.retry_max_secs = 604_800;
+    config.validate().unwrap();
+    for max in [604_801, u64::MAX] {
+        config.tls.acme.renewal.retry_max_secs = max;
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::AcmeRenewalRetryMaxExceedsWeek)
+        );
+    }
+}
+
+#[test]
 fn rejects_enabled_acme_without_storage() {
     let config: Config = toml::from_str(
         r#"

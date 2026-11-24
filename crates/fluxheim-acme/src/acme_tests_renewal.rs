@@ -247,7 +247,7 @@ proptest! {
     ) {
         let now = UNIX_EPOCH + Duration::from_secs(1_000);
         let due_at = next_retry_at(now, failures, initial_secs, max_secs);
-        let delay_secs = due_at.duration_since(now).unwrap().as_secs();
+        let delay_secs = due_at.unwrap().duration_since(now).unwrap().as_secs();
         let multiplier = 1_u64
             .checked_shl(failures.min(63))
             .unwrap_or(u64::MAX);

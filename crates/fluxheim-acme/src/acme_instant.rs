@@ -369,15 +369,21 @@ pub(super) async fn execute_instant_acme_item(
     config: &Config,
     item: &AcmeRenewalItem,
     run: &mut AcmeRenewalRun,
-) {
+) -> bool {
     run.attempted = run.attempted.saturating_add(1);
     match execute_instant_acme_renewal(config, item).await {
-        Ok(outcome) => run.renewed.push(outcome),
-        Err(error) => run.failed.push(AcmeRenewalFailure {
-            vhost_name: item.target.vhost_name.clone(),
-            issuer: item.target.issuer.clone(),
-            domains: item.target.domains.clone(),
-            error: error.to_string(),
-        }),
+        Ok(outcome) => {
+            run.renewed.push(outcome);
+            true
+        }
+        Err(error) => {
+            run.failed.push(AcmeRenewalFailure {
+                vhost_name: item.target.vhost_name.clone(),
+                issuer: item.target.issuer.clone(),
+                domains: item.target.domains.clone(),
+                error: error.to_string(),
+            });
+            false
+        }
     }
 }

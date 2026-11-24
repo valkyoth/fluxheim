@@ -26,6 +26,15 @@ pub(super) async fn execute_due_queue(
     queue: &[AcmeRenewalItem],
     now: SystemTime,
 ) -> Result<AcmeRenewalRun, AcmeRenewalError> {
+    execute_due_queue_reporting(config, queue, now, |_, _| {}).await
+}
+
+pub(super) async fn execute_due_queue_reporting(
+    config: &Config,
+    queue: &[AcmeRenewalItem],
+    now: SystemTime,
+    mut completed: impl FnMut(&str, bool),
+) -> Result<AcmeRenewalRun, AcmeRenewalError> {
     let started = std::time::Instant::now();
     let mut run = AcmeRenewalRun {
         attempted: 0,
@@ -59,7 +68,8 @@ pub(super) async fn execute_due_queue(
         .await;
         for (item, should_renew) in chunk.iter().zip(decisions) {
             if should_renew {
-                acme_instant::execute_instant_acme_item(config, item, &mut run).await;
+                let success = acme_instant::execute_instant_acme_item(config, item, &mut run).await;
+                completed(&item.target.vhost_name, success);
             } else if hold.is_some()
                 && item.not_after.is_some_and(|expiry| {
                     expiry.duration_since(now).unwrap_or_default()

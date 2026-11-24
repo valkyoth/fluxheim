@@ -113,7 +113,7 @@ class AcmeSmokeTests(unittest.TestCase):
         self.assertIn("--entrypoint=/bin/cp", args)
         self.assertNotIn("-p", args)
         self.assertNotIn("-a", args)
-        sources = ["renew.toml", "server.toml", "served.toml", "cache.toml", "elective.toml", "off.toml", *smoke.RENEWAL_CONFIGS, "ca.pem"]
+        sources = ["renew.toml", "server.toml", "served.toml", "backoff.toml", "cache.toml", "elective.toml", "off.toml", *smoke.RENEWAL_CONFIGS, "ca.pem"]
         self.assertEqual(args[-len(sources)-1:],
                          ["/input/" + name for name in sources] + ["/control/"])
         host_mounts = [arg for arg in args if arg.startswith("/fixture-input/")]
@@ -186,6 +186,17 @@ class AcmeSmokeTests(unittest.TestCase):
         expected = json.loads(json.dumps(original))
         expected["meta"]["termsOfService"] = frontend.TERMS
         self.assertEqual(actual, expected)
+
+    def test_backoff_fixture_isolates_the_fault_to_a_single_local_issuer(self):
+        config = tomllib.loads(smoke.backoff_configuration(smoke.configuration))
+        acme = config["tls"]["acme"]
+        self.assertEqual(acme["automation"], "background")
+        self.assertEqual([item["directory_url"] for item in acme["issuers"]],
+                         ["https://localhost:14000/retry-dir", "https://localhost:14000/dir"])
+        self.assertEqual(acme["default_issuer"], "retry-issuer")
+        self.assertEqual(config["vhosts"][1]["tls"]["acme"]["issuer"], "healthy-issuer")
+        self.assertEqual([acme["renewal"][k] for k in
+                          ("check_interval_secs", "retry_initial_secs", "retry_max_secs")], [1, 3, 6])
 
     def test_adapter_rejects_changed_or_missing_terms(self):
         for metadata in ({}, {"termsOfService": "https://unexpected.test"}):

@@ -297,6 +297,10 @@ pub use acme_instant::{
     renew_selected_instant_acme_targets,
 };
 #[cfg(feature = "acme-client")]
+mod acme_background;
+#[cfg(feature = "acme-client")]
+pub use acme_background::BackgroundRenewals;
+#[cfg(feature = "acme-client")]
 use acme_instant_account::ACME_ACCOUNT_OPERATION_TIMEOUT;
 #[cfg(feature = "acme-client")]
 pub use acme_instant_account::{

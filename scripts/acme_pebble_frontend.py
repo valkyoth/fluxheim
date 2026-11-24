@@ -1,12 +1,14 @@
 """Test-only TLS adapter: give Pebble's data: terms URL an HTTPS equivalent.
 
 No ACME/JWS, authorization, challenge or certificate result is synthesized.
-Only the directory's terms metadata changes; both TLS hops verify/use the local CA.
+The retry fixture also refuses the first two requests to its separate directory.
 """
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import ssl
+import threading
+import time
 
 LIMIT = 2 * 1024 * 1024
 TERMS = "https://localhost:14000/terms"
@@ -24,17 +26,31 @@ def directory_body(body):
 def main():
     context = ssl.create_default_context(cafile="/fixture/ca.pem")
     context.minimum_version = ssl.TLSVersion.TLSv1_2
+    failures_left = 2
+    fault_lock = threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
 
         def handle_request(self):
+            nonlocal failures_left
             self.connection.settimeout(10)
             size = int(self.headers.get("Content-Length", "0"))
             if not 0 <= size <= LIMIT or self.headers.get("Transfer-Encoding"):
                 self.send_error(400)
                 return
+            path = self.path
+            if self.command == "GET" and path == "/retry-dir":
+                with fault_lock:
+                    print(f"retry directory {time.monotonic_ns()}", flush=True)
+                    refuse = failures_left > 0
+                    if refuse:
+                        failures_left -= 1
+                if refuse:
+                    self.send_error(403, "Test issuer temporarily refusing renewal")
+                    return
+                path = "/dir"
             connection = http.client.HTTPSConnection("localhost", 14001, context=context, timeout=10)
             try:
                 headers = {"Host": "localhost:14000", "User-Agent": "Fluxheim-ACME-smoke"}
@@ -42,12 +58,12 @@ def main():
                     print("order request", flush=True)
                 if self.headers.get("Content-Type"):
                     headers["Content-Type"] = self.headers["Content-Type"]
-                connection.request(self.command, self.path, self.rfile.read(size), headers)
+                connection.request(self.command, path, self.rfile.read(size), headers)
                 response = connection.getresponse()
                 body = response.read(LIMIT + 1)
                 if len(body) > LIMIT:
                     raise ValueError("oversized local CA response")
-                if self.path == "/dir" and response.status == 200:
+                if path == "/dir" and response.status == 200:
                     body = directory_body(body)
                 self.send_response(response.status)
                 for name in ("Replay-Nonce", "Location", "Content-Type", "Retry-After"):

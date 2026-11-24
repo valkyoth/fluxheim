@@ -3522,8 +3522,9 @@ Start with the [ACME operator guide](../guides/acme.md) and
 [complete option reference](acme-options.md). The renewal hold applies to all
 unforced runs according to `hold_mode`: elective (default) permits emergency
 or issuer-advised renewal; absolute does not. Use `enabled = false` to disable
-even forced renewal. Per-target failure backoff and background reload flags still
-have the limitations described in the operator guide.
+even forced renewal. Failed background renewals back off per vhost; one-shot
+commands do not share that state. See the
+[retry policy](../guides/certificate-renewal.md#retry-policy) for timing and restart behavior.
 
 ACME config parsing, renewal planning, managed certificate storage paths, local
 HTTP-01 challenge serving, and the local renewal execution contract exist.

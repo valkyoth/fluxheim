@@ -55,6 +55,10 @@ pub(super) fn format_tls_error(
             formatter,
             "tls.acme.renewal.retry_initial_secs cannot exceed retry_max_secs"
         ),
+        ConfigError::AcmeRenewalRetryMaxExceedsWeek => write!(
+            formatter,
+            "tls.acme.renewal.retry_max_secs cannot exceed seven days (604800 seconds)"
+        ),
         ConfigError::EmptyAcmeIssuerName { scope } => write!(formatter, "{scope} cannot be empty"),
         ConfigError::DuplicateAcmeIssuerName { name } => {
             write!(formatter, "duplicate ACME issuer {name:?}")

@@ -374,6 +374,9 @@ impl AcmeRenewalConfig {
         if self.retry_initial_secs > self.retry_max_secs {
             return Err(ConfigError::AcmeRenewalRetryInitialExceedsMax);
         }
+        if self.retry_max_secs > 7 * 24 * 60 * 60 {
+            return Err(ConfigError::AcmeRenewalRetryMaxExceedsWeek);
+        }
         if self
             .renew_after
             .as_ref()

@@ -235,6 +235,7 @@ pub enum ConfigError {
     },
     InvalidAcmeRenewAfterDatetime,
     AcmeRenewalRetryInitialExceedsMax,
+    AcmeRenewalRetryMaxExceedsWeek,
     EmptyAcmeIssuerName {
         scope: &'static str,
     },
