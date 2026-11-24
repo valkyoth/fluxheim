@@ -114,7 +114,14 @@ Do not distribute validation connections across independent gateway instances.
 Both background renewal and a separate companion publish to a private local
 socket at `<storage>/.alpn/s`, including on Windows. Use the same service
 identity and local ACME storage, with a short absolute path that fits the OS
-socket-path limit. Configure each managed name once. The gateway acknowledges
+socket-path limit. On Unix, the storage root and its `.alpn` directory must
+belong to that service UID and have mode `0700`; their ancestors must belong
+to root or the service UID and must not be group- or other-writable or
+symlinks. Missing directories are created privately. The gateway will not
+take ownership or repair permissions on existing directories. In particular,
+do not run a root gateway against a less-privileged user's TLS-ALPN storage;
+run the gateway and companion as that user instead. HTTP-01 is unaffected.
+Configure each managed name once. The gateway acknowledges
 publication before the companion signals readiness to the CA. Only that SNI
 offering exactly `acme-tls/1` receives the temporary certificate. Ordinary
 HTTPS still uses the site's certificate; TLS resumption is disabled on this

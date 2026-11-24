@@ -16,6 +16,11 @@ For ordinary HTTPS the test pins and compares the exact installed leaf.
   CA adapter while checking ordinary HTTPS, missing/wrong SNI and mixed
   protocols. Terminating only the companion must remove the temporary
   identity without stopping the gateway. Restart must not republish it.
+- On Unix, an offline doctor on an empty external installation must create
+  service-owned `0700` storage without binding a socket. In the container
+  mode of `scripts/smoke_acme_mount_boundary.sh`, a separate two-UID test
+  verifies a root broker refuses foreign storage, an untrusted ancestor and
+  a foreign publication directory without changing their contents or owners.
 
 To repeat the native proof, build `fluxheim` and `fluxheim-acme` with
 `--locked --no-default-features --features profile-web-server,acme-client`.

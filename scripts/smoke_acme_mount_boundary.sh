@@ -47,6 +47,15 @@ run_in_constrained_container() {
     esac
 
     image=${FLUXHEIM_ACME_MOUNT_TEST_IMAGE:-docker.io/library/debian:13.3-slim@sha256:1d3c811171a08a5adaa4a163fbafd96b61b87aa871bbc7aa15431ac275d3d430}
+    # A separate private tmpfs provides two UIDs without granting mount privileges.
+    ownership_test=alpn_control::directory_tests::root_broker_refuses_foreign_owner_without_modifying_storage
+    ownership_result=$("$runtime" run --rm --network none --read-only --cap-drop ALL \
+        --cap-add CHOWN --cap-add DAC_OVERRIDE --security-opt no-new-privileges \
+        --pids-limit 64 --tmpfs /work:rw,nosuid,nodev,noexec,mode=0700,size=8m \
+        --user 0:0 --workdir /work --entrypoint /fluxheim-acme-test \
+        -v "$test_binary:/fluxheim-acme-test:ro,Z" "$image" --exact "$ownership_test" --ignored)
+    printf '%s\n' "$ownership_result"
+    printf '%s\n' "$ownership_result" | grep -Fq '1 passed; 0 failed'
     apparmor_option=
     if [ "$runtime" = docker ]; then
         # docker-default denies mount(2) independently of CAP_SYS_ADMIN.

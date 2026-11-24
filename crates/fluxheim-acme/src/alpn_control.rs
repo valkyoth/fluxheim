@@ -1,8 +1,12 @@
 //! Local, filesystem-protected publication channel. Only names and digests
 //! cross the socket; certificate generation and private keys stay in the gateway.
+#[cfg(windows)]
 use crate::acme_certificate_install::fs_ops::{
     ensure_safe_directory, managed_certificate_ownership,
 };
+#[cfg(unix)]
+#[path = "alpn_directory.rs"]
+mod directory;
 pub use crate::acme_tls_alpn::tls_alpn_01_certificate;
 use socket2::{Domain, SockAddr, Socket, Type};
 use std::{
@@ -45,11 +49,21 @@ pub struct Broker {
     stop: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
 }
+/// Prepare the local publication boundary before binding or running recovery.
+pub fn prepare_directory(storage: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    return directory::check(storage, true);
+    #[cfg(windows)]
+    {
+        let owner = managed_certificate_ownership(storage).map_err(io::Error::other)?;
+        ensure_safe_directory(&storage.join(".alpn"), &owner).map_err(io::Error::other)
+    }
+}
+
 impl Broker {
     pub fn bind(storage: &Path, publish: Arc<Publish>) -> io::Result<Self> {
         let dir = storage.join(".alpn");
-        let owner = managed_certificate_ownership(storage).map_err(io::Error::other)?;
-        ensure_safe_directory(&dir, &owner).map_err(io::Error::other)?;
+        prepare_directory(storage)?;
         let lock = crate::AcmeMutationLock::try_acquire(&dir)?.ok_or(io::ErrorKind::AddrInUse)?;
         let path = endpoint(storage);
         let addr = SockAddr::unix(&path)?;
@@ -61,11 +75,6 @@ impl Broker {
         }
         let listener = socket()?;
         listener.bind(&addr)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-        }
         listener.listen(32)?;
         listener.set_nonblocking(true)?;
         let stop = Arc::new(AtomicBool::new(false));
@@ -192,10 +201,16 @@ impl Publication {
             frame.extend_from_slice(digest);
         }
         let path = endpoint(storage);
+        #[cfg(unix)]
+        let storage = storage.to_owned();
         tokio::task::spawn_blocking(move || {
-            if fluxheim_config::fs_trust::existing_parent_has_insecure_write_permissions(&path)?
-                || !is_socket(&path)?
-            {
+            #[cfg(unix)]
+            directory::check(&storage, false)?;
+            #[cfg(windows)]
+            if fluxheim_config::fs_trust::existing_parent_has_insecure_write_permissions(&path)? {
+                return Err(io::ErrorKind::PermissionDenied.into());
+            }
+            if !is_socket(&path)? {
                 return Err(io::ErrorKind::PermissionDenied.into());
             }
             let mut stream = socket()?;
@@ -307,3 +322,7 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "alpn_directory_tests.rs"]
+mod directory_tests;

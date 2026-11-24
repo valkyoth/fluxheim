@@ -95,7 +95,11 @@ pub(super) fn run_doctor(
     if targets.is_empty() {
         return Err("ACME doctor: no enabled ACME vhost targets are configured".into());
     }
-    std::fs::create_dir_all(storage)?;
+    if cfg!(unix) && config.tls.acme.challenge == fluxheim_config::AcmeChallenge::TlsAlpn01 {
+        fluxheim_acme::alpn_control::prepare_directory(storage)?;
+    } else {
+        std::fs::create_dir_all(storage)?;
+    }
     let metadata = std::fs::symlink_metadata(storage)?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err("ACME doctor: storage is not a real directory".into());

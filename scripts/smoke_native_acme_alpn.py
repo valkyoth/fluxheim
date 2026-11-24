@@ -95,8 +95,9 @@ def cancellation(root, gateway, companion, settings, chain, paused):
 
 def test_mode(root, bins, suffix, mode, paused):
     storage = root / mode
-    storage.mkdir()
-    protect_directory(storage)
+    if os.name == "nt":
+        storage.mkdir()
+        protect_directory(storage)
     settings = root / "gateway.toml"
     log = root / (mode + ".log")
     gateway = [bins / ("fluxheim" + suffix), "--config", settings]
@@ -111,6 +112,13 @@ def test_mode(root, bins, suffix, mode, paused):
             .replace("0.0.0.0:", "127.0.0.1:")
             .replace('["127.0.0.1:5443"]', '["127.0.0.1:5443", "[::1]:5443"]')
             .replace("[tls]\n", state + "[tls]\n"), encoding="utf-8")
+        if os.name == "posix" and mode == "external" and order == 1:
+            # Running doctor first must leave a private directory, not an active endpoint.
+            subprocess.run([*companion, "doctor"], check=True, timeout=30, stdout=subprocess.DEVNULL)
+            for path in (storage, storage / ".alpn"):
+                info = path.stat()
+                assert info.st_uid == os.geteuid() and (info.st_mode & 0o777) == 0o700
+            assert not (storage / ".alpn" / "s").exists()
         with running(gateway, log) as child:
             wait(child, log, lambda: ready(5443))
             if mode == "external":

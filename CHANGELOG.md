@@ -18,7 +18,9 @@ behavior when the change improves security or project direction.
   only copy of the previous certificate or key.
 
 - Native Rustls gateways can answer TLS-ALPN-01 for background and external
-  ACME orders. Unsupported listener configurations are rejected; HTTP-01
+  ACME orders. On Unix, use the same service UID for the gateway, companion,
+  and private (`0700`) ACME storage. Unsafe publication directories are
+  rejected rather than repaired. Unsupported listener configurations are rejected; HTTP-01
   remains the default. See [challenge selection](docs/guides/acme.md#challenge-selection).
 
 - Give ACME renewals ownership of their challenge files across cancellation,
