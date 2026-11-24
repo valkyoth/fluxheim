@@ -90,6 +90,7 @@ impl std::error::Error for AcmeSecretLoadError {}
 
 #[derive(Debug)]
 pub enum AcmeCertificateInstallError {
+    PublishedCleanupPending,
     InvalidCertificatePem(&'static str),
     InvalidPrivateKeyPem(&'static str),
     Transaction(String),
@@ -100,6 +101,10 @@ pub enum AcmeCertificateInstallError {
 impl fmt::Display for AcmeCertificateInstallError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::PublishedCleanupPending => write!(
+                formatter,
+                "certificate pair published; transaction cleanup was not confirmed"
+            ),
             Self::InvalidCertificatePem(message) => {
                 write!(formatter, "invalid ACME certificate PEM: {message}")
             }

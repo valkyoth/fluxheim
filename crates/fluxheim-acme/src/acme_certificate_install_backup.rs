@@ -105,7 +105,7 @@ pub(super) fn backup_existing_file(
     }
 }
 
-fn ensure_backup_slot_is_empty(
+pub(super) fn ensure_backup_slot_is_empty(
     directory: &Path,
     path: &Path,
     directory_fd: Option<&CertificateDirectoryFd>,
@@ -196,62 +196,5 @@ pub(super) fn cleanup_backup(
             path: path.to_path_buf(),
             error,
         }),
-    }
-}
-
-pub(super) fn restore_backup(
-    directory: &Path,
-    backup: &Path,
-    destination: &Path,
-    directory_fd: Option<&CertificateDirectoryFd>,
-) -> io::Result<()> {
-    #[cfg(not(unix))]
-    let _ = (directory, directory_fd);
-    #[cfg(unix)]
-    if let Some(directory_fd) = directory_fd {
-        let backup_name = certificate_file_name_in_directory(directory, backup)
-            .map_err(acme_install_error_to_io_error)?;
-        let destination_name = certificate_file_name_in_directory(directory, destination)
-            .map_err(acme_install_error_to_io_error)?;
-        return match rustix::fs::statat(
-            directory_fd,
-            backup_name,
-            rustix::fs::AtFlags::SYMLINK_NOFOLLOW,
-        ) {
-            Ok(stat) if !rustix::fs::FileType::from_raw_mode(stat.st_mode).is_file() => Err(
-                io::Error::new(io::ErrorKind::InvalidData, "backup is not a regular file"),
-            ),
-            Ok(_) => {
-                rustix::fs::renameat(directory_fd, backup_name, directory_fd, destination_name)
-                    .map_err(Into::into)
-            }
-            Err(error) if error == rustix::io::Errno::NOENT => Ok(()),
-            Err(error) => Err(error.into()),
-        };
-    }
-
-    #[cfg(windows)]
-    return match fluxheim_windows_security::rename_regular_file(backup, destination) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    };
-
-    #[cfg(not(windows))]
-    match fs::symlink_metadata(backup) {
-        Ok(metadata) if certificate_metadata_is_link(&metadata) || !metadata.is_file() => Err(
-            io::Error::new(io::ErrorKind::InvalidData, "backup is not a regular file"),
-        ),
-        Ok(_) => fs::rename(backup, destination),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-#[cfg(unix)]
-fn acme_install_error_to_io_error(error: AcmeCertificateInstallError) -> io::Error {
-    match error {
-        AcmeCertificateInstallError::Io { error, .. } => error,
-        other => io::Error::new(io::ErrorKind::InvalidInput, other.to_string()),
     }
 }

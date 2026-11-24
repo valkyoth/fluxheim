@@ -1,4 +1,5 @@
 """Compare installed and served local-CA leaves independently of CLI status."""
+import json
 import socket
 import ssl
 
@@ -49,6 +50,8 @@ def companion_matrix(smoke, image, gateway, port, directory, initial, command):
         raise AssertionError("companion did not install a fresh leaf")
     assert_served(port, current)
     # This companion shares storage, but not the gateway's Unix socket.
+    execute("ln", pem, directory + "/saved-cert")
+    execute("ln", directory + "/privkey.pem", directory + "/saved-key")
     code, logs = smoke.launch("detached-renew", image, ["renew", "--force-renew"],
                               entry="/usr/local/bin/fluxheim-acme", config="served.toml")
     detached = execute("cat", pem).stdout
@@ -57,7 +60,22 @@ def companion_matrix(smoke, image, gateway, port, directory, initial, command):
     assert_served(port, current)
     # The old active handle is independent of both installed generations.
     companion("reload")
-    current = detached
+    assert_served(port, detached)
+    # Replay a legacy Publishing journal with an interrupted first restore.
+    execute("mv", directory + "/saved-key", directory + "/.privkey.pem.previous")
+    execute("mv", directory + "/saved-cert", directory + "/.fullchain.pem.previous")
+    execute("rm", pem)
+    execute("ln", directory + "/.fullchain.pem.previous", pem)
+    journal = directory + "/.install.transaction"
+    execute("touch", journal)
+    execute("chmod", "600", journal)
+    command([smoke.runtime, "exec", "-i", gateway, "tee", journal], data=json.dumps({
+        "phase": "publishing", "transaction": "0" * 32, "cert_existed": True, "key_existed": True,
+    }))
+    companion("doctor")
+    companion("doctor")
+    assert_served(port, detached)
+    companion("reload")
     assert_served(port, current)
     # Only the disposable engine-owned fixture is changed, never host credentials.
     backup = directory + "/saved-chain.pem"

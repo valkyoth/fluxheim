@@ -11,6 +11,9 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- Interrupted ACME installation rollback can be retried without consuming the
+  only copy of the previous certificate or key.
+
 - Enabled managed ACME now rejects `challenge = "tls-alpn-01"` rather than
   negotiating a protocol the gateway cannot serve. Use `http-01` and route
   public port 80 to the gateway before upgrading. Normal HTTPS is unchanged.

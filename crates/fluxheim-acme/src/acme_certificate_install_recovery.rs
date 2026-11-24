@@ -1,4 +1,4 @@
-use super::backup::{cleanup_backup, restore_backup};
+use super::backup::{backup_existing_file, cleanup_backup};
 use super::fs_ops::{
     CertificateDirectoryFd, ManagedCertificateOwner, certificate_metadata_is_link,
     rename_certificate_file, sync_directory, write_new_file,
@@ -19,6 +19,7 @@ pub(super) enum CertificateInstallPhase {
     Prepared,
     Publishing,
     Published,
+    RolledBack,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -28,6 +29,8 @@ struct CertificateInstallJournal {
     cert_existed: bool,
     key_existed: bool,
     phase: CertificateInstallPhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    identity: Option<PairIdentity>,
 }
 
 pub(super) fn begin_certificate_install(
@@ -45,6 +48,7 @@ pub(super) fn begin_certificate_install(
             cert_existed,
             key_existed,
             phase: CertificateInstallPhase::Prepared,
+            identity: None,
         },
         owner,
         directory_fd,
@@ -66,6 +70,7 @@ pub(super) fn update_certificate_install_phase(
             transaction: transaction.to_owned(),
             cert_existed,
             key_existed,
+            identity: Some(pair_identity(directory, phase, cert_existed, key_existed)?),
             phase,
         },
         owner,
@@ -88,10 +93,11 @@ pub(super) fn complete_certificate_install(
 pub(super) fn recover_interrupted_install(
     directory: &Path,
     paths: &AcmeCertificatePaths,
+    owner: ManagedCertificateOwner,
     directory_fd: Option<&CertificateDirectoryFd>,
 ) -> Result<(), AcmeCertificateInstallError> {
     let journal_path = directory.join(INSTALL_JOURNAL_FILE);
-    let Some(journal) = read_journal(&journal_path)? else {
+    let Some(mut journal) = read_journal(&journal_path)? else {
         return Ok(());
     };
     validate_transaction_id(&journal.transaction, &journal_path)?;
@@ -100,15 +106,32 @@ pub(super) fn recover_interrupted_install(
     let cert_backup = directory.join(".fullchain.pem.previous");
     let key_backup = directory.join(".privkey.pem.previous");
 
-    match journal.phase {
-        CertificateInstallPhase::Prepared => {
-            cleanup_backup(directory, &cert_backup, directory_fd)?;
-            cleanup_backup(directory, &key_backup, directory_fd)?;
+    if journal.phase != CertificateInstallPhase::Prepared {
+        if journal.phase == CertificateInstallPhase::RolledBack && journal.identity.is_none() {
+            return Err(AcmeCertificateInstallError::Transaction(
+                "missing restored certificate identity".into(),
+            ));
         }
-        CertificateInstallPhase::Publishing => {
+        let identity = pair_identity(
+            directory,
+            journal.phase,
+            journal.cert_existed,
+            journal.key_existed,
+        )?;
+        if journal
+            .identity
+            .as_ref()
+            .is_some_and(|expected| expected != &identity)
+        {
+            return Err(AcmeCertificateInstallError::Transaction(
+                "certificate recovery identity mismatch".into(),
+            ));
+        }
+        if journal.phase == CertificateInstallPhase::Publishing {
             restore_original(
                 directory,
                 &cert_backup,
+                &cert_tmp,
                 &paths.cert_path,
                 journal.cert_existed,
                 directory_fd,
@@ -116,18 +139,27 @@ pub(super) fn recover_interrupted_install(
             restore_original(
                 directory,
                 &key_backup,
+                &key_tmp,
                 &paths.key_path,
                 journal.key_existed,
                 directory_fd,
             )?;
-        }
-        CertificateInstallPhase::Published => {
-            cleanup_backup(directory, &cert_backup, directory_fd)?;
-            cleanup_backup(directory, &key_backup, directory_fd)?;
+            sync_directory(directory, directory_fd)?;
+            journal.phase = CertificateInstallPhase::RolledBack;
+            journal.identity = Some(identity);
+            write_journal(directory, &journal, owner, directory_fd)?;
         }
     }
+    cleanup_backup(directory, &cert_backup, directory_fd)?;
+    cleanup_backup(directory, &key_backup, directory_fd)?;
     cleanup_backup(directory, &cert_tmp, directory_fd)?;
     cleanup_backup(directory, &key_tmp, directory_fd)?;
+    cleanup_backup(
+        directory,
+        &directory.join(format!(".install.{}.journal.tmp", journal.transaction)),
+        directory_fd,
+    )?;
+    sync_directory(directory, directory_fd)?;
     cleanup_backup(directory, &journal_path, directory_fd)?;
     sync_directory(directory, directory_fd)
 }
@@ -135,35 +167,87 @@ pub(super) fn recover_interrupted_install(
 fn restore_original(
     directory: &Path,
     backup: &Path,
+    scratch: &Path,
     destination: &Path,
     existed: bool,
     directory_fd: Option<&CertificateDirectoryFd>,
 ) -> Result<(), AcmeCertificateInstallError> {
     if existed {
-        require_regular_backup(backup)?;
-        restore_backup(directory, backup, destination, directory_fd).map_err(|error| {
-            AcmeCertificateInstallError::Io {
-                path: destination.to_path_buf(),
-                error,
-            }
-        })
+        cleanup_backup(directory, scratch, directory_fd)?;
+        if !backup_existing_file(directory, backup, scratch, directory_fd)? {
+            return Err(AcmeCertificateInstallError::Transaction(
+                "certificate recovery backup disappeared".into(),
+            ));
+        }
+        rename_certificate_file(directory, scratch, destination, directory_fd)
     } else {
         cleanup_backup(directory, destination, directory_fd)
     }
 }
 
-fn require_regular_backup(path: &Path) -> Result<(), AcmeCertificateInstallError> {
-    let metadata = fs::symlink_metadata(path).map_err(|error| AcmeCertificateInstallError::Io {
-        path: path.to_path_buf(),
-        error,
-    })?;
-    if certificate_metadata_is_link(&metadata) || !metadata.is_file() {
-        return Err(AcmeCertificateInstallError::UnsafePath {
-            path: path.to_path_buf(),
-            message: "ACME transaction backup is not a regular file".to_owned(),
-        });
-    }
-    Ok(())
+#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PairIdentity {
+    cert: Option<[u8; 32]>,
+    key: Option<[u8; 32]>,
+}
+
+// Fingerprint bounded files through checked handles. The journal is private;
+// neither recovery errors nor logs contain the identity or key bytes.
+fn pair_identity(
+    directory: &Path,
+    phase: CertificateInstallPhase,
+    cert: bool,
+    key: bool,
+) -> Result<PairIdentity, AcmeCertificateInstallError> {
+    use sha2::{Digest, Sha256};
+    let fingerprint = |name: &str, exists: bool, limit: usize| {
+        let path = directory.join(name);
+        if !exists {
+            return match fs::symlink_metadata(&path) {
+                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+                _ => Err(AcmeCertificateInstallError::Transaction(
+                    "unexpected certificate recovery file".into(),
+                )),
+            };
+        }
+        let result = (|| -> io::Result<_> {
+            let mut file = fluxheim_config::fs_trust::open_regular_file(&path)?;
+            let size =
+                usize::try_from(file.metadata()?.len()).map_err(|_| io::ErrorKind::InvalidData)?;
+            if size > limit {
+                return Err(io::ErrorKind::InvalidData.into());
+            }
+            let mut bytes = SecretVec::from_fn(size, |_| 0);
+            bytes.with_secret_mut(|buf| file.read_exact(buf))?;
+            if file.read(&mut [0])? != 0 {
+                return Err(io::ErrorKind::InvalidData.into());
+            }
+            Ok(Some(bytes.with_secret(|buf| Sha256::digest(buf).into())))
+        })();
+        result.map_err(|error| AcmeCertificateInstallError::Io { path, error })
+    };
+    let backups = phase == CertificateInstallPhase::Publishing;
+    Ok(PairIdentity {
+        cert: fingerprint(
+            if backups {
+                ".fullchain.pem.previous"
+            } else {
+                MANAGED_FULLCHAIN_FILE
+            },
+            cert || phase == CertificateInstallPhase::Published,
+            MAX_CERTIFICATE_CHAIN_BYTES,
+        )?,
+        key: fingerprint(
+            if backups {
+                ".privkey.pem.previous"
+            } else {
+                MANAGED_PRIVATE_KEY_FILE
+            },
+            key || phase == CertificateInstallPhase::Published,
+            MAX_PRIVATE_KEY_BYTES,
+        )?,
+    })
 }
 
 fn write_journal(
@@ -317,7 +401,7 @@ mod tests {
         fs::write(&replacement, b"new certificate").unwrap();
         fs::rename(replacement, &paths.cert_path).unwrap();
 
-        recover_interrupted_install(&directory, &paths, directory_fd).unwrap();
+        recover_interrupted_install(&directory, &paths, owner, directory_fd).unwrap();
 
         assert_eq!(fs::read(&paths.cert_path).unwrap(), b"old certificate");
         assert_eq!(fs::read(&paths.key_path).unwrap(), b"old key");

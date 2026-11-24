@@ -92,6 +92,7 @@ supports recovery after an interrupted writer.
 | `prepared` | Active files have not entered publication; remove transaction temporary/backup material |
 | `publishing` | Restore the old files where they existed; remove newly introduced active slots otherwise |
 | `published` | Keep the newly published pair and finish temporary/backup cleanup |
+| `rolled-back` | Verify the restored pair and finish cleanup, even if one backup has already been removed |
 
 Recovery runs before another install and through `doctor` for renewal targets:
 
@@ -100,14 +101,13 @@ fluxheim-acme --config /etc/fluxheim/fluxheim.toml doctor
 fluxheim-acme --config /etc/fluxheim/fluxheim.toml status --vhost site.example.test
 ```
 
-**Current limitation:** recovery itself is not restart-idempotent during `publishing`.
-Restoring a backup consumes its name, but the journal does not record that
-progress. An interruption after the first restore leaves an old certificate
-and new key; another recovery attempt fails because the certificate backup is
-missing, even though the old key backup remains. Interruption after both restores
-can also block cleanup despite the active pair being restored. Local tests
-exercise both boundaries. Do not repeatedly delete journals or rename backups
-until the error disappears: preserve state and obtain a verified recovery plan.
+If recovery stops after restoring only the certificate, run `doctor` again.
+Recovery retains both backups until the restored pair is durable. New journals
+fingerprint both files and refuse recovery when their recorded identities do
+not match. Older journals have no fingerprints and still require each indicated
+backup during rollback. If an older recovery already consumed a required
+backup, keep the listener isolated and preserve the directory for repair.
+Do not delete a journal or substitute an unrelated certificate or key.
 
 An install can also publish the new pair and then report a cleanup error.
 Therefore “command failed” does not universally mean “old files are still

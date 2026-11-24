@@ -69,7 +69,7 @@ pub fn recover_managed_certificate_transaction(
     #[cfg(not(unix))]
     let directory_fd: Option<&CertificateDirectoryFd> = None;
     recover_interrupted_revocation(&directory, &paths, directory_fd)?;
-    recover_interrupted_install(&directory, &paths, directory_fd)
+    recover_interrupted_install(&directory, &paths, ownership.file_owner(), directory_fd)
 }
 
 pub(super) fn install_certificate_files(
@@ -93,7 +93,7 @@ pub(super) fn install_certificate_files(
     #[cfg(not(unix))]
     let directory_fd: Option<&CertificateDirectoryFd> = None;
     recover_interrupted_revocation(&directory, paths, directory_fd)?;
-    recover_interrupted_install(&directory, paths, directory_fd)?;
+    recover_interrupted_install(&directory, paths, owner, directory_fd)?;
 
     let transaction = unique_transaction_id().map_err(|error| AcmeCertificateInstallError::Io {
         path: directory.clone(),
@@ -106,6 +106,12 @@ pub(super) fn install_certificate_files(
     let mut journal_started = false;
 
     let result = (|| {
+        backup::ensure_backup_slot_is_empty(&directory, &cert_backup, directory_fd)?;
+        backup::ensure_backup_slot_is_empty(&directory, &key_backup, directory_fd)?;
+        ensure_safe_destination(&paths.cert_path)?;
+        ensure_safe_destination(&paths.key_path)?;
+        begin_certificate_install(&directory, &transaction, false, false, owner, directory_fd)?;
+        journal_started = true;
         write_new_file(
             &directory,
             &cert_tmp,
@@ -122,14 +128,11 @@ pub(super) fn install_certificate_files(
             owner,
             directory_fd,
         )?;
-        ensure_safe_destination(&paths.cert_path)?;
-        ensure_safe_destination(&paths.key_path)?;
-        begin_certificate_install(&directory, &transaction, false, false, owner, directory_fd)?;
-        journal_started = true;
         let cert_backed_up =
             backup_existing_file(&directory, &paths.cert_path, &cert_backup, directory_fd)?;
         let key_backed_up =
             backup_existing_file(&directory, &paths.key_path, &key_backup, directory_fd)?;
+        fs_ops::sync_directory(&directory, directory_fd)?;
         update_certificate_install_phase(
             &directory,
             &transaction,
@@ -141,6 +144,7 @@ pub(super) fn install_certificate_files(
         )?;
         rename_certificate_file(&directory, &cert_tmp, &paths.cert_path, directory_fd)?;
         rename_certificate_file(&directory, &key_tmp, &paths.key_path, directory_fd)?;
+        fs_ops::sync_directory(&directory, directory_fd)?;
         update_certificate_install_phase(
             &directory,
             &transaction,
@@ -150,15 +154,16 @@ pub(super) fn install_certificate_files(
             owner,
             directory_fd,
         )?;
-        cleanup_backup(&directory, &cert_backup, directory_fd)?;
-        cleanup_backup(&directory, &key_backup, directory_fd)?;
-        complete_certificate_install(&directory, directory_fd)?;
+        cleanup_backup(&directory, &cert_backup, directory_fd)
+            .and_then(|()| cleanup_backup(&directory, &key_backup, directory_fd))
+            .and_then(|()| complete_certificate_install(&directory, directory_fd))
+            .map_err(|_| AcmeCertificateInstallError::PublishedCleanupPending)?;
         Ok(())
     })();
 
     if result.is_err() {
         let recovery = if journal_started {
-            recover_interrupted_install(&directory, paths, directory_fd)
+            recover_interrupted_install(&directory, paths, owner, directory_fd)
         } else {
             cleanup_backup(&directory, &cert_tmp, directory_fd)
                 .and_then(|()| cleanup_backup(&directory, &key_tmp, directory_fd))
