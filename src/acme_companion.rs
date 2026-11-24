@@ -225,17 +225,6 @@ mod tests {
 
     #[cfg(feature = "acme-client")]
     #[test]
-    fn doctor_tcp_probe_accepts_a_reachable_listener() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = std::thread::spawn(move || listener.accept().unwrap());
-
-        super::commands::doctor_tcp_reachability("127.0.0.1", port, "test").unwrap();
-        server.join().unwrap();
-    }
-
-    #[cfg(feature = "acme-client")]
-    #[test]
     fn doctor_reports_account_rollover_as_unavailable() {
         assert_eq!(
             super::commands::account_rollover_capability_status(),

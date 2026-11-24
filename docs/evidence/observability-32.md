@@ -19,3 +19,10 @@ live ALPN handshake.
 
 For operating and upgrading a separate gateway and companion see
 [Challenge Cleanup](../guides/acme-recovery.md#challenge-cleanup).
+
+The follow-up qualification rejects enabled managed TLS-ALPN-01 in server and
+companion validation and in the direct renewal API. The native handshake test
+stages challenge files, verifies rejection of a challenge-only ALPN offer, and
+checks the ordinary HTTPS leaf before and after reload. The packaged Pebble
+test checks startup, validation, built-in renewal and companion renewal all
+reject the configuration without opening an order, then exercises HTTP-01.

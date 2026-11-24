@@ -3529,8 +3529,8 @@ commands do not share that state. See the
 ACME config parsing, renewal planning, managed certificate storage paths, local
 HTTP-01 challenge serving, and the local renewal execution contract exist.
 Builds with `acme-client` can load or create issuer accounts and complete
-HTTP-01 orders through `instant-acme`. The TLS-ALPN-01 client path exists but
-native challenge serving is incomplete. By default, the
+HTTP-01 orders through `instant-acme`. Managed TLS-ALPN-01 is rejected.
+By default, the
 runtime registers a background renewal service for configured ACME vhosts when
 `acme-client` is compiled in. Set `tls.acme.automation = "external"` when a
 systemd timer, container scheduler, or another supervisor runs `acme-renew`.
@@ -3585,10 +3585,8 @@ retry_max_secs = 86400
 reload_after_renewal = true
 ```
 
-Managed ACME accepts `http-01` and `tls-alpn-01` configuration. Use HTTP-01
-with public port 80 reachable until native TLS-ALPN-01 serving is integrated.
-The latter validates with `server.tls_listen`, `tls.backend = "rustls"`, and an
-ACME-managed or static fallback certificate for the listener. DNS-01 remains
+Managed ACME requires `http-01` with public port 80 reachable. Setting
+`tls-alpn-01` with managed ACME enabled prevents startup and renewal. DNS-01 remains
 future work because provider integrations need explicit secret handling and
 record-cleanup behavior.
 See [examples/acme-http-01.toml](../../examples/acme-http-01.toml) for a minimal
@@ -3717,20 +3715,8 @@ must be regular files, and oversized or control-character-containing responses
 are rejected. If `[vhosts.acme_challenge]` is enabled, the explicit forwarding
 helper takes precedence instead of the local managed challenge store.
 
-When `tls.acme.challenge = "tls-alpn-01"` and `[vhosts.tls.acme]` is enabled,
-Fluxheim generates temporary ACME challenge certificates below:
-
-```text
-<storage>/tls-alpn-01/<safe-domain-segment>/fullchain.pem
-<storage>/tls-alpn-01/<safe-domain-segment>/privkey.pem
-```
-
-The intended serving contract selects these only for `acme-tls/1` and the
-matching SNI. **Current limitation:** the native listener does not currently attach
-that challenge store. A loopback test confirms it returns the ordinary fallback
-certificate, even when these files exist and after reload. Normal TLS and
-HTTP-01 support do not prove TLS-ALPN-01 issuance. See the
-[ACME guide](../guides/acme.md#challenge-selection) for the current limitation.
+The native TLS listener does not advertise `acme-tls/1`. See the
+[ACME guide](../guides/acme.md#challenge-selection) for migration guidance.
 
 ## Vhosts
 

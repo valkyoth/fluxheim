@@ -129,7 +129,7 @@ class AcmeSmokeTests(unittest.TestCase):
         self.assertIn("--entrypoint=/bin/cp", args)
         self.assertNotIn("-p", args)
         self.assertNotIn("-a", args)
-        sources = ["renew.toml", "server.toml", "served.toml", "backoff.toml", *smoke.PAUSE_CONFIGS, "cache.toml", "elective.toml", "off.toml", *smoke.RENEWAL_CONFIGS, "ca.pem"]
+        sources = ["renew.toml", "server.toml", "served.toml", "backoff.toml", *smoke.PAUSE_CONFIGS, "unsupported-alpn.toml", "cache.toml", "elective.toml", "off.toml", *smoke.RENEWAL_CONFIGS, "ca.pem"]
         self.assertEqual(args[-len(sources)-1:],
                          ["/input/" + name for name in sources] + ["/control/"])
         host_mounts = [arg for arg in args if arg.startswith("/fixture-input/")]

@@ -1,6 +1,6 @@
 use crate::config::{
-    AcmeChallenge, Config, ConfigError, MAX_VHOSTS, ProxyConfig, TlsBackend, VhostConfig,
-    normalize_host_pattern, validate_config_list_len,
+    Config, ConfigError, MAX_VHOSTS, ProxyConfig, VhostConfig, normalize_host_pattern,
+    validate_config_list_len,
 };
 use crate::config_cache::validate_cache_compliance_internal_crypto;
 use crate::config_http::{
@@ -33,7 +33,6 @@ impl Config {
                 }
                 self.tls.validate()?;
                 self.validate_acme_compliance()?;
-                self.validate_acme_challenge_runtime()?;
                 self.validate_vhosts(ValidationScope::Acme)
             }
         }
@@ -62,7 +61,6 @@ impl Config {
         self.logging.validate()?;
         self.headers.validate()?;
         self.tls.validate()?;
-        self.validate_acme_challenge_runtime()?;
         self.validate_tls_listeners()?;
         self.proxy.validate()?;
         self.compression.validate()?;
@@ -99,26 +97,6 @@ impl Config {
                 minimum_field: "every vhost and route max_request_body_bytes",
             });
         }
-        Ok(())
-    }
-
-    fn validate_acme_challenge_runtime(&self) -> Result<(), ConfigError> {
-        if !self.tls.acme.enabled || self.tls.acme.challenge != AcmeChallenge::TlsAlpn01 {
-            return Ok(());
-        }
-        if self.tls.backend != TlsBackend::Rustls {
-            return Err(ConfigError::InvalidTlsPolicy {
-                field: "tls.acme.challenge",
-                reason: "tls-alpn-01 managed ACME is currently supported only by the rustls backend",
-            });
-        }
-        if self.server.tls_listen.is_empty() {
-            return Err(ConfigError::InvalidTlsPolicy {
-                field: "tls.acme.challenge",
-                reason: "tls-alpn-01 managed ACME requires at least one server.tls_listen address",
-            });
-        }
-
         Ok(())
     }
 

@@ -29,7 +29,9 @@ async fn execute_instant_acme_renewal_inner(
 ) -> Result<AcmeRenewalOutcome, AcmeRenewalError> {
     match item.target.challenge {
         AcmeChallenge::Http01 => execute_instant_http_01_renewal(config, item).await,
-        AcmeChallenge::TlsAlpn01 => execute_instant_tls_alpn_01_renewal(config, item).await,
+        AcmeChallenge::TlsAlpn01 => Err(AcmeRenewalError::UnsupportedChallenge {
+            challenge: item.target.challenge,
+        }),
     }
 }
 
@@ -152,138 +154,6 @@ async fn execute_instant_http_01_renewal(
                     &item.target.domains,
                     &published,
                 ),
-            })?
-            .into_bytes();
-        let certificate = private_key_pem
-            .with_secret(|private_key| {
-                install_managed_certificate(
-                    storage,
-                    &item.target.vhost_name,
-                    &fullchain_pem,
-                    private_key,
-                    &item.target.domains,
-                )
-            })
-            .map_err(AcmeRenewalError::CertificateInstall)?;
-
-        Ok(AcmeRenewalOutcome {
-            vhost_name: item.target.vhost_name.clone(),
-            issuer: item.target.issuer.clone(),
-            certificate,
-            published_challenges: published.len(),
-            cleanup_pending: false,
-        })
-    }
-    .await;
-
-    let cleanup = ownership.finish().map_err(acme_cleanup::order_error);
-    finish_renewal_cleanup(result, cleanup)
-}
-
-#[cfg(feature = "acme-client")]
-async fn execute_instant_tls_alpn_01_renewal(
-    config: &Config,
-    item: &AcmeRenewalItem,
-) -> Result<AcmeRenewalOutcome, AcmeRenewalError> {
-    let storage = config
-        .tls
-        .acme
-        .storage
-        .as_deref()
-        .ok_or(AcmeRenewalError::MissingStorage)?;
-    let account = load_or_create_instant_acme_account(config, &item.target.issuer)
-        .await
-        .map_err(instant_client_error_to_renewal_error)?;
-    let mut ownership = acme_order::Order::new().map_err(acme_cleanup::order_error)?;
-    let mut published = Vec::with_capacity(item.target.domains.len());
-
-    let result = async {
-        let identifiers: Vec<instant_acme::Identifier> = item
-            .target
-            .domains
-            .iter()
-            .map(|domain| instant_acme::Identifier::Dns(domain.clone()))
-            .collect();
-        let mut order = account
-            .new_order(&instant_acme::NewOrder::new(&identifiers))
-            .await
-            .map_err(|error| AcmeRenewalError::Client {
-                issuer: item.target.issuer.clone(),
-                message: error.to_string(),
-            })?;
-
-        {
-            let mut authorizations = order.authorizations();
-            while let Some(authorization) = authorizations.next().await {
-                let mut authorization =
-                    authorization.map_err(|error| AcmeRenewalError::Client {
-                        issuer: item.target.issuer.clone(),
-                        message: error.to_string(),
-                    })?;
-                if authorization.status == instant_acme::AuthorizationStatus::Valid {
-                    continue;
-                }
-
-                let identifier = authorization.identifier().to_string();
-                if !item
-                    .target
-                    .domains
-                    .iter()
-                    .any(|d| d.eq_ignore_ascii_case(&identifier))
-                {
-                    return Err(acme_cleanup::order_error(io::ErrorKind::InvalidData.into()));
-                }
-                let mut challenge = authorization
-                    .challenge(instant_acme::ChallengeType::TlsAlpn01)
-                    .ok_or_else(|| AcmeRenewalError::Client {
-                        issuer: item.target.issuer.clone(),
-                        message: format!(
-                            "authorization for {} did not include a tls-alpn-01 challenge",
-                            identifier
-                        ),
-                    })?;
-                let digest = challenge.key_authorization().digest();
-                let (cert_pem, key_pem) = tls_alpn_01_certificate(&identifier, digest.as_ref())?;
-                key_pem
-                    .with_secret(|private_key| {
-                        ownership.alpn(storage, &identifier, &cert_pem, private_key)
-                    })
-                    .map_err(acme_cleanup::order_error)?;
-                published.push(identifier.clone());
-                challenge
-                    .set_ready()
-                    .await
-                    .map_err(|error| AcmeRenewalError::Client {
-                        issuer: item.target.issuer.clone(),
-                        message: error.to_string(),
-                    })?;
-            }
-        }
-
-        let retry_policy = instant_acme::RetryPolicy::new().timeout(Duration::from_secs(60));
-        order
-            .poll_ready(&retry_policy)
-            .await
-            .map_err(|error| AcmeRenewalError::Client {
-                issuer: item.target.issuer.clone(),
-                message: error.to_string(),
-            })?;
-        let private_key_pem = SecretVec::from_vec(
-            order
-                .finalize()
-                .await
-                .map_err(|error| AcmeRenewalError::Client {
-                    issuer: item.target.issuer.clone(),
-                    message: error.to_string(),
-                })?
-                .into_bytes(),
-        );
-        let fullchain_pem = order
-            .poll_certificate(&retry_policy)
-            .await
-            .map_err(|error| AcmeRenewalError::Client {
-                issuer: item.target.issuer.clone(),
-                message: error.to_string(),
             })?
             .into_bytes();
         let certificate = private_key_pem

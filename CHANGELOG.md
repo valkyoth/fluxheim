@@ -11,6 +11,10 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- Enabled managed ACME now rejects `challenge = "tls-alpn-01"` rather than
+  negotiating a protocol the gateway cannot serve. Use `http-01` and route
+  public port 80 to the gateway before upgrading. Normal HTTPS is unchanged.
+
 - Give ACME renewals ownership of their challenge files across cancellation,
   timeout and restart. Upgrade the gateway before its external companion;
   see [challenge cleanup and migration](docs/guides/acme-recovery.md#challenge-cleanup).

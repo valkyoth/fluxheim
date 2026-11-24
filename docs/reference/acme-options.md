@@ -16,7 +16,7 @@ listeners are separate `server.tls_listen` settings, not created by ACME.
 | `storage` | Absent | Required when enabled; persistent, private directory; relative paths resolve against config base |
 | `contact_email` | Absent | Required when enabled; operator contact, not an EAB identifier |
 | `default_issuer` | `"letsencrypt"` | Exact configured issuer name |
-| `challenge` | `"http-01"` | `http-01` or `tls-alpn-01`; latter validates with rustls/TLS listener but native challenge serving is incomplete  |
+| `challenge` | `"http-01"` | Enabled managed ACME requires `http-01`; `tls-alpn-01` is rejected |
 | `automation` | `"background"` | `background` or `external`; external stops the in-process renewal task, not challenge serving |
 | `renewal` | Table below | Scheduling and reload settings |
 | `issuers` | Five built-in entries | `[[tls.acme.issuers]]`; maximum 128, unique nonempty names; an explicit list replaces built-ins |

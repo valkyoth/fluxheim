@@ -30,16 +30,21 @@ fn acme_guide_templates_validate_without_implied_terms_acceptance() {
 }
 
 #[test]
-fn acme_guide_alpn_requires_tls_listener_and_rustls() {
+fn managed_tls_alpn_is_rejected_in_server_and_companion_scopes() {
     let root = secure_test_dir("acme-guide-alpn");
     let mut config = recipe(HTTP, &root);
     config.tls.acme.challenge = crate::AcmeChallenge::TlsAlpn01;
-    config.validate().unwrap();
-    config.server.tls_listen.clear();
-    assert!(config.validate().is_err());
-    config.server.tls_listen = vec!["127.0.0.1:8443".parse().unwrap()];
-    config.tls.backend = crate::TlsBackend::Openssl;
-    assert!(config.validate().is_err());
+    for backend in [crate::TlsBackend::Rustls, crate::TlsBackend::Openssl] {
+        config.tls.backend = backend;
+        for scope in [crate::ValidationScope::Server, crate::ValidationScope::Acme] {
+            let error = config.validate_for_scope(scope).unwrap_err();
+            assert!(matches!(
+                error,
+                ConfigError::UnsupportedAcmeChallenge { .. }
+            ));
+            assert!(error.to_string().contains("http-01"));
+        }
+    }
     fs::remove_dir_all(root).unwrap();
 }
 

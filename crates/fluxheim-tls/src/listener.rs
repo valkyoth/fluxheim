@@ -7,7 +7,6 @@ use thiserror::Error;
 pub struct DownstreamTlsListenerPlan {
     selector: DownstreamCertificateSelector,
     requires_certificate_resolver: bool,
-    acme_tls_alpn_enabled: bool,
 }
 
 impl DownstreamTlsListenerPlan {
@@ -15,6 +14,11 @@ impl DownstreamTlsListenerPlan {
         config: &Config,
         resolver: impl Fn(&Config, &VhostConfig) -> Option<DownstreamCertificateSource>,
     ) -> Result<Option<Self>, DownstreamTlsPlanError> {
+        if config.tls.acme.enabled
+            && config.tls.acme.challenge != fluxheim_config::AcmeChallenge::Http01
+        {
+            return Err(DownstreamTlsPlanError::UnsupportedAcmeChallenge);
+        }
         if config.server.tls_listen.is_empty() {
             return Ok(None);
         }
@@ -25,14 +29,11 @@ impl DownstreamTlsListenerPlan {
         let selector =
             DownstreamCertificateSelector::from_config_with_acme_resolver(config, resolver)
                 .ok_or(DownstreamTlsPlanError::MissingFallbackCertificate)?;
-        let acme_tls_alpn_enabled = acme_tls_alpn_enabled(config);
-        let requires_certificate_resolver =
-            selector.has_sni_certificates() || acme_tls_alpn_enabled;
+        let requires_certificate_resolver = selector.has_sni_certificates();
 
         Ok(Some(Self {
             selector,
             requires_certificate_resolver,
-            acme_tls_alpn_enabled,
         }))
     }
 
@@ -49,7 +50,7 @@ impl DownstreamTlsListenerPlan {
     }
 
     pub fn acme_tls_alpn_enabled(&self) -> bool {
-        self.acme_tls_alpn_enabled
+        false
     }
 }
 
@@ -57,6 +58,8 @@ impl DownstreamTlsListenerPlan {
 pub enum DownstreamTlsPlanError {
     #[error("server.tls_listen requires tls.enabled = true")]
     TlsDisabled,
+    #[error("native TLS-ALPN-01 is not supported; use http-01")]
+    UnsupportedAcmeChallenge,
     #[error(
         "server.tls_listen requires a global certificate or a static/ACME certificate source on server.default_vhost"
     )]
@@ -254,19 +257,6 @@ fn managed_acme_domains_for_vhost(vhost: &VhostConfig) -> Option<HashSet<String>
         .filter_map(|domain| normalize_host(domain))
         .collect::<HashSet<_>>();
     (!domains.is_empty()).then_some(domains)
-}
-
-fn acme_tls_alpn_enabled(config: &Config) -> bool {
-    #[cfg(feature = "acme")]
-    {
-        config.tls.acme.enabled
-            && config.tls.acme.challenge == fluxheim_config::AcmeChallenge::TlsAlpn01
-    }
-    #[cfg(not(feature = "acme"))]
-    {
-        let _ = config;
-        false
-    }
 }
 
 #[cfg(test)]

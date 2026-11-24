@@ -42,7 +42,7 @@ pub(super) fn format_tls_error(
         }
         ConfigError::UnsupportedAcmeChallenge { challenge } => write!(
             formatter,
-            "tls.acme.challenge {challenge:?} is not supported for managed ACME yet; use \"http-01\" or \"tls-alpn-01\""
+            "tls.acme.challenge {challenge:?} is not supported for managed ACME by the native listener; use \"http-01\""
         ),
         ConfigError::InvalidAcmeRenewalDuration { field } => {
             write!(formatter, "{field} must be greater than zero")

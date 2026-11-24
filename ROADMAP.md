@@ -623,7 +623,7 @@ enabled = true
 storage = "/var/lib/fluxheim/acme"
 contact_email = "admin@example.com"
 default_issuer = "letsencrypt"
-challenge = "tls-alpn-01"
+challenge = "http-01"
 
 [[vhosts]]
 name = "example.com"

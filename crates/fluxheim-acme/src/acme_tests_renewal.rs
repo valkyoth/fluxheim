@@ -52,6 +52,23 @@ fn account_rollover_fails_before_remote_mutation_is_possible() {
     assert!(error.to_string().contains("caller-generated key"));
 }
 
+#[cfg(feature = "acme-client")]
+#[test]
+fn direct_renewal_rejects_tls_alpn_before_storage_or_issuer_access() {
+    let mut config = acme_config_with_vhosts(vec![managed_vhost("example")]);
+    let mut item = plan_renewal_queue(&config, &[], UNIX_EPOCH).remove(0);
+    item.target.challenge = crate::AcmeChallenge::TlsAlpn01;
+    config.tls.acme.storage = None;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    assert!(matches!(
+        rt.block_on(crate::execute_instant_acme_renewal(&config, &item)),
+        Err(crate::AcmeRenewalError::UnsupportedChallenge { .. })
+    ));
+}
+
 #[test]
 fn execute_renewal_publishes_finalizes_installs_and_cleans_http_01() {
     let storage = fluxheim_common::test_support::unique_temp_path("acme-execute-renewal");

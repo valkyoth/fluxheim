@@ -80,9 +80,7 @@ fluxheim-acme --config /etc/fluxheim/fluxheim.toml doctor
 
 `doctor` is offline by default but is **not read-only**: it creates storage and
 recovers managed certificate transactions. With `doctor --online`, HTTP-01
-also writes a temporary probe and requests the domain's HTTP port 80. The
-TLS-ALPN-01 doctor check is only TCP reachability to port 443, not proof that a
-CA can complete an ALPN challenge. Neither doctor mode replaces real issuance.
+also writes a temporary probe and requests the domain's HTTP port 80. Neither doctor mode replaces real issuance.
 
 Managed certificates can initially be missing. The server may start with that
 SNI pending; HTTPS then uses an available fallback or fails until issuance and
@@ -98,28 +96,13 @@ An interrupted managed renewal stops serving its token without waiting for
 disk cleanup. When upgrading a gateway and a separate companion, upgrade the
 gateway first. See [challenge cleanup and recovery](acme-recovery.md#challenge-cleanup).
 
-**the documented limitation: native TLS-ALPN-01 serving is incomplete. Use HTTP-01 for
-managed issuance today.** The accepted configuration below is not a working
-alternative merely because it validates:
-
-```toml
-[tls.acme]
-# Keep the other settings from the base template.
-challenge = "tls-alpn-01"
-```
-
-This is a replacement field in the existing table, not a second table to paste
-at the bottom. It requires rustls and a TLS listener. However, the native listener
-does not attach the challenge-capable resolver/store: with the root application's
-ACME/TLS features it negotiates `acme-tls/1` but serves an ordinary fallback
-certificate, even when challenge files exist and after certificate reload. The
-loopback handshake characterization checks that mismatch. The certificate-generation
-and resolver primitives exist; their production integration does not.
-
-The correction must prove actual CA validation, in-process and external
-publication/removal, correct SNI and strict ALPN selection. Public port 443 and a
-TLS path that preserves `acme-tls/1` remain prerequisites, not a fix for the missing
-integration. DNS-01 and wildcard certificate issuance are not supported.
+**HTTP-01 is the only supported managed challenge.** If an existing
+configuration sets `tls.acme.challenge = "tls-alpn-01"`, change it to
+`"http-01"` (the default) and route public port 80 to the gateway before
+upgrading. The gateway and renewal companion both reject the unsupported
+setting; they do not silently switch protocols. The native TLS listener does
+not advertise `acme-tls/1`. Normal HTTPS and HTTP/2 on port 443 are unchanged.
+DNS-01 and wildcard issuance are not supported.
 
 To forward HTTP-01 to a different ACME agent instead of Fluxheim's token store:
 
@@ -262,7 +245,7 @@ issuance support.
 | No targets | Global TLS/ACME, vhost TLS/ACME, concrete domains and renewal enabled |
 | Agreement error | Exact issuer entry, reviewed terms URL, explicit acceptance |
 | HTTP-01 failure | DNS, public port 80, container listen/publish addresses, correct vhost, external-forwarder precedence |
-| TLS-ALPN-01 failure | Native challenge serving is incomplete; use HTTP-01 rather than repeatedly forcing orders |
+| TLS-ALPN-01 failure | Set `challenge = "http-01"` and make port 80 reachable before starting the gateway or companion |
 | Files renewed but old certificate served | Reload result, serving process storage, default-vhost/SNI routing; use a new TLS connection |
 | EAB/ownership error | Secret source, service identity, mounts, symlinks and writable ancestors; do not solve by making keys public |
 | Repeated renewal failures | Check CA limits, clock and credentials; allow for the background retry delay, or correct the external timer's cadence |

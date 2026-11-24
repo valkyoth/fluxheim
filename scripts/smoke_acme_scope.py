@@ -112,6 +112,8 @@ def fixtures(root):
     # issuer names isolate accounts while retaining the same certificate store.
     for index, name in enumerate(RENEWAL_CONFIGS):
         (control / name).write_text(configuration(issuer=f"pebble-{index}", elective=index == 0))
+    (control / "unsupported-alpn.toml").write_text(configuration(renewal=False, held=True).replace(
+        "[tls.acme]\n", '[tls.acme]\nchallenge = "tls-alpn-01"\n'))
     (control / "off.toml").write_text(configuration(off=True))
     (control / "elective.toml").write_text(configuration(issuer="elective", elective=True))
     (control / "server.toml").write_text(configuration(renewal=False, held=True))
@@ -154,7 +156,7 @@ class Smoke:
         # preserving ownership) into an engine volume, then mount it read-only.
         name = self.prefix + "-fixtures"
         self.names.append(name)
-        sources = ("renew.toml", "server.toml", "served.toml", "backoff.toml", *PAUSE_CONFIGS, "cache.toml", "elective.toml", "off.toml", *RENEWAL_CONFIGS, "ca.pem")
+        sources = ("renew.toml", "server.toml", "served.toml", "backoff.toml", *PAUSE_CONFIGS, "unsupported-alpn.toml", "cache.toml", "elective.toml", "off.toml", *RENEWAL_CONFIGS, "ca.pem")
         mounts = [argument for source in sources
                   for argument in self.mount(source, "/input/" + source)]
         command([self.runtime, "run", "--name", name, "--network=none", "--user=0",
@@ -303,6 +305,16 @@ def qualify(smoke, full, php, legacy):
         log = command([smoke.runtime, "logs", frontend])
         return (log.stdout + log.stderr).splitlines().count("order request")
 
+    for label, entry, args in (
+        ("startup", "/usr/local/bin/fluxheim", []),
+        ("validate", "/usr/local/bin/fluxheim", ["--validate-config"]),
+        ("renew", "/usr/local/bin/fluxheim", ["acme-renew", "--force-renew"]),
+        ("companion", "/usr/local/bin/fluxheim-acme", ["renew", "--force-renew"]),
+    ):
+        expect_failure(smoke.launch("unsupported-" + label, full, args, entry=entry,
+                                    config="unsupported-alpn.toml"), 'use "http-01"')
+    if order_count():
+        raise AssertionError("unsupported challenge opened a CA order")
     code, status = smoke.launch("held-status", full, ["status", "--vhost", "scope"],
                                 entry="/usr/local/bin/fluxheim-acme", config="server.toml")
     if (code or "status=held due_now=false" not in status or "not_after=missing" not in status

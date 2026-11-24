@@ -17,26 +17,10 @@ sanitized and hash-suffixed by Fluxheim, not supplied by the operator.
 For HTTP-01, Fluxheim also derives a local challenge store at
 `<storage>/http-01/<safe-vhost-segment>/` and serves safe challenge token files
 directly when `tls.acme.challenge = "http-01"`.
-TLS-ALPN-01 configuration and challenge-generation primitives exist, but
-**Current limitation:**. During renewal,
-the engine writes challenge certificates under
-`<storage>/tls-alpn-01/<safe-domain-segment>/`; the native listener does not
-attach the challenge store to its resolver. Advertising `acme-tls/1` alone does
-not serve these certificates. Use HTTP-01 until the integration is qualified.
-Challenge generation does not set an order-bounded validity window, so do not
-rely on certificate expiry to clean leftover state. DNS-01 remains
-future work because secure provider integrations need explicit, provider-specific
-secret handling rather than generic shell hooks.
-The `fluxheim-tls` challenge-capable resolver accepts only an atomically
-published, bounded in-memory SNI table; it no longer exposes a synchronous
-challenge loader to remote ClientHello processing. ACME state integrations
-must parse and validate challenge material before replacing that table, outside
-the handshake path.
-Challenge publication uses the same managed store: HTTP-01 tokens are restricted
-to one URL-safe path segment, key-authorizations are bounded and checked for
-control bytes, TLS-ALPN-01 certificates are generated with the ACME identifier
-extension, files are written through temporary files, and symlinked destinations
-are rejected.
+Managed TLS-ALPN-01 is rejected before issuance. Use HTTP-01 and route port
+80 to the gateway; opening port 443 alone is not sufficient. DNS-01 is not
+supported. HTTP-01 tokens must be single URL-safe path segments, and
+key-authorizations are bounded and checked for control bytes.
 ACME account credentials are stored separately at
 `<storage>/accounts/<safe-issuer-segment>/credentials.json`, again using a
 Fluxheim-generated sanitized and hash-suffixed segment rather than a raw config
@@ -296,13 +280,10 @@ When Fluxheim is built with `acme-client`, it can load existing credentials from
 that path or recoverably create a new issuer account through `instant-acme`.
 EAB HMAC keys are treated as base64/base64url
 encoded ACME MAC keys before they are passed to the issuer client. The same
-feature also contains the HTTP-01 and TLS-ALPN-01 client order paths:
-create order, publish challenge material, mark challenges ready, finalize the
-generated CSR, retrieve the certificate chain, install it atomically, and clean
-up challenge files. The TLS-ALPN-01 serving gap above prevents claiming a working
-native end-to-end TLS-ALPN workflow. **Current limitation:** cleanup is skipped if the
-renewal future is cancelled and stops at the first removal error; normal-return
-cleanup tests do not prove timeout/crash cleanup.
+feature implements the HTTP-01 order: publish the challenge, mark it ready,
+finalize the CSR, retrieve and install the chain, and clean up owned files.
+See [challenge cleanup](acme-recovery.md#challenge-cleanup) for cancellation
+and restart behavior.
 
 Production packages and container images ship the `fluxheim-acme` companion as
 the preferred external renewal command. It uses the same ACME engine, storage
@@ -369,9 +350,8 @@ not a `fluxheim-acme renew` flag and should not be used in new automation.
 `doctor` checks target consistency, storage, account credentials, explicit
 terms acceptance, system time, transaction recovery/locking, and
 certificate/key pair presence. `--online` also probes each used issuer
-directory through the bounded client, resolves every requested name, exercises
-HTTP-01 through a temporary challenge file, and checks TLS-ALPN port
-reachability. Reachability is measured from the machine running `doctor`; it
+directory through the bounded client, resolves every requested name, and exercises
+HTTP-01 through a temporary challenge file. Reachability is measured from the machine running `doctor`; it
 does not replace a CA-side validation test or external monitoring. Remote
 lifecycle changes require explicit confirmation:
 

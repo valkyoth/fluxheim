@@ -129,7 +129,7 @@ impl Slot {
         self.activate()
     }
 
-    #[cfg(feature = "acme-client")]
+    #[cfg(all(test, feature = "acme-client"))]
     pub(super) fn publish_pair(&mut self, domain: &str, cert: &[u8], key: &[u8]) -> io::Result<()> {
         validate_issued_material(cert, key, &[normalized_domain(domain)])
             .map_err(io::Error::other)?;

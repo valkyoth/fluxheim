@@ -16,9 +16,6 @@ use fluxheim_config::{Config, TlsAlpnPolicy};
 ))]
 use super::NativeHttp1ProxyRuntimeError;
 
-#[cfg(feature = "tls-rustls-backend")]
-const ACME_TLS_ALPN_PROTOCOL: &[u8] = b"acme-tls/1";
-
 #[cfg(all(test, feature = "tls-rustls-backend", feature = "acme"))]
 #[path = "native_acme_alpn_contract_tests.rs"]
 mod acme_alpn_contract_tests;
@@ -40,16 +37,10 @@ pub(super) fn native_rustls_server_config(
         fluxheim_tls::RustlsDownstreamCertificateResolver::new(plan.selector())
             .map_err(NativeHttp1ProxyRuntimeError::RustlsCertificate)?,
     );
-    let acme_tls_alpn_protocol = plan
-        .acme_tls_alpn_enabled()
-        .then_some(ACME_TLS_ALPN_PROTOCOL);
-    let server_config = fluxheim_tls::build_rustls_downstream_server_config(
-        &config.tls,
-        resolver.clone(),
-        acme_tls_alpn_protocol,
-    )
-    .map(Arc::new)
-    .map_err(NativeHttp1ProxyRuntimeError::RustlsServerConfig)?;
+    let server_config =
+        fluxheim_tls::build_rustls_downstream_server_config(&config.tls, resolver.clone(), None)
+            .map(Arc::new)
+            .map_err(NativeHttp1ProxyRuntimeError::RustlsServerConfig)?;
     Ok((server_config, resolver))
 }
 

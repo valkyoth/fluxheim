@@ -236,7 +236,7 @@ mod acme_pem;
 mod acme_queue;
 #[path = "acme_targets.rs"]
 mod acme_targets;
-#[cfg(feature = "acme-client")]
+#[cfg(all(test, feature = "acme-client"))]
 #[path = "acme_tls_alpn.rs"]
 mod acme_tls_alpn;
 #[path = "acme_transaction.rs"]
@@ -322,7 +322,7 @@ pub use acme_queue::{
     next_retry_at, plan_renewal_queue, renewal_held, toml_offset_datetime_to_system_time,
 };
 pub use acme_targets::{managed_acme_targets, renewal_targets};
-#[cfg(feature = "acme-client")]
+#[cfg(all(test, feature = "acme-client"))]
 use acme_tls_alpn::tls_alpn_01_certificate;
 pub use acme_transaction::{AcmeCertificateReadLock, lock_managed_certificate_pair};
 use acme_transaction::{AcmeMutationLock, unique_transaction_id};

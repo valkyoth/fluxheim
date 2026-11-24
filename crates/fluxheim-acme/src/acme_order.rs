@@ -101,7 +101,7 @@ impl Order {
             .publish_http(token, value)
     }
 
-    #[cfg(feature = "acme-client")]
+    #[cfg(all(test, feature = "acme-client"))]
     pub(super) fn alpn(
         &mut self,
         storage: &Path,

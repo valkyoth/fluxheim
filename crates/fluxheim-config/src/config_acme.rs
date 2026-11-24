@@ -176,6 +176,11 @@ impl AcmeConfig {
         validate_config_list_len("tls.acme.issuers", self.issuers.len(), MAX_ACME_ISSUERS)?;
 
         if self.enabled {
+            if self.challenge != AcmeChallenge::Http01 {
+                return Err(ConfigError::UnsupportedAcmeChallenge {
+                    challenge: self.challenge,
+                });
+            }
             let Some(storage) = &self.storage else {
                 return Err(ConfigError::MissingAcmeStorage);
             };

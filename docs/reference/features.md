@@ -42,7 +42,7 @@ for the difference between these aliases and published artifacts.
 | `metrics-otlp` | No | Optional OTLP/HTTP JSON metrics export to a local Prometheus OTLP receiver or collector. |
 | `otel-tracing` | No | W3C `traceparent` propagation and access-log trace ID correlation. |
 | `otel-otlp` | No | Optional OTLP/HTTP JSON trace export to a local collector or Jaeger endpoint. |
-| `acme` | No | ACME config, renewal planning, managed certificate/account paths, local HTTP-01 serving and challenge primitives. Native TLS-ALPN-01 serving is incomplete; see [current ACME limits](../guides/acme.md). |
+| `acme` | No | ACME config, renewal planning, managed certificate/account paths, local HTTP-01 serving and challenge primitives. Managed TLS-ALPN-01 is rejected; see [current ACME limits](../guides/acme.md). |
 | `acme-client` | No | Live ACME account/order HTTP client and background renewal service. |
 | `compression` | No | Shared response compression config and body-filter integration. |
 | `compression-brotli` | No | Brotli response compression for eligible known-length responses. |
@@ -90,8 +90,7 @@ credential source, or container secret.
 renewal-executor pieces. `acme-client` adds the live ACME HTTP client stack used
 to load or create issuer accounts and run orders through `instant-acme`, plus
 the runtime background renewal service. HTTP-01 has native challenge serving;
-the TLS-ALPN-01 client path is not sufficient because the native listener lacks
-challenge-store integration. Keep
+TLS-ALPN-01 is not available for managed renewal. Keep
 `acme-client` enabled only in builds that perform certificate issuance or
 renewal.
 

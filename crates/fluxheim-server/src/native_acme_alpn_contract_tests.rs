@@ -13,7 +13,7 @@ fn write_private(path: &std::path::Path, bytes: &[u8]) {
 }
 
 #[tokio::test]
-async fn native_alpn_challenge_currently_serves_ordinary_certificate_even_after_reload() {
+async fn native_listener_refuses_challenge_only_handshakes_before_and_after_reload() {
     use rustls::pki_types::ServerName;
     use tokio::net::{TcpListener, TcpStream};
     use tokio_rustls::{TlsAcceptor, TlsConnector};
@@ -87,54 +87,65 @@ async fn native_alpn_challenge_currently_serves_ordinary_certificate_even_after_
         cert_path,
         key_path,
     }];
+    assert!(matches!(
+        native_rustls_server_config(&config),
+        Err(NativeHttp1ProxyRuntimeError::TlsPlan(
+            fluxheim_tls::DownstreamTlsPlanError::UnsupportedAcmeChallenge
+        ))
+    ));
+    config.tls.acme.challenge = fluxheim_config::AcmeChallenge::Http01;
     let (server, resolver) = native_rustls_server_config(&config).unwrap();
-    // A standalone server-crate build may omit fluxheim-tls/acme; the root
-    // application's acme feature enables it. Exercise both feature combinations.
-    let advertises_challenge = server
-        .alpn_protocols
-        .iter()
-        .any(|value| value == b"acme-tls/1");
+    assert!(
+        !server
+            .alpn_protocols
+            .iter()
+            .any(|value| value == b"acme-tls/1")
+    );
     let mut roots = rustls::RootCertStore::empty();
     roots.add(normal.cert.der().clone()).unwrap();
     let mut client = rustls::ClientConfig::builder()
         .with_root_certificates(roots)
         .with_no_client_auth();
-    client.alpn_protocols = vec![b"acme-tls/1".to_vec()];
-    let connector = TlsConnector::from(Arc::new(client));
-
     for reload in [false, true] {
         if reload {
             resolver.reload().unwrap();
         }
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let acceptor = TlsAcceptor::from(server.clone());
-        let serving = async {
-            let (tcp, _) = listener.accept().await.unwrap();
-            acceptor.accept(tcp).await
-        };
-        let connecting = async {
-            let tcp = TcpStream::connect(address).await.unwrap();
-            connector
-                .connect(ServerName::try_from("localhost").unwrap(), tcp)
+        for challenge_only in [true, false] {
+            client.alpn_protocols = if challenge_only {
+                vec![b"acme-tls/1".to_vec()]
+            } else {
+                vec![b"http/1.1".to_vec()]
+            };
+            let connector = TlsConnector::from(Arc::new(client.clone()));
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let acceptor = TlsAcceptor::from(server.clone());
+            let serving = async {
+                let (tcp, _) = listener.accept().await.unwrap();
+                acceptor.accept(tcp).await
+            };
+            let connecting = async {
+                let tcp = TcpStream::connect(address).await.unwrap();
+                connector
+                    .connect(ServerName::try_from("localhost").unwrap(), tcp)
+                    .await
+            };
+            let (accepted, connected) =
+                tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                    tokio::join!(serving, connecting)
+                })
                 .await
-        };
-        let (accepted, connected) =
-            tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                tokio::join!(serving, connecting)
-            })
-            .await
-            .unwrap();
-        if !advertises_challenge {
-            assert!(accepted.is_err() && connected.is_err());
-            continue;
+                .unwrap();
+            if challenge_only {
+                assert!(accepted.is_err() && connected.is_err());
+                continue;
+            }
+            let _accepted = accepted.unwrap();
+            let connection = connected.unwrap();
+            let tls = connection.get_ref().1;
+            assert_eq!(tls.alpn_protocol(), Some(b"http/1.1".as_slice()));
+            assert_eq!(tls.peer_certificates().unwrap()[0], *normal.cert.der());
+            assert_ne!(tls.peer_certificates().unwrap()[0], *challenge.der());
         }
-        let _accepted = accepted.unwrap();
-        let connection = connected.unwrap();
-        let tls = connection.get_ref().1;
-        assert_eq!(tls.alpn_protocol(), Some(b"acme-tls/1".as_slice()));
-        // documented contract: negotiate the protocol but return the wrong certificate.
-        assert_eq!(tls.peer_certificates().unwrap()[0], *normal.cert.der());
-        assert_ne!(tls.peer_certificates().unwrap()[0], *challenge.der());
     }
 }

@@ -91,7 +91,7 @@ fn parses_tls_acme_config_with_actalis_eab() {
 }
 
 #[test]
-fn accepts_tls_alpn_acme_with_rustls_tls_listener() {
+fn rejects_tls_alpn_acme_with_rustls_tls_listener() {
     let storage = secure_test_dir("config-tls-alpn-acme");
     let certificate_dir = secure_test_dir("config-tls-alpn-certificate");
     let cert_path = safe_child_path(&certificate_dir, "localhost-cert.pem");
@@ -125,7 +125,10 @@ fn accepts_tls_alpn_acme_with_rustls_tls_listener() {
         config.tls.acme.challenge,
         super::super::super::AcmeChallenge::TlsAlpn01
     );
-    config.validate().unwrap();
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::UnsupportedAcmeChallenge { .. })
+    ));
 }
 
 #[test]
@@ -149,10 +152,7 @@ fn rejects_tls_alpn_acme_without_tls_listener() {
 
     assert!(matches!(
         config.validate(),
-        Err(ConfigError::InvalidTlsPolicy {
-            field: "tls.acme.challenge",
-            ..
-        })
+        Err(ConfigError::UnsupportedAcmeChallenge { .. })
     ));
 }
 

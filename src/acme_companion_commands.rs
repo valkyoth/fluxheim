@@ -121,7 +121,7 @@ pub(super) fn run_doctor(
                         doctor_http_01_reachability(storage, &target.vhost_name, domain)?;
                     }
                     fluxheim_config::AcmeChallenge::TlsAlpn01 => {
-                        doctor_tcp_reachability(domain, 443, "TLS-ALPN-01")?;
+                        return Err("managed TLS-ALPN-01 is not supported; use http-01".into());
                     }
                 }
             }
@@ -258,29 +258,6 @@ fn doctor_http_01_reachability(
             Err(primary)
         }
     }
-}
-
-#[cfg(feature = "acme-client")]
-pub(super) fn doctor_tcp_reachability(
-    domain: &str,
-    port: u16,
-    challenge: &str,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    use std::net::ToSocketAddrs as _;
-
-    let addresses = (domain, port).to_socket_addrs()?.collect::<Vec<_>>();
-    if addresses.is_empty() {
-        return Err(format!("ACME doctor: DNS returned no addresses for {domain}").into());
-    }
-    if addresses.iter().any(|address| {
-        std::net::TcpStream::connect_timeout(address, std::time::Duration::from_secs(5)).is_ok()
-    }) {
-        return Ok(());
-    }
-    Err(format!(
-        "ACME doctor: {challenge} local-vantage TCP reachability failed for {domain}:{port}"
-    )
-    .into())
 }
 
 #[cfg(feature = "acme-client")]
