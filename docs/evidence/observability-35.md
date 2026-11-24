@@ -17,8 +17,8 @@ For ordinary HTTPS the test pins and compares the exact installed leaf.
   protocols. Terminating only the companion must remove the temporary
   identity without stopping the gateway. Restart must not republish it.
 - On Unix, an offline doctor on an empty external installation must create
-  service-owned `0700` storage without binding a socket. In the container
-  mode of `scripts/smoke_acme_mount_boundary.sh`, a separate two-UID test
+  service-owned `0700` storage without binding a socket. In every mode
+  of `scripts/smoke_acme_mount_boundary.sh`, a separate two-UID test
   verifies a root broker refuses foreign storage, an untrusted ancestor and
   a foreign publication directory without changing their contents or owners.
 

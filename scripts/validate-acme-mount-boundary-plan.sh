@@ -32,6 +32,14 @@ require_text "$smoke" '--pids-limit 64'
 require_text "$smoke" '--tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m'
 require_text "$smoke" '--workdir /tmp'
 require_text "$smoke" '--exact "$test_name" --ignored --nocapture'
+require_text "$smoke" 'root_broker_refuses_foreign_owner_without_modifying_storage'
+# Both tests must run: don't hide the two-UID check inside a backend branch.
+if ! awk '/^run_ownership_test$/ { ownership=NR }
+         /^if \[ "\$backend" = userns \]; then$/ { dispatch=NR }
+         END { exit !(ownership && dispatch > ownership) }' "$smoke"; then
+    echo "ACME two-UID check must precede mount backend dispatch" >&2
+    exit 1
+fi
 require_text "$ci" 'scripts/smoke_acme_mount_boundary.sh'
 require_text "$ci" 'FLUXHEIM_ACME_MOUNT_TEST_MODE=container'
 require_text "$stable_gate" 'scripts/smoke_acme_mount_boundary.sh'

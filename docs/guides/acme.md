@@ -121,6 +121,16 @@ symlinks. Missing directories are created privately. The gateway will not
 take ownership or repair permissions on existing directories. In particular,
 do not run a root gateway against a less-privileged user's TLS-ALPN storage;
 run the gateway and companion as that user instead. HTTP-01 is unaffected.
+
+For a container or root-squashed mount, check ownership **inside the gateway's
+namespace**, not just on the host. If `/` appears owned by neither UID 0 nor
+the service UID (for example, UID 65534 with a service running as UID 1000),
+the gateway refuses TLS-ALPN at startup and the companion refuses publication.
+An unmapped UID can stand for multiple owners; matching its number on another
+directory would not establish trust. Use a namespace with trusted ownership
+from `/` to storage, or choose HTTP-01. Changing only the socket permissions
+will not help.
+
 Configure each managed name once. The gateway acknowledges
 publication before the companion signals readiness to the CA. Only that SNI
 offering exactly `acme-tls/1` receives the temporary certificate. Ordinary

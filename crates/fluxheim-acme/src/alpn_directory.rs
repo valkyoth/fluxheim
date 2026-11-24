@@ -18,7 +18,16 @@ pub(super) fn check(storage: &Path, create: bool) -> io::Result<()> {
     let uid = rustix::process::geteuid().as_raw();
     let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
     let mut fd = openat(CWD, "/", flags, Mode::empty())?;
-    check_owner(&fd, uid, false)?;
+    let anchor = fstat(&fd)?;
+    // An unmapped owner can have the same displayed UID as unrelated owners.
+    // Never derive an ancestor allowlist from the UID returned for "/".
+    if anchor.st_uid != 0 && anchor.st_uid != uid {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "ACME TLS-ALPN cannot verify the owner of /; use a namespace with trusted root ownership or use HTTP-01",
+        ));
+    }
+    check_owner(&anchor, uid, false)?;
     let parents = parent.components().skip(1).map(|c| (c, false));
     let private_dirs = [leaf, OsStr::new(".alpn")].map(|name| (Component::Normal(name), true));
     for (part, private) in parents.chain(private_dirs) {
@@ -35,13 +44,12 @@ pub(super) fn check(storage: &Path, create: bool) -> io::Result<()> {
             }
             other => other?,
         };
-        check_owner(&fd, uid, private)?;
+        check_owner(&fstat(&fd)?, uid, private)?;
     }
     Ok(())
 }
 
-fn check_owner(fd: &rustix::fd::OwnedFd, uid: u32, private: bool) -> io::Result<()> {
-    let stat = fstat(fd)?;
+fn check_owner(stat: &rustix::fs::Stat, uid: u32, private: bool) -> io::Result<()> {
     let trusted = if private {
         stat.st_uid == uid && stat.st_mode & 0o777 == 0o700
     } else {

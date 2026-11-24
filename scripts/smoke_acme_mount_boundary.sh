@@ -26,7 +26,7 @@ run_in_user_namespace() {
         --exact "$test_name" --ignored --nocapture
 }
 
-run_in_constrained_container() {
+select_container_runtime() {
     runtime=${FLUXHEIM_ACME_MOUNT_TEST_RUNTIME:-}
     if [ -z "$runtime" ]; then
         if command -v podman >/dev/null 2>&1; then
@@ -34,7 +34,7 @@ run_in_constrained_container() {
         elif command -v docker >/dev/null 2>&1; then
             runtime=docker
         else
-            echo "ACME mount-boundary smoke requires user namespaces, Podman, or Docker" >&2
+            echo "ACME ownership smoke requires Podman or Docker for its two-UID fixture" >&2
             exit 1
         fi
     fi
@@ -47,6 +47,9 @@ run_in_constrained_container() {
     esac
 
     image=${FLUXHEIM_ACME_MOUNT_TEST_IMAGE:-docker.io/library/debian:13.3-slim@sha256:1d3c811171a08a5adaa4a163fbafd96b61b87aa871bbc7aa15431ac275d3d430}
+}
+
+run_ownership_test() {
     # A separate private tmpfs provides two UIDs without granting mount privileges.
     ownership_test=alpn_control::directory_tests::root_broker_refuses_foreign_owner_without_modifying_storage
     ownership_result=$("$runtime" run --rm --network none --read-only --cap-drop ALL \
@@ -56,6 +59,9 @@ run_in_constrained_container() {
         -v "$test_binary:/fluxheim-acme-test:ro,Z" "$image" --exact "$ownership_test" --ignored)
     printf '%s\n' "$ownership_result"
     printf '%s\n' "$ownership_result" | grep -Fq '1 passed; 0 failed'
+}
+
+run_in_constrained_container() {
     apparmor_option=
     if [ "$runtime" = docker ]; then
         # docker-default denies mount(2) independently of CAP_SYS_ADMIN.
@@ -86,10 +92,10 @@ case "$mode" in
         if command -v unshare >/dev/null 2>&1 \
             && unshare --user --map-root-user --mount --propagation private --fork true \
                 >/dev/null 2>&1; then
-            run_in_user_namespace
+            backend=userns
         else
             echo "ACME mount-boundary smoke: user namespaces unavailable; using constrained container" >&2
-            run_in_constrained_container
+            backend=container
         fi
         ;;
     userns)
@@ -97,10 +103,10 @@ case "$mode" in
             echo "ACME mount-boundary smoke requires util-linux unshare in userns mode" >&2
             exit 1
         fi
-        run_in_user_namespace
+        backend=userns
         ;;
     container)
-        run_in_constrained_container
+        backend=container
         ;;
     *)
         echo "unsupported ACME mount-boundary smoke mode: $mode" >&2
@@ -108,4 +114,13 @@ case "$mode" in
         ;;
 esac
 
+select_container_runtime
+run_ownership_test
+if [ "$backend" = userns ]; then
+    mount_result=$(run_in_user_namespace)
+else
+    mount_result=$(run_in_constrained_container)
+fi
+printf '%s\n' "$mount_result"
+printf '%s\n' "$mount_result" | grep -Fq '1 passed; 0 failed'
 echo "ACME mount-boundary smoke passed"

@@ -268,7 +268,7 @@ mod tests {
         }
     }
     #[test]
-    fn native_publication_acknowledges_install_release_death_and_restart() {
+    fn native_publication_checks_root_before_install_release_death_and_restart() {
         let root =
             fluxheim_common::test_support::test_root().join(format!("a{:x}", std::process::id()));
         let active = Arc::new(AtomicBool::new(false));
@@ -286,6 +286,20 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            let owner = std::fs::metadata("/").unwrap().uid();
+            if owner != 0 && owner != rustix::process::geteuid().as_raw() {
+                let err = Broker::bind(&root, publish).err().unwrap();
+                assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+                assert!(err.to_string().contains("owner of /"));
+                let err = rt.block_on(probe(&root)).unwrap_err();
+                assert!(err.to_string().contains("owner of /"));
+                assert!(!root.exists());
+                return;
+            }
+        }
         for _ in 0..2 {
             let broker = Broker::bind(&root, publish.clone()).unwrap();
             assert!(Broker::bind(&root, publish.clone()).is_err());

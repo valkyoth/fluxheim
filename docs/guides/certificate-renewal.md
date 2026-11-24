@@ -89,7 +89,9 @@ filesystem, all capabilities dropped except `SYS_ADMIN`, and
 container because that profile denies `mount(2)` independently of capabilities;
 Docker's seccomp profile and the other restrictions remain active. The script
 never uses unrestricted `--privileged` access. A normal test inventory therefore
-reports the Rust test as ignored rather than as a false pass.
+reports the Rust test as ignored rather than as a false pass. All smoke modes
+also require Podman or Docker to run a separate ownership test with two UIDs
+in a private tmpfs. Selecting the user-namespace mount backend does not skip it.
 
 ```bash
 fluxheim --config path/to/fluxheim.toml --check-tls-storage
