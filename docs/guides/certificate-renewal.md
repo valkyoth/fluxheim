@@ -904,8 +904,11 @@ issuance does not replace the installed certificate.
 The delay runs from completion of the failed attempt, using monotonic time
 without jitter. The worker checks eligibility at the start of a tick and sleeps
 `check_interval_secs` after each tick. An elapsed delay permits a due check;
-it does not schedule an immediate order. Missing and expiring certificates are
-eligible immediately on the first attempt but do not bypass a failure cooldown.
+it does not schedule an immediate order. If the certificate is missing, expired,
+or has seven days or less left, the cooldown is at most one hour from the last
+failure. Shorter configured delays still apply. The worker checks expiry on
+each tick, so entering the emergency window shortens an existing cooldown too.
+An absolute hold still prevents issuance until the hold ends.
 CA renewal advice (ARI) has a separate cache; an unsuccessful advice lookup is
 not itself a failed issuance.
 

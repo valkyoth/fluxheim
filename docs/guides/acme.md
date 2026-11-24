@@ -211,7 +211,9 @@ the live listener serves the leaf or that a client trusts the chain.
 Other scheduling considerations:
 - After a failed background issuance, only that vhost waits: the delay starts at
   `retry_initial_secs`, doubles after consecutive failures up to `retry_max_secs`,
-  and resets on success. The worker retries on a normal check, not on a separate timer.
+  and resets on success. If the certificate is missing or has seven days or less
+  left, the cooldown is capped at one hour. The worker retries on a normal check,
+  not on a separate timer; an absolute hold still takes precedence.
   CLI invocations do not share this history. See the [retry example](certificate-renewal.md#retry-policy).
 - **Current limitation:** background renewal reloads whenever a reload handle exists,
   irrespective of `reload_after_renewal`. The companion and reload-control

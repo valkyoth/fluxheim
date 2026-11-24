@@ -2,6 +2,8 @@ use super::*;
 use std::collections::HashMap;
 use std::time::Instant;
 
+const EMERGENCY_RETRY_MAX: Duration = Duration::from_secs(3600);
+
 /// Retry state belongs to one worker and its immutable configuration. Vhost
 /// names are unique in that configuration; a replacement worker starts cold.
 pub struct BackgroundRenewals<'a> {
@@ -40,7 +42,13 @@ impl<'a> BackgroundRenewals<'a> {
             self.failures
                 .get(&item.target.vhost_name)
                 .is_none_or(|failure| {
-                    start.saturating_duration_since(failure.finished) >= failure.delay
+                    // Reevaluate expiry each tick: a routine failure can become urgent.
+                    let delay = if acme_queue::emergency_at(item.not_after, now) <= now {
+                        failure.delay.min(EMERGENCY_RETRY_MAX)
+                    } else {
+                        failure.delay
+                    };
+                    start.saturating_duration_since(failure.finished) >= delay
                 })
         });
         acme_ari::execute_due_queue_reporting(config, &queue, now, |name, success| {

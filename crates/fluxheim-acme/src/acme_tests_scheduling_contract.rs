@@ -37,6 +37,54 @@ fn background_failure_suppresses_the_next_due_attempt() {
 }
 
 #[test]
+fn entering_emergency_window_shortens_an_existing_week_long_cooldown() {
+    let mut config = held_config("acme-backoff-enter-emergency");
+    let week = Duration::from_secs(7 * 86400);
+    config.tls.acme.renewal.renew_after = None;
+    config.tls.acme.renewal.retry_initial_secs = week.as_secs();
+    config.tls.acme.renewal.retry_max_secs = week.as_secs();
+    let root = config.tls.acme.storage.as_ref().unwrap();
+    let paths = managed_certificate_paths(root, "example");
+    std::fs::create_dir_all(paths.cert_path.parent().unwrap()).unwrap();
+    std::fs::write(&paths.cert_path, valid_leaf_certificate_pem()).unwrap();
+    let expiry = load_certificate_not_after(&paths.cert_path)
+        .unwrap()
+        .unwrap();
+    let base = expiry - week - Duration::from_secs(7200);
+    let start = std::time::Instant::now();
+    let rt = runtime();
+    let mut worker = crate::BackgroundRenewals::new(&config);
+    for (secs, expected) in [(0, 1), (7199, 0), (7200, 1), (10799, 0), (10800, 1)] {
+        let elapsed = Duration::from_secs(secs);
+        let run = rt
+            .block_on(worker.tick_with_clock(base + elapsed, || start + elapsed))
+            .unwrap();
+        assert_eq!(run.failed.len(), expected, "elapsed={secs}");
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn missing_certificate_under_elective_hold_retries_hourly_after_failure() {
+    let mut config = held_config("acme-backoff-missing-emergency");
+    config.tls.acme.renewal.hold_mode = fluxheim_config::AcmeHoldMode::Elective;
+    config.tls.acme.renewal.retry_initial_secs = 604800;
+    config.tls.acme.renewal.retry_max_secs = 604800;
+    let base = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+    let start = std::time::Instant::now();
+    let rt = runtime();
+    let mut worker = crate::BackgroundRenewals::new(&config);
+    for (secs, expected) in [(0, 1), (3599, 0), (3600, 1)] {
+        let elapsed = Duration::from_secs(secs);
+        let run = rt
+            .block_on(worker.tick_with_clock(base + elapsed, || start + elapsed))
+            .unwrap();
+        assert_eq!(run.failed.len(), expected, "elapsed={secs}");
+    }
+    std::fs::remove_dir_all(config.tls.acme.storage.unwrap()).unwrap();
+}
+
+#[test]
 fn background_backoff_is_per_managed_vhost_and_dies_with_the_worker() {
     let mut config = held_config("acme-backoff-reset");
     config.tls.acme.renewal.renew_after = None;
