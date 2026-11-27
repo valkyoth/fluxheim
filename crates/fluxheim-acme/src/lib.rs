@@ -310,7 +310,7 @@ pub use acme_background::BackgroundRenewals;
 use acme_instant_account::ACME_ACCOUNT_OPERATION_TIMEOUT;
 #[cfg(feature = "acme-client")]
 pub use acme_instant_account::{
-    deactivate_instant_acme_account, load_or_create_instant_acme_account,
+    ReconciledAccountStatus, deactivate_instant_acme_account, load_or_create_instant_acme_account,
     probe_instant_acme_issuer, reconcile_instant_acme_account, revoke_instant_acme_certificate,
     rollover_instant_acme_account_key,
 };

@@ -47,7 +47,16 @@ pub(super) fn run_account_operation(
             let outcome = runtime.block_on(fluxheim_acme::reconcile_instant_acme_account(
                 &config, issuer,
             ))?;
-            println!("acme account reconcile: issuer={issuer} remote={outcome} status=ok");
+            match outcome {
+                fluxheim_acme::ReconciledAccountStatus::Valid => {
+                    println!("acme account reconcile: issuer={issuer} remote=valid status=ok");
+                }
+                fluxheim_acme::ReconciledAccountStatus::Deactivated => {
+                    println!(
+                        "acme account reconcile: issuer={issuer} remote=deactivated status=ok"
+                    );
+                }
+            }
             return Ok(());
         }
         _ => return Err("unknown ACME account operation".into()),

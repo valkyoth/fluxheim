@@ -356,12 +356,17 @@ fn check_outcome_with(outcome: Outcome, cli: bool) {
             // A new invocation can only inspect the same pending identity, never retry the mutation.
             let result = if cli {
                 invoke("account-reconcile").map(|line| {
-                    assert!(line.contains("status=ok"));
-                    if line.contains("remote=deactivated") {
-                        "deactivated"
-                    } else {
-                        assert!(line.contains("remote=valid"));
-                        "valid"
+                    match line
+                        .strip_suffix("\r\n")
+                        .or_else(|| line.strip_suffix('\n'))
+                    {
+                        Some(
+                            "acme account reconcile: issuer=fixture remote=deactivated status=ok",
+                        ) => crate::ReconciledAccountStatus::Deactivated,
+                        Some("acme account reconcile: issuer=fixture remote=valid status=ok") => {
+                            crate::ReconciledAccountStatus::Valid
+                        }
+                        _ => panic!("unexpected reconciliation output"),
                     }
                 })
             } else {
@@ -371,7 +376,7 @@ fn check_outcome_with(outcome: Outcome, cli: bool) {
             };
             match outcome {
                 Outcome::Rejected | Outcome::Redirect => {
-                    assert_eq!(result.unwrap(), "valid");
+                    assert_eq!(result.unwrap(), crate::ReconciledAccountStatus::Valid);
                     assert!(active.is_file() && !pending.exists());
                 }
                 Outcome::Malformed | Outcome::UnexpectedStatus => {
@@ -379,7 +384,7 @@ fn check_outcome_with(outcome: Outcome, cli: bool) {
                     assert!(!active.exists() && pending.is_file());
                 }
                 _ => {
-                    assert_eq!(result.unwrap(), "deactivated");
+                    assert_eq!(result.unwrap(), crate::ReconciledAccountStatus::Deactivated);
                     assert!(!active.exists() && !pending.exists());
                 }
             }

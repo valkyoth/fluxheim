@@ -149,11 +149,18 @@ pub async fn deactivate_instant_acme_account(
         .map(|_| ())
 }
 
+/// Confirmed issuer state after successful local credential reconciliation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReconciledAccountStatus {
+    Valid,
+    Deactivated,
+}
+
 /// Resolve a pending local transaction only from the issuer's current account object.
 pub async fn reconcile_instant_acme_account(
     config: &Config,
     issuer_name: &str,
-) -> Result<&'static str, AcmeInstantClientError> {
+) -> Result<ReconciledAccountStatus, AcmeInstantClientError> {
     account_outcome(config, issuer_name, true, ACME_ACCOUNT_OPERATION_TIMEOUT).await
 }
 
@@ -162,7 +169,7 @@ pub(super) async fn account_outcome(
     issuer_name: &str,
     reconcile: bool,
     timeout: Duration,
-) -> Result<&'static str, AcmeInstantClientError> {
+) -> Result<ReconciledAccountStatus, AcmeInstantClientError> {
     use instant_acme::AuthorizationStatus::{Deactivated, Valid};
     let acme = &config.tls.acme;
     let storage = acme
@@ -218,7 +225,7 @@ pub(super) async fn account_outcome(
                         "remote=deactivated; local credential cleanup not confirmed",
                     )
                 })?;
-            Ok("deactivated")
+            Ok(ReconciledAccountStatus::Deactivated)
         }
         Ok(Ok(Valid)) if reconcile => {
             acme_account_async::rollback_account_deactivation_async(transaction, issuer_name)
@@ -229,7 +236,7 @@ pub(super) async fn account_outcome(
                         "remote=valid; local credential restoration not confirmed",
                     )
                 })?;
-            Ok("valid")
+            Ok(ReconciledAccountStatus::Valid)
         }
         _ => Err(account_error(
             issuer_name,
