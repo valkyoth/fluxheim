@@ -293,8 +293,8 @@ issuance support.
 
 For issuer selection, registration, EAB and account incident limitations, see
 [ACME accounts and issuers](acme-accounts.md). In particular, account deactivation
-can misreport remote outcomes; do not use its exit status as
-confirmation that an account was deactivated.
+requires a confirmed issuer response. After an uncertain outcome, the pending
+credentials remain protected; do not rerun deactivation to find out what happened.
 
 Keep the persistent storage through upgrades; account credentials are not
 disposable cache. Use the [recovery guide](acme-recovery.md) for backups, ambiguous transaction

@@ -11,6 +11,10 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- ACME account deactivation now requires a confirmed issuer response before
+  removing credentials. Use [account-reconcile](docs/guides/acme-accounts.md#account-incident-commands)
+  to resolve a pending operation without retrying deactivation.
+
 - The ACME companion can revoke a managed leaf and run recovery with renewal
   disabled. It reports confirmed revocation separately from listener activation.
 

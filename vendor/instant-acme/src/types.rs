@@ -100,6 +100,11 @@ pub struct AccountCredentials {
 }
 
 impl AccountCredentials {
+    /// Directory URL originally associated with these credentials, if recorded.
+    pub fn directory_url(&self) -> Option<&str> {
+        self.directory.as_deref()
+    }
+
     /// The account's private key
     pub fn with_private_key<R>(&self, inspect: impl FnOnce(&[u8]) -> R) -> R {
         self.key_pkcs8.with_secret(inspect)

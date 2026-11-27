@@ -135,6 +135,12 @@ fn load_account_credentials_locked(
     if !allow_bootstrap_recovery {
         reject_pending_account_bootstrap(directory)?;
     }
+    read_account_credentials_file(path)
+}
+
+fn read_account_credentials_file(
+    path: &Path,
+) -> Result<Option<instant_acme::AccountCredentials>, AcmeAccountStoreError> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -209,7 +215,14 @@ pub(crate) fn begin_account_deactivation(
 pub(crate) fn try_begin_account_deactivation(
     storage: &Path,
     issuer_name: &str,
-) -> Result<AccountStoreAttempt<AccountDeactivationTransaction>, AcmeAccountStoreError> {
+    resume_pending: bool,
+) -> Result<
+    AccountStoreAttempt<(
+        AccountDeactivationTransaction,
+        instant_acme::AccountCredentials,
+    )>,
+    AcmeAccountStoreError,
+> {
     let active = account_credentials_path(storage, issuer_name).path;
     let directory = active
         .parent()
@@ -224,7 +237,41 @@ pub(crate) fn try_begin_account_deactivation(
     else {
         return Ok(AccountStoreAttempt::Contended);
     };
-    begin_account_deactivation_locked(active, &directory, lock).map(AccountStoreAttempt::Acquired)
+    reject_pending_account_bootstrap(&directory)?;
+    let pending = directory.join(super::acme_account_state::ACCOUNT_DEACTIVATION_PENDING_FILE);
+    let source = if resume_pending {
+        match fs::symlink_metadata(&active) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => (),
+            Err(error) => return Err(account_store_io_error(&active, error)),
+            Ok(_) => {
+                return Err(AcmeAccountStoreError::UnsafePath {
+                    path: active,
+                    message: "cannot reconcile with active credentials present".to_owned(),
+                });
+            }
+        }
+        &pending
+    } else {
+        reject_pending_account_deactivation(&directory)?;
+        &active
+    };
+    let credentials = read_account_credentials_file(source)?.ok_or_else(|| {
+        AcmeAccountStoreError::UnsafePath {
+            path: source.clone(),
+            message: "no matching account credentials for this operation".to_owned(),
+        }
+    })?;
+    let transaction = if resume_pending {
+        AccountDeactivationTransaction {
+            active,
+            pending,
+            directory,
+            _lock: lock,
+        }
+    } else {
+        begin_account_deactivation_locked(active, &directory, lock)?
+    };
+    Ok(AccountStoreAttempt::Acquired((transaction, credentials)))
 }
 
 #[cfg(feature = "acme-client")]

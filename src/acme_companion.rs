@@ -81,6 +81,15 @@ pub enum AcmeCompanionCommand {
         confirm: bool,
     },
 
+    /// Resolve pending local credentials from the existing issuer account's current status.
+    AccountReconcile {
+        #[arg(long)]
+        issuer: String,
+        /// Confirm local cleanup or restoration. No remote mutation is sent.
+        #[arg(long)]
+        confirm: bool,
+    },
+
     /// Revoke the currently installed certificate for an ACME vhost.
     Revoke {
         /// Configured ACME vhost name.
@@ -154,6 +163,18 @@ where
                 Err("account deactivation requires the acme-client feature".into())
             }
         }
+        AcmeCompanionCommand::AccountReconcile { issuer, confirm } => {
+            if !confirm {
+                return Err("account reconciliation requires --confirm".into());
+            }
+            #[cfg(feature = "acme-client")]
+            return run_account_operation(cli.config.as_deref(), &issuer, "reconcile");
+            #[cfg(not(feature = "acme-client"))]
+            {
+                let _ = issuer;
+                Err("account reconciliation requires the acme-client feature".into())
+            }
+        }
         AcmeCompanionCommand::Revoke { vhost, confirm } => {
             if !confirm {
                 return Err("certificate revocation requires --confirm".into());
@@ -224,6 +245,14 @@ mod tests {
         ])
         .unwrap_err();
         assert!(deactivate.to_string().contains("requires --confirm"));
+        let reconcile = run_from_args([
+            "fluxheim-acme",
+            "account-reconcile",
+            "--issuer",
+            "letsencrypt",
+        ])
+        .unwrap_err();
+        assert!(reconcile.to_string().contains("requires --confirm"));
 
         let revoke = run_from_args(["fluxheim-acme", "revoke", "--vhost", "example"]).unwrap_err();
         assert!(revoke.to_string().contains("requires --confirm"));

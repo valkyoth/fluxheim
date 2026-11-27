@@ -9,17 +9,30 @@ enum Outcome {
     Accepted,
     Rejected,
     AcceptedWithTruncatedReply,
+    Malformed,
+    UnexpectedStatus,
+    Redirect,
+    Cancelled,
+    TimedOut,
 }
 
 // This is a bounded HTTP/TLS outcome fixture, not an ACME authority: it checks
 // the signed envelope's payload, but does not validate its signature or issue.
-fn serve_outcome(listener: TcpListener, tls: Arc<rustls::ServerConfig>, outcome: Outcome) -> bool {
+fn serve_outcome(
+    listener: TcpListener,
+    tls: Arc<rustls::ServerConfig>,
+    outcome: Outcome,
+    applied: tokio::sync::oneshot::Sender<()>,
+) -> bool {
     listener.set_nonblocking(true).unwrap();
     let base = format!(
         "https://127.0.0.1:{}",
         listener.local_addr().unwrap().port()
     );
     let deadline = Instant::now() + Duration::from_secs(15);
+    let mut applied = Some(applied);
+    let mut changed = false;
+    let mut stalled_response = None;
     loop {
         assert!(
             Instant::now() < deadline,
@@ -55,9 +68,33 @@ fn serve_outcome(listener: TcpListener, tls: Arc<rustls::ServerConfig>, outcome:
             let payload = base64_ng::URL_SAFE_NO_PAD
                 .decode_vec(envelope["payload"].as_str().unwrap().as_bytes())
                 .unwrap();
+            if applied.is_none() {
+                drop(stalled_response.take());
+                assert!(payload.is_empty(), "reconciliation must be POST-as-GET");
+                match outcome {
+                    Outcome::Malformed => reply(&mut stream, "403 Forbidden", "{}"),
+                    Outcome::UnexpectedStatus => {
+                        reply(&mut stream, "200 OK", r#"{"status":"unknown"}"#)
+                    }
+                    _ if changed => reply(&mut stream, "200 OK", r#"{"status":"deactivated"}"#),
+                    _ => reply(&mut stream, "200 OK", r#"{"status":"valid"}"#),
+                }
+                stream.conn.send_close_notify();
+                let _ = stream.flush();
+                return changed;
+            }
             let payload: serde_json::Value = serde_json::from_slice(&payload).unwrap();
             assert_eq!(payload["status"], "deactivated");
+            changed = !matches!(outcome, Outcome::Rejected | Outcome::Redirect);
+            let _ = applied.take().unwrap().send(());
             match outcome {
+                Outcome::Cancelled | Outcome::TimedOut => {
+                    stalled_response = Some(stream);
+                    continue;
+                }
+                Outcome::Malformed => reply(&mut stream, "200 OK", "{"),
+                Outcome::UnexpectedStatus => reply(&mut stream, "200 OK", r#"{"status":"valid"}"#),
+                Outcome::Redirect => reply(&mut stream, "302 Found", r#"{"status":"deactivated"}"#),
                 Outcome::Accepted => reply(&mut stream, "200 OK", r#"{"status":"deactivated"}"#),
                 Outcome::Rejected => reply(
                     &mut stream,
@@ -77,7 +114,10 @@ fn serve_outcome(listener: TcpListener, tls: Arc<rustls::ServerConfig>, outcome:
             }
             stream.conn.send_close_notify();
             let _ = stream.flush();
-            return !matches!(outcome, Outcome::Rejected);
+            if matches!(outcome, Outcome::Accepted) {
+                return changed;
+            }
+            continue;
         }
         stream.conn.send_close_notify();
         let _ = stream.flush();
@@ -160,6 +200,10 @@ impl Drop for PrivateRoot {
 }
 
 fn check_outcome(outcome: Outcome) {
+    check_outcome_with(outcome, false);
+}
+
+fn check_outcome_with(outcome: Outcome, cli: bool) {
     let root = PrivateRoot(fluxheim_common::test_support::unique_temp_path(
         "acme-account-outcome",
     ));
@@ -204,49 +248,147 @@ fn check_outcome(outcome: Outcome) {
     config.tls.acme.issuers = vec![AcmeIssuerConfig {
         name: "fixture".to_owned(),
         directory_url: format!("{base}/directory"),
-        ca_bundle_file: Some(trust),
+        ca_bundle_file: Some(trust.clone()),
         terms_of_service_agreed: false,
         terms_of_service_url: None,
         allow_unadvertised_terms_of_service: false,
         eab: None,
     }];
-    let worker = std::thread::spawn(move || serve_outcome(listener, Arc::new(tls), outcome));
+    let invoke = |operation: &str| {
+        let config_file = root.0.join("fixture.toml");
+        std::fs::write(&config_file, format!(
+            "[tls]\nenabled=true\n[tls.acme]\nenabled=true\ncontact_email=\"test@example.test\"\nstorage={}\ndefault_issuer=\"fixture\"\n[[tls.acme.issuers]]\nname=\"fixture\"\ndirectory_url=\"{base}/directory\"\nca_bundle_file={}\nterms_of_service_agreed=true\nterms_of_service_url=\"{base}/terms\"\n",
+            serde_json::to_string(&storage).unwrap(), serde_json::to_string(&trust).unwrap()
+        )).unwrap();
+        let test_exe = std::env::current_exe().unwrap();
+        let debug = test_exe
+            .ancestors()
+            .find(|p| p.file_name().is_some_and(|n| n == "debug"))
+            .unwrap();
+        let exe = debug.join(format!("fluxheim-acme{}", std::env::consts::EXE_SUFFIX));
+        let output = std::process::Command::new(exe)
+            .arg("--config")
+            .arg(config_file)
+            .args([operation, "--issuer", "fixture", "--confirm"])
+            .output()
+            .unwrap();
+        if output.status.success() {
+            Ok(String::from_utf8(output.stdout).unwrap())
+        } else {
+            Err(String::from_utf8(output.stderr).unwrap())
+        }
+    };
+    let (notify, applied) = tokio::sync::oneshot::channel();
+    let worker =
+        std::thread::spawn(move || serve_outcome(listener, Arc::new(tls), outcome, notify));
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
     let result = runtime.block_on(async {
-        tokio::time::timeout(
-            Duration::from_secs(10),
-            crate::deactivate_instant_acme_account(&config, "fixture"),
-        )
-        .await
+        assert!(
+            crate::reconcile_instant_acme_account(&config, "fixture")
+                .await
+                .is_err()
+        );
+        assert!(active.is_file() && !pending.exists());
+        let mut wrong = config.clone();
+        wrong.tls.acme.issuers[0].directory_url.push_str("-other");
+        assert!(
+            crate::deactivate_instant_acme_account(&wrong, "fixture")
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("no account request sent")
+        );
+        assert!(active.is_file() && !pending.exists());
+        if cli {
+            return Some(invoke("account-deactivate").map(|_| ()));
+        }
+        let timeout = if matches!(outcome, Outcome::TimedOut) {
+            Duration::from_secs(2)
+        } else {
+            Duration::from_secs(10)
+        };
+        let deactivate =
+            crate::acme_instant_account::account_outcome(&config, "fixture", false, timeout);
+        if matches!(outcome, Outcome::Cancelled) {
+            match futures::future::select(applied, Box::pin(deactivate)).await {
+                futures::future::Either::Left((received, in_flight)) => {
+                    received.unwrap();
+                    assert!(matches!(
+                        crate::try_load_account_credentials(&storage, "fixture").unwrap(),
+                        crate::AccountStoreAttempt::Contended
+                    ));
+                    drop(in_flight);
+                }
+                futures::future::Either::Right((result, _)) => {
+                    panic!("expected in-flight cancellation, got {result:?}")
+                }
+            }
+            None
+        } else {
+            Some(
+                tokio::time::timeout(Duration::from_secs(12), deactivate)
+                    .await
+                    .unwrap()
+                    .map(|_| ())
+                    .map_err(|e| e.to_string()),
+            )
+        }
     });
-    let remotely_deactivated = worker.join().unwrap();
-    let result = result.expect("bounded deactivation fixture timed out");
     match outcome {
         Outcome::Accepted => {
-            assert!(remotely_deactivated);
-            result.unwrap();
+            result.unwrap().unwrap();
             assert!(!active.exists() && !pending.exists());
         }
-        Outcome::Rejected => {
-            assert!(!remotely_deactivated);
-            // documented contract: an HTTP error currently looks like confirmed success.
-            result.unwrap();
-            assert!(!active.exists() && !pending.exists());
-        }
-        Outcome::AcceptedWithTruncatedReply => {
-            assert!(remotely_deactivated);
-            assert!(result.is_err());
-            assert!(active.is_file() && !pending.exists());
-            assert!(
-                load_account_credentials(&storage, "fixture")
-                    .unwrap()
-                    .is_some()
-            );
+        _ => {
+            if let Some(result) = result {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("remote=unconfirmed")
+                );
+            }
+            assert!(!active.exists() && pending.is_file());
+            assert!(load_account_credentials(&storage, "fixture").is_err());
+            // A new invocation can only inspect the same pending identity, never retry the mutation.
+            let result = if cli {
+                invoke("account-reconcile").map(|line| {
+                    assert!(line.contains("status=ok"));
+                    if line.contains("remote=deactivated") {
+                        "deactivated"
+                    } else {
+                        assert!(line.contains("remote=valid"));
+                        "valid"
+                    }
+                })
+            } else {
+                runtime
+                    .block_on(crate::reconcile_instant_acme_account(&config, "fixture"))
+                    .map_err(|e| e.to_string())
+            };
+            match outcome {
+                Outcome::Rejected | Outcome::Redirect => {
+                    assert_eq!(result.unwrap(), "valid");
+                    assert!(active.is_file() && !pending.exists());
+                }
+                Outcome::Malformed | Outcome::UnexpectedStatus => {
+                    assert!(result.is_err());
+                    assert!(!active.exists() && pending.is_file());
+                }
+                _ => {
+                    assert_eq!(result.unwrap(), "deactivated");
+                    assert!(!active.exists() && !pending.exists());
+                }
+            }
         }
     }
+    assert_eq!(
+        worker.join().unwrap(),
+        !matches!(outcome, Outcome::Rejected | Outcome::Redirect)
+    );
 }
 
 #[test]
@@ -255,11 +397,37 @@ fn accepted_deactivation_removes_local_credentials() {
 }
 
 #[test]
-fn rejected_deactivation_currently_reports_success_and_removes_credentials() {
+fn rejected_deactivation_retains_credentials_until_verified_valid() {
     check_outcome(Outcome::Rejected);
 }
 
 #[test]
-fn accepted_deactivation_with_truncated_reply_currently_restores_credentials() {
+fn truncated_reply_requires_reconciliation_before_cleanup() {
     check_outcome(Outcome::AcceptedWithTruncatedReply);
+}
+
+#[test]
+fn unexpected_responses_and_denied_or_unknown_reconciliation_remain_pending() {
+    for outcome in [
+        Outcome::Malformed,
+        Outcome::UnexpectedStatus,
+        Outcome::Redirect,
+        Outcome::Cancelled,
+        Outcome::TimedOut,
+    ] {
+        check_outcome(outcome);
+    }
+}
+
+#[test]
+#[ignore = "requires a native debug fluxheim-acme companion built with profile-web-server,acme-client"]
+fn native_companion_reconciles_account_outcomes_across_processes() {
+    for outcome in [
+        Outcome::Accepted,
+        Outcome::Rejected,
+        Outcome::AcceptedWithTruncatedReply,
+        Outcome::Malformed,
+    ] {
+        check_outcome_with(outcome, true);
+    }
 }

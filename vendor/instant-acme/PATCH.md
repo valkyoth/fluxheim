@@ -12,10 +12,15 @@ drop-cleared Base64 buffers. New P-256 account material is generated through a
 zeroizing RustCrypto `SecretKey` and serialized through a zeroizing
 `SecretDocument` before the selected Ring/AWS-LC-compatible provider imports it
 as the active signing key. This downstream patch therefore raises the vendored
-client's effective MSRV from 1.70 to 1.85. No ACME wire-format, signing, EAB,
-HTTP, or response behavior is changed. These APIs let Fluxheim durably journal
+client's effective MSRV from 1.70 to 1.85. These APIs let Fluxheim durably journal
 the account key before the issuer can activate it while preserving configured
 contacts and EAB.
+
+Account deactivation now requires HTTP 200 and an account object with status
+`deactivated`. A separate signed POST-as-GET reads the existing account for
+operator reconciliation. A directory URL accessor lets Fluxheim verify that
+stored credentials still belong to the configured issuer before using them.
+Neither operation creates an account or changes the client's TLS trust.
 
 The selected provider's active signing-key representation is opaque and does
 not expose a verifiable memory-clearing operation. The patch protects transient

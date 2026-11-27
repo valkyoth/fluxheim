@@ -144,26 +144,38 @@ registration, not as a replacement for the persistent account signing key.
 | Operation | Current behavior / limitation |
 | --- | --- |
 | `account-rollover --issuer NAME --confirm` | Fails before remote mutation; safe replacement-key journaling is not implemented |
-| `account-deactivate --issuer NAME --confirm` | Destructive; **Current limitation:** makes success/error an unreliable indicator of CA state |
+| `account-deactivate --issuer NAME --confirm` | Quarantines the existing credentials, asks the CA to deactivate the account and removes the pending credentials only on confirmed success |
+| `account-reconcile --issuer NAME --confirm` | Reads the pending account's current status from the CA; changes local credentials only, never resends deactivation |
 | `revoke --vhost NAME --confirm` | Certificate operation, not account deactivation; separate quarantine/reload limitations apply |
 
-**Current limitation:** a loopback TLS outcome fixture proves that HTTP 503 from the
-account endpoint can be accepted as success, deleting local credentials despite
-the fixture not applying deactivation. Conversely, a truncated response after
-applying deactivation causes credential rollback and ordinary local loading.
-These are tests of the actual Fluxheim/client path, not evidence about a
-particular public CA. the local follow-up must correct response validation and preserve
-ambiguous outcomes before this workflow is reliable.
+Pause renewal writers and preserve a private backup before deactivation.
+Confirmation requires HTTP 200 and a complete account object with status
+`deactivated`. If a request may have been sent but the reply is missing,
+unreadable, or rejected, Fluxheim keeps the pending credentials across restarts.
+Ordinary account loading and bootstrap remain blocked. Do not delete the
+pending file or infer that a failed command left the account active.
 
-Until then, do not build automated incident closure around deactivation's exit
-status or `status=ok` output. Pause renewal writers, preserve a private backup,
-and use the issuer's authenticated account/support channel to establish remote
-status. Do not delete pending records, create another account or reactivate a
-backup blindly. Never assume deactivation revoked existing site certificates;
-use the separate certificate incident process where required.
+Once the issuer has finished processing the original request, run:
+
+```sh
+fluxheim-acme --config /etc/fluxheim/fluxheim.toml account-reconcile --issuer letsencrypt --confirm
+```
+
+This sends a signed POST-as-GET to the original account URL using the same
+credentials and configured issuer trust. A confirmed `valid` account restores
+the credentials; `deactivated` completes local cleanup. A CA can refuse to
+serve a deactivated account: a refusal (including 403 or 404) is not proof of
+either outcome. Keep the credentials quarantined and use the issuer's
+authenticated support channel. If the issuer confirms retirement out of band,
+retire that issuer configuration rather than reactivating a backup. Account
+deactivation is not certificate revocation.
+
+If the stored credentials do not record the configured directory URL, Fluxheim
+does not send an account request. Use the original issuer configuration or
+contact the issuer; do not edit credential files to bypass the check.
 
 No companion command currently performs account contact updates, account import,
-issuer migration or general pending-deactivation reconciliation. This is an
+or issuer migration. This is an
 explicit functionality boundary, not a reason to hand-edit secret state.
 
 ## Troubleshooting

@@ -144,31 +144,97 @@ pub async fn deactivate_instant_acme_account(
     config: &Config,
     issuer_name: &str,
 ) -> Result<(), AcmeInstantClientError> {
-    let storage = existing_account_storage(config, issuer_name).await?;
-    let account = load_or_create_instant_acme_account(config, issuer_name).await?;
-    let transaction =
-        acme_account_async::begin_account_deactivation_async(storage, issuer_name).await?;
-    let result = tokio::time::timeout(ACME_ACCOUNT_OPERATION_TIMEOUT, account.deactivate())
+    account_outcome(config, issuer_name, false, ACME_ACCOUNT_OPERATION_TIMEOUT)
         .await
-        .map_err(|_| account_error(issuer_name, "ACME account deactivation timed out"))?
-        .map_err(|error| account_error(issuer_name, error.to_string()));
-    match result {
-        Ok(()) => {
-            acme_account_async::complete_account_deactivation_async(transaction, issuer_name).await
+        .map(|_| ())
+}
+
+/// Resolve a pending local transaction only from the issuer's current account object.
+pub async fn reconcile_instant_acme_account(
+    config: &Config,
+    issuer_name: &str,
+) -> Result<&'static str, AcmeInstantClientError> {
+    account_outcome(config, issuer_name, true, ACME_ACCOUNT_OPERATION_TIMEOUT).await
+}
+
+pub(super) async fn account_outcome(
+    config: &Config,
+    issuer_name: &str,
+    reconcile: bool,
+    timeout: Duration,
+) -> Result<&'static str, AcmeInstantClientError> {
+    use instant_acme::AuthorizationStatus::{Deactivated, Valid};
+    let acme = &config.tls.acme;
+    let storage = acme
+        .storage
+        .as_deref()
+        .ok_or(AcmeInstantClientError::MissingStorage)?;
+    let issuer = acme
+        .issuers
+        .iter()
+        .find(|i| i.name == issuer_name)
+        .ok_or_else(|| AcmeInstantClientError::UnknownIssuer {
+            issuer: issuer_name.into(),
+        })?;
+    let builder = bounded_acme_account_builder(issuer)?;
+    let (transaction, credentials) =
+        acme_account_async::begin_account_deactivation_async(storage, issuer_name, reconcile)
+            .await?;
+    let deadline = tokio::time::Instant::now() + timeout;
+    let account = if credentials.directory_url() == Some(issuer.directory_url.as_str()) {
+        tokio::time::timeout_at(deadline, builder.from_credentials(credentials))
+            .await
+            .ok()
+            .and_then(Result::ok)
+    } else {
+        None
+    };
+    let Some(account) = account else {
+        if !reconcile {
+            // No mutation was sent; this is the only automatic rollback.
+            acme_account_async::rollback_account_deactivation_async(transaction, issuer_name)
+                .await?;
         }
-        Err(primary) => {
-            match acme_account_async::rollback_account_deactivation_async(transaction, issuer_name)
+        return Err(account_error(
+            issuer_name,
+            "no account request sent: cannot open stored account with configured issuer",
+        ));
+    };
+    let outcome = tokio::time::timeout_at(deadline, async {
+        if reconcile {
+            account.account_status().await
+        } else {
+            account.deactivate().await.map(|()| Deactivated)
+        }
+    })
+    .await;
+    match outcome {
+        Ok(Ok(Deactivated)) => {
+            acme_account_async::complete_account_deactivation_async(transaction, issuer_name)
                 .await
-            {
-                Ok(()) => Err(primary),
-                Err(rollback) => Err(account_error(
-                    issuer_name,
-                    format!(
-                        "remote deactivation failed ({primary}); local credential rollback also failed ({rollback})"
-                    ),
-                )),
-            }
+                .map_err(|_| {
+                    account_error(
+                        issuer_name,
+                        "remote=deactivated; local credential cleanup not confirmed",
+                    )
+                })?;
+            Ok("deactivated")
         }
+        Ok(Ok(Valid)) if reconcile => {
+            acme_account_async::rollback_account_deactivation_async(transaction, issuer_name)
+                .await
+                .map_err(|_| {
+                    account_error(
+                        issuer_name,
+                        "remote=valid; local credential restoration not confirmed",
+                    )
+                })?;
+            Ok("valid")
+        }
+        _ => Err(account_error(
+            issuer_name,
+            "remote=unconfirmed; credentials remain quarantined; use account-reconcile after verifying the incident with the issuer",
+        )),
     }
 }
 
@@ -257,25 +323,6 @@ pub async fn revoke_instant_acme_certificate(
         quarantined_private_key,
         replacement_required: true,
     })
-}
-
-async fn existing_account_storage<'a>(
-    config: &'a Config,
-    issuer_name: &str,
-) -> Result<&'a Path, AcmeInstantClientError> {
-    let storage = config
-        .tls
-        .acme
-        .storage
-        .as_deref()
-        .ok_or(AcmeInstantClientError::MissingStorage)?;
-    if acme_account_async::load_account_credentials_async(storage, issuer_name)
-        .await?
-        .is_none()
-    {
-        return Err(account_error(issuer_name, "no stored ACME account exists"));
-    }
-    Ok(storage)
 }
 
 fn account_error(issuer: &str, message: impl Into<String>) -> AcmeInstantClientError {

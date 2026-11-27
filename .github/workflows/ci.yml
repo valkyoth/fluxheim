@@ -336,6 +336,9 @@ jobs:
       - name: Run isolated ACME mount-boundary regression
         run: FLUXHEIM_ACME_MOUNT_TEST_MODE=container FLUXHEIM_ACME_MOUNT_TEST_RUNTIME=docker scripts/smoke_acme_mount_boundary.sh
 
+      - name: Verify ACME account outcomes across companion restarts
+        run: sh scripts/check_acme_account_outcomes.sh
+
       - name: Validate OWASP Top 10 2025 baseline
         run: scripts/validate-owasp-top10-2025.sh check
 
@@ -538,6 +541,9 @@ jobs:
       - name: Run macOS native parity smoke
         run: sh scripts/smoke_macos_native_parity.sh
 
+      - name: Verify macOS ACME account outcomes across companion restarts
+        run: sh scripts/check_acme_account_outcomes.sh
+
       - name: Test macOS filesystem trust fixtures
         run: |
           cargo test --locked -p fluxheim-config fs_trust::tests
@@ -670,6 +676,9 @@ jobs:
 
       - name: Run Windows workspace tests
         run: cargo test --workspace --locked
+
+      - name: Verify Windows ACME account outcomes across companion restarts
+        run: sh scripts/check_acme_account_outcomes.sh
 
       - name: Test Windows in-process certificate activation
         run: cargo test --locked -p fluxheim --lib --features tls-rustls,acme-client reload

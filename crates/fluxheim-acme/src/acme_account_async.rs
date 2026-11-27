@@ -183,14 +183,21 @@ pub(crate) async fn promote_account_bootstrap_async(
 pub(crate) async fn begin_account_deactivation_async(
     storage: &Path,
     issuer_name: &str,
-) -> Result<AccountDeactivationTransaction, AcmeInstantClientError> {
+    resume_pending: bool,
+) -> Result<
+    (
+        AccountDeactivationTransaction,
+        instant_acme::AccountCredentials,
+    ),
+    AcmeInstantClientError,
+> {
     let storage = storage.to_path_buf();
     let issuer = issuer_name.to_owned();
     run_account_store_attempt(
         issuer_name,
         "deactivation lock",
         ACCOUNT_LOCK_WAIT_TIMEOUT,
-        move || try_begin_account_deactivation(&storage, &issuer),
+        move || try_begin_account_deactivation(&storage, &issuer, resume_pending),
     )
     .await
 }

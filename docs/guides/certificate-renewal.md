@@ -367,13 +367,11 @@ Account key rollover currently fails before making a remote change. The ACME
 client generates the replacement key internally, so Fluxheim cannot durably
 journal that exact key before activation at the issuer; enabling rollover would
 create an account-orphaning crash window. Deactivation first moves local
-credentials into a locked pending state, but **Current limitation:** prevents treating
-its outcome as authoritative: the client can accept an HTTP rejection as success
-and delete credentials. A truncated response after remote application instead
-causes local credential restoration. Outer timeout/interruption can leave
-pending state blocking account loading. See the
-[account guide](acme-accounts.md) and [incident workflow](acme-recovery.md);
-neither a successful exit nor local restoration proves the remote account state.
+credentials into a locked pending state and requires an explicit deactivated
+account object from the issuer before deleting them. An uncertain response,
+timeout or interruption leaves credentials quarantined. To investigate without
+repeating the mutation, see `account-reconcile` in the
+[account guide](acme-accounts.md) and [incident workflow](acme-recovery.md).
 `fluxheim-acme doctor` reports `account-rollover=unavailable` explicitly so
 operators can see this capability limit before an incident.
 

@@ -309,7 +309,7 @@ impl Account {
             status: &'a str,
         }
 
-        let _ = self
+        let rsp = self
             .inner
             .post(
                 Some(&DeactivateRequest {
@@ -320,8 +320,29 @@ impl Account {
             )
             .await?;
 
-        Ok(())
+        // FLUXHEIM PATCH BEGIN: confirmed account mutation outcomes
+        match Self::read_account_status(rsp).await? {
+            AuthorizationStatus::Deactivated => Ok(()),
+            _ => Err("account deactivation not confirmed".into()),
+        }
     }
+
+    /// Read the current account using a signed POST-as-GET, without updating it.
+    pub async fn account_status(&self) -> Result<AuthorizationStatus, Error> {
+        Self::read_account_status(self.inner.post(None::<&Empty>, None, self.id()).await?).await
+    }
+
+    async fn read_account_status(rsp: BytesResponse) -> Result<AuthorizationStatus, Error> {
+        #[derive(Deserialize)]
+        struct AccountState {
+            status: AuthorizationStatus,
+        }
+        if rsp.parts.status != http::StatusCode::OK {
+            return Err("issuer did not return HTTP 200 for account operation".into());
+        }
+        Ok(Problem::check::<AccountState>(rsp).await?.status)
+    }
+    // FLUXHEIM PATCH END: confirmed account mutation outcomes
 
     /// Yield the profiles supported according to the account's server directory
     pub fn profiles(&self) -> impl Iterator<Item = ProfileMeta<'_>> {

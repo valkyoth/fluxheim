@@ -197,26 +197,18 @@ Account deactivation is destructive and requires explicit confirmation:
 fluxheim-acme --config /etc/fluxheim/fluxheim.toml account-deactivate --issuer letsencrypt --confirm
 ```
 
-**Current limitation:**
-It first moves credentials to pending state under a lock, but the current client
-does not validate the deactivation response status before reporting success.
-A local TLS fixture returned HTTP 503 without applying deactivation: the
-operation nevertheless succeeded locally and deleted both active and pending
-credentials. A successful exit is therefore not proof of CA confirmation.
-
-The opposite mismatch is also reproduced: the fixture applied deactivation,
-then truncated the response. Fluxheim returned an error, restored the active
-credentials and allowed ordinary credential loading again. This does not mean
-the CA reactivated the account. Outer timeout/interruption can instead leave
-pending state blocking ordinary access; these outcomes are not interchangeable.
+Credentials are quarantined before sending the request. A confirmed deactivation
+removes them. After an uncertain response or interruption, ordinary loading is
+blocked until the pending transaction is resolved. A separate local cleanup
+error after remote confirmation does not mean the account is active.
 
 Pause automation and preserve a private backup before any account incident
 operation. Establish account status through the issuer's authenticated support
 or account-management channel. Do not retry blindly, remove pending records or
 copy a backup into active use just because the command failed. Deactivating an
 account is not a substitute for certificate revocation. See
-[accounts and issuers](acme-accounts.md) for the normal registration workflow
-and the planned outcome-handling correction.
+[accounts and issuers](acme-accounts.md#account-incident-commands) for the
+`account-reconcile` command and what to do if the CA refuses the status read.
 
 ## Verify Recovery Separately From Activation
 

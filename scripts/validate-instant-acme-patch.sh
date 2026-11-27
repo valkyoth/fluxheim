@@ -23,7 +23,8 @@ fi
 for marker in \
     'durable caller-key account bootstrap' \
     'protected caller-key account recovery' \
-    'protected generated account key'
+    'protected generated account key' \
+    'confirmed account mutation outcomes'
 do
     begin_count=$(grep -c "FLUXHEIM PATCH BEGIN: $marker" "$vendor/src/account.rs" || true)
     end_count=$(grep -c "FLUXHEIM PATCH END: $marker" "$vendor/src/account.rs" || true)

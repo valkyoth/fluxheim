@@ -326,7 +326,8 @@ The companion `fluxheim-acme` has its own `--config`, help/version and commands:
 | `reload` | Ask the local certificate control socket to reload |
 | `doctor [--online]` | Local diagnostics; opt into issuer network checks |
 | `account-rollover --issuer NAME [--confirm]` | Plan or confirm account-key replacement |
-| `account-deactivate --issuer NAME [--confirm]` | Plan or confirm account deactivation |
+| `account-deactivate --issuer NAME --confirm` | Deactivate the existing account; quarantine credentials on an uncertain response |
+| `account-reconcile --issuer NAME --confirm` | Read the CA's account status to resolve pending local credentials without repeating deactivation |
 | `revoke --vhost NAME [--confirm]` | Plan or confirm certificate revocation |
 
 Do not substitute account deactivation for certificate revocation. Scope,
